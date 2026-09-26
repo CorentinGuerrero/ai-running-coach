@@ -312,6 +312,21 @@ def _positive_float(config: Dict[str, dict], section: str, key: str, default: fl
     return value
 
 
+def _positive_int_at_least_1(config: Dict[str, dict], section: str, key: str, default: int) -> int:
+    """Comme `_positive_float`, puis arrondi à l'entier le plus proche et
+    replié sur `default` si le résultat est sous 1 (revue de code #58, nit —
+    ex. `slope_model_months = 0.5` : `_positive_float` seule le laisserait
+    passer tel quel, un `int(0.5)` silencieux tronquant ensuite à 0, une
+    fenêtre de modèle nulle jamais signalée comme une erreur de configuration)."""
+    raw_value = _positive_float(config, section, key, float(default))
+    rounded = round(raw_value)
+    if rounded < 1:
+        print(f"avertissement : [{section}].{key} = {raw_value:g} donne un entier < 1 une fois arrondi — "
+              f"défaut {default} appliqué.", file=sys.stderr)
+        return default
+    return rounded
+
+
 def settings(config: Dict[str, dict]) -> dict:
     """Les réglages qui changent ce que l'index attend et ce que le tableau affiche."""
     agents = config.get("agents", {}).get("enabled", ["coach", "medical", "nutritionist", "course-strategist"])
@@ -333,8 +348,8 @@ def settings(config: Dict[str, dict]) -> dict:
             config, "metrics", "climb_min_grade_pct", VC.MIN_CLIMB_AVG_GRADE * 100.0) / 100.0,
         # Modèle personnel pente -> allure (#58) : fenêtre d'historique (mois) configurable
         # (`[metrics].slope_model_months`) — voir `arc_slope_model.DEFAULT_MONTHS`.
-        "slope_model_months": int(_positive_float(
-            config, "metrics", "slope_model_months", float(SL.DEFAULT_MONTHS))),
+        "slope_model_months": _positive_int_at_least_1(
+            config, "metrics", "slope_model_months", SL.DEFAULT_MONTHS),
     }
 
 
@@ -1127,7 +1142,15 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                     # activité pour chaque bande (`arc_slope_model.BANDS`), à partir de
                     # `gap_series` déjà calculée ci-dessus (grade + vitesse, jamais un second
                     # calcul de pente). Bande « endurance » sautée si aucun seuil FC résolu
-                    # (`slope_easy_hr_bpm`), voir `activity_bin_summaries`.
+                    # (`slope_easy_hr_bpm`), voir `activity_bin_summaries`. TAMPONNÉ dans
+                    # `pending_slope_bins` (revue de code #58, nit) plutôt qu'ajouté
+                    # directement à `slope_activities` : si un calcul PLUS LOIN dans ce même
+                    # `try` échoue, cette activité doit être entièrement rejetée (mêmes
+                    # champs remis à NULL, voir le `except Exception` ci-dessous) — un
+                    # résumé de panier déjà commité dans `slope_activities` serait
+                    # impossible à retirer proprement. Committé seulement juste avant la fin
+                    # du bloc `try`, une fois TOUS les calculs de l'activité réussis.
+                    pending_slope_bins: Dict[str, dict] = {}
                     for band in SL.BANDS:
                         easy_hr = slope_easy_hr_bpm if band == "endurance" else None
                         if band == "endurance" and easy_hr is None:
@@ -1135,8 +1158,7 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                         bin_summary = SL.activity_bin_summaries(
                             gap_series, band=band, easy_hr_bpm=easy_hr, resolution_s=S.DEFAULT_RESOLUTION_S)
                         if bin_summary:
-                            slope_activities[band].append(
-                                {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary})
+                            pending_slope_bins[band] = bin_summary
                     gap_pace = G.activity_gap_pace_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
                     conn.execute("UPDATE activity SET gap_pace_s_km = ? WHERE id = ?",
                                  (round(gap_pace, 2) if gap_pace is not None else None, act["id"]))
@@ -1293,6 +1315,13 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                          dur_report["hr_last_third_bpm"], dur_report["reason"], dur_report["reason_code"],
                          act["id"]),
                     )
+                    # Modèle pente -> allure (#58) : commit du tampon SEULEMENT ICI, tout au
+                    # bout du `try` réussi (voir le commentaire de `pending_slope_bins`
+                    # ci-dessus) — une activité qui a échoué plus haut ne contribue donc
+                    # jamais au modèle global, même partiellement.
+                    for band, bin_summary in pending_slope_bins.items():
+                        slope_activities[band].append(
+                            {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary})
                 except sqlite3.Error:
                     # Jamais rattrapé, `ARC_STRICT_METRICS` ou pas (voir le commentaire
                     # ci-dessus) : un verrou ou une base corrompue est un problème

@@ -304,7 +304,9 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chart .line--slope { stroke: var(--s-slope); stroke-width: 2.2; }
 .chart .line--slope-generic { stroke: var(--s-slope-generic); stroke-width: 1.4; stroke-dasharray: 4 3; }
 .chart .band--slope-ci { fill: var(--s-slope-band); }
-.chart .dot--slope-hr { fill: none; stroke: var(--s-rhr); stroke-width: 1.6; }
+/* Panier personnel ISOLÉ (aucun voisin personnel adjacent) : `line--slope` ne le
+   relie à rien (revue de code #58, nit) — ce point le rend visible quand même. */
+.chart .dot--slope { fill: var(--s-slope); }
 .chart .dot { stroke: var(--surface); stroke-width: 1.2; }
 .chart .dot--hrv { fill: var(--s-hrv); } .chart .dot--rhr { fill: var(--s-rhr); } .chart .dot--dplus { fill: var(--s-dplus); }
 .chart .dot--weight { fill: var(--s-weight); }
@@ -332,6 +334,17 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
    partie des sorties longues, ce point isolé ne doit jamais se confondre avec un
    point glucides/h voisin sur le même graphique (#41, revue de code). */
 .chart .dot--sweat { fill: var(--surface); stroke: var(--s-sweat); stroke-width: 1.6; }
+/* Anneau creux (même motif que `.dot--sweat` ci-dessus) pour la FC médiane du
+   modèle pente -> allure (#58). Sélecteur COMPOSÉ (`.dot.dot--slope-hr`, deux
+   classes) — pas seulement `.dot--slope-hr` — pour battre `.chart .dot`
+   ci-dessus PAR SPÉCIFICITÉ plutôt que par ordre de déclaration (revue de
+   code #58, should-fix 6, BLOQUANT visuel : la règle générique `.chart .dot`
+   a la même spécificité qu'un sélecteur à une seule classe déclaré plus haut
+   dans la feuille, et gagne alors sur `stroke` — un point trouvé « invisible »
+   en revue, stroke `var(--surface)` = la couleur de fond, jamais
+   `var(--s-rhr)`). Une spécificité strictement supérieure met ce risque
+   structurellement hors jeu, quel que soit l'ordre futur des règles. */
+.chart .dot.dot--slope-hr { fill: none; stroke: var(--s-rhr); stroke-width: 1.6; }
 .chart .bar { fill: var(--s-bar); }
 .chart .bar--sleep { fill: var(--s-sleep); }
 .chart .bar--sleep.bar--warn { fill: var(--warn); }

@@ -15,6 +15,12 @@ from __future__ import annotations
 import json
 import subprocess
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import arc_slope_model as SL  # noqa: E402
+
 from tests.install.test_dashboard import Server
 from tests.lib.sandbox import Sandbox
 from tests.lib.asserts import InstallAsserts
@@ -87,8 +93,8 @@ class TestSlopeModelApi(InstallAsserts):
     def test_open_tail_bins_have_null_bounds_over_the_wire(self):
         status, body, _ = self.server.get("/api/slope-model?band=all")
         model = json.loads(body)
-        low_tail = next(b for b in model["bins"] if b["label"] == "<-30%")
-        high_tail = next(b for b in model["bins"] if b["label"] == ">30%")
+        low_tail = next(b for b in model["bins"] if b["label"] == SL.GRADE_BINS[0][2])
+        high_tail = next(b for b in model["bins"] if b["label"] == SL.GRADE_BINS[-1][2])
         self.assertIsNone(low_tail["grade_lo"])
         self.assertIsNone(high_tail["grade_hi"])
 

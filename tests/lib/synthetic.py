@@ -171,6 +171,8 @@ def sample_session(
     zone_bounds_bpm: Sequence[float] = ZONE_BOUNDS_BPM,
     dropout_windows: Sequence = (),
     slope_factor_fn: Optional[Callable[[float], float]] = None,
+    hr_grade_response_bpm_per_pct: float = 0.0,
+    hr_grade_lag_s: float = 60.0,
     noise: bool = True,
 ) -> tuple:
     """Génère une séance échantillonnée seconde par seconde, à vérité connue.
@@ -223,6 +225,20 @@ def sample_session(
     - `noise` : `False` désactive tout bruit aléatoire (utile pour des
       assertions exactes en test) ; `True` (défaut) ajoute un bruit borné et
       centré, qui ne change pas les moyennes attendues à grande échelle.
+    - `hr_grade_response_bpm_per_pct` (défaut `0.0`, story #58, revue de code) :
+      ajoute à la FC un bonus proportionnel à la pente MONTANTE instantanée
+      (`bpm_par_point × max(0, grade_pct)`), filtré par un premier ordre de
+      constante de temps `hr_grade_lag_s` (défaut 60 s) — modélise l'inertie
+      cardiaque réelle (la FC monte avec un RETARD sur l'effort, jamais
+      instantanément). Toujours `0` par défaut (aucun effet, comportement
+      identique aux séances déjà générées avant #58) : sert à `tests/data/
+      test_arc_slope_model.py` pour prouver que la sélection au niveau de
+      L'ACTIVITÉ (jamais de l'échantillon) du modèle pente -> allure ne
+      biaise pas l'allure de montée mesurée quand la FC répond en retard à
+      l'effort — un filtre par ÉCHANTILLON introduirait ce biais (voir
+      `arc_slope_model.ASSUMPTIONS['population']`), pas un filtre par
+      ACTIVITÉ. Additif au calcul de FC existant (décrochage/zones ci-dessus),
+      jamais appliqué en descente (`max(0, grade_pct)`).
 
     Déterministe : même `seed` + mêmes paramètres → mêmes échantillons,
     octet pour octet (pas d'horloge, pas d'aléatoire hors `random.Random(seed)`).
@@ -249,6 +265,7 @@ def sample_session(
     t_out, distance_out, altitude_out, hr_out, speed_out, cadence_out = [], [], [], [], [], []
     distance = altitude = 0.0
     third_t, half_t = duration_s / 3, duration_s / 2
+    grade_hr_bonus = 0.0  # état du filtre du premier ordre, voir `hr_grade_response_bpm_per_pct`
 
     for t in range(duration_s):
         grade_pct = _grade_at(distance, segments)
@@ -271,6 +288,13 @@ def sample_session(
             # plat sans fade — voir le docstring de `decoupling_pct` pour le calcul et
             # ce qui se passe quand un fade est aussi actif.
             hr = hr_base_bpm * (1 / (1 - decoupling_pct / 100) if t >= half_t else 1)
+        if hr_grade_response_bpm_per_pct:
+            # Filtre du premier ordre (voir docstring `hr_grade_response_bpm_per_pct`) :
+            # la FC ne bondit jamais instantanément à la cible, elle s'en rapproche
+            # avec un retard — jamais appliqué en descente (`max(0, grade_pct)`).
+            target_bonus = hr_grade_response_bpm_per_pct * max(0.0, grade_pct)
+            grade_hr_bonus += (target_bonus - grade_hr_bonus) * min(1.0, 1.0 / hr_grade_lag_s)
+            hr += grade_hr_bonus
         if noise:
             hr += rng.uniform(-1.5, 1.5)
 

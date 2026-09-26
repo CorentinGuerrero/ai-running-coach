@@ -1292,18 +1292,25 @@ function slopeGradeLabel(b) {
  * un graphique allure (F.paceFromSecPerKm, imperial-aware) vs pente, avec une
  * bande d'intervalle interquartile (repère de dispersion, pas un IC statistique
  * au sens strict — voir `arc_slope_model.ASSUMPTIONS['robust_stats']`) et une
- * courbe générique de comparaison (repli Minetti sur la référence plate
- * personnelle) recalculée ICI côté client à partir de `flat_reference_speed_ms`
- * (jamais dupliquée depuis le serveur : chaque panier générique renvoyé par
- * `/api/slope-model` porte DÉJÀ cette valeur lissée avec ses voisins — voir
- * `arc_slope_model.ASSUMPTIONS['smoothing']` — la courbe de comparaison ici est
- * volontairement la version NON lissée, pour montrer le repli « pur »).
+ * courbe générique de comparaison (repli Minetti). Les DEUX courbes viennent
+ * directement de `b.pace_s_km` par panier, TELLES QUE `/api/slope-model` les
+ * renvoie (déjà lissées avec leurs voisins de même provenance — voir
+ * `arc_slope_model.ASSUMPTIONS['smoothing']`) : rien n'est recalculé côté
+ * client (revue de code #58, nit — une version antérieure de ce commentaire
+ * prétendait à tort le contraire).
+ *
+ * Un panier PERSONNEL isolé (aucun voisin personnel adjacent, donc jamais relié
+ * par un trait à `pathFrom`, voir `chart.js`) reste rendu en POINT (couche
+ * `dots` séparée, revue de code #58, nit) — sans elle, un point personnel isolé
+ * entre deux paniers génériques disparaîtrait silencieusement du graphique.
  *
  * Axe x par INDICE de panier, pas à l'échelle réelle de la pente (mêmes limites
  * assumées que `fuelingSection` : les paniers sont de largeur égale, donc
  * l'écart n'est trompeur qu'aux deux paniers ouverts en bout de plage, dont le
  * point milieu est un ancrage nominal — voir `arc_slope_model.ASSUMPTIONS
- * ['interpolation']`). */
+ * ['interpolation']`). Axe y INVERSÉ (`invert: true`, `chart.js`) : plus RAPIDE
+ * (nombre plus petit) affiché en HAUT, comme la convention « mieux = plus haut »
+ * du reste du tableau de bord. */
 function slopeModelSection(model, band) {
   if (model.reason_code) {
     return { html: `<section class="band"><h2>Modèle personnel pente → allure</h2>${note(F.esc(model.reason))}</section>`, chart: null };
@@ -1324,14 +1331,40 @@ function slopeModelSection(model, band) {
   const paceFromSlowSpeedP25 = bins.map((b) => (b.ci_low_speed_ms ? 1000 / b.ci_low_speed_ms : null));
   const paceFromFastSpeedP75 = bins.map((b) => (b.ci_high_speed_ms ? 1000 / b.ci_high_speed_ms : null));
   const hasHr = bins.some((b) => b.hr_bpm != null);
+  // Un panier personnel SANS voisin personnel des deux côtés ne serait jamais tracé
+  // par `line--slope` (aucun segment ne le relie à rien, `pathFrom` n'émet qu'un "M"
+  // sans "L" — même motif que `fuelingSection`, revue de code #58, nit) : une couche
+  // `dots` séparée le rend visible même isolé.
+  const personalDots = bins.map((b, i) => {
+    if (b.source !== "personal") return null;
+    const prevPersonal = i > 0 && bins[i - 1].source === "personal";
+    const nextPersonal = i + 1 < bins.length && bins[i + 1].source === "personal";
+    return prevPersonal || nextPersonal ? null : b.pace_s_km;
+  });
   const layers = [
     { type: "band", lo: paceFromFastSpeedP75, hi: paceFromSlowSpeedP25, cls: "band--slope-ci" },
     { type: "line", values: personal, cls: "line line--slope" },
     { type: "line", values: generic, cls: "line line--slope-generic" },
+    { type: "dots", values: personalDots, cls: "dot dot--slope", r: 3 },
   ];
-  if (hasHr) layers.push({ type: "dots", values: bins.map((b) => b.hr_bpm), cls: "dot dot--slope-hr", axis: "y2", r: 3 });
-  const chart = timeChart(xLabels, layers, [{ type: "hline", value: 0, cls: "mark mark--zero" }], {
-    height: 220, y2: hasHr ? { zero: false } : undefined,
+  let y2Opts;
+  if (hasHr) {
+    layers.push({ type: "dots", values: bins.map((b) => b.hr_bpm), cls: "dot dot--slope-hr", axis: "y2", r: 3 });
+    // Plage minimale de 10 bpm (revue de code #58, should-fix 7) : sur une fenêtre de
+    // FC très resserrée (ex. 140-144 bpm), l'arrondi de `niceTicks` produisait des
+    // graduations dupliquées (« 144 bpm » deux fois) — un padding symétrique évite
+    // à la fois les doublons et un axe qui donnerait une fausse impression de
+    // variation en zoomant sur un écart de 1-2 bpm.
+    const hrValues = bins.map((b) => b.hr_bpm).filter((v) => v != null);
+    const hrMin = Math.min(...hrValues), hrMax = Math.max(...hrValues);
+    const pad = Math.max(0, (10 - (hrMax - hrMin)) / 2);
+    y2Opts = { min: hrMin - pad, max: hrMax + pad };
+  }
+  // Pas de repère à 0 (revue de code #58, should-fix 7) : une allure de 0:00/km n'a
+  // aucun sens et forcer l'axe à l'inclure écrase l'échelle utile — contrairement à
+  // un delta ou une charge, l'allure n'a pas de « zéro » de référence à marquer.
+  const chart = timeChart(xLabels, layers, [], {
+    height: 220, y: { invert: true }, y2: y2Opts,
     label: `Allure par classe de pente, bande ${band === "all" ? "tous efforts" : "endurance"}`,
     yFormat: (v) => F.paceFromSecPerKm(v), y2Format: hasHr ? (v) => `${F.num(v)} bpm` : undefined,
     xLabels,

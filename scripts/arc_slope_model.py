@@ -35,18 +35,39 @@ ajuste une courbe (une trentaine de paniers).
 L'allure sur une pente donnée dépend énormément de l'effort fourni (un sprint
 en côte n'a rien à voir avec une côte en endurance fondamentale) : mélanger
 toutes les séances sans distinction ferait une moyenne sans signification
-physiologique claire. Par défaut (`band="endurance"`), ce module restreint
-les échantillons à ceux dont la FC est sous le seuil facile/modéré du modèle
-de Seiler déjà résolu pour l'athlète (`arc_metrics.seiler_bounds`, #43) — la
-« zone d'endurance » au sens le plus large (Z1+Z2 façon Karvonen, ou
-équivalent LTHR/%FCmax selon la méthode active). `band="all"` lève cette
-restriction (toutes les séances de la famille course à pied, tous efforts
-confondus) : une seconde courbe, à lire comme « comment je bouge sur cette
-pente, quel que soit l'effort », jamais comme une allure d'endurance. Sans
-seuils FC résolus au profil, `band="endurance"` ne peut rien ajuster (aucune
-séance n'est incluse) : `fit_slope_model` le signale par
-`reason_code="no_hr_threshold"`, jamais un silence qui laisserait croire à un
-manque de séances.
+physiologique claire. Par défaut (`band="endurance"`), ce module restreint le
+modèle aux ACTIVITÉS majoritairement faciles : une activité est retenue si au
+moins `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` (80 %) de son temps de mouvement (FC
+connue) reste sous le seuil facile/modéré du modèle de Seiler déjà résolu pour
+l'athlète (`arc_metrics.seiler_bounds`, #43 — la « zone d'endurance » au sens
+le plus large, Z1+Z2 façon Karvonen ou équivalent LTHR/%FCmax selon la méthode
+active) ; UNE FOIS une activité retenue, TOUS ses échantillons alimentent les
+paniers, sans filtre FC supplémentaire échantillon par échantillon.
+
+**Sélection au niveau de l'ACTIVITÉ, jamais de l'échantillon (revue de code
+#58, BLOQUANT)** : une version antérieure de ce module filtrait CHAQUE
+ÉCHANTILLON par sa propre FC (`hr_bpm < easy_hr_bpm`) — un biais de sélection
+réel sur les montées, où la FC monte avec un RETARD physiologique sur
+l'effort (inertie cardiaque, 30 s à quelques minutes selon l'individu) : au
+début d'une côte parcourue à effort constant, les premiers échantillons ont
+encore une FC "facile" alors que l'effort a déjà changé — filtrer par FC
+échantillon par échantillon aurait alors sur-représenté ces instants de
+transition (FC pas encore montée) au détriment du reste de la montée (FC
+montée, donc exclue), mesurant une allure de montée SYSTÉMATIQUEMENT trop
+optimiste (repro revue de code : jusqu'à plusieurs points de pourcentage de
+temps de montée perdus, allure mesurée faussée). Sélectionner l'ACTIVITÉ
+entière élimine structurellement ce biais : soit toute la montée compte
+(activité classée facile dans son ensemble), soit aucun de ses échantillons
+ne compte (activité trop intense) — jamais une sélection interne à la montée
+elle-même corrélée à l'effort récent.
+
+`band="all"` lève cette restriction (toutes les séances de la famille course
+à pied, tous efforts confondus) : une seconde courbe, à lire comme « comment
+je bouge sur cette pente, quel que soit l'effort », jamais comme une allure
+d'endurance. Sans seuils FC résolus au profil, `band="endurance"` ne peut
+rien ajuster (aucune activité n'est classable) : `fit_slope_model` le signale
+par `reason_code="no_hr_threshold"`, jamais un silence qui laisserait croire
+à un manque de séances.
 
 ## Marche vs course sur les pentes raides — gardée, pas retirée
 
@@ -88,7 +109,14 @@ séance, pas par échantillon individuel : une longue sortie plate ne doit pas
 « diluer » par son nombre d'échantillons le poids d'une séance plus courte
 mais plus récente sur un panier de pente donné — le poids de récession est un
 attribut de LA SÉANCE, le volume de temps dans le panier (poids secondaire,
-multiplicatif) reste, lui, mesuré par échantillon.
+multiplicatif) reste, lui, mesuré par échantillon — MAIS jamais sans plancher
+ni plafond (revue de code #58, should-fix 4) : un passage de moins de
+`MIN_ACTIVITY_BIN_TIME_S` dans le panier ne compte pas comme une observation
+(sinon `MIN_BIN_ACTIVITIES` serait satisfait par une simple traversée de
+quelques secondes), et le TEMPS utilisé comme poids est plafonné à
+`ACTIVITY_BIN_TIME_WEIGHT_CAP_S` (sinon une unique très longue sortie sur le
+même panier écraserait plusieurs séances plus courtes mais plus récentes) —
+voir `combine_activity_summaries`.
 
 ## Coût — agrégation par activité, jamais par échantillon global
 
@@ -113,6 +141,11 @@ personnels ; à défaut, aucune prédiction générique n'est possible — voir
 formule GAP (`arc_gap.gap_speed_ms`), puisqu'on VEUT ici l'allure brute
 prédite à effort constant, pas l'allure ajustée à plat. `source: "generic"`
 marque explicitement ce repli, jamais confondu avec une donnée personnelle.
+En DESCENTE, cette inversion amplifie le biais connu de Minetti en forte
+descente (`arc_gap.ASSUMPTIONS["model"]`) jusqu'à des vitesses non plausibles
+(revue de code #58, BLOQUANT) : plafonnée à `GENERIC_DOWNHILL_SPEED_CAP_RATIO`
+(1,3×) la référence plate, et jamais au-delà de la descente personnelle la
+plus rapide connue quand il en existe une — voir `_generic_downhill_cap`.
 
 ## Lissage — léger, jamais forcé à la monotonie
 
@@ -195,16 +228,65 @@ FLAT_REFERENCE_ABS = 0.0375  # un panier et demi de large de chaque côté de 0
 
 BANDS = ("endurance", "all")
 
+# Part MINIMALE du temps de mouvement sous le seuil facile/modéré pour classer
+# TOUTE une activité en « endurance » (revue de code #58, BLOQUANT — sélection
+# au niveau ACTIVITÉ, jamais au niveau échantillon, voir ASSUMPTIONS['population']).
+ENDURANCE_ACTIVITY_EASY_SHARE_MIN = 0.80
+
+# Temps de mouvement minimal (avec FC connue) pour qu'une activité soit
+# CLASSABLE en endurance ou non — en dessous, la part mesurée est trop bruitée
+# pour être fiable (ex. un seul échantillon isolé), l'activité est alors
+# EXCLUE de la bande « endurance » (jamais classée par défaut « facile »).
+ENDURANCE_ACTIVITY_MIN_HR_TIME_S = 60.0
+
+# Temps minimal qu'UNE ACTIVITÉ doit passer dans UN panier pour que sa
+# contribution y compte (revue de code #58, should-fix 4) : un passage de
+# quelques secondes dans un panier de transition (ex. traversée d'un court
+# pic de pente) ne doit jamais compter comme "une séance de plus" pour
+# `MIN_BIN_ACTIVITIES`, ni peser dans la médiane comme une vraie observation.
+MIN_ACTIVITY_BIN_TIME_S = 30.0
+
+# Plafond du temps d'UNE SEULE activité dans UN panier, utilisé comme POIDS
+# (jamais pour `effective_time_s`, qui reste le temps réel — voir
+# `combine_activity_summaries`) : sans ce plafond, une unique sortie très
+# longue (plusieurs heures dans le même panier de pente, ex. un ultra plat)
+# écraserait le poids de plusieurs séances plus courtes mais plus nombreuses
+# et plus récentes (revue de code #58, should-fix 4) — 10 minutes reste
+# largement assez pour distinguer un vrai passage prolongé d'un bref, sans
+# jamais laisser UNE séance dominer la médiane pondérée à elle seule.
+ACTIVITY_BIN_TIME_WEIGHT_CAP_S = 600.0
+
+# Plafond de vitesse du repli générique en DESCENTE (revue de code #58,
+# BLOQUANT) : coefficient maximal appliqué à la référence plate personnelle —
+# voir ASSUMPTIONS['fallback'] pour la justification complète (biais connu de
+# Minetti en forte descente, `arc_gap.ASSUMPTIONS["model"]`).
+GENERIC_DOWNHILL_SPEED_CAP_RATIO = 1.3
+
 
 def _grade_bins() -> Tuple[Tuple[float, float, str], ...]:
-    bins: List[Tuple[float, float, str]] = [(float("-inf"), -BIN_MAX_ABS, f"<{-BIN_MAX_ABS * 100:.0f}%")]
-    n = round(2 * BIN_MAX_ABS / BIN_WIDTH)
-    lo = -BIN_MAX_ABS
-    for _ in range(n):
-        hi = round(lo + BIN_WIDTH, 6)
+    """Construit `GRADE_BINS` CENTRÉ sur 0 (revue de code #58, nit) : un panier
+    plat `[-BIN_WIDTH/2, +BIN_WIDTH/2[` contient le plat exact, jamais scindé en
+    deux paniers dont aucun n'est vraiment « le plat » — la construction
+    précédente plaçait une frontière de panier PILE à 0 %, si bien qu'un plat
+    parfaitement mesuré à 0,0 % tombait arbitrairement dans le panier
+    « [0 %, +2,5 %[ » plutôt que dans un panier réellement centré sur le plat.
+    Les paniers s'étendent ensuite de `BIN_WIDTH` en `BIN_WIDTH` de chaque côté
+    jusqu'à couvrir au moins `BIN_MAX_ABS`, arrondi au panier supérieur (la
+    borne réelle peut donc légèrement dépasser `BIN_MAX_ABS`, voir le calcul de
+    `half_extra` ci-dessous) — puis deux paniers ouverts (queues) au-delà."""
+    import math
+    half = BIN_WIDTH / 2.0
+    half_extra = math.ceil((BIN_MAX_ABS - half) / BIN_WIDTH)
+    edges = [-half - i * BIN_WIDTH for i in range(half_extra, 0, -1)]
+    edges.append(-half)
+    edges.append(half)
+    edges.extend(half + i * BIN_WIDTH for i in range(1, half_extra + 1))
+    edges = [round(e, 6) for e in edges]
+    outer = edges[-1]
+    bins: List[Tuple[float, float, str]] = [(float("-inf"), edges[0], f"<{edges[0] * 100:.0f}%")]
+    for lo, hi in zip(edges, edges[1:]):
         bins.append((lo, hi, f"{lo * 100:+.1f}/{hi * 100:+.1f}%"))
-        lo = hi
-    bins.append((BIN_MAX_ABS, float("inf"), f">{BIN_MAX_ABS * 100:.0f}%"))
+    bins.append((outer, float("inf"), f">{outer * 100:.0f}%"))
     return tuple(bins)
 
 
@@ -212,19 +294,26 @@ GRADE_BINS: Tuple[Tuple[float, float, str], ...] = _grade_bins()
 
 ASSUMPTIONS = {
     "grade_bins": (
-        f"Paniers de pente de {BIN_WIDTH * 100:.1f} points de pourcentage entre "
-        f"{-BIN_MAX_ABS * 100:.0f} % et {BIN_MAX_ABS * 100:.0f} %, plus deux paniers ouverts au-delà — voir "
-        "GRADE_BINS. Beaucoup plus fins que les classes de montée/descente déjà affichées "
-        "(arc_climb.GRADE_CLASSES, arc_descent.DESCENT_GRADE_CLASSES), qui servent un affichage synthétique, "
-        "pas l'ajustement d'une courbe."
+        f"Paniers de pente de {BIN_WIDTH * 100:.1f} points de pourcentage, CENTRÉS SUR 0 (le panier "
+        f"« {next(label for lo, hi, label in GRADE_BINS if lo <= 0.0 < hi)} » contient le plat exact, jamais "
+        "scindé en deux paniers dont aucun n'est réellement le plat), jusqu'à environ "
+        f"±{GRADE_BINS[-1][0] * 100:.0f} % (arrondi au panier supérieur, voir `_grade_bins`), plus deux "
+        "paniers ouverts au-delà — voir GRADE_BINS. Beaucoup plus fins que les classes de montée/descente déjà "
+        "affichées (arc_climb.GRADE_CLASSES, arc_descent.DESCENT_GRADE_CLASSES), qui servent un affichage "
+        "synthétique, pas l'ajustement d'une courbe."
     ),
     "population": (
-        "Par défaut (band='endurance'), seuls les échantillons sous le seuil facile/modéré du modèle de "
-        "Seiler déjà résolu pour l'athlète (arc_metrics.seiler_bounds, #43) alimentent le modèle : mélanger "
-        "tous les efforts sans distinction produirait une allure par pente sans signification physiologique "
-        "claire. band='all' lève cette restriction (tous efforts, famille course à pied) — à lire comme « "
-        "comment je bouge sur cette pente », jamais comme une allure d'endurance. Sans seuils FC résolus, "
-        "band='endurance' ne peut ajuster aucun panier personnel (reason_code='no_hr_threshold')."
+        "Par défaut (band='endurance'), une ACTIVITÉ ENTIÈRE est retenue si au moins "
+        f"{ENDURANCE_ACTIVITY_EASY_SHARE_MIN * 100:.0f} % de son temps de mouvement (FC connue) reste sous le "
+        "seuil facile/modéré du modèle de Seiler déjà résolu pour l'athlète (arc_metrics.seiler_bounds, #43) ; "
+        "une fois retenue, TOUS ses échantillons alimentent les paniers. Sélection au niveau de l'ACTIVITÉ, "
+        "jamais de l'échantillon individuel (revue de code #58, BLOQUANT) : filtrer chaque échantillon par sa "
+        "propre FC introduirait un biais de sélection sur les montées, où la FC monte avec un retard "
+        "physiologique sur l'effort — les instants de transition (FC pas encore montée) seraient "
+        "sur-représentés, mesurant une allure de montée systématiquement trop optimiste. band='all' lève "
+        "cette restriction (tous efforts, famille course à pied) — à lire comme « comment je bouge sur cette "
+        "pente », jamais comme une allure d'endurance. Sans seuils FC résolus, band='endurance' ne peut "
+        "classer aucune activité (reason_code='no_hr_threshold')."
     ),
     "walking": (
         "La marche/le power-hiking sur les paniers de forte pente montante est GARDÉE, jamais filtrée : elle "
@@ -245,7 +334,14 @@ ASSUMPTIONS = {
         f"Chaque SÉANCE (pas chaque échantillon) pèse 2**(-âge_jours/{DEFAULT_HALF_LIFE_DAYS:.0f}) dans la "
         "médiane pondérée de chaque panier — demi-vie par défaut configurable. Le poids de récence est un "
         "attribut de la séance entière, jamais dilué par son volume d'échantillons dans le panier (mesuré "
-        "séparément, par activité, avant combinaison — voir 'aggregation_cost')."
+        "séparément, par activité, avant combinaison — voir 'aggregation_cost'). Deux garde-fous sur le "
+        f"TEMPS passé dans le panier (revue de code #58, should-fix 4) : un passage sous "
+        f"{MIN_ACTIVITY_BIN_TIME_S:.0f} s n'y compte pas du tout (ni poids, ni MIN_BIN_ACTIVITIES — sinon une "
+        "traversée de quelques secondes suffirait à faire compter une séance comme une observation de plus), "
+        f"et le poids qui en dérive est plafonné à {ACTIVITY_BIN_TIME_WEIGHT_CAP_S / 60:.0f} min "
+        "(`ACTIVITY_BIN_TIME_WEIGHT_CAP_S` — sinon une unique très longue sortie sur le même panier écraserait "
+        "le poids de plusieurs séances plus courtes mais plus nombreuses et plus récentes) ; le temps RÉEL "
+        "(`effective_time_s`) reste, lui, rapporté sans plafond."
     ),
     "aggregation_cost": (
         "Chaque séance est réduite à, au plus, une valeur par panier (moyenne pondérée par le temps DE "
@@ -265,13 +361,26 @@ ASSUMPTIONS = {
         "l'allure brute prédite à effort constant, pas l'allure ajustée à plat. `source: 'generic'` marque "
         "ce repli. Sans référence plate personnelle du tout, aucune prédiction générique n'est possible "
         "(reason_code='no_flat_reference') : le modèle générique a lui-même besoin d'un point d'ancrage "
-        "personnel, il n'invente jamais une vitesse plate par défaut."
+        "personnel, il n'invente jamais une vitesse plate par défaut. PLAFOND DE DESCENTE (revue de code "
+        "#58, BLOQUANT) : inverser la formule GAP pour PRÉDIRE une vitesse brute (plutôt que l'appliquer à "
+        "une vitesse déjà mesurée, comme le fait #44) amplifie le biais connu de Minetti en forte descente "
+        "(`arc_gap.ASSUMPTIONS['model']`) jusqu'à des vitesses non plausibles (le coût prédit peut s'effondrer "
+        f"avant le plafonnage de pente de `arc_gap.CLAMP_GRADE`) : la vitesse générique en descente est donc "
+        f"plafonnée à `GENERIC_DOWNHILL_SPEED_CAP_RATIO` ({GENERIC_DOWNHILL_SPEED_CAP_RATIO:.1f}×) la référence "
+        "plate, ET, si au moins une descente personnelle est connue, jamais au-delà de la plus rapide d'entre "
+        "elles (repère mesuré, plus fiable que le plafond générique) — voir `_generic_downhill_cap`."
     ),
     "smoothing": (
         f"Lissage à 3 points ({SMOOTH_WEIGHTS[0]:.2f}/{SMOOTH_WEIGHTS[1]:.2f}/{SMOOTH_WEIGHTS[2]:.2f}, "
-        "renormalisé aux bords) appliqué sur la suite ordonnée des vitesses prédites (personnelles ou "
-        "génériques) pour atténuer le bruit entre paniers voisins peu fréquentés — la monotonie n'est "
-        "JAMAIS forcée (une descente peut légitimement re-ralentir au-delà d'un certain point, voir "
+        "renormalisé aux bords) appliqué sur la suite ordonnée des vitesses prédites, RESTREINT AUX VOISINS DE "
+        "MÊME PROVENANCE (personnel avec personnel, générique avec générique — revue de code #58, BLOQUANT) : "
+        "lisser un panier personnel avec un voisin générique contaminerait une donnée mesurée avec un repli "
+        "théorique, potentiellement très éloigné (voir le plafond de descente ci-dessus) — un panier personnel "
+        "isolé entre deux génériques garde donc sa propre valeur brute, jamais tirée vers ses voisins. Un "
+        "panier personnel lissé est en plus RECLAMPÉ dans son propre intervalle [p25, p75] (`ci_low_speed_ms`/"
+        "`ci_high_speed_ms`) après lissage : même entre voisins personnels, le lissage ne doit jamais faire "
+        "dire à un panier une valeur que ses propres données ne soutiennent pas. La monotonie n'est JAMAIS "
+        "forcée par ailleurs (une descente peut légitimement re-ralentir au-delà d'un certain point, voir "
         "arc_gap.ASSUMPTIONS['model']). `source` par panier reste celui du panier d'origine même après "
         "lissage."
     ),
@@ -279,9 +388,13 @@ ASSUMPTIONS = {
         "`predict_speed` interpole linéairement entre les vitesses des DEUX paniers dont le POINT MILIEU "
         "encadre la pente demandée (jamais une simple table de paliers, qui produirait des discontinuités à "
         "chaque frontière de panier) ; au-delà du point milieu du panier extrême (queue ouverte), la valeur "
-        "est prolongée à PLAT (jamais une extrapolation polynomiale hors de tout point mesuré). Le point "
-        "milieu d'un panier ouvert est un point d'ancrage NOMINAL (une demi-largeur de panier au-delà de sa "
-        "borne fermée), pas une pente réellement typique de la queue."
+        "est prolongée à PLAT (jamais une extrapolation polynomiale hors de tout point mesuré), signalé par "
+        "`reason_code='extrapolated'` (informatif, `speed_ms` reste renseignée). Le point milieu d'un panier "
+        "ouvert est un point d'ancrage NOMINAL (une demi-largeur de panier au-delà de sa borne fermée), pas "
+        "une pente réellement typique de la queue. `source: 'mixed'` (vraie interpolation entre un panier "
+        "personnel et un panier générique) met `hr_bpm`/`ci_low_speed_ms`/`ci_high_speed_ms` à `None` : "
+        "interpoler une FC ou un IQR entre deux provenances différentes ne produirait un nombre qui n'a de "
+        "sens dans AUCUNE des deux, jamais affiché comme une mesure."
     ),
 }
 
@@ -322,36 +435,80 @@ def _is_walking(sample: dict) -> bool:
     return speed is not None and speed < DC.WALKING_SPEED_MS
 
 
+def _moving_samples(series: Sequence[dict]) -> List[dict]:
+    """Échantillons en mouvement (vitesse >= `arc_gap.STOPPED_SPEED_MS`), triés
+    par `t_s` — partage commun à `_activity_easy_share` et à la boucle
+    principale de `activity_bin_summaries`, jamais deux critères de mouvement
+    différents dans le même module."""
+    ordered = sorted((s for s in series if s.get("t_s") is not None), key=lambda s: s["t_s"])
+    return [s for s in ordered if (s.get("speed_ms") or 0.0) >= G.STOPPED_SPEED_MS]
+
+
+def _activity_easy_share(moving: Sequence[dict], easy_hr_bpm: float,
+                          resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Optional[float]:
+    """Part du temps de mouvement (avec FC connue) sous `easy_hr_bpm`, pour
+    CLASSER L'ACTIVITÉ ENTIÈRE — jamais un filtre échantillon par échantillon
+    (voir ASSUMPTIONS['population'], revue de code #58, BLOQUANT : filtrer par
+    FC échantillon par échantillon introduit un biais de sélection sur les
+    montées, où la FC monte avec un RETARD sur l'effort — les instants
+    encore "sous le seuil" en tout début de côte seraient alors sur-
+    représentés, et l'allure de montée mesurée artificiellement optimiste).
+    `None` si le temps de mouvement avec FC connue est trop court pour juger
+    (`ENDURANCE_ACTIVITY_MIN_HR_TIME_S`) — l'activité n'est alors ni incluse
+    ni exclue par ce critère seul, `activity_bin_summaries` la rejette par
+    prudence (jamais classée "facile" par défaut)."""
+    total_hr_time, easy_time = 0.0, 0.0
+    n = len(moving)
+    for i, s in enumerate(moving):
+        hr = s.get("hr_bpm")
+        if hr is None:
+            continue
+        dt = moving[i + 1]["t_s"] - s["t_s"] if i + 1 < n else resolution_s
+        dt = max(0.0, min(dt, resolution_s))
+        total_hr_time += dt
+        if hr < easy_hr_bpm:
+            easy_time += dt
+    if total_hr_time < ENDURANCE_ACTIVITY_MIN_HR_TIME_S:
+        return None
+    return easy_time / total_hr_time
+
+
 def activity_bin_summaries(series: Sequence[dict], *, band: str = "endurance",
                             easy_hr_bpm: Optional[float] = None,
                             resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Dict[str, dict]:
     """Résumé PAR PANIER d'une séance déjà augmentée par
     `arc_gap.gap_sample_series` (a `grade`, `speed_ms`, `hr_bpm`?,
     `cadence_spm`?). Échantillons à l'arrêt (`arc_gap.STOPPED_SPEED_MS`)
-    toujours exclus. `band='endurance'` restreint en plus aux échantillons
-    dont `hr_bpm < easy_hr_bpm` (voir ASSUMPTIONS['population']) ; sans
-    `easy_hr_bpm` fourni, rend `{}` (rien à ajuster pour cette séance).
+    toujours exclus.
+
+    `band='endurance'` : sélection au niveau de L'ACTIVITÉ ENTIÈRE (jamais
+    échantillon par échantillon, voir ASSUMPTIONS['population']/revue de code
+    #58, BLOQUANT) — l'activité est retenue seulement si au moins
+    `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` de son temps de mouvement (FC connue)
+    est sous `easy_hr_bpm` (`_activity_easy_share`) ; une fois retenue, TOUS
+    ses échantillons en mouvement alimentent les paniers, sans filtre FC
+    supplémentaire — jamais un mélange des deux échelles de sélection. Sans
+    `easy_hr_bpm` fourni, ou activité non classable/pas assez "facile", rend
+    `{}` (rien à ajuster pour cette séance dans cette bande).
 
     Rend `{label: {"weighted_time_s", "speed_weighted_sum", "hr_weighted_time_s",
     "hr_weighted_sum", "n_samples", "walking_weighted_time_s"}}`."""
     if band == "endurance" and easy_hr_bpm is None:
         return {}
-    ordered = sorted((s for s in series if s.get("t_s") is not None), key=lambda s: s["t_s"])
-    n = len(ordered)
+    moving = _moving_samples(series)
+    if band == "endurance":
+        share = _activity_easy_share(moving, easy_hr_bpm, resolution_s)
+        if share is None or share < ENDURANCE_ACTIVITY_EASY_SHARE_MIN:
+            return {}
+    n = len(moving)
     out: Dict[str, dict] = {}
-    for i, s in enumerate(ordered):
-        speed = s.get("speed_ms")
-        if speed is None or speed < G.STOPPED_SPEED_MS:
-            continue
-        if band == "endurance":
-            hr = s.get("hr_bpm")
-            if hr is None or hr >= easy_hr_bpm:
-                continue
+    for i, s in enumerate(moving):
         label = grade_bin(s.get("grade"))
         if label is None:
             continue
-        dt = ordered[i + 1]["t_s"] - s["t_s"] if i + 1 < n else resolution_s
+        dt = moving[i + 1]["t_s"] - s["t_s"] if i + 1 < n else resolution_s
         dt = max(0.0, min(dt, resolution_s))
+        speed = s["speed_ms"]
         bucket = out.setdefault(label, {
             "weighted_time_s": 0.0, "speed_weighted_sum": 0.0,
             "hr_weighted_time_s": 0.0, "hr_weighted_sum": 0.0,
@@ -401,6 +558,20 @@ def combine_activity_summaries(activities: Sequence[dict], *, as_of: str,
     `activities` : séquence de `{"activity_id", "date" (AAAA-MM-JJ), "bins": {...}}`.
     `as_of` : date de référence (AAAA-MM-JJ) pour l'âge de chaque séance.
 
+    Deux garde-fous sur le poids d'UNE activité DANS UN panier (revue de code
+    #58, should-fix 4, voir ASSUMPTIONS['recency']) :
+    - un passage de moins de `MIN_ACTIVITY_BIN_TIME_S` (30 s) dans le panier ne
+      compte PAS DU TOUT (ni pour le poids, ni pour `n_activities`/
+      `MIN_BIN_ACTIVITIES`) — sans ce plancher, une traversée de quelques
+      secondes suffirait à faire compter une séance comme "une observation de
+      plus" de ce panier ;
+    - le temps réellement passé dans le panier reste rapporté tel quel
+      (`effective_time_s`, `n_samples`), mais le poids qui en dérive pour la
+      médiane pondérée est plafonné à `ACTIVITY_BIN_TIME_WEIGHT_CAP_S` (10 min)
+      — sans ce plafond, une unique très longue sortie dans le même panier
+      (ex. un ultra sur terrain plat) écraserait le poids de plusieurs séances
+      plus courtes mais plus nombreuses et plus récentes.
+
     Rend `{label: {"speed_pairs": [(vitesse_moy_activité, poids)], "hr_pairs": [...],
     "n_samples", "effective_time_s", "n_activities", "run_share"}}` — pas encore le
     modèle final (voir `apply_fallback_and_smoothing`)."""
@@ -420,17 +591,19 @@ def combine_activity_summaries(activities: Sequence[dict], *, as_of: str,
                 age_days = 0.0
         weight = _recency_weight(age_days, half_life_days)
         for label, b in (act.get("bins") or {}).items():
-            if b["weighted_time_s"] <= 0:
+            if b["weighted_time_s"] < MIN_ACTIVITY_BIN_TIME_S:
                 continue
             agg = per_bin.setdefault(label, {
                 "speed_pairs": [], "hr_pairs": [], "n_samples": 0,
                 "effective_time_s": 0.0, "n_activities": 0, "walking_time_s": 0.0,
             })
             mean_speed = b["speed_weighted_sum"] / b["weighted_time_s"]
-            agg["speed_pairs"].append((mean_speed, weight * b["weighted_time_s"]))
+            time_weight = min(b["weighted_time_s"], ACTIVITY_BIN_TIME_WEIGHT_CAP_S)
+            agg["speed_pairs"].append((mean_speed, weight * time_weight))
             if b["hr_weighted_time_s"] > 0:
                 mean_hr = b["hr_weighted_sum"] / b["hr_weighted_time_s"]
-                agg["hr_pairs"].append((mean_hr, weight * b["hr_weighted_time_s"]))
+                hr_time_weight = min(b["hr_weighted_time_s"], ACTIVITY_BIN_TIME_WEIGHT_CAP_S)
+                agg["hr_pairs"].append((mean_hr, weight * hr_time_weight))
             agg["n_samples"] += b["n_samples"]
             agg["effective_time_s"] += b["weighted_time_s"]
             agg["walking_time_s"] += b["walking_weighted_time_s"]
@@ -457,6 +630,26 @@ def _flat_reference(combined: Dict[str, dict]) -> Tuple[Optional[float], Optiona
     if not pairs:
         return None, None
     return _weighted_percentile(pairs, 0.5), "personal"
+
+
+def _generic_downhill_cap(mid: float, flat_speed: float, personal_downhill_speeds: Sequence[float]) -> float:
+    """Plafond de vitesse du repli générique sur un panier de DESCENTE (`mid`
+    < 0) — revue de code #58, BLOQUANT : le modèle de Minetti, inversé pour
+    PRÉDIRE une vitesse brute à partir d'une référence plate (voir
+    ASSUMPTIONS['fallback']), diverge en forte descente bien au-delà de
+    vitesses plausibles (le coût métabolique prédit peut devenir très faible
+    voire proche de zéro avant le plafonnage de pente de `arc_gap.CLAMP_GRADE`,
+    donnant un rapport coût(0)/coût(pente) énorme) — voir
+    `arc_gap.ASSUMPTIONS["model"]` sur le biais CONNU de Minetti en forte
+    descente. Le plafond retenu (`GENERIC_DOWNHILL_SPEED_CAP_RATIO`, 1,3× la
+    référence plate) est un jugement d'ingénierie, pas une valeur mesurée ; en
+    présence de descentes PERSONNELLES connues, le plafond ne dépasse en plus
+    JAMAIS la plus rapide d'entre elles (une descente personnelle plus lente
+    que 1,3× le plat est un repère plus fiable que le plafond générique)."""
+    cap = flat_speed * GENERIC_DOWNHILL_SPEED_CAP_RATIO
+    if personal_downhill_speeds:
+        cap = min(cap, max(personal_downhill_speeds))
+    return cap
 
 
 def apply_fallback_and_smoothing(combined: Dict[str, dict], *,
@@ -492,17 +685,34 @@ def apply_fallback_and_smoothing(combined: Dict[str, dict], *,
                 "run_share": agg["run_share"],
             })
         else:
-            cost = G.minetti_cost(mid)
-            speed = flat_speed * (G.MINETTI_FLAT_COST / cost) if cost else None
             raw.append({
                 "grade_lo": lo, "grade_hi": hi, "grade_mid": mid, "label": label,
-                "speed_ms": speed, "ci_low_speed_ms": None, "ci_high_speed_ms": None, "hr_bpm": None,
+                "speed_ms": None, "ci_low_speed_ms": None, "ci_high_speed_ms": None, "hr_bpm": None,
                 "source": "generic", "n_samples": 0, "n_activities": 0, "effective_time_s": 0.0,
                 "run_share": None,
             })
+    # Repli générique (Minetti), calculé APRÈS avoir connu toutes les vitesses
+    # personnelles (nécessaire au plafond de descente ci-dessous, voir
+    # `_generic_downhill_cap` — ASSUMPTIONS['fallback'], BLOQUANT).
+    personal_downhill_speeds = [b["speed_ms"] for b in raw if b["source"] == "personal" and b["grade_mid"] < 0]
+    for b in raw:
+        if b["source"] != "generic":
+            continue
+        cost = G.minetti_cost(b["grade_mid"])
+        speed = flat_speed * (G.MINETTI_FLAT_COST / cost) if cost else None
+        if speed is not None and b["grade_mid"] < 0:
+            speed = min(speed, _generic_downhill_cap(b["grade_mid"], flat_speed, personal_downhill_speeds))
+        b["speed_ms"] = speed
     # Lissage léger (ASSUMPTIONS['smoothing']) : ne touche que `speed_ms`, jamais
     # `source`/`hr_bpm`/`ci_*` (repère de provenance et de dispersion inchangés).
+    # RESTREINT AUX VOISINS DE MÊME PROVENANCE (revue de code #58, BLOQUANT) :
+    # lisser un panier PERSONNEL avec un voisin GÉNÉRIQUE (potentiellement très
+    # éloigné, voir le biais de Minetti ci-dessus) contaminait une donnée
+    # mesurée avec un repli théorique — un panier personnel isolé entre deux
+    # génériques n'est donc PAS lissé du tout (reste sa propre valeur brute),
+    # jamais tiré vers le générique voisin.
     speeds = [b["speed_ms"] for b in raw]
+    sources = [b["source"] for b in raw]
     smoothed = []
     w0, w1, w2 = SMOOTH_WEIGHTS
     for i, s in enumerate(speeds):
@@ -510,13 +720,21 @@ def apply_fallback_and_smoothing(combined: Dict[str, dict], *,
             smoothed.append(None)
             continue
         parts = [(w1, s)]
-        if i > 0 and speeds[i - 1] is not None:
+        if i > 0 and speeds[i - 1] is not None and sources[i - 1] == sources[i]:
             parts.append((w0, speeds[i - 1]))
-        if i + 1 < len(speeds) and speeds[i + 1] is not None:
+        if i + 1 < len(speeds) and speeds[i + 1] is not None and sources[i + 1] == sources[i]:
             parts.append((w2, speeds[i + 1]))
         total_w = sum(w for w, _ in parts)
         smoothed.append(sum(w * v for w, v in parts) / total_w if total_w else None)
+    # Clampage dans [p25, p75] pour les paniers PERSONNELS (revue de code #58,
+    # BLOQUANT) : même lissé entre voisins personnels seulement, un panier peu
+    # fréquenté à côté d'un voisin très différent pouvait sortir de sa propre
+    # dispersion mesurée — le lissage ne doit jamais faire dire au panier une
+    # valeur que ses propres données ne soutiennent pas.
     for b, s in zip(raw, smoothed):
+        if s is not None and b["source"] == "personal" and b["ci_low_speed_ms"] is not None \
+                and b["ci_high_speed_ms"] is not None:
+            s = max(b["ci_low_speed_ms"], min(b["ci_high_speed_ms"], s))
         b["speed_ms"] = s
         b["pace_s_km"] = (1000.0 / s) if s else None
     return {"bins": raw, "flat_reference_speed_ms": flat_speed, "reason": None, "reason_code": None}
@@ -594,7 +812,7 @@ def fit_slope_model(activities: Sequence[dict], *, band: str = "endurance",
     est déjà augmentée par `arc_gap.gap_sample_series` — voir
     `recompute_slope_model` (`arc_index.py`, CLI `slope-model --months`) pour
     comment cette liste est construite à partir d'un workspace réel, et
-    `tests/data/test_slope_model.py` pour l'usage direct depuis des séances
+    `tests/data/test_arc_slope_model.py` pour l'usage direct depuis des séances
     synthétiques (`tests/lib/synthetic.py`). `arc_index.compute_metrics`, lui,
     emprunte le chemin plus économique `fit_from_activity_bins` (voir
     ASSUMPTIONS['aggregation_cost']).
@@ -628,8 +846,9 @@ def predict_speed(grade: Optional[float], bins: Sequence[dict]) -> dict:
     rendue par `fit_slope_model` (ou relue depuis `slope_model_bin`, même
     forme). Interpolation linéaire entre les points milieux des deux paniers
     encadrant `grade` (voir ASSUMPTIONS['interpolation']) ; extrapolation
-    plate au-delà. `grade=None` ou `bins` vide -> résultat sans vitesse,
-    `reason_code` explicite, jamais d'exception."""
+    plate au-delà (`reason_code="extrapolated"`, informatif — `speed_ms` reste
+    renseignée, ce n'est jamais un échec). `grade=None` ou `bins` vide ->
+    résultat sans vitesse, `reason_code` explicite, jamais d'exception."""
     if grade is None:
         return {"speed_ms": None, "pace_s_km": None, "hr_bpm": None, "source": None,
                 "ci_low_speed_ms": None, "ci_high_speed_ms": None, "reason": "pente inconnue",
@@ -640,12 +859,18 @@ def predict_speed(grade: Optional[float], bins: Sequence[dict]) -> dict:
                 "ci_low_speed_ms": None, "ci_high_speed_ms": None,
                 "reason": "aucun panier disponible (modèle non ajusté)", "reason_code": "no_model"}
     mids = [b["grade_mid"] for b in ordered]
-    if len(ordered) == 1 or grade <= mids[0]:
+    extrapolated = False
+    if len(ordered) == 1:
         lo_b = hi_b = ordered[0]
         frac = 0.0
+    elif grade <= mids[0]:
+        lo_b = hi_b = ordered[0]
+        frac = 0.0
+        extrapolated = grade < mids[0]
     elif grade >= mids[-1]:
         lo_b = hi_b = ordered[-1]
         frac = 0.0
+        extrapolated = grade > mids[-1]
     else:
         idx = bisect.bisect_right(mids, grade)
         lo_b, hi_b = ordered[idx - 1], ordered[idx]
@@ -669,9 +894,19 @@ def predict_speed(grade: Optional[float], bins: Sequence[dict]) -> dict:
         source = hi_b["source"]
     else:
         source = lo_b["source"] if lo_b["source"] == hi_b["source"] else "mixed"
+    # `hr_bpm`/`ci_*` mis à `None` quand `source == "mixed"` (revue de code #58,
+    # nit) : interpoler un IQR ou une FC entre un panier personnel et un panier
+    # générique (qui n'en a pas, `hr_bpm`/`ci_*` déjà `None`) produirait un
+    # nombre qui n'a de sens dans AUCUNE des deux provenances — jamais affiché
+    # comme si c'était une mesure.
+    if source == "mixed":
+        hr_bpm = ci_low = ci_high = None
+    else:
+        hr_bpm, ci_low, ci_high = _interp("hr_bpm"), _interp("ci_low_speed_ms"), _interp("ci_high_speed_ms")
     return {
         "speed_ms": speed, "pace_s_km": (1000.0 / speed) if speed else None,
-        "hr_bpm": _interp("hr_bpm"), "source": source,
-        "ci_low_speed_ms": _interp("ci_low_speed_ms"), "ci_high_speed_ms": _interp("ci_high_speed_ms"),
-        "reason": None, "reason_code": None,
+        "hr_bpm": hr_bpm, "source": source, "ci_low_speed_ms": ci_low, "ci_high_speed_ms": ci_high,
+        "reason": "pente au-delà du point milieu du panier extrême le plus proche : valeur prolongée à plat"
+                  if extrapolated else None,
+        "reason_code": "extrapolated" if extrapolated else None,
     }

@@ -1,29 +1,39 @@
 """Palier D — modèle personnel pente -> allure (#58, épopée #23).
 
 Familles de tests :
-- Paniers de pente (`GRADE_BINS`) : bornes, étiquettes, point milieu.
+- Paniers de pente (`GRADE_BINS`) : bornes, étiquettes, point milieu, centrage
+  sur 0.
 - `activity_bin_summaries` : échantillons à l'arrêt exclus, bande « endurance »
-  (filtre FC) vs « all » (aucun filtre), part de marche (`run_share`), trous de
-  signal jamais franchis (hérité de `arc_elevation.grade_series`/`arc_gap.
-  gap_sample_series`, réutilisés tels quels).
+  (sélection au niveau de L'ACTIVITÉ entière, jamais de l'échantillon — revue
+  de code #58, BLOQUANT) vs « all » (aucun filtre), part de marche
+  (`run_share`), trous de signal jamais franchis.
+- `combine_activity_summaries` : plancher/plafond du poids d'une activité dans
+  un panier (revue de code #58, should-fix 4).
 - `fit_slope_model` bout en bout sur des séances synthétiques à courbe
   pente -> allure IMPOSÉE (`tests.lib.synthetic.sample_session(slope_factor_fn=...)`) :
   la courbe est retrouvée à une tolérance documentée près, sur plusieurs pentes
-  (montée et descente) ; effet de la pondération par récence ; effet du filtre
-  de bande FC ; fenêtre de mois qui exclut les séances trop anciennes.
+  (montée et descente), aux points milieux des paniers ; courbe nulle (témoin
+  négatif) ; effet de la pondération par récence ; effet du filtre de bande
+  FC ; fenêtre de mois qui exclut les séances trop anciennes ; absence de
+  biais de montée quand la FC répond en retard à l'effort.
 - Repli générique (Minetti) quand un panier manque de données, `source:
-  "generic"` explicite ; `predict_speed` (interpolation entre paniers,
-  extrapolation plate aux queues).
+  "generic"` explicite, PLAFONNÉ en descente (revue de code #58, BLOQUANT) ;
+  lissage RESTREINT aux voisins de même provenance et reclampé dans son propre
+  IQR (revue de code #58, BLOQUANT) ; `predict_speed` (interpolation entre
+  paniers, extrapolation plate aux queues signalée, `hr`/`ci` à `None` quand
+  la source est mixte).
 - `arc_index` : tables `slope_model_bin`/`slope_model_meta` recalculées à
   l'indexation, CLI `slope-model` (stocké et recalculé à la volée), garde en
-  cas d'échec inattendu d'un calcul dérivé de la même activité (même
-  discipline que #46/#47/#48 : une activité en échec ne doit jamais empêcher
-  l'indexation des autres, ni celle du modèle pente -> allure lui-même).
+  cas d'échec inattendu d'un calcul dérivé de la même activité — une activité
+  en échec ne doit ni empêcher l'indexation des autres, ni contribuer
+  elle-même au modèle pente -> allure (revue de code #58, nit : tamponné,
+  commité seulement après succès complet).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -46,20 +56,27 @@ from tests.lib.synthetic import sample_session  # noqa: E402
 
 
 class TestGradeBins(unittest.TestCase):
-    def test_bins_cover_minus_30_to_plus_30_with_two_open_tails(self):
+    def test_bins_cover_at_least_30_pct_with_two_open_tails_and_are_centered_on_zero(self):
         self.assertEqual(SL.GRADE_BINS[0][0], float("-inf"))
-        self.assertEqual(SL.GRADE_BINS[0][1], -SL.BIN_MAX_ABS)
-        self.assertEqual(SL.GRADE_BINS[-1][0], SL.BIN_MAX_ABS)
+        self.assertGreaterEqual(-SL.GRADE_BINS[0][1], SL.BIN_MAX_ABS)
+        self.assertEqual(SL.GRADE_BINS[-1][0], -SL.GRADE_BINS[0][1])  # queues symétriques
         self.assertEqual(SL.GRADE_BINS[-1][1], float("inf"))
         # Continuité stricte : la borne haute d'un panier == la borne basse du suivant.
         for (_, hi, _), (lo2, _, _) in zip(SL.GRADE_BINS, SL.GRADE_BINS[1:]):
             self.assertAlmostEqual(hi, lo2, places=9)
+        # Centré sur 0 (revue de code #58, nit) : un panier fermé contient EXACTEMENT
+        # 0,0 %, à cheval symétriquement autour (jamais une frontière pile à 0).
+        flat = next((lo, hi) for lo, hi, _ in SL.GRADE_BINS if lo <= 0.0 < hi and lo != float("-inf"))
+        self.assertAlmostEqual(flat[0], -SL.BIN_WIDTH / 2, places=9)
+        self.assertAlmostEqual(flat[1], SL.BIN_WIDTH / 2, places=9)
 
     def test_grade_bin_picks_the_containing_bucket(self):
-        self.assertEqual(SL.grade_bin(0.0), "+0.0/+2.5%")
-        self.assertEqual(SL.grade_bin(-0.001), "-2.5/+0.0%")
-        self.assertEqual(SL.grade_bin(0.5), ">30%")
-        self.assertEqual(SL.grade_bin(-0.5), "<-30%")
+        half = SL.BIN_WIDTH / 2
+        self.assertEqual(SL.grade_bin(0.0), f"{-half * 100:+.1f}/{half * 100:+.1f}%")
+        self.assertEqual(SL.grade_bin(-0.001), f"{-half * 100:+.1f}/{half * 100:+.1f}%")
+        outer = SL.GRADE_BINS[-1][0]
+        self.assertEqual(SL.grade_bin(outer + 1.0), f">{outer * 100:.0f}%")
+        self.assertEqual(SL.grade_bin(-outer - 1.0), f"<{-outer * 100:.0f}%")
         self.assertIsNone(SL.grade_bin(None))
 
     def test_open_tail_mid_is_a_nominal_anchor_half_a_bin_beyond_the_closed_bound(self):
@@ -82,6 +99,9 @@ def _flat_series(speed_ms, hr_bpm, cadence_spm, n=200, t0=0):
     ]
 
 
+EASY_HR = 154.8  # seuil facile/modéré utilisé dans ces tests (méthode LTHR, profil type)
+
+
 class TestActivityBinSummaries(unittest.TestCase):
     def test_stopped_samples_are_excluded(self):
         series = _flat_series(3.0, 140.0, 170.0, n=100)
@@ -89,30 +109,20 @@ class TestActivityBinSummaries(unittest.TestCase):
         for s in series[40:50]:
             s["speed_ms"] = 0.05
             s["gap_speed_ms"] = 0.05
-        bins = SL.activity_bin_summaries(series, band="all")
         # 90 échantillons de mouvement à vitesse constante -> 90 s de temps pondéré
-        # (dernier échantillon compte pour `resolution_s`, ici 5 s par défaut, mais la
-        # résolution du générateur est 1 s -> on la passe explicitement).
+        # (dernier échantillon compte pour `resolution_s`, ici 1 s, la résolution du
+        # générateur — passée explicitement, jamais le défaut 5 s d'`arc_gap`).
         bins = SL.activity_bin_summaries(series, band="all", resolution_s=1.0)
         label = SL.grade_bin(0.0)
         self.assertAlmostEqual(bins[label]["weighted_time_s"], 90.0, delta=1.0)
         self.assertEqual(bins[label]["n_samples"], 90)
-
-    def test_endurance_band_excludes_samples_above_the_easy_threshold(self):
-        series = _flat_series(3.0, 160.0, 170.0, n=50) + _flat_series(3.2, 145.0, 170.0, n=50, t0=50)
-        bins_all = SL.activity_bin_summaries(series, band="all", resolution_s=1.0)
-        bins_endurance = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=154.8, resolution_s=1.0)
-        label = SL.grade_bin(0.0)
-        self.assertEqual(bins_all[label]["n_samples"], 100)
-        # Seule la seconde moitié (FC 145 < 154,8) est retenue en bande « endurance ».
-        self.assertEqual(bins_endurance[label]["n_samples"], 50)
 
     def test_endurance_band_without_threshold_yields_nothing(self):
         series = _flat_series(3.0, 140.0, 170.0, n=20)
         self.assertEqual(SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=None), {})
 
     def test_walking_share_reflects_cadence_below_walking_threshold(self):
-        series = _flat_series(1.4, 140.0, 130.0, n=60, )  # cadence 130 < WALKING_CADENCE_SPM (140)
+        series = _flat_series(1.4, 140.0, 130.0, n=60)  # cadence 130 < WALKING_CADENCE_SPM (140)
         bins = SL.activity_bin_summaries(series, band="all", resolution_s=1.0)
         label = SL.grade_bin(0.0)
         self.assertAlmostEqual(bins[label]["walking_weighted_time_s"], bins[label]["weighted_time_s"], delta=1.0)
@@ -132,6 +142,85 @@ class TestActivityBinSummaries(unittest.TestCase):
         self.assertLessEqual(bins[label]["weighted_time_s"], 11 * 5.0 + 1e-6)
 
 
+class TestEnduranceIsSelectedAtTheActivityLevel(unittest.TestCase):
+    """Revue de code #58, BLOQUANT : `band='endurance'` classe l'ACTIVITÉ
+    ENTIÈRE, jamais échantillon par échantillon — une version antérieure
+    filtrait chaque échantillon par sa propre FC, un biais de sélection réel
+    sur les montées (la FC monte avec un retard sur l'effort, voir
+    `arc_slope_model.ASSUMPTIONS['population']`)."""
+
+    def test_activity_included_wholesale_when_easy_share_is_high(self):
+        # 90 % du temps de mouvement sous le seuil facile (180 s faciles, 20 s dures)
+        # -> activité retenue ENTIÈREMENT, y compris les 20 s "dures".
+        series = _flat_series(3.0, 145.0, 170.0, n=180) + _flat_series(3.5, 165.0, 170.0, n=20, t0=180)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        total_samples = sum(b["n_samples"] for b in bins.values())
+        self.assertEqual(total_samples, 200)  # TOUS les échantillons, pas seulement les 180 faciles
+
+    def test_activity_excluded_wholesale_when_easy_share_is_low(self):
+        # 50 % du temps sous le seuil -> sous ENDURANCE_ACTIVITY_EASY_SHARE_MIN (80 %) ->
+        # activité EXCLUE ENTIÈREMENT (aucun panier, même pas les échantillons faciles).
+        series = _flat_series(3.0, 145.0, 170.0, n=100) + _flat_series(3.5, 165.0, 170.0, n=100, t0=100)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        self.assertEqual(bins, {})
+
+    def test_activity_with_too_little_hr_coverage_is_excluded_not_assumed_easy(self):
+        series = _flat_series(3.0, None, 170.0, n=190)
+        for s in _flat_series(3.0, 145.0, 170.0, n=10, t0=190):
+            series.append(s)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        self.assertEqual(bins, {})  # 10 s de FC connue < ENDURANCE_ACTIVITY_MIN_HR_TIME_S (60 s)
+
+    def test_activity_easy_share_helper_matches_direct_computation(self):
+        moving = _flat_series(3.0, 145.0, 170.0, n=80) + _flat_series(3.0, 165.0, 170.0, n=20, t0=80)
+        share = SL._activity_easy_share(moving, EASY_HR, resolution_s=1.0)
+        self.assertAlmostEqual(share, 0.80, places=2)
+
+
+class TestActivityBinTimeFloorAndCap(unittest.TestCase):
+    """Revue de code #58, should-fix 4 : plancher/plafond du poids d'UNE
+    activité DANS UN panier, appliqués par `combine_activity_summaries`."""
+
+    def test_a_pass_shorter_than_the_floor_never_counts_toward_min_bin_activities(self):
+        # Deux activités : l'une avec 5 s dans le panier plat (sous MIN_ACTIVITY_BIN_TIME_S,
+        # 30 s), l'autre avec une vraie présence (60 s). MIN_BIN_ACTIVITIES (2) ne doit PAS
+        # être satisfait par la traversée de 5 s.
+        bins_a = {SL.grade_bin(0.0): {
+            "weighted_time_s": 5.0, "speed_weighted_sum": 5.0 * 3.0, "hr_weighted_time_s": 5.0,
+            "hr_weighted_sum": 5.0 * 145.0, "n_samples": 5, "walking_weighted_time_s": 0.0}}
+        bins_b = {SL.grade_bin(0.0): {
+            "weighted_time_s": 60.0, "speed_weighted_sum": 60.0 * 3.0, "hr_weighted_time_s": 60.0,
+            "hr_weighted_sum": 60.0 * 145.0, "n_samples": 60, "walking_weighted_time_s": 0.0}}
+        combined = SL.combine_activity_summaries(
+            [{"activity_id": "a", "date": "2026-09-20", "bins": bins_a},
+             {"activity_id": "b", "date": "2026-09-21", "bins": bins_b}],
+            as_of="2026-09-26", half_life_days=45.0,
+        )
+        agg = combined[SL.grade_bin(0.0)]
+        self.assertEqual(agg["n_activities"], 1)  # seule "b" compte, "a" (5 s) est ignorée
+
+    def test_a_single_very_long_activity_never_outweighs_several_shorter_recent_ones(self):
+        """Repro revue de code #58 : un ultra de 3 h dans le même panier ne doit pas
+        écraser 3 sorties récentes de 30 min — le poids-temps est plafonné à
+        `ACTIVITY_BIN_TIME_WEIGHT_CAP_S` (10 min)."""
+        label = SL.grade_bin(0.0)
+        long_bins = {label: {
+            "weighted_time_s": 3 * 3600.0, "speed_weighted_sum": 3 * 3600.0 * 2.0, "hr_weighted_time_s": 0.0,
+            "hr_weighted_sum": 0.0, "n_samples": 100, "walking_weighted_time_s": 0.0}}
+        short_bins = {label: {
+            "weighted_time_s": 1800.0, "speed_weighted_sum": 1800.0 * 3.6, "hr_weighted_time_s": 0.0,
+            "hr_weighted_sum": 0.0, "n_samples": 100, "walking_weighted_time_s": 0.0}}
+        activities = [{"activity_id": "ultra", "date": "2026-09-01", "bins": long_bins}]
+        activities += [{"activity_id": f"short{i}", "date": f"2026-09-2{i}", "bins": short_bins}
+                       for i in range(3)]
+        combined = SL.combine_activity_summaries(activities, as_of="2026-09-26", half_life_days=45.0)
+        result = SL.apply_fallback_and_smoothing(combined)
+        flat = next(b for b in result["bins"] if b["label"] == label)
+        # Vitesse retrouvée nettement plus proche de 3,6 m/s (3 sorties courtes) que de
+        # 2,0 m/s (l'ultra) — jamais dominée par la seule très longue sortie.
+        self.assertGreater(flat["speed_ms"], 3.0)
+
+
 # ---------------------------------------------------------------------------
 # Bout en bout, courbe imposée retrouvée (`tests.lib.synthetic`)
 # ---------------------------------------------------------------------------
@@ -148,8 +237,16 @@ def _slope_curve(grade_pct: float) -> float:
     return min(1.3, 1 + 0.02 * (-grade_pct))
 
 
+def _flat_curve(_grade_pct: float) -> float:
+    """Témoin négatif : aucune dépendance à la pente (facteur toujours 1,0).
+    Sert à vérifier que le modèle ne "trouve" jamais un signal pente -> allure
+    là où il n'y en a structurellement aucun (voir
+    `TestFitSlopeModelRecoversAnImposedCurve.test_a_flat_imposed_curve_recovers_flat_everywhere`)."""
+    return 1.0
+
+
 def _synthetic_activities(n=10, seed0=200, months_back_days=(0, 10, 30, 40, 60, 70, 90, 100, 120, 150),
-                           as_of="2026-09-26", **session_kwargs):
+                           as_of="2026-09-26", curve=_slope_curve, **session_kwargs):
     """`n` séances synthétiques identiques (même courbe imposée, même segments),
     espacées dans le temps par `months_back_days` (jours avant `as_of`) —
     `{"activity_id", "date", "series"}`, prêt pour `fit_slope_model`. Segments
@@ -166,39 +263,57 @@ def _synthetic_activities(n=10, seed0=200, months_back_days=(0, 10, 30, 40, 60, 
         records, _truth = sample_session(seed=seed0 + i, duration_s=5400, base_speed_ms=2.8,
                                           hr_base_bpm=140.0, cadence_spm=170.0,
                                           segments=[(0, 2500, 8.0), (4000, 2500, -8.0)],
-                                          slope_factor_fn=_slope_curve, **session_kwargs)
+                                          slope_factor_fn=curve, **session_kwargs)
         series = G.gap_sample_series(records)
         activities.append({"activity_id": i, "date": day, "series": series})
     return activities
 
 
 class TestFitSlopeModelRecoversAnImposedCurve(unittest.TestCase):
-    """Tolérance documentée : `arc_elevation.grade_series` calcule la pente sur
-    une FENÊTRE de distance (20-50 m, lissage inclus, voir son docstring) —
-    près des transitions de segment (début/fin de montée ou de descente), la
-    pente mesurée est donc légèrement plus faible que la pente réellement
-    imposée à cet instant précis, ce qui mélange dans un panier de bord des
-    échantillons à vitesse "pleine pente" mais pente mesurée atténuée. Sur une
-    montée, cet effet reste faible (le modèle imposé est proche de linéaire
-    sur cette plage) ; en descente, il peut biaiser la vitesse mesurée d'un
-    panier de ~10 % — d'où une tolérance plus large en descente qu'en montée,
-    documentée ici plutôt que masquée par une tolérance globale trop large."""
+    """Tolérance documentée, mesurée AUX POINTS MILIEUX DE PANIER (jamais à une
+    pente arbitraire, qui pourrait retomber entre un panier personnel et un
+    panier générique voisin — voir `apply_fallback_and_smoothing`, revue de
+    code #58, should-fix 3) : `arc_elevation.grade_series` calcule la pente
+    sur une FENÊTRE de distance (20-50 m, lissage inclus) — près des
+    transitions de segment, la pente mesurée est donc légèrement plus faible
+    que la pente réellement imposée à cet instant précis. Avec des segments
+    longs (2 500 m) et une pente modérée (±8 %), cet effet reste faible des
+    deux côtés (< 5 %) — une tolérance serrée suffit désormais des deux côtés
+    (contrairement à une version antérieure de ce test, où la tolérance large
+    en descente masquait en réalité le bogue corrigé en revue de code #58,
+    BLOQUANT 1 : le lissage inter-paniers contaminait alors un panier
+    personnel avec son voisin générique)."""
 
-    def test_recovers_the_curve_on_moderate_uphill_and_downhill(self):
+    def test_recovers_the_curve_at_the_uphill_and_downhill_bin_midpoints(self):
         activities = _synthetic_activities(noise=True)
         model = SL.fit_slope_model(activities, band="all", months=12, as_of="2026-09-26")
         self.assertIsNone(model["reason_code"], model["reason"])
         self.assertGreaterEqual(model["n_activities"], 10)
-        expected_uphill = 2.8 * _slope_curve(8.0)
-        expected_downhill = 2.8 * _slope_curve(-8.0)
-        got_uphill = SL.predict_speed(0.08, model["bins"])["speed_ms"]
-        got_downhill = SL.predict_speed(-0.08, model["bins"])["speed_ms"]
-        # Montée : le modèle imposé est proche de linéaire sur cette plage, la pente
-        # mesurée colle de très près à la pente imposée -> tolérance serrée.
-        self.assertAlmostEqual(got_uphill, expected_uphill, delta=expected_uphill * 0.10)
-        # Descente : biais documenté ci-dessus (fenêtre de calcul de pente) -> tolérance
-        # plus large, jamais masquée derrière une tolérance unique trop permissive.
-        self.assertAlmostEqual(got_downhill, expected_downhill, delta=expected_downhill * 0.25)
+        personal = {b["label"]: b for b in model["bins"] if b["source"] == "personal"}
+        self.assertTrue(personal)
+        checked_uphill = checked_downhill = 0
+        for b in personal.values():
+            expected = 2.8 * _slope_curve(b["grade_mid"] * 100)
+            self.assertAlmostEqual(b["speed_ms"], expected, delta=expected * 0.05,
+                                    msg=f"panier {b['label']} (mid={b['grade_mid']})")
+            if b["grade_mid"] > 0.01:
+                checked_uphill += 1
+            elif b["grade_mid"] < -0.01:
+                checked_downhill += 1
+        self.assertGreater(checked_uphill, 0)
+        self.assertGreater(checked_downhill, 0)
+
+    def test_a_flat_imposed_curve_recovers_flat_everywhere(self):
+        """Témoin négatif (revue de code #58, should-fix 3) : sans dépendance
+        réelle à la pente, chaque panier personnel doit retrouver la MÊME
+        vitesse (la référence plate), jamais un faux signal pente -> allure."""
+        activities = _synthetic_activities(noise=True, curve=_flat_curve)
+        model = SL.fit_slope_model(activities, band="all", months=12, as_of="2026-09-26")
+        self.assertIsNone(model["reason_code"], model["reason"])
+        personal = [b for b in model["bins"] if b["source"] == "personal"]
+        self.assertGreaterEqual(len(personal), 3)
+        for b in personal:
+            self.assertAlmostEqual(b["speed_ms"], 2.8, delta=2.8 * 0.05, msg=f"panier {b['label']}")
 
     def test_flat_reference_matches_the_base_speed(self):
         activities = _synthetic_activities(noise=True)
@@ -221,6 +336,21 @@ class TestFitSlopeModelRecoversAnImposedCurve(unittest.TestCase):
         self.assertIsNotNone(far_bin["speed_ms"])  # le repli produit quand même une valeur
         flat_bin = next(b for b in model["bins"] if b["label"] == SL.grade_bin(0.0))
         self.assertEqual(flat_bin["source"], "personal")
+
+    def test_generic_downhill_speed_is_capped_never_implausibly_fast(self):
+        """Revue de code #58, BLOQUANT 2 : le repli générique inversé (Minetti)
+        divergeait en forte descente (ex. -18,75 % -> ~2,0x la référence plate,
+        une allure ~2 min/km totalement implausible pour un plat à 4:00/km).
+        Plafonné à `GENERIC_DOWNHILL_SPEED_CAP_RATIO` (1,3x) la référence
+        plate — jamais au-delà, même sur les paniers les plus raides."""
+        activities = _synthetic_activities(n=2, noise=False)
+        model = SL.fit_slope_model(activities, band="all", months=12, as_of="2026-09-26")
+        flat_speed = model["flat_reference_speed_ms"]
+        cap = flat_speed * SL.GENERIC_DOWNHILL_SPEED_CAP_RATIO
+        downhill_generic = [b for b in model["bins"] if b["source"] == "generic" and b["grade_mid"] < 0]
+        self.assertTrue(downhill_generic)
+        for b in downhill_generic:
+            self.assertLessEqual(b["speed_ms"], cap + 1e-6, msg=f"panier {b['label']}")
 
     def test_endurance_band_without_hr_threshold_reports_a_reason(self):
         activities = _synthetic_activities(n=2, noise=False)
@@ -302,6 +432,49 @@ class TestFitSlopeModelRecoversAnImposedCurve(unittest.TestCase):
         model = SL.fit_slope_model([{"activity_id": 1, "date": None, "series": []}], band="all")
         self.assertEqual(model["reason_code"], "no_data")
 
+    def test_endurance_band_avoids_uphill_bias_when_hr_lags_behind_effort(self):
+        """Revue de code #58, BLOQUANT 5 : la FC répond avec un RETARD à
+        l'effort (`hr_grade_response_bpm_per_pct`/`hr_grade_lag_s`, voir
+        `tests/lib/synthetic.py`) — assez fort pour que la FC dépasse le seuil
+        facile PENDANT la montée sur certaines séances. La sélection au niveau
+        de L'ACTIVITÉ (jamais de l'échantillon) fait que ces séances restent
+        soit ENTIÈREMENT incluses (si l'essentiel du temps reste facile), soit
+        ENTIÈREMENT exclues — jamais un sous-ensemble de la montée corrélé à
+        la FC, qui biaiserait l'allure de montée mesurée. L'allure de montée
+        retrouvée doit rester proche de la courbe imposée, PAS artificiellement
+        rapide (le biais qu'un filtre par échantillon aurait introduit)."""
+        from datetime import date, timedelta
+        as_of = date.fromisoformat("2026-09-26")
+        activities = []
+        for i in range(8):
+            day = (as_of - timedelta(days=i * 5)).isoformat()
+            records, _ = sample_session(
+                seed=900 + i, duration_s=5400, base_speed_ms=2.8, hr_base_bpm=140.0, cadence_spm=170.0,
+                segments=[(0, 2500, 8.0), (4000, 2500, -8.0)], slope_factor_fn=_slope_curve,
+                # Réponse et retard choisis pour que la FC dépasse le seuil facile
+                # (154,8) PENDANT une bonne partie de la montée (~2,3 min à 90 s de
+                # constante de temps pour y arriver, sur une montée d'environ 22 min)
+                # SANS faire chuter la part globale de temps facile de la séance
+                # sous `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` (80 %) — sans quoi la
+                # séance serait simplement exclue plutôt que sujette au biais testé.
+                hr_grade_response_bpm_per_pct=2.0, hr_grade_lag_s=200.0, noise=True,
+            )
+            activities.append({"activity_id": i, "date": day, "series": G.gap_sample_series(records)})
+        model = SL.fit_slope_model(activities, band="endurance", months=12,
+                                    easy_hr_bpm=EASY_HR, as_of="2026-09-26")
+        self.assertIsNone(model["reason_code"], model["reason"])
+        uphill_personal = [b for b in model["bins"]
+                            if b["source"] == "personal" and 0.06 < b["grade_mid"] < 0.10]
+        self.assertTrue(uphill_personal, "aucun panier de montée personnel — vérifier le scénario du test")
+        expected = 2.8 * _slope_curve(8.0)
+        for b in uphill_personal:
+            # Tolérance plus large qu'au test de récupération pur (10 %) : le lissage
+            # léger et le bruit du générateur restent en jeu, mais AUCUN biais
+            # systématique vers une allure plus rapide que l'allure imposée ne doit
+            # apparaître (ce qu'un filtre par échantillon aurait produit).
+            self.assertAlmostEqual(b["speed_ms"], expected, delta=expected * 0.12,
+                                    msg=f"panier {b['label']}")
+
 
 # ---------------------------------------------------------------------------
 # `predict_speed` — interpolation et queues
@@ -323,17 +496,31 @@ class TestPredictSpeed(unittest.TestCase):
         got = SL.predict_speed(0.05, self.BINS)
         self.assertAlmostEqual(got["speed_ms"], (2.8 + 2.2) / 2, places=6)
         self.assertEqual(got["source"], "mixed")  # un panier personnel, un générique
+        # Revue de code #58, nit : FC/IQR à None quand la source est mixte — interpoler
+        # entre une FC personnelle et un `None` générique ne produirait un nombre qui
+        # n'a de sens dans aucune des deux provenances.
+        self.assertIsNone(got["hr_bpm"])
+        self.assertIsNone(got["ci_low_speed_ms"])
+        self.assertIsNone(got["ci_high_speed_ms"])
+        self.assertIsNone(got["reason_code"])  # une vraie interpolation, pas une extrapolation
 
     def test_matches_a_bin_exactly_at_its_own_midpoint(self):
         got = SL.predict_speed(0.025, self.BINS)
         self.assertAlmostEqual(got["speed_ms"], 2.8, places=6)
         self.assertEqual(got["source"], "personal")
+        self.assertEqual(got["hr_bpm"], 150.0)
 
-    def test_extrapolates_flat_beyond_the_outer_midpoints(self):
+    def test_extrapolates_flat_beyond_the_outer_midpoints_and_flags_it(self):
         got_low = SL.predict_speed(-0.5, self.BINS)
         got_high = SL.predict_speed(0.5, self.BINS)
         self.assertAlmostEqual(got_low["speed_ms"], 3.2, places=6)
         self.assertAlmostEqual(got_high["speed_ms"], 2.2, places=6)
+        self.assertEqual(got_low["reason_code"], "extrapolated")
+        self.assertEqual(got_high["reason_code"], "extrapolated")
+
+    def test_a_grade_within_the_outer_midpoints_is_never_flagged_extrapolated(self):
+        got = SL.predict_speed(0.0, self.BINS)
+        self.assertIsNone(got["reason_code"])
 
     def test_none_grade_is_reported_explicitly(self):
         got = SL.predict_speed(None, self.BINS)
@@ -344,6 +531,36 @@ class TestPredictSpeed(unittest.TestCase):
         got = SL.predict_speed(0.05, [])
         self.assertIsNone(got["speed_ms"])
         self.assertEqual(got["reason_code"], "no_model")
+
+
+# ---------------------------------------------------------------------------
+# Lissage — restreint aux voisins de même provenance (revue de code #58, BLOQUANT)
+# ---------------------------------------------------------------------------
+
+
+class TestSmoothingNeverCrossesPersonalAndGenericBins(unittest.TestCase):
+    def test_a_personal_bin_between_two_generic_ones_keeps_its_own_raw_value(self):
+        """Repro revue de code #58, BLOQUANT 1 : un panier PERSONNEL isolé entre
+        deux paniers GÉNÉRIQUES très différents ne doit RIEN emprunter à ses
+        voisins — sa valeur lissée doit rester dans son propre intervalle
+        [p25, p75], jamais tirée vers une valeur générique éloignée."""
+        flat_label = SL.grade_bin(0.0)
+        label_mid = SL.grade_bin(-0.10)
+        combined = {
+            # Référence plate personnelle, requise par `_flat_reference` avant même de
+            # pouvoir construire un repli générique.
+            flat_label: {"speed_pairs": [(2.8, 300.0)], "hr_pairs": [], "n_samples": 300,
+                         "effective_time_s": 300.0, "n_activities": 3, "walking_time_s": 0.0, "run_share": 1.0},
+            # Panier personnel isolé (voisins -12,5 % et -7,5 % absents -> génériques),
+            # avec un IQR étroit autour de 3,0.
+            label_mid: {"speed_pairs": [(2.9, 5.0), (3.0, 10.0), (3.1, 5.0)], "hr_pairs": [], "n_samples": 200,
+                        "effective_time_s": 400.0, "n_activities": 3, "walking_time_s": 0.0, "run_share": 1.0},
+        }
+        result = SL.apply_fallback_and_smoothing(combined)
+        b = next(x for x in result["bins"] if x["label"] == label_mid)
+        self.assertEqual(b["source"], "personal")
+        self.assertGreaterEqual(b["speed_ms"], b["ci_low_speed_ms"] - 1e-9)
+        self.assertLessEqual(b["speed_ms"], b["ci_high_speed_ms"] + 1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -407,8 +624,9 @@ class TestArcIndexSlopeModelTables(Workspace):
         bins = self.conn.execute("SELECT * FROM slope_model_bin WHERE band = 'all'").fetchall()
         self.assertTrue(bins)
         # Panier ouvert -> bornes NULL en base (jamais une chaîne "inf").
+        tail_label = SL.GRADE_BINS[0][2]
         tail = self.conn.execute(
-            "SELECT * FROM slope_model_bin WHERE band = 'all' AND label = '<-30%'").fetchone()
+            "SELECT * FROM slope_model_bin WHERE band = 'all' AND label = ?", (tail_label,)).fetchone()
         self.assertIsNone(tail["grade_lo"])
 
     def test_slope_model_report_keeps_open_tail_bounds_as_json_null(self):
@@ -427,12 +645,13 @@ class TestArcIndexSlopeModelTables(Workspace):
             self.write_fit(garmin_id, records)
         self.index()
         report = I.slope_model_report(self.conn, "all")
-        tail = next(b for b in report["bins"] if b["label"] == "<-30%")
+        tail_label = SL.GRADE_BINS[0][2]
+        tail = next(b for b in report["bins"] if b["label"] == tail_label)
         self.assertIsNone(tail["grade_lo"])
         # Round-trip JSON réel (pas seulement le dict Python) : la garantie qui
         # compte est celle-ci, jamais cassée même si le champ change de forme.
         round_tripped = json.loads(json.dumps(report, ensure_ascii=False))
-        tail2 = next(b for b in round_tripped["bins"] if b["label"] == "<-30%")
+        tail2 = next(b for b in round_tripped["bins"] if b["label"] == tail_label)
         self.assertIsNone(tail2["grade_lo"])
 
     def test_cli_slope_model_command_returns_stored_model(self):
@@ -462,45 +681,64 @@ class TestArcIndexSlopeModelTables(Workspace):
         self.assertEqual(result["months"], 1)
         self.assertIsNone(result["reason_code"], result["reason"])
 
+    def test_fractional_months_below_one_falls_back_to_the_default_with_a_warning(self):
+        """Revue de code #58, nit : `slope_model_months = 0.5` ne doit jamais
+        se retrouver tronqué silencieusement en une fenêtre nulle (`int(0.5)
+        == 0`) — repli explicite sur le défaut, avec avertissement."""
+        self.write("config/workspace.user.toml", "[metrics]\nslope_model_months = 0.5\n")
+        conf = I.settings(I.load_config(self.ws))
+        self.assertEqual(conf["slope_model_months"], SL.DEFAULT_MONTHS)
 
-class TestComputeMetricsSurvivesAnUnexpectedCrashAndStillBuildsTheSlopeModel(Workspace):
-    """Même discipline que #46/#47/#48 (`test_arc_durability.py::
-    TestComputeMetricsSurvivesAnUnexpectedDurabilityCrash`) : un bug inattendu
-    dans UN calcul dérivé d'UNE activité (ici, on force `arc_climb.detect_climbs`
-    à lever) ne doit ni faire planter `compute_metrics` pour les autres
-    activités, ni empêcher le modèle pente -> allure global de se construire à
-    partir des activités qui, elles, ont réussi leur résumé par panier (calculé
-    AVANT le point de la boucle qui plante, voir `arc_index.compute_metrics`)."""
 
-    def test_one_activitys_crash_never_stops_the_slope_model(self):
-        import os
-        import arc_index as I2
+class TestComputeMetricsSurvivesAnUnexpectedCrashAndExcludesTheFailedActivity(Workspace):
+    """Même discipline que #46/#47/#48 : un bug inattendu dans UN calcul dérivé
+    d'UNE activité ne doit jamais faire échouer `index_workspace` pour toutes
+    les activités. Revue de code #58, nit (corrigé) : l'activité EN ÉCHEC ne
+    doit elle-même JAMAIS contribuer au modèle pente -> allure global — le
+    résumé par panier calculé avant le point de la boucle qui plante est
+    TAMPONNÉ (`pending_slope_bins`, `arc_index.compute_metrics`), commité
+    seulement une fois l'activité entièrement réussie."""
+
+    def test_one_activitys_crash_never_stops_indexing_and_is_excluded_from_the_slope_model(self):
+        import arc_climb as VC
         self.write_profile()
         from datetime import date, timedelta
         as_of = date.fromisoformat("2026-09-26")
-        for i in range(3):
-            day = (as_of - timedelta(days=i * 10)).isoformat()
-            garmin_id = 94000000000 + i
+        broken_id, ok_ids = 94000000000, [94000000001, 94000000002, 94000000003]
+        # `compute_metrics` traite les activités PAR DATE CROISSANTE (jamais l'ordre
+        # d'insertion) : l'activité "en échec" doit donc être la plus ANCIENNE pour
+        # être la PREMIÈRE traitée (celle que `boom_once` fait échouer).
+        for i, garmin_id in enumerate([broken_id] + ok_ids):
+            day = (as_of - timedelta(days=(len(ok_ids) - i) * 10)).isoformat()
             records, _ = sample_session(seed=800 + i, duration_s=1800, base_speed_ms=2.8, noise=True)
             self.write_activity(garmin_id, day)
             self.write_fit(garmin_id, records)
         previous_strict = os.environ.pop("ARC_STRICT_METRICS", None)
-        original = I2.VC.detect_climbs
+        original = VC.detect_climbs
+        calls = {"n": 0}
 
-        def boom(*args, **kwargs):
-            raise RuntimeError("boum (test)")
-        I2.VC.detect_climbs = boom
+        def boom_once(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boum (test)")
+            return original(*args, **kwargs)
+        VC.detect_climbs = boom_once
         try:
             self.index()
         finally:
-            I2.VC.detect_climbs = original
+            VC.detect_climbs = original
             if previous_strict is None:
                 os.environ.pop("ARC_STRICT_METRICS", None)
             else:
                 os.environ["ARC_STRICT_METRICS"] = previous_strict
         meta = self.conn.execute("SELECT * FROM slope_model_meta WHERE band = 'all'").fetchone()
         self.assertIsNone(meta["reason_code"], meta["reason"])
-        self.assertGreaterEqual(meta["n_activities"], 3)
+        # Seules les 3 activités RÉUSSIES contribuent — la première (échec injecté)
+        # est exclue du modèle, jamais un résumé partiel.
+        self.assertEqual(meta["n_activities"], len(ok_ids))
+        broken = self.conn.execute(
+            "SELECT gap_pace_s_km FROM activity WHERE garmin_activity_id = ?", (broken_id,)).fetchone()
+        self.assertIsNone(broken["gap_pace_s_km"])  # même discipline que les autres champs dérivés
 
 
 if __name__ == "__main__":
