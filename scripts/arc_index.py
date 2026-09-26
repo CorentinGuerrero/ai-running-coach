@@ -188,12 +188,13 @@ import arc_slope_model as SL  # noqa: E402
 from coach_config import ConfigError, read_toml  # noqa: E402
 from coach_setup import ENGINE, workspace_root  # noqa: E402
 
+# #58 (2ᵉ revue de code) : `slope_model_meta.selected_by_plan`/`selected_by_hr`.
 # #58 : modèle personnel pente -> allure — tables `slope_model_bin`/`slope_model_meta`.
 # #54 : nouveau type de contrat `decision` — tables `decision` (une ligne par fichier) et
 # `decision_rule` (une ligne par rule_id cité, pour le filtre par règle du journal des
 # décisions, #55). #100 (revue de code) : colonnes `decision.created_at_utc` (tri correct
 # entre fuseaux) et `decision.supersedes` — voir #49 pour la version d'avant #54.
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -646,9 +647,13 @@ CREATE INDEX slope_model_bin_band ON slope_model_bin(band);
 -- cas d'échec (`reason`/`reason_code` non NULL, `slope_model_bin` alors vide pour cette
 -- bande) — jamais une absence totale de ligne qui laisserait croire à un oubli plutôt qu'à
 -- une impossibilité documentée (profil sans zones FC, historique trop récent, etc.).
+-- `selected_by_plan`/`selected_by_hr` (2ᵉ revue de code #58, should-fix) : nombre
+-- d'activités RETENUES par méthode (`arc_slope_model.EASY_PLAN_INTENSITIES` en priorité,
+-- repli FC sinon — voir `arc_slope_model.ASSUMPTIONS['population']`), jamais les exclues.
 CREATE TABLE slope_model_meta (
     band TEXT PRIMARY KEY, months INTEGER, half_life_days REAL, as_of TEXT,
-    n_activities INTEGER, flat_reference_speed_ms REAL, reason TEXT, reason_code TEXT
+    n_activities INTEGER, flat_reference_speed_ms REAL, selected_by_plan INTEGER, selected_by_hr INTEGER,
+    reason TEXT, reason_code TEXT
 );
 """
 
@@ -1010,6 +1015,28 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 _insert(conn, "decision_rule", {"source_path": rel, "rule_id": rule_id})
 
 
+def planned_intensity_for(conn, date: Optional[str], sport: Optional[str]) -> Optional[str]:
+    """`planned_session.intensity` (#58, 2ᵉ revue de code, should-fix) pour la
+    séance PLANIFIÉE de même date et même FAMILLE de sport qu'une activité
+    réelle (`M.sport_family`, jamais une comparaison de sport exacte — un plan
+    « trail » et une activité loguée « running » le même jour restent
+    apparentés) — `None` si `date` manque ou si aucune séance planifiée
+    correspondante n'existe (l'appelant retombe alors sur le repli FC, voir
+    `arc_slope_model._endurance_selection`). Plusieurs séances planifiées la
+    même date/famille (rare, ex. double séance) : la PREMIÈRE trouvée (ordre
+    SQL non garanti au-delà de ça) — jamais un plantage, jamais un mélange des
+    deux intensités."""
+    if not date:
+        return None
+    family = M.sport_family(sport)
+    for row in conn.execute(
+            "SELECT sport, intensity FROM planned_session WHERE date = ? AND intensity IS NOT NULL",
+            (date,)).fetchall():
+        if M.sport_family(row["sport"]) == family:
+            return row["intensity"]
+    return None
+
+
 def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     """Charge par séance, VO2max par séance, temps en zone FC + polarisation, puis la
     série quotidienne matérialisée."""
@@ -1042,13 +1069,15 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     conn.execute("DELETE FROM slope_model_bin")
     conn.execute("DELETE FROM slope_model_meta")
     # Modèle personnel pente -> allure (#58) : `gap_series` de CHAQUE activité course à pied
-    # est réduite à un résumé PAR PANIER (`arc_slope_model.activity_bin_summaries`) au fil du
-    # même passage — jamais un second parcours des activités, voir
+    # est réduite à un résumé PAR PANIER (`arc_slope_model.activity_bin_summaries_and_selection`)
+    # au fil du même passage — jamais un second parcours des activités, voir
     # `arc_slope_model.ASSUMPTIONS["aggregation_cost"]`. Seuils FC (#43) résolus une seule
-    # fois, hors boucle, pour la bande « endurance ».
-    slope_easy_hr_bpm = None
+    # fois, hors boucle, pour le repli FC de la bande « endurance » (2ᵉ revue de code #58,
+    # should-fix : seulement un REPLI désormais, une séance planifiée « recovery »/« endurance »
+    # prime — voir `slope_planned_intensity`).
+    slope_easy_hr_bpm = slope_moderate_hr_bpm = None
     if seiler_thresholds:
-        slope_easy_hr_bpm = seiler_thresholds[0]
+        slope_easy_hr_bpm, slope_moderate_hr_bpm = seiler_thresholds
     slope_activities: Dict[str, list] = {band: [] for band in SL.BANDS}
     # Identité de montée entre séances (#49, `arc_climb_match.py`) : registre reconstruit
     # INTÉGRALEMENT à chaque passage, comme les autres tables ci-dessus — `rows` est déjà
@@ -1141,24 +1170,28 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                     # Modèle personnel pente -> allure (#58) : résumé PAR PANIER de CETTE
                     # activité pour chaque bande (`arc_slope_model.BANDS`), à partir de
                     # `gap_series` déjà calculée ci-dessus (grade + vitesse, jamais un second
-                    # calcul de pente). Bande « endurance » sautée si aucun seuil FC résolu
-                    # (`slope_easy_hr_bpm`), voir `activity_bin_summaries`. TAMPONNÉ dans
-                    # `pending_slope_bins` (revue de code #58, nit) plutôt qu'ajouté
-                    # directement à `slope_activities` : si un calcul PLUS LOIN dans ce même
-                    # `try` échoue, cette activité doit être entièrement rejetée (mêmes
-                    # champs remis à NULL, voir le `except Exception` ci-dessous) — un
-                    # résumé de panier déjà commité dans `slope_activities` serait
-                    # impossible à retirer proprement. Committé seulement juste avant la fin
-                    # du bloc `try`, une fois TOUS les calculs de l'activité réussis.
-                    pending_slope_bins: Dict[str, dict] = {}
+                    # calcul de pente). `slope_planned_intensity` (2ᵉ revue de code #58,
+                    # should-fix) prime sur la FC pour la bande « endurance » — résolue même
+                    # sans seuils FC (`slope_easy_hr_bpm` peut être `None`, un plan seul suffit
+                    # à classer l'activité, voir `arc_slope_model._endurance_selection`).
+                    # TAMPONNÉ dans `pending_slope_bins` (revue de code #58, nit) plutôt
+                    # qu'ajouté directement à `slope_activities` : si un calcul PLUS LOIN dans
+                    # ce même `try` échoue, cette activité doit être entièrement rejetée (mêmes
+                    # champs remis à NULL, voir le `except Exception` ci-dessous) — un résumé de
+                    # panier déjà commité dans `slope_activities` serait impossible à retirer
+                    # proprement. Committé seulement juste avant la fin du bloc `try`, une fois
+                    # TOUS les calculs de l'activité réussis.
+                    slope_planned_intensity = planned_intensity_for(conn, act.get("date"), act.get("sport"))
+                    pending_slope_bins: Dict[str, tuple] = {}
                     for band in SL.BANDS:
                         easy_hr = slope_easy_hr_bpm if band == "endurance" else None
-                        if band == "endurance" and easy_hr is None:
-                            continue
-                        bin_summary = SL.activity_bin_summaries(
-                            gap_series, band=band, easy_hr_bpm=easy_hr, resolution_s=S.DEFAULT_RESOLUTION_S)
+                        moderate_hr = slope_moderate_hr_bpm if band == "endurance" else None
+                        planned = slope_planned_intensity if band == "endurance" else None
+                        bin_summary, method = SL.activity_bin_summaries_and_selection(
+                            gap_series, band=band, easy_hr_bpm=easy_hr, moderate_hr_bpm=moderate_hr,
+                            planned_intensity=planned, resolution_s=S.DEFAULT_RESOLUTION_S)
                         if bin_summary:
-                            pending_slope_bins[band] = bin_summary
+                            pending_slope_bins[band] = (bin_summary, method)
                     gap_pace = G.activity_gap_pace_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
                     conn.execute("UPDATE activity SET gap_pace_s_km = ? WHERE id = ?",
                                  (round(gap_pace, 2) if gap_pace is not None else None, act["id"]))
@@ -1319,9 +1352,10 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                     # bout du `try` réussi (voir le commentaire de `pending_slope_bins`
                     # ci-dessus) — une activité qui a échoué plus haut ne contribue donc
                     # jamais au modèle global, même partiellement.
-                    for band, bin_summary in pending_slope_bins.items():
+                    for band, (bin_summary, method) in pending_slope_bins.items():
                         slope_activities[band].append(
-                            {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary})
+                            {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary,
+                             "selected_by": method})
                 except sqlite3.Error:
                     # Jamais rattrapé, `ARC_STRICT_METRICS` ou pas (voir le commentaire
                     # ci-dessus) : un verrou ou une base corrompue est un problème
@@ -1400,12 +1434,15 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     for band in SL.BANDS:
         result = SL.fit_from_activity_bins(
             slope_activities[band], band=band, months=conf["slope_model_months"],
-            easy_hr_bpm=slope_easy_hr_bpm if band == "endurance" else None, as_of=today)
+            easy_hr_bpm=slope_easy_hr_bpm if band == "endurance" else None,
+            moderate_hr_bpm=slope_moderate_hr_bpm if band == "endurance" else None, as_of=today)
         conn.execute(
             "INSERT INTO slope_model_meta (band, months, half_life_days, as_of, n_activities, "
-            "flat_reference_speed_ms, reason, reason_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "flat_reference_speed_ms, selected_by_plan, selected_by_hr, reason, reason_code) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (band, result["months"], result["half_life_days"], result["as_of"], result["n_activities"],
-             result["flat_reference_speed_ms"], result["reason"], result["reason_code"]),
+             result["flat_reference_speed_ms"], result["selected_by"]["plan"], result["selected_by"]["hr"],
+             result["reason"], result["reason_code"]),
         )
         if result["bins"]:
             conn.executemany(
@@ -2371,18 +2408,21 @@ def slope_model_report(conn, band: str = "endurance") -> dict:
     `reason`/`reason_code` si non ajustable — jamais d'exception."""
     if band not in SL.BANDS:
         return {"band": band, "months": None, "half_life_days": None, "as_of": None, "n_activities": 0,
-                "flat_reference_speed_ms": None, "bins": [],
+                "flat_reference_speed_ms": None, "selected_by": {"plan": 0, "hr": 0}, "bins": [],
                 "reason": f"bande « {band} » inconnue (attendu : {', '.join(SL.BANDS)})",
                 "reason_code": "unknown_band"}
     meta = conn.execute(
-        "SELECT months, half_life_days, as_of, n_activities, flat_reference_speed_ms, reason, reason_code "
+        "SELECT months, half_life_days, as_of, n_activities, flat_reference_speed_ms, "
+        "selected_by_plan, selected_by_hr, reason, reason_code "
         "FROM slope_model_meta WHERE band = ?", (band,)).fetchone()
     if meta is None:
         return {"band": band, "months": None, "half_life_days": None, "as_of": None, "n_activities": 0,
-                "flat_reference_speed_ms": None, "bins": [],
+                "flat_reference_speed_ms": None, "selected_by": {"plan": 0, "hr": 0}, "bins": [],
                 "reason": "modèle jamais calculé (aucun compute_metrics n'a encore tourné)",
                 "reason_code": "not_computed"}
-    return {"band": band, **dict(meta), "bins": slope_model_bins(conn, band)}
+    meta_dict = dict(meta)
+    selected_by = {"plan": meta_dict.pop("selected_by_plan") or 0, "hr": meta_dict.pop("selected_by_hr") or 0}
+    return {"band": band, **meta_dict, "selected_by": selected_by, "bins": slope_model_bins(conn, band)}
 
 
 def recompute_slope_model(conn, conf: dict, band: str, months: int, today: Optional[str] = None) -> dict:
@@ -2396,7 +2436,9 @@ def recompute_slope_model(conn, conf: dict, band: str, months: int, today: Optio
     athlete = dict(athlete) if athlete else {}
     zone_bounds = M.hr_zone_bounds(athlete, conf.get("hr_zones"))
     seiler_thresholds = M.seiler_bounds(athlete, zone_bounds[1]) if zone_bounds else None
-    easy_hr_bpm = seiler_thresholds[0] if (band == "endurance" and seiler_thresholds) else None
+    easy_hr_bpm = moderate_hr_bpm = None
+    if band == "endurance" and seiler_thresholds:
+        easy_hr_bpm, moderate_hr_bpm = seiler_thresholds
     rows = conn.execute(
         "SELECT id, date, garmin_activity_id, sport FROM activity WHERE garmin_activity_id IS NOT NULL "
         "ORDER BY date").fetchall()
@@ -2409,8 +2451,11 @@ def recompute_slope_model(conn, conf: dict, band: str, months: int, today: Optio
         if not act_samples:
             continue
         series = G.gap_sample_series(act_samples)
-        activities.append({"activity_id": act["id"], "date": act.get("date"), "series": series})
-    result = SL.fit_slope_model(activities, band=band, months=months, easy_hr_bpm=easy_hr_bpm, as_of=today)
+        planned = planned_intensity_for(conn, act.get("date"), act.get("sport")) if band == "endurance" else None
+        activities.append({"activity_id": act["id"], "date": act.get("date"), "series": series,
+                            "planned_intensity": planned})
+    result = SL.fit_slope_model(activities, band=band, months=months, easy_hr_bpm=easy_hr_bpm,
+                                 moderate_hr_bpm=moderate_hr_bpm, as_of=today)
     # `SL.fit_slope_model` rend des bornes de panier ouvert en `float("inf")` RÉEL
     # (GRADE_BINS), correctes pour un consommateur Python — mais cette fonction
     # nourrit directement le CLI (`json.dumps`), où un `inf` produirait le jeton

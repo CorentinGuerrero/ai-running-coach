@@ -35,14 +35,29 @@ ajuste une courbe (une trentaine de paniers).
 L'allure sur une pente donnée dépend énormément de l'effort fourni (un sprint
 en côte n'a rien à voir avec une côte en endurance fondamentale) : mélanger
 toutes les séances sans distinction ferait une moyenne sans signification
-physiologique claire. Par défaut (`band="endurance"`), ce module restreint le
-modèle aux ACTIVITÉS majoritairement faciles : une activité est retenue si au
-moins `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` (80 %) de son temps de mouvement (FC
-connue) reste sous le seuil facile/modéré du modèle de Seiler déjà résolu pour
-l'athlète (`arc_metrics.seiler_bounds`, #43 — la « zone d'endurance » au sens
-le plus large, Z1+Z2 façon Karvonen ou équivalent LTHR/%FCmax selon la méthode
-active) ; UNE FOIS une activité retenue, TOUS ses échantillons alimentent les
-paniers, sans filtre FC supplémentaire échantillon par échantillon.
+physiologique claire. Par défaut (`band="endurance"`), ce module retient des
+ACTIVITÉS ENTIÈRES (jamais un sous-ensemble de leurs échantillons) réputées
+« faciles », par deux règles appliquées dans l'ordre (2ᵉ revue de code #58) :
+
+1. **Intention déclarée d'abord** : si une séance PLANIFIÉE existe pour la
+   même date et la même famille de sport (`planned_session.intensity`,
+   `arc_contract.INTENSITY`), elle prime — `"recovery"`/`"endurance"` inclut
+   l'activité entière, `"tempo"` ou plus dur (`"threshold"`, `"vo2max"`,
+   `"race"`, `"strength"`) l'exclut entière, SANS jamais regarder la FC. Le
+   plan porte l'intention réelle de la séance (le coach l'a programmée comme
+   facile ou dure), une information que la FC seule ne peut jamais reconstituer
+   parfaitement.
+2. **Repli FC, sans plan** : deux seuils (`ENDURANCE_FALLBACK_MIN_EASY_SHARE`,
+   65 %, ET `ENDURANCE_FALLBACK_MAX_HARD_SHARE`, 10 %) sur le temps de
+   mouvement (FC connue) — au moins 65 % sous le seuil facile/modéré de Seiler
+   ET au plus 10 % au-dessus du seuil modéré/difficile (`arc_metrics.
+   seiler_bounds`, #43). Volontairement PLUS LÂCHE qu'un simple seuil unique à
+   80 % sous le seuil facile (2ᵉ revue de code #58, should-fix : un seuil
+   unique à 80 % rejetait à tort des sorties vallonnées réellement faciles
+   dont une part notable du temps tombe en zone MODÉRÉE — ni facile ni dure —
+   simplement à cause du relief, sans que l'athlète ait forcé l'allure ; les
+   deux bornes ci-dessus tolèrent cette zone modérée tant que le temps
+   VRAIMENT difficile reste marginal).
 
 **Sélection au niveau de l'ACTIVITÉ, jamais de l'échantillon (revue de code
 #58, BLOQUANT)** : une version antérieure de ce module filtrait CHAQUE
@@ -53,21 +68,26 @@ début d'une côte parcourue à effort constant, les premiers échantillons ont
 encore une FC "facile" alors que l'effort a déjà changé — filtrer par FC
 échantillon par échantillon aurait alors sur-représenté ces instants de
 transition (FC pas encore montée) au détriment du reste de la montée (FC
-montée, donc exclue), mesurant une allure de montée SYSTÉMATIQUEMENT trop
-optimiste (repro revue de code : jusqu'à plusieurs points de pourcentage de
-temps de montée perdus, allure mesurée faussée). Sélectionner l'ACTIVITÉ
-entière élimine structurellement ce biais : soit toute la montée compte
-(activité classée facile dans son ensemble), soit aucun de ses échantillons
-ne compte (activité trop intense) — jamais une sélection interne à la montée
-elle-même corrélée à l'effort récent.
+montée, donc exclue) : un BIAIS DE SÉLECTION sur l'allure de montée mesurée
+(repro revue de code : jusqu'à plusieurs points de pourcentage de temps de
+montée perdus). Sélectionner l'ACTIVITÉ entière élimine structurellement ce
+biais : soit toute la montée compte (activité classée facile dans son
+ensemble), soit aucun de ses échantillons ne compte (activité trop intense)
+— jamais une sélection interne à la montée elle-même corrélée à l'effort
+récent.
+
+`selected_by` (`fit_slope_model`/`fit_from_activity_bins`, dict `{"plan": n,
+"hr": n}`) compte, par méthode, le nombre d'activités RETENUES — jamais les
+exclues, pour que l'appelant voie la part de plan vs de repli FC dans le
+modèle sans avoir à recompter lui-même.
 
 `band="all"` lève cette restriction (toutes les séances de la famille course
 à pied, tous efforts confondus) : une seconde courbe, à lire comme « comment
 je bouge sur cette pente, quel que soit l'effort », jamais comme une allure
-d'endurance. Sans seuils FC résolus au profil, `band="endurance"` ne peut
-rien ajuster (aucune activité n'est classable) : `fit_slope_model` le signale
-par `reason_code="no_hr_threshold"`, jamais un silence qui laisserait croire
-à un manque de séances.
+d'endurance. Sans plan ET sans seuils FC résolus au profil, `band="endurance"`
+ne peut rien ajuster (aucune activité n'est classable) : `fit_slope_model` le
+signale par `reason_code="no_hr_threshold"`, jamais un silence qui laisserait
+croire à un manque de séances.
 
 ## Marche vs course sur les pentes raides — gardée, pas retirée
 
@@ -228,15 +248,31 @@ FLAT_REFERENCE_ABS = 0.0375  # un panier et demi de large de chaque côté de 0
 
 BANDS = ("endurance", "all")
 
-# Part MINIMALE du temps de mouvement sous le seuil facile/modéré pour classer
-# TOUTE une activité en « endurance » (revue de code #58, BLOQUANT — sélection
-# au niveau ACTIVITÉ, jamais au niveau échantillon, voir ASSUMPTIONS['population']).
-ENDURANCE_ACTIVITY_EASY_SHARE_MIN = 0.80
+# Intensités planifiées (`arc_contract.INTENSITY`) considérées « faciles » —
+# priment sur toute règle FC quand une séance planifiée existe pour la même
+# date et famille de sport (2ᵉ revue de code #58, should-fix : le plan porte
+# l'intention réelle, la FC seule ne peut jamais la reconstituer parfaitement).
+EASY_PLAN_INTENSITIES = ("recovery", "endurance")
+
+# Repli FC (sans plan) — DEUX bornes, volontairement plus lâches qu'un seuil
+# unique à 80 % sous le seuil facile (2ᵉ revue de code #58, should-fix) : un
+# seuil unique rejetait à tort des sorties vallonnées réellement faciles, dont
+# une part notable du temps tombe en zone MODÉRÉE (ni facile ni dure) à cause
+# du seul relief. Retenue si AU MOINS `ENDURANCE_FALLBACK_MIN_EASY_SHARE` du
+# temps est sous le seuil facile/modéré de Seiler ET AU PLUS
+# `ENDURANCE_FALLBACK_MAX_HARD_SHARE` au-dessus du seuil modéré/difficile —
+# voir `arc_metrics.seiler_bounds`, #43, et Seiler & Kjerland (2006, Scand J
+# Med Sci Sports 16:49-56) sur la distinction entre l'objectif d'une séance et
+# le simple temps passé en zone.
+ENDURANCE_FALLBACK_MIN_EASY_SHARE = 0.65
+ENDURANCE_FALLBACK_MAX_HARD_SHARE = 0.10
 
 # Temps de mouvement minimal (avec FC connue) pour qu'une activité soit
-# CLASSABLE en endurance ou non — en dessous, la part mesurée est trop bruitée
+# CLASSABLE par le repli FC — en dessous, la part mesurée est trop bruitée
 # pour être fiable (ex. un seul échantillon isolé), l'activité est alors
 # EXCLUE de la bande « endurance » (jamais classée par défaut « facile »).
+# Non applicable quand une séance planifiée résout la sélection (voir
+# `EASY_PLAN_INTENSITIES` ci-dessus), qui ne regarde jamais la FC.
 ENDURANCE_ACTIVITY_MIN_HR_TIME_S = 60.0
 
 # Temps minimal qu'UNE ACTIVITÉ doit passer dans UN panier pour que sa
@@ -303,17 +339,23 @@ ASSUMPTIONS = {
         "synthétique, pas l'ajustement d'une courbe."
     ),
     "population": (
-        "Par défaut (band='endurance'), une ACTIVITÉ ENTIÈRE est retenue si au moins "
-        f"{ENDURANCE_ACTIVITY_EASY_SHARE_MIN * 100:.0f} % de son temps de mouvement (FC connue) reste sous le "
-        "seuil facile/modéré du modèle de Seiler déjà résolu pour l'athlète (arc_metrics.seiler_bounds, #43) ; "
-        "une fois retenue, TOUS ses échantillons alimentent les paniers. Sélection au niveau de l'ACTIVITÉ, "
-        "jamais de l'échantillon individuel (revue de code #58, BLOQUANT) : filtrer chaque échantillon par sa "
-        "propre FC introduirait un biais de sélection sur les montées, où la FC monte avec un retard "
-        "physiologique sur l'effort — les instants de transition (FC pas encore montée) seraient "
-        "sur-représentés, mesurant une allure de montée systématiquement trop optimiste. band='all' lève "
-        "cette restriction (tous efforts, famille course à pied) — à lire comme « comment je bouge sur cette "
-        "pente », jamais comme une allure d'endurance. Sans seuils FC résolus, band='endurance' ne peut "
-        "classer aucune activité (reason_code='no_hr_threshold')."
+        "Par défaut (band='endurance'), une ACTIVITÉ ENTIÈRE (jamais un sous-ensemble de ses échantillons) est "
+        "retenue par DEUX règles, dans cet ordre (2ᵉ revue de code #58, should-fix) : 1) si une séance "
+        "planifiée existe pour la même date/famille de sport (`planned_session.intensity`), elle tranche "
+        "seule — 'recovery'/'endurance' inclut, 'tempo' ou plus dur exclut, sans jamais regarder la FC (le "
+        "plan porte l'intention réelle de la séance) ; 2) sans plan, repli sur deux bornes FC "
+        f"({ENDURANCE_FALLBACK_MIN_EASY_SHARE * 100:.0f} % du temps au moins sous le seuil facile/modéré de "
+        f"Seiler ET {ENDURANCE_FALLBACK_MAX_HARD_SHARE * 100:.0f} % au plus au-dessus du seuil modéré/difficile, "
+        "arc_metrics.seiler_bounds, #43) — volontairement plus lâche qu'un seuil unique, qui rejetait à tort "
+        "des sorties vallonnées réellement faciles dont une part du temps tombe en zone modérée à cause du "
+        "seul relief (voir Seiler & Kjerland, 2006, Scand J Med Sci Sports 16:49-56, sur la distinction entre "
+        "l'objectif d'une séance et le simple temps passé en zone). Sélection au niveau de l'ACTIVITÉ, jamais "
+        "de l'échantillon individuel (revue de code #58, BLOQUANT) : filtrer chaque échantillon par sa propre "
+        "FC introduirait un biais de sélection sur les montées, où la FC monte avec un retard physiologique "
+        "sur l'effort. `selected_by` (dict {'plan': n, 'hr': n}) compte les activités RETENUES par méthode. "
+        "band='all' lève cette restriction (tous efforts, famille course à pied) — à lire comme « comment je "
+        "bouge sur cette pente », jamais comme une allure d'endurance. Sans plan ET sans seuils FC résolus, "
+        "band='endurance' ne peut classer aucune activité (reason_code='no_hr_threshold')."
     ),
     "walking": (
         "La marche/le power-hiking sur les paniers de forte pente montante est GARDÉE, jamais filtrée : elle "
@@ -444,20 +486,19 @@ def _moving_samples(series: Sequence[dict]) -> List[dict]:
     return [s for s in ordered if (s.get("speed_ms") or 0.0) >= G.STOPPED_SPEED_MS]
 
 
-def _activity_easy_share(moving: Sequence[dict], easy_hr_bpm: float,
-                          resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Optional[float]:
-    """Part du temps de mouvement (avec FC connue) sous `easy_hr_bpm`, pour
-    CLASSER L'ACTIVITÉ ENTIÈRE — jamais un filtre échantillon par échantillon
-    (voir ASSUMPTIONS['population'], revue de code #58, BLOQUANT : filtrer par
-    FC échantillon par échantillon introduit un biais de sélection sur les
-    montées, où la FC monte avec un RETARD sur l'effort — les instants
-    encore "sous le seuil" en tout début de côte seraient alors sur-
-    représentés, et l'allure de montée mesurée artificiellement optimiste).
-    `None` si le temps de mouvement avec FC connue est trop court pour juger
+def _activity_hr_shares(moving: Sequence[dict], easy_hr_bpm: float, moderate_hr_bpm: float,
+                         resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Tuple[Optional[float], Optional[float]]:
+    """Parts du temps de mouvement (avec FC connue) sous `easy_hr_bpm`
+    (facile/modérée) et au-dessus de `moderate_hr_bpm` (modérée/difficile),
+    pour CLASSER L'ACTIVITÉ ENTIÈRE — jamais un filtre échantillon par
+    échantillon (voir ASSUMPTIONS['population'], revue de code #58, BLOQUANT :
+    filtrer par FC échantillon par échantillon introduit un biais de sélection
+    sur les montées, où la FC monte avec un RETARD sur l'effort). `(None,
+    None)` si le temps de mouvement avec FC connue est trop court pour juger
     (`ENDURANCE_ACTIVITY_MIN_HR_TIME_S`) — l'activité n'est alors ni incluse
-    ni exclue par ce critère seul, `activity_bin_summaries` la rejette par
+    ni exclue par ce critère seul, `_endurance_selection` la rejette par
     prudence (jamais classée "facile" par défaut)."""
-    total_hr_time, easy_time = 0.0, 0.0
+    total_hr_time, easy_time, hard_time = 0.0, 0.0, 0.0
     n = len(moving)
     for i, s in enumerate(moving):
         hr = s.get("hr_bpm")
@@ -468,38 +509,66 @@ def _activity_easy_share(moving: Sequence[dict], easy_hr_bpm: float,
         total_hr_time += dt
         if hr < easy_hr_bpm:
             easy_time += dt
+        if hr >= moderate_hr_bpm:
+            hard_time += dt
     if total_hr_time < ENDURANCE_ACTIVITY_MIN_HR_TIME_S:
-        return None
-    return easy_time / total_hr_time
+        return None, None
+    return easy_time / total_hr_time, hard_time / total_hr_time
 
 
-def activity_bin_summaries(series: Sequence[dict], *, band: str = "endurance",
-                            easy_hr_bpm: Optional[float] = None,
-                            resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Dict[str, dict]:
-    """Résumé PAR PANIER d'une séance déjà augmentée par
-    `arc_gap.gap_sample_series` (a `grade`, `speed_ms`, `hr_bpm`?,
-    `cadence_spm`?). Échantillons à l'arrêt (`arc_gap.STOPPED_SPEED_MS`)
-    toujours exclus.
+def _endurance_selection(moving: Sequence[dict], *, easy_hr_bpm: Optional[float],
+                          moderate_hr_bpm: Optional[float], planned_intensity: Optional[str],
+                          resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Tuple[bool, Optional[str]]:
+    """Décide si UNE ACTIVITÉ ENTIÈRE compte pour la bande « endurance »
+    (2ᵉ revue de code #58, should-fix) — voir ASSUMPTIONS['population'] pour
+    la justification complète des deux règles, appliquées DANS CET ORDRE :
 
-    `band='endurance'` : sélection au niveau de L'ACTIVITÉ ENTIÈRE (jamais
-    échantillon par échantillon, voir ASSUMPTIONS['population']/revue de code
-    #58, BLOQUANT) — l'activité est retenue seulement si au moins
-    `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` de son temps de mouvement (FC connue)
-    est sous `easy_hr_bpm` (`_activity_easy_share`) ; une fois retenue, TOUS
-    ses échantillons en mouvement alimentent les paniers, sans filtre FC
-    supplémentaire — jamais un mélange des deux échelles de sélection. Sans
-    `easy_hr_bpm` fourni, ou activité non classable/pas assez "facile", rend
-    `{}` (rien à ajuster pour cette séance dans cette bande).
+    1. `planned_intensity` (résolu par l'appelant depuis `planned_session`,
+       même date/famille de sport — ce module reste pur, sans SQLite) : s'il
+       est fourni, il TRANCHE SEUL, sans jamais regarder la FC — `"recovery"`/
+       `"endurance"` inclut, tout le reste (`"tempo"` ou plus dur) exclut.
+    2. Sans plan : repli sur les deux bornes FC (`ENDURANCE_FALLBACK_
+       MIN_EASY_SHARE`/`MAX_HARD_SHARE`, `_activity_hr_shares`).
 
-    Rend `{label: {"weighted_time_s", "speed_weighted_sum", "hr_weighted_time_s",
-    "hr_weighted_sum", "n_samples", "walking_weighted_time_s"}}`."""
-    if band == "endurance" and easy_hr_bpm is None:
-        return {}
+    Rend `(retenue, méthode)` — `méthode` dans `{"plan", "hr", None}` : `None`
+    à la fois quand l'activité est EXCLUE et quand elle ne peut être classée du
+    tout (jamais confondu avec une inclusion — `retenue` porte cette
+    distinction seule)."""
+    if planned_intensity is not None:
+        included = planned_intensity in EASY_PLAN_INTENSITIES
+        return included, ("plan" if included else None)
+    if easy_hr_bpm is None or moderate_hr_bpm is None:
+        return False, None
+    easy_share, hard_share = _activity_hr_shares(moving, easy_hr_bpm, moderate_hr_bpm, resolution_s)
+    if easy_share is None or hard_share is None:
+        return False, None
+    included = easy_share >= ENDURANCE_FALLBACK_MIN_EASY_SHARE and hard_share <= ENDURANCE_FALLBACK_MAX_HARD_SHARE
+    return included, ("hr" if included else None)
+
+
+def activity_bin_summaries_and_selection(
+        series: Sequence[dict], *, band: str = "endurance", easy_hr_bpm: Optional[float] = None,
+        moderate_hr_bpm: Optional[float] = None, planned_intensity: Optional[str] = None,
+        resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Tuple[Dict[str, dict], Optional[str]]:
+    """Comme `activity_bin_summaries`, mais rend aussi la MÉTHODE de sélection
+    (`_endurance_selection`, `None` en bande `"all"` ou pour une activité
+    exclue/non classable) — pour que les appelants (`arc_index.
+    compute_metrics`, `fit_slope_model`) puissent tallyer `selected_by` sans
+    reclasser l'activité une seconde fois. `activity_bin_summaries` reste un
+    raccourci qui ignore ce second élément, pour la compatibilité des
+    appelants qui n'en ont pas besoin.
+
+    Rend `({}, None)` si `band='endurance'` sans aucun moyen de classer
+    l'activité (ni plan, ni seuils FC), ou si l'activité est classée mais
+    EXCLUE."""
     moving = _moving_samples(series)
+    method = None
     if band == "endurance":
-        share = _activity_easy_share(moving, easy_hr_bpm, resolution_s)
-        if share is None or share < ENDURANCE_ACTIVITY_EASY_SHARE_MIN:
-            return {}
+        included, method = _endurance_selection(
+            moving, easy_hr_bpm=easy_hr_bpm, moderate_hr_bpm=moderate_hr_bpm,
+            planned_intensity=planned_intensity, resolution_s=resolution_s)
+        if not included:
+            return {}, None
     n = len(moving)
     out: Dict[str, dict] = {}
     for i, s in enumerate(moving):
@@ -523,7 +592,32 @@ def activity_bin_summaries(series: Sequence[dict], *, band: str = "endurance",
         if hr is not None:
             bucket["hr_weighted_time_s"] += dt
             bucket["hr_weighted_sum"] += dt * hr
-    return out
+    return out, method
+
+
+def activity_bin_summaries(series: Sequence[dict], *, band: str = "endurance",
+                            easy_hr_bpm: Optional[float] = None, moderate_hr_bpm: Optional[float] = None,
+                            planned_intensity: Optional[str] = None,
+                            resolution_s: float = G.DEFAULT_RESOLUTION_S) -> Dict[str, dict]:
+    """Résumé PAR PANIER d'une séance déjà augmentée par
+    `arc_gap.gap_sample_series` (a `grade`, `speed_ms`, `hr_bpm`?,
+    `cadence_spm`?). Échantillons à l'arrêt (`arc_gap.STOPPED_SPEED_MS`)
+    toujours exclus.
+
+    `band='endurance'` : sélection au niveau de L'ACTIVITÉ ENTIÈRE (jamais
+    échantillon par échantillon, voir ASSUMPTIONS['population']/revue de code
+    #58, BLOQUANT) — voir `_endurance_selection` pour les deux règles (plan
+    d'abord, repli FC sinon). Une fois retenue, TOUS les échantillons en
+    mouvement de l'activité alimentent les paniers, sans filtre FC
+    supplémentaire. Raccourci de `activity_bin_summaries_and_selection` qui
+    ignore la méthode de sélection — utiliser cette dernière pour tallyer
+    `selected_by`.
+
+    Rend `{label: {"weighted_time_s", "speed_weighted_sum", "hr_weighted_time_s",
+    "hr_weighted_sum", "n_samples", "walking_weighted_time_s"}}`."""
+    return activity_bin_summaries_and_selection(
+        series, band=band, easy_hr_bpm=easy_hr_bpm, moderate_hr_bpm=moderate_hr_bpm,
+        planned_intensity=planned_intensity, resolution_s=resolution_s)[0]
 
 
 def _recency_weight(age_days: float, half_life_days: float) -> float:
@@ -608,6 +702,11 @@ def combine_activity_summaries(activities: Sequence[dict], *, as_of: str,
             agg["effective_time_s"] += b["weighted_time_s"]
             agg["walking_time_s"] += b["walking_weighted_time_s"]
             agg["n_activities"] += 1
+    # `run_share` (revue de code #58, nit) : calculé sur `walking_time_s`/`effective_time_s`,
+    # tous deux le temps RÉEL non plafonné (jamais `ACTIVITY_BIN_TIME_WEIGHT_CAP_S`, qui ne
+    # s'applique qu'au POIDS utilisé pour la médiane de vitesse/FC ci-dessus) — numérateur et
+    # dénominateur restent cohérents entre eux (les deux uncapped), un ratio de temps réel,
+    # jamais mélangé avec le poids pondéré par récence utilisé ailleurs pour la médiane.
     for agg in per_bin.values():
         agg["run_share"] = (
             1.0 - agg["walking_time_s"] / agg["effective_time_s"] if agg["effective_time_s"] > 0 else None)
@@ -745,29 +844,47 @@ def _empty_result(band: str, months: int, half_life_days: float, as_of: Optional
     return {
         "band": band, "months": months, "half_life_days": half_life_days, "as_of": as_of,
         "n_activities": 0, "bins": [], "flat_reference_speed_ms": None,
+        "selected_by": {"plan": 0, "hr": 0},
         "reason": reason, "reason_code": reason_code,
     }
 
 
+def _no_endurance_selection_possible(easy_hr_bpm: Optional[float], moderate_hr_bpm: Optional[float],
+                                      activities: Sequence[dict]) -> bool:
+    """`True` seulement si la bande « endurance » n'a STRUCTURELLEMENT aucun
+    moyen de classer quoi que ce soit : ni seuils FC résolus pour le repli, ni
+    UNE SEULE séance planifiée dans tout l'historique fourni (2ᵉ revue de code
+    #58, should-fix — le plan peut à lui seul suffire, même profil sans FC
+    max/repos/seuil renseignée : ne jamais bloquer prématurément sur l'absence
+    de FC quand un plan est disponible)."""
+    if easy_hr_bpm is not None and moderate_hr_bpm is not None:
+        return False
+    return not any(a.get("planned_intensity") is not None for a in activities)
+
+
 def fit_from_activity_bins(activities: Sequence[dict], *, band: str = "endurance",
                             months: int = DEFAULT_MONTHS, half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
-                            easy_hr_bpm: Optional[float] = None, as_of: Optional[str] = None) -> dict:
+                            easy_hr_bpm: Optional[float] = None, moderate_hr_bpm: Optional[float] = None,
+                            as_of: Optional[str] = None) -> dict:
     """Comme `fit_slope_model`, mais `activities` porte des résumés PAR PANIER
-    DÉJÀ CALCULÉS (`{"activity_id", "date", "bins": activity_bin_summaries(...)}`)
-    plutôt que des séries brutes — le chemin bon marché emprunté par
-    `arc_index.compute_metrics` (voir ASSUMPTIONS['aggregation_cost']) : chaque
-    activité n'y est résumée qu'UNE fois, au fil de la boucle d'indexation
-    principale, jamais une seconde fois ici. `fit_slope_model` (séries brutes)
-    reste l'entrée à utiliser depuis des tests/scripts qui n'ont pas déjà ce
-    résumé sous la main."""
+    DÉJÀ CALCULÉS (`{"activity_id", "date", "bins": activity_bin_summaries(...),
+    "selected_by": "plan"|"hr"|None}`) plutôt que des séries brutes — le chemin
+    bon marché emprunté par `arc_index.compute_metrics` (voir
+    ASSUMPTIONS['aggregation_cost']) : chaque activité n'y est résumée (et
+    classée) qu'UNE fois, au fil de la boucle d'indexation principale, jamais
+    une seconde fois ici — la sélection endurance a donc déjà eu lieu, `band`
+    ne sert plus ici qu'à choisir le message d'erreur et à tallyer
+    `selected_by`. `fit_slope_model` (séries brutes) reste l'entrée à utiliser
+    depuis des tests/scripts qui n'ont pas déjà ce résumé sous la main."""
     if band not in BANDS:
         return _empty_result(band, months, half_life_days, as_of,
                               f"bande « {band} » inconnue (attendu : {', '.join(BANDS)})", "unknown_band")
-    if band == "endurance" and easy_hr_bpm is None:
+    if band == "endurance" and _no_endurance_selection_possible(easy_hr_bpm, moderate_hr_bpm, activities):
         return _empty_result(
             band, months, half_life_days, as_of,
-            "aucun seuil FC facile/modéré résolu pour l'athlète (profil sans FC max/repos/seuil "
-            "renseignée) — le modèle 'endurance' ne peut restreindre aucun échantillon", "no_hr_threshold")
+            "aucun seuil FC facile/modéré résolu pour l'athlète (profil sans FC max/repos/seuil renseignée) "
+            "ET aucune séance planifiée dans l'historique — le modèle 'endurance' n'a aucun moyen de classer "
+            "une activité", "no_hr_threshold")
     dated = sorted((a["date"] for a in activities if a.get("date")))
     resolved_as_of = as_of or (dated[-1] if dated else None)
     if resolved_as_of is None:
@@ -788,30 +905,34 @@ def fit_from_activity_bins(activities: Sequence[dict], *, band: str = "endurance
             continue
         bins = act.get("bins") or {}
         if bins:
-            per_activity.append({"activity_id": act.get("activity_id"), "date": act_date, "bins": bins})
+            per_activity.append({"activity_id": act.get("activity_id"), "date": act_date, "bins": bins,
+                                  "selected_by": act.get("selected_by")})
     if not per_activity:
         return _empty_result(
             band, months, half_life_days, resolved_as_of,
             f"aucune séance exploitable dans la fenêtre des {months} derniers mois pour la bande « {band} »",
             "no_data_in_window")
+    selected_by = {"plan": sum(1 for a in per_activity if a["selected_by"] == "plan"),
+                   "hr": sum(1 for a in per_activity if a["selected_by"] == "hr")}
     combined = combine_activity_summaries(per_activity, as_of=resolved_as_of, half_life_days=half_life_days)
     result = apply_fallback_and_smoothing(combined)
     result.update({
         "band": band, "months": months, "half_life_days": half_life_days, "as_of": resolved_as_of,
-        "n_activities": len(per_activity),
+        "n_activities": len(per_activity), "selected_by": selected_by,
     })
     return result
 
 
 def fit_slope_model(activities: Sequence[dict], *, band: str = "endurance",
                      months: int = DEFAULT_MONTHS, half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
-                     easy_hr_bpm: Optional[float] = None, as_of: Optional[str] = None,
-                     resolution_s: float = G.DEFAULT_RESOLUTION_S) -> dict:
+                     easy_hr_bpm: Optional[float] = None, moderate_hr_bpm: Optional[float] = None,
+                     as_of: Optional[str] = None, resolution_s: float = G.DEFAULT_RESOLUTION_S) -> dict:
     """Bout en bout, pure (aucun accès disque/SQLite) : `activities` est une
-    séquence de `{"activity_id", "date" (AAAA-MM-JJ), "series"}` où `series`
-    est déjà augmentée par `arc_gap.gap_sample_series` — voir
-    `recompute_slope_model` (`arc_index.py`, CLI `slope-model --months`) pour
-    comment cette liste est construite à partir d'un workspace réel, et
+    séquence de `{"activity_id", "date" (AAAA-MM-JJ), "series", "planned_intensity"?}`
+    où `series` est déjà augmentée par `arc_gap.gap_sample_series` et
+    `planned_intensity` (optionnel, résolu par l'appelant depuis
+    `planned_session`, même date/famille de sport — voir
+    `arc_index.recompute_slope_model`) alimente `_endurance_selection`. Voir
     `tests/data/test_arc_slope_model.py` pour l'usage direct depuis des séances
     synthétiques (`tests/lib/synthetic.py`). `arc_index.compute_metrics`, lui,
     emprunte le chemin plus économique `fit_from_activity_bins` (voir
@@ -821,24 +942,27 @@ def fit_slope_model(activities: Sequence[dict], *, band: str = "endurance",
     `months` mois ET sert de référence d'âge pour la pondération par récence.
 
     Rend `{"band", "months", "half_life_days", "as_of", "n_activities", "bins",
-    "flat_reference_speed_ms", "reason", "reason_code"}` — TOUJOURS ce dict,
-    jamais d'exception : une population vide rend `bins: []` avec une raison
-    explicite plutôt qu'un plantage."""
+    "flat_reference_speed_ms", "selected_by", "reason", "reason_code"}` —
+    TOUJOURS ce dict, jamais d'exception : une population vide rend `bins: []`
+    avec une raison explicite plutôt qu'un plantage."""
     if band not in BANDS:
         return _empty_result(band, months, half_life_days, as_of,
                               f"bande « {band} » inconnue (attendu : {', '.join(BANDS)})", "unknown_band")
-    if band == "endurance" and easy_hr_bpm is None:
+    if band == "endurance" and _no_endurance_selection_possible(easy_hr_bpm, moderate_hr_bpm, activities):
         return _empty_result(
             band, months, half_life_days, as_of,
-            "aucun seuil FC facile/modéré résolu pour l'athlète (profil sans FC max/repos/seuil "
-            "renseignée) — le modèle 'endurance' ne peut restreindre aucun échantillon", "no_hr_threshold")
+            "aucun seuil FC facile/modéré résolu pour l'athlète (profil sans FC max/repos/seuil renseignée) "
+            "ET aucune séance planifiée dans l'historique — le modèle 'endurance' n'a aucun moyen de classer "
+            "une activité", "no_hr_threshold")
     with_bins = []
     for act in activities:
-        bins = activity_bin_summaries(act.get("series") or [], band=band, easy_hr_bpm=easy_hr_bpm,
-                                       resolution_s=resolution_s)
-        with_bins.append({"activity_id": act.get("activity_id"), "date": act.get("date"), "bins": bins})
+        bins, method = activity_bin_summaries_and_selection(
+            act.get("series") or [], band=band, easy_hr_bpm=easy_hr_bpm, moderate_hr_bpm=moderate_hr_bpm,
+            planned_intensity=act.get("planned_intensity"), resolution_s=resolution_s)
+        with_bins.append({"activity_id": act.get("activity_id"), "date": act.get("date"), "bins": bins,
+                           "selected_by": method})
     return fit_from_activity_bins(with_bins, band=band, months=months, half_life_days=half_life_days,
-                                   easy_hr_bpm=easy_hr_bpm, as_of=as_of)
+                                   easy_hr_bpm=easy_hr_bpm, moderate_hr_bpm=moderate_hr_bpm, as_of=as_of)
 
 
 def predict_speed(grade: Optional[float], bins: Sequence[dict]) -> dict:

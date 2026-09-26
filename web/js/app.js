@@ -1324,29 +1324,53 @@ function slopeModelSection(model, band) {
   }
   const xLabels = bins.map(slopeGradeLabel);
   const personal = bins.map((b) => (b.source === "personal" ? b.pace_s_km : null));
-  const generic = bins.map((b) => (b.source === "generic" ? b.pace_s_km : null));
+  // Repli générique affiché seulement jusqu'à ±20 % (revue de code #58, nit) : au-delà,
+  // le repli (déjà plafonné en descente, mais pas en montée) diverge trop pour partager
+  // un axe lisible avec l'allure personnelle — mieux vaut l'arrêter que d'écraser toute
+  // la partie utile du graphique pour montrer une queue extrême. `predict_speed` côté
+  // serveur continue, lui, d'utiliser TOUS les paniers, affichage ou pas.
+  const GENERIC_DISPLAY_MAX_ABS_GRADE = 0.20;
+  const generic = bins.map((b) => (
+    b.source === "generic" && Math.abs(b.grade_mid) <= GENERIC_DISPLAY_MAX_ABS_GRADE ? b.pace_s_km : null));
   // `ci_low_speed_ms`/`ci_high_speed_ms` sont des bornes de VITESSE (p25/p75) : converties
   // en allure, elles s'INVERSENT (la vitesse p25, plus lente, donne l'allure la plus
   // GRANDE — le "haut" numérique de la bande d'allure, pas son "bas").
   const paceFromSlowSpeedP25 = bins.map((b) => (b.ci_low_speed_ms ? 1000 / b.ci_low_speed_ms : null));
   const paceFromFastSpeedP75 = bins.map((b) => (b.ci_high_speed_ms ? 1000 / b.ci_high_speed_ms : null));
   const hasHr = bins.some((b) => b.hr_bpm != null);
-  // Un panier personnel SANS voisin personnel des deux côtés ne serait jamais tracé
-  // par `line--slope` (aucun segment ne le relie à rien, `pathFrom` n'émet qu'un "M"
-  // sans "L" — même motif que `fuelingSection`, revue de code #58, nit) : une couche
-  // `dots` séparée le rend visible même isolé.
-  const personalDots = bins.map((b, i) => {
-    if (b.source !== "personal") return null;
-    const prevPersonal = i > 0 && bins[i - 1].source === "personal";
-    const nextPersonal = i + 1 < bins.length && bins[i + 1].source === "personal";
-    return prevPersonal || nextPersonal ? null : b.pace_s_km;
+  // Un panier ISOLÉ (aucun voisin de même provenance, PARMI CE QUI EST AFFICHÉ) ne
+  // serait jamais tracé par sa `line` (aucun segment ne le relie à rien, `pathFrom`
+  // n'émet qu'un "M" sans "L" — même motif que `fuelingSection`, revue de code #58,
+  // nit) : une couche `dots` séparée le rend visible même isolé — pour le personnel
+  // ET pour le générique affiché (ex. un seul panier générique entre deux personnels).
+  const isolatedValues = (values) => values.map((v, i) => {
+    if (v == null) return null;
+    const prevSame = i > 0 && values[i - 1] != null;
+    const nextSame = i + 1 < values.length && values[i + 1] != null;
+    return prevSame || nextSame ? null : v;
   });
+  const personalDots = isolatedValues(personal);
+  const genericDots = isolatedValues(generic);
   const layers = [
     { type: "band", lo: paceFromFastSpeedP75, hi: paceFromSlowSpeedP25, cls: "band--slope-ci" },
     { type: "line", values: personal, cls: "line line--slope" },
     { type: "line", values: generic, cls: "line line--slope-generic" },
     { type: "dots", values: personalDots, cls: "dot dot--slope", r: 3 },
+    { type: "dots", values: genericDots, cls: "dot dot--slope-generic", r: 2.6 },
   ];
+  // Axe y borné aux valeurs PERSONNELLES (+ dispersion, + repli générique affiché ci-dessus,
+  // marge de 15 %) plutôt qu'à l'étendue brute de tous les paniers (revue de code #58,
+  // nit) : sans ce clamp, un seul panier générique extrême (montée très raide, jamais
+  // plafonnée comme la descente) écrasait toute la partie personnelle du graphique sur
+  // une fraction illisible de la hauteur disponible.
+  const rangeValues = [...personal, ...paceFromSlowSpeedP25, ...paceFromFastSpeedP75, ...generic]
+    .filter((v) => v != null);
+  let yOpts = { invert: true };
+  if (rangeValues.length) {
+    const yLo = Math.min(...rangeValues), yHi = Math.max(...rangeValues);
+    const margin = (yHi - yLo) * 0.15 || yHi * 0.15 || 10;
+    yOpts = { invert: true, min: Math.max(0, yLo - margin), max: yHi + margin };
+  }
   let y2Opts;
   if (hasHr) {
     layers.push({ type: "dots", values: bins.map((b) => b.hr_bpm), cls: "dot dot--slope-hr", axis: "y2", r: 3 });
@@ -1364,7 +1388,7 @@ function slopeModelSection(model, band) {
   // aucun sens et forcer l'axe à l'inclure écrase l'échelle utile — contrairement à
   // un delta ou une charge, l'allure n'a pas de « zéro » de référence à marquer.
   const chart = timeChart(xLabels, layers, [], {
-    height: 220, y: { invert: true }, y2: y2Opts,
+    height: 220, y: yOpts, y2: y2Opts,
     label: `Allure par classe de pente, bande ${band === "all" ? "tous efforts" : "endurance"}`,
     yFormat: (v) => F.paceFromSecPerKm(v), y2Format: hasHr ? (v) => `${F.num(v)} bpm` : undefined,
     xLabels,

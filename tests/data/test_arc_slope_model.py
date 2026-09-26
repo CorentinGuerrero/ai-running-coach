@@ -100,6 +100,7 @@ def _flat_series(speed_ms, hr_bpm, cadence_spm, n=200, t0=0):
 
 
 EASY_HR = 154.8  # seuil facile/modéré utilisé dans ces tests (méthode LTHR, profil type)
+MODERATE_HR = 172.0  # seuil modéré/difficile — même profil type (FC au seuil 172, méthode LTHR)
 
 
 class TestActivityBinSummaries(unittest.TestCase):
@@ -150,31 +151,115 @@ class TestEnduranceIsSelectedAtTheActivityLevel(unittest.TestCase):
     `arc_slope_model.ASSUMPTIONS['population']`)."""
 
     def test_activity_included_wholesale_when_easy_share_is_high(self):
-        # 90 % du temps de mouvement sous le seuil facile (180 s faciles, 20 s dures)
-        # -> activité retenue ENTIÈREMENT, y compris les 20 s "dures".
+        # 90 % du temps de mouvement sous le seuil facile, 0 % au-dessus du seuil
+        # modéré/difficile -> activité retenue ENTIÈREMENT, y compris la portion
+        # "modérée" (145 <= hr < 154.8 exclu ci-dessous, ici hr=165 reste < MODERATE_HR).
         series = _flat_series(3.0, 145.0, 170.0, n=180) + _flat_series(3.5, 165.0, 170.0, n=20, t0=180)
-        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, resolution_s=1.0)
         total_samples = sum(b["n_samples"] for b in bins.values())
         self.assertEqual(total_samples, 200)  # TOUS les échantillons, pas seulement les 180 faciles
 
     def test_activity_excluded_wholesale_when_easy_share_is_low(self):
-        # 50 % du temps sous le seuil -> sous ENDURANCE_ACTIVITY_EASY_SHARE_MIN (80 %) ->
-        # activité EXCLUE ENTIÈREMENT (aucun panier, même pas les échantillons faciles).
+        # 50 % du temps sous le seuil facile -> sous ENDURANCE_FALLBACK_MIN_EASY_SHARE
+        # (65 %) -> activité EXCLUE ENTIÈREMENT (aucun panier, même pas les faciles).
         series = _flat_series(3.0, 145.0, 170.0, n=100) + _flat_series(3.5, 165.0, 170.0, n=100, t0=100)
-        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, resolution_s=1.0)
         self.assertEqual(bins, {})
+
+    def test_a_genuinely_easy_hilly_run_is_no_longer_dropped_by_a_single_threshold(self):
+        """Repro revue de code #58, should-fix (2ᵉ revue) : une sortie vallonnée
+        réellement facile (70 % du temps sous le seuil facile, 25 % en zone
+        MODÉRÉE à cause du relief — jamais forcée par l'athlète — et seulement
+        5 % vraiment difficile) aurait été REJETÉE par l'ancien seuil unique à
+        80 % sous le seuil facile (70 % < 80 %) — vérifié ci-dessous en
+        recalculant explicitement l'ancienne règle. La nouvelle règle à deux
+        bornes (65 % facile ET 10 % difficile au plus) la retient à raison."""
+        series = (_flat_series(3.0, 145.0, 170.0, n=490)
+                  + _flat_series(2.2, 160.0, 150.0, n=175, t0=490)  # montée, zone modérée
+                  + _flat_series(3.0, 175.0, 170.0, n=35, t0=665))  # bref passage difficile
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, resolution_s=1.0)
+        total_samples = sum(b["n_samples"] for b in bins.values())
+        self.assertEqual(total_samples, 700)  # retenue ENTIÈREMENT sous la nouvelle règle
+        # Preuve que l'ANCIENNE règle (seuil unique à 80 % sous le seuil facile) aurait
+        # rejeté cette même séance : 490/700 = 70 % < 80 %.
+        old_style_easy_share = 490 / 700
+        self.assertLess(old_style_easy_share, 0.80)
 
     def test_activity_with_too_little_hr_coverage_is_excluded_not_assumed_easy(self):
         series = _flat_series(3.0, None, 170.0, n=190)
         for s in _flat_series(3.0, 145.0, 170.0, n=10, t0=190):
             series.append(s)
-        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR, resolution_s=1.0)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, resolution_s=1.0)
         self.assertEqual(bins, {})  # 10 s de FC connue < ENDURANCE_ACTIVITY_MIN_HR_TIME_S (60 s)
 
-    def test_activity_easy_share_helper_matches_direct_computation(self):
-        moving = _flat_series(3.0, 145.0, 170.0, n=80) + _flat_series(3.0, 165.0, 170.0, n=20, t0=80)
-        share = SL._activity_easy_share(moving, EASY_HR, resolution_s=1.0)
-        self.assertAlmostEqual(share, 0.80, places=2)
+    def test_hr_shares_helper_matches_direct_computation(self):
+        moving = (_flat_series(3.0, 145.0, 170.0, n=70) + _flat_series(3.0, 160.0, 170.0, n=25, t0=70)
+                  + _flat_series(3.0, 175.0, 170.0, n=5, t0=95))
+        easy_share, hard_share = SL._activity_hr_shares(moving, EASY_HR, MODERATE_HR, resolution_s=1.0)
+        self.assertAlmostEqual(easy_share, 0.70, places=2)
+        self.assertAlmostEqual(hard_share, 0.05, places=2)
+
+    def test_without_moderate_threshold_activity_cannot_be_classified_by_hr(self):
+        series = _flat_series(3.0, 145.0, 170.0, n=100)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=None, resolution_s=1.0)
+        self.assertEqual(bins, {})
+
+
+class TestEnduranceSelectionByPlannedIntensity(unittest.TestCase):
+    """Revue de code #58 (2ᵉ revue), should-fix : une séance planifiée
+    (`planned_intensity`, résolue par l'appelant depuis `planned_session`)
+    prime SUR la FC, dans les deux sens."""
+
+    def test_plan_recovery_includes_the_whole_activity_even_with_hard_hr(self):
+        # Toute la séance en zone difficile (175 bpm > MODERATE_HR) — un repli FC
+        # l'exclurait entièrement, mais le plan "recovery" l'emporte.
+        series = _flat_series(3.0, 175.0, 170.0, n=200)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, planned_intensity="recovery",
+                                          resolution_s=1.0)
+        total_samples = sum(b["n_samples"] for b in bins.values())
+        self.assertEqual(total_samples, 200)
+
+    def test_plan_endurance_also_includes_the_whole_activity(self):
+        series = _flat_series(3.0, 175.0, 170.0, n=50)
+        bins = SL.activity_bin_summaries(series, band="endurance", planned_intensity="endurance",
+                                          resolution_s=1.0)
+        self.assertEqual(sum(b["n_samples"] for b in bins.values()), 50)
+
+    def test_plan_tempo_excludes_the_whole_activity_even_with_easy_hr(self):
+        # Toute la séance en zone facile (140 bpm) — un repli FC l'inclurait, mais le
+        # plan "tempo" l'exclut : l'intention de la séance prime.
+        series = _flat_series(3.0, 140.0, 170.0, n=200)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=EASY_HR,
+                                          moderate_hr_bpm=MODERATE_HR, planned_intensity="tempo",
+                                          resolution_s=1.0)
+        self.assertEqual(bins, {})
+
+    def test_plan_needs_no_hr_thresholds_at_all(self):
+        """Un plan seul suffit, même sans aucun seuil FC résolu pour l'athlète
+        (profil sans FC max/repos/seuil renseignée) — voir
+        `arc_slope_model._no_endurance_selection_possible`."""
+        series = _flat_series(3.0, None, 170.0, n=50)
+        bins = SL.activity_bin_summaries(series, band="endurance", easy_hr_bpm=None,
+                                          moderate_hr_bpm=None, planned_intensity="recovery",
+                                          resolution_s=1.0)
+        self.assertEqual(sum(b["n_samples"] for b in bins.values()), 50)
+
+    def test_selection_method_is_reported_by_activity_bin_summaries_and_selection(self):
+        series = _flat_series(3.0, 175.0, 170.0, n=50)
+        bins_plan, method_plan = SL.activity_bin_summaries_and_selection(
+            series, band="endurance", planned_intensity="recovery", resolution_s=1.0)
+        self.assertEqual(method_plan, "plan")
+        self.assertTrue(bins_plan)
+        bins_hr, method_hr = SL.activity_bin_summaries_and_selection(
+            series, band="endurance", easy_hr_bpm=EASY_HR, moderate_hr_bpm=MODERATE_HR, resolution_s=1.0)
+        self.assertEqual(method_hr, None)  # 175 bpm partout -> exclu par le repli FC
+        self.assertEqual(bins_hr, {})
 
 
 class TestActivityBinTimeFloorAndCap(unittest.TestCase):
@@ -432,48 +517,119 @@ class TestFitSlopeModelRecoversAnImposedCurve(unittest.TestCase):
         model = SL.fit_slope_model([{"activity_id": 1, "date": None, "series": []}], band="all")
         self.assertEqual(model["reason_code"], "no_data")
 
-    def test_endurance_band_avoids_uphill_bias_when_hr_lags_behind_effort(self):
-        """Revue de code #58, BLOQUANT 5 : la FC répond avec un RETARD à
-        l'effort (`hr_grade_response_bpm_per_pct`/`hr_grade_lag_s`, voir
-        `tests/lib/synthetic.py`) — assez fort pour que la FC dépasse le seuil
-        facile PENDANT la montée sur certaines séances. La sélection au niveau
-        de L'ACTIVITÉ (jamais de l'échantillon) fait que ces séances restent
-        soit ENTIÈREMENT incluses (si l'essentiel du temps reste facile), soit
-        ENTIÈREMENT exclues — jamais un sous-ensemble de la montée corrélé à
-        la FC, qui biaiserait l'allure de montée mesurée. L'allure de montée
-        retrouvée doit rester proche de la courbe imposée, PAS artificiellement
-        rapide (le biais qu'un filtre par échantillon aurait introduit)."""
-        from datetime import date, timedelta
-        as_of = date.fromisoformat("2026-09-26")
-        activities = []
-        for i in range(8):
-            day = (as_of - timedelta(days=i * 5)).isoformat()
-            records, _ = sample_session(
-                seed=900 + i, duration_s=5400, base_speed_ms=2.8, hr_base_bpm=140.0, cadence_spm=170.0,
-                segments=[(0, 2500, 8.0), (4000, 2500, -8.0)], slope_factor_fn=_slope_curve,
-                # Réponse et retard choisis pour que la FC dépasse le seuil facile
-                # (154,8) PENDANT une bonne partie de la montée (~2,3 min à 90 s de
-                # constante de temps pour y arriver, sur une montée d'environ 22 min)
-                # SANS faire chuter la part globale de temps facile de la séance
-                # sous `ENDURANCE_ACTIVITY_EASY_SHARE_MIN` (80 %) — sans quoi la
-                # séance serait simplement exclue plutôt que sujette au biais testé.
-                hr_grade_response_bpm_per_pct=2.0, hr_grade_lag_s=200.0, noise=True,
-            )
-            activities.append({"activity_id": i, "date": day, "series": G.gap_sample_series(records)})
-        model = SL.fit_slope_model(activities, band="endurance", months=12,
-                                    easy_hr_bpm=EASY_HR, as_of="2026-09-26")
-        self.assertIsNone(model["reason_code"], model["reason"])
-        uphill_personal = [b for b in model["bins"]
-                            if b["source"] == "personal" and 0.06 < b["grade_mid"] < 0.10]
-        self.assertTrue(uphill_personal, "aucun panier de montée personnel — vérifier le scénario du test")
-        expected = 2.8 * _slope_curve(8.0)
-        for b in uphill_personal:
-            # Tolérance plus large qu'au test de récupération pur (10 %) : le lissage
-            # léger et le bruit du générateur restent en jeu, mais AUCUN biais
-            # systématique vers une allure plus rapide que l'allure imposée ne doit
-            # apparaître (ce qu'un filtre par échantillon aurait produit).
-            self.assertAlmostEqual(b["speed_ms"], expected, delta=expected * 0.12,
-                                    msg=f"panier {b['label']}")
+def _old_per_sample_endurance_bins(series, easy_hr_bpm, resolution_s=1.0):
+    """Reproduction FIDÈLE de l'ANCIENNE logique (avant #58, BLOQUANT, 1ère
+    revue de code) : filtre CHAQUE ÉCHANTILLON par sa propre FC plutôt que
+    l'activité entière — gardée UNIQUEMENT ici pour prouver que le test de
+    biais de montée ci-dessous est bien DISCRIMINANT (il doit échouer sous
+    cette ancienne logique, réussir sous la nouvelle). Jamais utilisée par le
+    code de production — même boucle d'agrégation que `activity_bin_summaries`,
+    appliquée à la sous-liste FILTRÉE par échantillon."""
+    moving = SL._moving_samples(series)
+    filtered = [s for s in moving if (s.get("hr_bpm") is not None and s["hr_bpm"] < easy_hr_bpm)]
+    n = len(filtered)
+    out = {}
+    for i, s in enumerate(filtered):
+        label = SL.grade_bin(s.get("grade"))
+        if label is None:
+            continue
+        dt = filtered[i + 1]["t_s"] - s["t_s"] if i + 1 < n else resolution_s
+        dt = max(0.0, min(dt, resolution_s))
+        bucket = out.setdefault(label, {"weighted_time_s": 0.0, "speed_weighted_sum": 0.0,
+                                         "hr_weighted_time_s": 0.0, "hr_weighted_sum": 0.0,
+                                         "n_samples": 0, "walking_weighted_time_s": 0.0})
+        bucket["weighted_time_s"] += dt
+        bucket["speed_weighted_sum"] += dt * s["speed_ms"]
+        bucket["n_samples"] += 1
+    return out
+
+
+class TestEnduranceBandAvoidsUphillSelectionBias(unittest.TestCase):
+    """Revue de code #58, BLOQUANT 5 puis 3ᵉ revue (should-fix (a)) : un test
+    de biais de montée doit être DISCRIMINANT — il doit RÉUSSIR sous la
+    nouvelle sélection au niveau de l'activité et ÉCHOUER sous l'ancienne
+    sélection au niveau de l'échantillon. Le générateur `sample_session`
+    impose une vitesse constante par instant de pente donnée, donc un filtre
+    par échantillon n'y change JAMAIS la vitesse mesurée, seulement le temps
+    retenu — insuffisant pour discriminer une allure biaisée. Ce module
+    construit directement une série avec une VRAIE variation de vitesse
+    (poussée en fin de montée à effort/FC plus élevés) pour que l'ancien
+    filtre par échantillon exclue sélectivement la partie la PLUS RAPIDE de la
+    montée, biaisant l'allure mesurée à la baisse — un biais mesurable et
+    vérifié ci-dessous en recalculant explicitement l'ancienne logique."""
+
+    CLIMB_GRADE = 0.08  # tombe dans un panier unique (voir GRADE_BINS, centré sur 0)
+    EASY_PHASE_S, EASY_SPEED, EASY_HR = 800, 2.0, 145.0
+    PUSH_PHASE_S, PUSH_SPEED, PUSH_HR = 300, 2.6, 165.0  # 165 >= EASY_HR mais < MODERATE_HR
+    FLAT_PHASE_S, FLAT_SPEED, FLAT_HR = 5000, 3.0, 145.0
+
+    def _build_series(self):
+        """Une « activité » : fond plat facile (qualifie l'activité), puis une
+        montée en deux phases — d'abord easy, puis une POUSSÉE (vitesse et FC
+        plus hautes, sans jamais atteindre le seuil modéré/difficile)."""
+        series = []
+        t = 0
+        for _ in range(self.FLAT_PHASE_S):
+            series.append({"t_s": float(t), "grade": 0.0, "speed_ms": self.FLAT_SPEED,
+                           "hr_bpm": self.FLAT_HR, "cadence_spm": 170.0})
+            t += 1
+        for _ in range(self.EASY_PHASE_S):
+            series.append({"t_s": float(t), "grade": self.CLIMB_GRADE, "speed_ms": self.EASY_SPEED,
+                           "hr_bpm": self.EASY_HR, "cadence_spm": 170.0})
+            t += 1
+        for _ in range(self.PUSH_PHASE_S):
+            series.append({"t_s": float(t), "grade": self.CLIMB_GRADE, "speed_ms": self.PUSH_SPEED,
+                           "hr_bpm": self.PUSH_HR, "cadence_spm": 170.0})
+            t += 1
+        return series
+
+    def test_new_logic_matches_all_band_within_2_pct_and_keeps_the_full_climb_time(self):
+        activities = [{"activity_id": i, "date": f"2026-09-{10 + i:02d}", "series": self._build_series()}
+                      for i in range(6)]
+        endurance = SL.fit_slope_model(activities, band="endurance", months=12,
+                                        easy_hr_bpm=EASY_HR, moderate_hr_bpm=MODERATE_HR, as_of="2026-09-26")
+        all_band = SL.fit_slope_model(activities, band="all", months=12, as_of="2026-09-26")
+        self.assertIsNone(endurance["reason_code"], endurance["reason"])
+        self.assertIsNone(all_band["reason_code"], all_band["reason"])
+        climb_label = SL.grade_bin(self.CLIMB_GRADE)
+        endurance_climb = next(b for b in endurance["bins"] if b["label"] == climb_label)
+        all_climb = next(b for b in all_band["bins"] if b["label"] == climb_label)
+        self.assertEqual(endurance_climb["source"], "personal")
+        self.assertEqual(all_climb["source"], "personal")
+        # Écart relatif <= 2 % entre les deux bandes — la sélection à l'activité ne
+        # perd RIEN de la montée pour les activités qui qualifient.
+        rel_diff = abs(endurance_climb["speed_ms"] - all_climb["speed_ms"]) / all_climb["speed_ms"]
+        self.assertLessEqual(rel_diff, 0.02, msg=(endurance_climb["speed_ms"], all_climb["speed_ms"]))
+        # Temps effectif IDENTIQUE entre les deux bandes pour les activités incluses —
+        # preuve qu'aucun échantillon de la montée n'a été perdu par la sélection
+        # « endurance » (voir le contrôle négatif ci-dessous : ce n'était PAS vrai
+        # sous l'ancienne logique par échantillon).
+        self.assertAlmostEqual(endurance_climb["effective_time_s"], all_climb["effective_time_s"], delta=1.0)
+
+    def test_old_per_sample_logic_would_have_failed_this_same_test(self):
+        """Contrôle négatif (should-fix (a)) : preuve, en recalculant
+        explicitement l'ANCIENNE logique par échantillon (`_old_per_sample_
+        endurance_bins`, jamais utilisée en production) sur EXACTEMENT le même
+        scénario, qu'elle aurait échoué les deux assertions ci-dessus — la
+        poussée (300 s à 2,6 m/s, FC 165) est intégralement exclue (165 >=
+        EASY_HR), ne laissant que la phase facile (800 s à 2,0 m/s) : temps
+        perdu (800 s retenus contre 1 100 s réels, comme le repro de revue de
+        code : « 4 894 s vs 10 443 s ») ET allure mesurée biaisée à la baisse
+        de plus de 2 %."""
+        series = self._build_series()
+        old_bins = _old_per_sample_endurance_bins(series, EASY_HR)
+        climb_label = SL.grade_bin(self.CLIMB_GRADE)
+        old_climb = old_bins[climb_label]
+        old_speed = old_climb["speed_weighted_sum"] / old_climb["weighted_time_s"]
+        true_avg_speed = ((self.EASY_PHASE_S * self.EASY_SPEED + self.PUSH_PHASE_S * self.PUSH_SPEED)
+                           / (self.EASY_PHASE_S + self.PUSH_PHASE_S))
+        # Temps retenu : SEULEMENT la phase facile, jamais les 1 100 s réelles de montée.
+        self.assertAlmostEqual(old_climb["weighted_time_s"], self.EASY_PHASE_S, delta=1.0)
+        self.assertLess(old_climb["weighted_time_s"], self.EASY_PHASE_S + self.PUSH_PHASE_S)
+        # Allure biaisée à la baisse de bien plus que 2 % par rapport à la vraie
+        # moyenne de la montée (poussée exclue -> sous-estime la vitesse réelle).
+        rel_diff = abs(old_speed - true_avg_speed) / true_avg_speed
+        self.assertGreater(rel_diff, 0.02, msg=(old_speed, true_avg_speed))
 
 
 # ---------------------------------------------------------------------------

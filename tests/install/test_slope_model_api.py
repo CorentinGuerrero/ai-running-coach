@@ -58,6 +58,13 @@ class TestSlopeModelApi(InstallAsserts):
             self.assertGreater(b["n_samples"], 0)
             self.assertGreater(b["n_activities"], 0)
             self.assertIsNotNone(b["run_share"])
+        # `selected_by` (2ᵉ revue de code #58) : ce workspace synthétique a des séances
+        # planifiées ET des séances sans plan correspondant — les deux méthodes de
+        # sélection (plan et repli FC) doivent apparaître, et leur somme doit égaler
+        # le nombre d'activités retenues.
+        self.assertIn("selected_by", model)
+        self.assertEqual(model["selected_by"]["plan"] + model["selected_by"]["hr"], model["n_activities"])
+        self.assertGreater(model["selected_by"]["hr"], 0)
 
     def test_all_band_is_selectable_and_differs_from_endurance(self):
         status, body, _ = self.server.get("/api/slope-model?band=all")
