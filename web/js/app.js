@@ -1279,8 +1279,86 @@ function hrZoneSection(hz) {
 // Vue : Performance
 // ---------------------------------------------------------------------------
 
-async function viewPerformance() {
-  const p = await api("performance");
+/** Étiquette d'un panier de pente (`arc_slope_model.GRADE_BINS`) pour l'axe x —
+ * arrondie au point de pourcentage, plus lisible que le libellé brut du serveur
+ * (ex. « +7.5/+10.0% » -> « +9 % ») : le point milieu (`grade_mid`) est déjà la
+ * valeur qui sert à l'interpolation (`predict_speed` côté serveur), donc la
+ * SEULE pente que ce panier représente réellement pour la lecture au survol. */
+function slopeGradeLabel(b) {
+  return `${b.grade_mid >= 0 ? "+" : ""}${Math.round(b.grade_mid * 100)} %`;
+}
+
+/** Section « Modèle personnel pente -> allure » de la vue Performance (#58) :
+ * un graphique allure (F.paceFromSecPerKm, imperial-aware) vs pente, avec une
+ * bande d'intervalle interquartile (repère de dispersion, pas un IC statistique
+ * au sens strict — voir `arc_slope_model.ASSUMPTIONS['robust_stats']`) et une
+ * courbe générique de comparaison (repli Minetti sur la référence plate
+ * personnelle) recalculée ICI côté client à partir de `flat_reference_speed_ms`
+ * (jamais dupliquée depuis le serveur : chaque panier générique renvoyé par
+ * `/api/slope-model` porte DÉJÀ cette valeur lissée avec ses voisins — voir
+ * `arc_slope_model.ASSUMPTIONS['smoothing']` — la courbe de comparaison ici est
+ * volontairement la version NON lissée, pour montrer le repli « pur »).
+ *
+ * Axe x par INDICE de panier, pas à l'échelle réelle de la pente (mêmes limites
+ * assumées que `fuelingSection` : les paniers sont de largeur égale, donc
+ * l'écart n'est trompeur qu'aux deux paniers ouverts en bout de plage, dont le
+ * point milieu est un ancrage nominal — voir `arc_slope_model.ASSUMPTIONS
+ * ['interpolation']`). */
+function slopeModelSection(model, band) {
+  if (model.reason_code) {
+    return { html: `<section class="band"><h2>Modèle personnel pente → allure</h2>${note(F.esc(model.reason))}</section>`, chart: null };
+  }
+  // Paniers ouverts (queues) exclus de l'AFFICHAGE (leur point milieu est un ancrage
+  // nominal, pas une pente réellement représentative) — restent utilisés par
+  // `predict_speed` côté serveur pour #59/#60/#61, juste pas tracés ici.
+  const bins = model.bins.filter((b) => Number.isFinite(b.grade_lo) && Number.isFinite(b.grade_hi));
+  if (!bins.length) {
+    return { html: `<section class="band"><h2>Modèle personnel pente → allure</h2>${note("Aucun panier de pente exploitable.")}</section>`, chart: null };
+  }
+  const xLabels = bins.map(slopeGradeLabel);
+  const personal = bins.map((b) => (b.source === "personal" ? b.pace_s_km : null));
+  const generic = bins.map((b) => (b.source === "generic" ? b.pace_s_km : null));
+  // `ci_low_speed_ms`/`ci_high_speed_ms` sont des bornes de VITESSE (p25/p75) : converties
+  // en allure, elles s'INVERSENT (la vitesse p25, plus lente, donne l'allure la plus
+  // GRANDE — le "haut" numérique de la bande d'allure, pas son "bas").
+  const paceFromSlowSpeedP25 = bins.map((b) => (b.ci_low_speed_ms ? 1000 / b.ci_low_speed_ms : null));
+  const paceFromFastSpeedP75 = bins.map((b) => (b.ci_high_speed_ms ? 1000 / b.ci_high_speed_ms : null));
+  const hasHr = bins.some((b) => b.hr_bpm != null);
+  const layers = [
+    { type: "band", lo: paceFromFastSpeedP75, hi: paceFromSlowSpeedP25, cls: "band--slope-ci" },
+    { type: "line", values: personal, cls: "line line--slope" },
+    { type: "line", values: generic, cls: "line line--slope-generic" },
+  ];
+  if (hasHr) layers.push({ type: "dots", values: bins.map((b) => b.hr_bpm), cls: "dot dot--slope-hr", axis: "y2", r: 3 });
+  const chart = timeChart(xLabels, layers, [{ type: "hline", value: 0, cls: "mark mark--zero" }], {
+    height: 220, y2: hasHr ? { zero: false } : undefined,
+    label: `Allure par classe de pente, bande ${band === "all" ? "tous efforts" : "endurance"}`,
+    yFormat: (v) => F.paceFromSecPerKm(v), y2Format: hasHr ? (v) => `${F.num(v)} bpm` : undefined,
+    xLabels,
+  });
+  const bandLabel = band === "all" ? "tous efforts" : "endurance";
+  const other = band === "all" ? "endurance" : "all";
+  const otherLabel = other === "all" ? "Tous efforts" : "Endurance";
+  const html = `<section class="band"><h2>Modèle personnel pente → allure</h2>
+    <p class="muted">Allure typique (médiane pondérée par le temps et la récence, demi-vie
+      ${F.num(model.half_life_days, 0)} j) par classe de pente, sur les ${F.num(model.months)} derniers mois
+      (${F.num(model.n_activities)} séance${model.n_activities > 1 ? "s" : ""}), bande <strong>${bandLabel}</strong>.
+      Repli sur le modèle générique (Minetti, trait pointillé) quand l'historique manque sur une classe.
+      La bande grisée est un repère de dispersion (quartiles), pas un intervalle de confiance statistique.
+      <a href="#/performance?bande=${other}">Voir la bande « ${otherLabel} »</a> ·
+      <a href="#/performance">Hypothèses des modèles</a></p>
+    <p class="legend"><span class="legend__item"><span class="key key--slope-band"></span>Dispersion (quartiles)</span>
+      <span class="legend__item"><span class="key key--slope"></span>Personnel</span>
+      <span class="legend__item"><span class="key key--slope-generic"></span>Générique (Minetti)</span>
+      ${hasHr ? `<span class="legend__item"><span class="key key--slope-hr"></span>FC médiane</span>` : ""}</p>
+    <div class="chart-host" id="c-slope">${chart.svg}</div><p class="readout" id="r-slope"></p>
+    ${model.flat_reference_speed_ms ? `<p class="legend legend--small">Référence plate personnelle : ${F.paceFromSecPerKm(1000 / model.flat_reference_speed_ms)}</p>` : ""}</section>`;
+  return { html, chart, bins };
+}
+
+async function viewPerformance(params) {
+  const band = params && params.get("bande") === "all" ? "all" : "endurance";
+  const [p, slope] = await Promise.all([api("performance"), api(`slope-model?band=${band}`)]);
   const trail = p.sport === "trail";
   let chartHtml = empty("Pas encore d'estimation", "La VO2max effective s'estime sur les séances de course d'au moins 20 minutes, à plus de 70 % de la FC max, avec distance et FC moyenne.");
   let c = null;
@@ -1292,14 +1370,22 @@ async function viewPerformance() {
   const pred = p.predictions.map((r) => `<tr><th scope="row">${r.tag === "objective" ? `${F.esc(p.objective.name || "Objectif")} <span class="muted">${F.distance(r.distance_m, 1)}${trail && r.effort_distance_m !== Math.round(r.distance_m) ? ` · effort ${F.distance(r.effort_distance_m, 0)}` : ""}</span>` : names[r.distance_m] || F.distance(r.distance_m)}</th><td class="num">${F.clock(r.vdot_s)}</td><td class="num">${F.clock(r.riegel_s)}</td></tr>`).join("");
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
   const assumptions = SUMMARY.assumptions || {};
+  const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}
     <section class="band"><h2>VO2max effective</h2>${p.vo2max_current ? `<p class="lead-num">${F.num(p.vo2max_current, 1)} <small>ml/kg/min, tendance 30 j${p.vo2max_date !== SUMMARY.today ? ` au ${F.dayShort(p.vo2max_date)}` : ""}</small></p>` : ""}${chartHtml}</section>
     <section class="band band--split"><div><h2>Prédictions</h2><table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">VDOT</th><th scope="col" class="num">Riegel</th></tr></thead><tbody>${pred}</tbody></table>
       ${trail ? note("En trail, la distance « effort » ajoute le dénivelé (1000 m D+ ≈ 1,75 km de plat, <code>config/sports/trail.md</code>). Sable, vent et barrières ne sont pas modélisés.") : ""}</div>
       <div><h2>Records</h2>${rec}</div></section>
+    ${slopeHtml}
     ${gearSection(SUMMARY.gear)}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
+  if (slopeChart) attachCursor($("#c-slope"), slopeChart, (i) => {
+    const b = slopeBins[i];
+    const hrTxt = b.hr_bpm != null ? ` · FC médiane ${F.num(b.hr_bpm, 0)} bpm` : "";
+    const runTxt = b.run_share != null && b.run_share < 0.95 ? ` · couru ${F.num(b.run_share * 100, 0)} %` : "";
+    readout($("#r-slope"), `<strong>${slopeGradeLabel(b)}</strong> · ${F.paceFromSecPerKm(b.pace_s_km)} · ${b.source === "personal" ? `personnel (${b.n_activities} séance${b.n_activities > 1 ? "s" : ""})` : "générique"}${hrTxt}${runTxt}`);
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -952,6 +952,23 @@ def api_durability(store: Store, q: dict) -> dict:
     return M.durability_trend(rows, today, weeks)
 
 
+def api_slope_model(store: Store, q: dict) -> dict:
+    """Modèle personnel pente -> allure (et FC) — #58, `/api/slope-model?band=`.
+
+    Additive : ne touche à aucune route existante. Délègue à
+    `I.slope_model_report`, le modèle DÉJÀ CALCULÉ au dernier passage de
+    `compute_metrics` (fenêtre `[metrics].slope_model_months`, voir
+    `arc_slope_model.ASSUMPTIONS`) — jamais un recalcul par requête HTTP (ce
+    n'est possible, à la demande, que par la CLI `slope-model --months`).
+    `band` (défaut `"endurance"`) : `"all"` sinon (`arc_slope_model.BANDS`), une
+    valeur inconnue retombe sur `"endurance"` plutôt que d'échouer."""
+    band = q.get("band", ["endurance"])[0]
+    if band not in ("endurance", "all"):
+        band = "endurance"
+    with store.lock:
+        return I.slope_model_report(store.conn, band)
+
+
 def api_files(store: Store, q: dict) -> dict:
     return {"items": store.backfill()}
 
@@ -1135,7 +1152,7 @@ ROUTES = {
     "/api/performance": api_performance, "/api/reports": api_reports, "/api/report": api_report,
     "/api/calendar": api_calendar, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
     "/api/decoupling": api_decoupling, "/api/vam": api_vam, "/api/descent": api_descent,
-    "/api/durability": api_durability, "/api/files": api_files,
+    "/api/durability": api_durability, "/api/slope-model": api_slope_model, "/api/files": api_files,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk,
 }

@@ -40,6 +40,9 @@
   --s-vam: #b0712f;
   --s-descent: #2f6b9a;
   --s-durability: #a63d40;
+  --s-slope: #3d7a5c;
+  --s-slope-band: rgba(61, 122, 92, 0.16);
+  --s-slope-generic: #9aa89f;
 
   /* sémantique : verdicts, météo, statuts */
   --ok: #2f7a4f;
@@ -73,6 +76,7 @@
     --s-median: #8b9a92; --s-bar: #4f8f6e; --s-sleep: #3d7a5c; --s-dplus: #e0826b; --s-band: rgba(124, 195, 155, 0.12);
     --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
     --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
+    --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
     --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
     --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
     --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -87,6 +91,7 @@
   --s-median: #8b9a92; --s-bar: #4f8f6e; --s-sleep: #3d7a5c; --s-dplus: #e0826b; --s-band: rgba(124, 195, 155, 0.12);
   --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
   --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
+  --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
   --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
   --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
   --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -292,6 +297,14 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chart .line--year-2 { stroke: var(--s-year-2); }
 .chart .area--form { fill: var(--s-form-pos); }
 .chart .band-fill { fill: var(--s-band); }
+/* Modèle personnel pente -> allure (#58) : trait plein pour la courbe personnelle
+   (paniers avec assez de données), trait pointillé pour la courbe générique de
+   comparaison (repli Minetti sur la référence plate personnelle) — forme
+   distincte, comme les autres paires personnel/générique du tableau de bord. */
+.chart .line--slope { stroke: var(--s-slope); stroke-width: 2.2; }
+.chart .line--slope-generic { stroke: var(--s-slope-generic); stroke-width: 1.4; stroke-dasharray: 4 3; }
+.chart .band--slope-ci { fill: var(--s-slope-band); }
+.chart .dot--slope-hr { fill: none; stroke: var(--s-rhr); stroke-width: 1.6; }
 .chart .dot { stroke: var(--surface); stroke-width: 1.2; }
 .chart .dot--hrv { fill: var(--s-hrv); } .chart .dot--rhr { fill: var(--s-rhr); } .chart .dot--dplus { fill: var(--s-dplus); }
 .chart .dot--weight { fill: var(--s-weight); }
@@ -374,6 +387,10 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .key--durability-gap { background: var(--s-durability); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key--durability-ef { background: var(--surface); border: 1.6px solid var(--s-durability); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key--band { background: var(--s-band); height: 0.6rem; }
+.key--slope { background: var(--s-slope); height: 0.22rem; }
+.key--slope-generic { background: repeating-linear-gradient(to right, var(--s-slope-generic) 0 4px, transparent 4px 7px); height: 0.22rem; }
+.key--slope-band { background: var(--s-slope-band); height: 0.6rem; }
+.key--slope-hr { background: var(--surface); border: 1.6px solid var(--s-rhr); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key.cal--1 { background: var(--cal-1); height: 0.8rem; width: 0.8rem; } .key.cal--2 { background: var(--cal-2); height: 0.8rem; width: 0.8rem; }
 .key.cal--3 { background: var(--cal-3); height: 0.8rem; width: 0.8rem; } .key.cal--4 { background: var(--cal-4); height: 0.8rem; width: 0.8rem; }
 

@@ -532,6 +532,17 @@ kilomètre : pas de graphique, c'est normal.
   au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
   alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
   profil — jamais masqué silencieusement.
+- **Modèle personnel pente → allure** (#58) : votre allure typique par classe de
+  pente fine, apprise sur les six derniers mois (par défaut) de vos propres
+  séances — pas le modèle générique de laboratoire (Minetti) appliqué à tout le
+  monde. La bande grisée est un repère de dispersion (quartiles), pas un
+  intervalle de confiance statistique ; la courbe pointillée est le repli
+  générique, affiché pour comparaison sur les classes de pente encore sans
+  assez de données. Bande « endurance » par défaut (FC sous le seuil
+  facile/modéré) — un lien bascule vers « tous efforts ». Marche/power-hiking
+  sur les fortes pentes n'est jamais retirée (c'est comment vous bougez
+  réellement sur cette pente), seulement signalée au survol quand elle domine
+  le panier.
 - **Hypothèses** : toutes les formules et leurs limites, en clair.
 
 **Comment la lire** : ce sont des ordres de grandeur, calculés sur l'allure et la FC
@@ -542,6 +553,7 @@ divergent disent que le terrain ou la forme du jour pèsent.
 |---|---|
 | `activities/*.md` (course et trail : allure, FC, splits) | `scripts/arc_metrics.py` |
 | `planning/Runner_Profile.md`, `planning/active_objective.md` | FC max ; distance et D+ de l'objectif |
+| `activities/fit/*.json` (échantillons seconde par seconde) | `scripts/arc_slope_model.py` (#58) |
 
 ## Calendrier
 

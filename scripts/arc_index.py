@@ -184,15 +184,16 @@ import arc_gap as G  # noqa: E402
 import arc_legacy as L  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_samples as S  # noqa: E402
+import arc_slope_model as SL  # noqa: E402
 from coach_config import ConfigError, read_toml  # noqa: E402
 from coach_setup import ENGINE, workspace_root  # noqa: E402
 
-SCHEMA_VERSION = 19  # #54 : nouveau type de contrat `decision` — tables `decision`
-                      # (une ligne par fichier) et `decision_rule` (une ligne par rule_id
-                      # cité, pour le filtre par règle du futur journal des décisions, #55).
-                      # #100 (revue de code) : colonnes `decision.created_at_utc` (tri correct
-                      # entre fuseaux) et `decision.supersedes` — voir #49 pour la version
-                      # d'avant #54.
+# #58 : modèle personnel pente -> allure — tables `slope_model_bin`/`slope_model_meta`.
+# #54 : nouveau type de contrat `decision` — tables `decision` (une ligne par fichier) et
+# `decision_rule` (une ligne par rule_id cité, pour le filtre par règle du journal des
+# décisions, #55). #100 (revue de code) : colonnes `decision.created_at_utc` (tri correct
+# entre fuseaux) et `decision.supersedes` — voir #49 pour la version d'avant #54.
+SCHEMA_VERSION = 20
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -330,6 +331,10 @@ def settings(config: Dict[str, dict]) -> dict:
         "climb_min_gain_m": _positive_float(config, "metrics", "climb_min_gain_m", VC.MIN_CLIMB_GAIN_M),
         "climb_min_grade": _positive_float(
             config, "metrics", "climb_min_grade_pct", VC.MIN_CLIMB_AVG_GRADE * 100.0) / 100.0,
+        # Modèle personnel pente -> allure (#58) : fenêtre d'historique (mois) configurable
+        # (`[metrics].slope_model_months`) — voir `arc_slope_model.DEFAULT_MONTHS`.
+        "slope_model_months": int(_positive_float(
+            config, "metrics", "slope_model_months", float(SL.DEFAULT_MONTHS))),
     }
 
 
@@ -604,6 +609,32 @@ CREATE TABLE activity_descent_class (
     mean_speed_ms REAL, mean_pace_s_km REAL, mean_gap_speed_ms REAL, mean_grade REAL, efficiency REAL
 );
 CREATE INDEX activity_descent_class_activity ON activity_descent_class(activity_id);
+-- Modèle personnel pente -> allure (#58, `arc_slope_model.py`) — GLOBAL au workspace
+-- (pas par activité, comme `climb_segment` ci-dessus) : recalculé INTÉGRALEMENT à chaque
+-- `compute_metrics`, jamais de purge partielle. Une ligne par (`band`, panier de pente) —
+-- voir `arc_slope_model.GRADE_BINS` pour les bornes/étiquettes. `source` : "personal"
+-- (données de l'athlète suffisantes sur ce panier) ou "generic" (repli Minetti sur la
+-- référence plate personnelle, voir `arc_slope_model.ASSUMPTIONS['fallback']`).
+-- `ci_low_speed_ms`/`ci_high_speed_ms` : repère de dispersion (IQR pondéré), PAS un
+-- intervalle de confiance statistique au sens strict — voir ASSUMPTIONS['robust_stats'].
+-- `run_share` : part du temps couru (vs marché/power-hiking) sur ce panier, `NULL` pour un
+-- panier générique (aucune donnée réelle). `NULL` si aucun modèle n'a pu être ajusté pour
+-- cette bande (voir `slope_model_meta.reason_code`) : pas de ligne du tout dans ce cas.
+CREATE TABLE slope_model_bin (
+    band TEXT, grade_lo REAL, grade_hi REAL, grade_mid REAL, label TEXT,
+    speed_ms REAL, pace_s_km REAL, hr_bpm REAL, source TEXT,
+    ci_low_speed_ms REAL, ci_high_speed_ms REAL,
+    n_samples INTEGER, n_activities INTEGER, effective_time_s REAL, run_share REAL
+);
+CREATE INDEX slope_model_bin_band ON slope_model_bin(band);
+-- Métadonnées de l'ajustement (#58), une ligne par bande (`arc_slope_model.BANDS`) même en
+-- cas d'échec (`reason`/`reason_code` non NULL, `slope_model_bin` alors vide pour cette
+-- bande) — jamais une absence totale de ligne qui laisserait croire à un oubli plutôt qu'à
+-- une impossibilité documentée (profil sans zones FC, historique trop récent, etc.).
+CREATE TABLE slope_model_meta (
+    band TEXT PRIMARY KEY, months INTEGER, half_life_days REAL, as_of TEXT,
+    n_activities INTEGER, flat_reference_speed_ms REAL, reason TEXT, reason_code TEXT
+);
 """
 
 # Tables alimentées par fichier (colonne `source_path`) : purgées à la réindexation d'un fichier.
@@ -993,6 +1024,17 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     conn.execute("DELETE FROM activity_climb")
     conn.execute("DELETE FROM activity_descent_class")
     conn.execute("DELETE FROM climb_segment")
+    conn.execute("DELETE FROM slope_model_bin")
+    conn.execute("DELETE FROM slope_model_meta")
+    # Modèle personnel pente -> allure (#58) : `gap_series` de CHAQUE activité course à pied
+    # est réduite à un résumé PAR PANIER (`arc_slope_model.activity_bin_summaries`) au fil du
+    # même passage — jamais un second parcours des activités, voir
+    # `arc_slope_model.ASSUMPTIONS["aggregation_cost"]`. Seuils FC (#43) résolus une seule
+    # fois, hors boucle, pour la bande « endurance ».
+    slope_easy_hr_bpm = None
+    if seiler_thresholds:
+        slope_easy_hr_bpm = seiler_thresholds[0]
+    slope_activities: Dict[str, list] = {band: [] for band in SL.BANDS}
     # Identité de montée entre séances (#49, `arc_climb_match.py`) : registre reconstruit
     # INTÉGRALEMENT à chaque passage, comme les autres tables ci-dessus — `rows` est déjà
     # trié par date croissante (`ORDER BY date`), donc traiter les activités DANS CET ORDRE
@@ -1081,6 +1123,20 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                     # l'allure globale ET par split — jamais recalculées deux fois pour la
                     # même activité (voir `arc_gap.activity_gap_pace_from_series`).
                     gap_series = G.gap_sample_series(act_samples)
+                    # Modèle personnel pente -> allure (#58) : résumé PAR PANIER de CETTE
+                    # activité pour chaque bande (`arc_slope_model.BANDS`), à partir de
+                    # `gap_series` déjà calculée ci-dessus (grade + vitesse, jamais un second
+                    # calcul de pente). Bande « endurance » sautée si aucun seuil FC résolu
+                    # (`slope_easy_hr_bpm`), voir `activity_bin_summaries`.
+                    for band in SL.BANDS:
+                        easy_hr = slope_easy_hr_bpm if band == "endurance" else None
+                        if band == "endurance" and easy_hr is None:
+                            continue
+                        bin_summary = SL.activity_bin_summaries(
+                            gap_series, band=band, easy_hr_bpm=easy_hr, resolution_s=S.DEFAULT_RESOLUTION_S)
+                        if bin_summary:
+                            slope_activities[band].append(
+                                {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary})
                     gap_pace = G.activity_gap_pace_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
                     conn.execute("UPDATE activity SET gap_pace_s_km = ? WHERE id = ?",
                                  (round(gap_pace, 2) if gap_pace is not None else None, act["id"]))
@@ -1308,6 +1364,31 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
              history["first_activity_id"], history["first_date"], len(history["occurrences"]),
              best_time, best_activity_id),
         )
+    # Modèle personnel pente -> allure (#58) : un ajustement par bande, sur la fenêtre
+    # `[metrics].slope_model_months` (défaut `arc_slope_model.DEFAULT_MONTHS`), `as_of` =
+    # `today` si fourni (sorties reproductibles, comme le reste de `compute_metrics`) sinon
+    # la date d'activité la plus récente (résolue par `fit_slope_model` lui-même).
+    for band in SL.BANDS:
+        result = SL.fit_from_activity_bins(
+            slope_activities[band], band=band, months=conf["slope_model_months"],
+            easy_hr_bpm=slope_easy_hr_bpm if band == "endurance" else None, as_of=today)
+        conn.execute(
+            "INSERT INTO slope_model_meta (band, months, half_life_days, as_of, n_activities, "
+            "flat_reference_speed_ms, reason, reason_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (band, result["months"], result["half_life_days"], result["as_of"], result["n_activities"],
+             result["flat_reference_speed_ms"], result["reason"], result["reason_code"]),
+        )
+        if result["bins"]:
+            conn.executemany(
+                "INSERT INTO slope_model_bin (band, grade_lo, grade_hi, grade_mid, label, speed_ms, "
+                "pace_s_km, hr_bpm, source, ci_low_speed_ms, ci_high_speed_ms, n_samples, n_activities, "
+                "effective_time_s, run_share) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(band, b["grade_lo"] if b["grade_lo"] != float("-inf") else None,
+                  b["grade_hi"] if b["grade_hi"] != float("inf") else None, b["grade_mid"], b["label"],
+                  b["speed_ms"], b["pace_s_km"], b["hr_bpm"], b["source"], b["ci_low_speed_ms"],
+                  b["ci_high_speed_ms"], b["n_samples"], b["n_activities"], b["effective_time_s"],
+                  b["run_share"]) for b in result["bins"]],
+            )
     conn.execute("DELETE FROM metric_day")
     dated = sorted(loads)
     if dated:
@@ -1721,10 +1802,14 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
     # préfixées `durability_*` — même raison que `decoupling_*`/`vam_*`/`descent_*`
     # ci-dessus (collision possible, ex. "model", "restricted_to_run_family").
     durability_assumptions = {f"durability_{key}": value for key, value in DU.ASSUMPTIONS.items()}
+    # `arc_slope_model.ASSUMPTIONS` (#58) fusionné à PART lui aussi, sous des clés
+    # préfixées `slope_model_` — même raison que `decoupling_*`/`vam_*`/`descent_*`/
+    # `durability_*` ci-dessus (collision possible, ex. "model", "fallback").
+    slope_model_assumptions = {f"slope_model_{key}": value for key, value in SL.ASSUMPTIONS.items()}
     for key, value in (("settings", _j(conf)),
                        ("assumptions", _j({**M.ASSUMPTIONS, **G.ASSUMPTIONS, **decoupling_assumptions,
                                            **vam_assumptions, **descent_assumptions,
-                                           **durability_assumptions})),
+                                           **durability_assumptions, **slope_model_assumptions})),
                        ("today", today or date.today().isoformat())):
         conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
     conn.commit()
@@ -2223,6 +2308,95 @@ def climb_segment_history(conn, segment_id: int) -> dict:
             "reason": None, "reason_code": None, "applicable": True}
 
 
+# ---------------------------------------------------------------------------
+# Modèle personnel pente -> allure (#58)
+# ---------------------------------------------------------------------------
+
+
+def slope_model_bins(conn, band: str) -> List[dict]:
+    """Paniers déjà stockés (recalculés au dernier `compute_metrics`) pour `band` —
+    lecture pure, aucun recalcul. Rend `[]` si le modèle n'a pas pu être ajusté pour
+    cette bande (voir `slope_model_meta`).
+
+    `grade_lo`/`grade_hi` d'un panier ouvert (queue) restent `NULL` TELS QUELS
+    (jamais convertis en `float("inf")`) : `json.dumps` d'un `inf` Python produit le
+    jeton `Infinity`/`-Infinity`, INVALIDE en JSON standard — `JSON.parse` d'un
+    navigateur le REJETTE (contrairement à `json.loads` de Python, qui l'accepte
+    par tolérance) et casserait `web/js/app.js` (revue de code #58). `null` est
+    d'ailleurs la représentation la plus juste d'un panier « ouvert » : aucun de
+    ses consommateurs (`predict_speed`, qui ne lit que `grade_mid` ; l'UI, qui
+    filtre déjà sur `Number.isFinite`, `null` échouant ce test comme `Infinity`
+    l'aurait fait) n'a besoin d'un infini numérique réel."""
+    rows = conn.execute(
+        "SELECT band, grade_lo, grade_hi, grade_mid, label, speed_ms, pace_s_km, hr_bpm, source, "
+        "ci_low_speed_ms, ci_high_speed_ms, n_samples, n_activities, effective_time_s, run_share "
+        "FROM slope_model_bin WHERE band = ? ORDER BY grade_mid", (band,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def slope_model_report(conn, band: str = "endurance") -> dict:
+    """Modèle personnel pente -> allure déjà stocké (#58) pour `band`
+    (`arc_slope_model.BANDS`) — pour `/api/slope-model` et la CLI `slope-model` sans
+    `--months` explicite (le modèle stocké est celui de `[metrics].slope_model_months`,
+    recalculé à chaque `compute_metrics`). TOUJOURS un dict, `bins: []` avec
+    `reason`/`reason_code` si non ajustable — jamais d'exception."""
+    if band not in SL.BANDS:
+        return {"band": band, "months": None, "half_life_days": None, "as_of": None, "n_activities": 0,
+                "flat_reference_speed_ms": None, "bins": [],
+                "reason": f"bande « {band} » inconnue (attendu : {', '.join(SL.BANDS)})",
+                "reason_code": "unknown_band"}
+    meta = conn.execute(
+        "SELECT months, half_life_days, as_of, n_activities, flat_reference_speed_ms, reason, reason_code "
+        "FROM slope_model_meta WHERE band = ?", (band,)).fetchone()
+    if meta is None:
+        return {"band": band, "months": None, "half_life_days": None, "as_of": None, "n_activities": 0,
+                "flat_reference_speed_ms": None, "bins": [],
+                "reason": "modèle jamais calculé (aucun compute_metrics n'a encore tourné)",
+                "reason_code": "not_computed"}
+    return {"band": band, **dict(meta), "bins": slope_model_bins(conn, band)}
+
+
+def recompute_slope_model(conn, conf: dict, band: str, months: int, today: Optional[str] = None) -> dict:
+    """Comme `slope_model_report`, mais RECALCULÉ à la volée pour une fenêtre `months`
+    différente de celle déjà stockée (CLI `slope-model --months`, exploration
+    ponctuelle) — parcourt à nouveau les activités course à pied et leurs échantillons
+    (coût acceptable pour un usage ponctuel/manuel, à la différence de
+    `compute_metrics`, qui doit rester bon marché à chaque passage, voir
+    `arc_slope_model.ASSUMPTIONS['aggregation_cost']`)."""
+    athlete = conn.execute("SELECT * FROM athlete LIMIT 1").fetchone()
+    athlete = dict(athlete) if athlete else {}
+    zone_bounds = M.hr_zone_bounds(athlete, conf.get("hr_zones"))
+    seiler_thresholds = M.seiler_bounds(athlete, zone_bounds[1]) if zone_bounds else None
+    easy_hr_bpm = seiler_thresholds[0] if (band == "endurance" and seiler_thresholds) else None
+    rows = conn.execute(
+        "SELECT id, date, garmin_activity_id, sport FROM activity WHERE garmin_activity_id IS NOT NULL "
+        "ORDER BY date").fetchall()
+    activities = []
+    for row in rows:
+        act = dict(row)
+        if M.sport_family(act.get("sport")) != "run":
+            continue
+        act_samples = samples(conn, act["id"])
+        if not act_samples:
+            continue
+        series = G.gap_sample_series(act_samples)
+        activities.append({"activity_id": act["id"], "date": act.get("date"), "series": series})
+    result = SL.fit_slope_model(activities, band=band, months=months, easy_hr_bpm=easy_hr_bpm, as_of=today)
+    # `SL.fit_slope_model` rend des bornes de panier ouvert en `float("inf")` RÉEL
+    # (GRADE_BINS), correctes pour un consommateur Python — mais cette fonction
+    # nourrit directement le CLI (`json.dumps`), où un `inf` produirait le jeton
+    # `Infinity`, invalide en JSON standard (même raison que `slope_model_bins`
+    # ci-dessus, revue de code #58) : converti en `None` ICI, à la frontière
+    # JSON, jamais plus tôt (les tests purs de `arc_slope_model` continuent de
+    # voir de vrais infinis).
+    for b in result["bins"]:
+        if b["grade_lo"] == float("-inf"):
+            b["grade_lo"] = None
+        if b["grade_hi"] == float("inf"):
+            b["grade_hi"] = None
+    return {"band": band, **result}
+
+
 def vam_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
     """Tendance de la VAM sur les montées détectées (#46) — pour la CLI
     (`arc_index.py vam --weeks`) et pour `coach`/le tableau de bord. Voir
@@ -2394,7 +2568,7 @@ def build_parser() -> argparse.ArgumentParser:
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
                                  "heat-acclimation", "gear", "fueling", "samples", "zones", "gap",
                                  "decoupling", "vam", "descent", "durability", "climb-history",
-                                 "decisions"))
+                                 "decisions", "slope-model"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -2429,6 +2603,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
                              "(journal courant, voir DECISION_INACTIVE_OUTCOMES)")
+    parser.add_argument("--months", type=int, metavar="N",
+                        help="commande « slope-model » : fenêtre d'historique (mois) — sans cette option, "
+                             "le modèle déjà stocké (fenêtre `[metrics].slope_model_months`) est renvoyé "
+                             "tel quel ; avec elle, recalculé à la volée pour cette fenêtre (#58)")
+    parser.add_argument("--band", choices=SL.BANDS, default="endurance",
+                        help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
+                             "arc_slope_model.ASSUMPTIONS['population'])")
     return parser
 
 
@@ -2599,6 +2780,16 @@ def main(argv=None) -> int:
         result = decisions_query(conn, today_date, args.days, args.trigger, args.date,
                                   args.outcome, args.active)
         print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if args.command == "slope-model":
+        conf = settings(load_config(workspace))
+        if args.months is not None:
+            if args.months < 1:
+                raise ConfigError(f"--months : un entier >= 1 attendu, « {args.months} » reçu.")
+            print(json.dumps(recompute_slope_model(conn, conf, args.band, args.months, args.today),
+                              ensure_ascii=False))
+            return 0
+        print(json.dumps(slope_model_report(conn, args.band), ensure_ascii=False))
         return 0
     if args.command == "status":
         by_status = {row[0]: row[1] for row in conn.execute(
