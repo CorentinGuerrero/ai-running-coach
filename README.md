@@ -11,7 +11,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | Composant | Description |
 |---|---|
 | 🧠 **4 agents spécialisés** | `coach`, `course-strategist`, `medical`, `nutritionist` — installez seulement ceux que vous voulez |
-| 🛠️ **13 skills** | analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, etc. |
+| 🛠️ **17 skills** | commandes courtes `/today` `/why` `/week` `/race`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, etc. |
 | 📡 **Accès Garmin Connect** | via `garmin-mcp` (mode direct, liste blanche d'outils) — passerelle `leanproxy-mcp` optionnelle |
 | 🚀 **Installation automatisée** | un script pour installer et configurer tout (uv, Garmin, IDE) |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
@@ -106,6 +106,23 @@ Lors de la première installation, le script lance l'authentification Garmin Con
    - *« Je veux préparer un trail de 50 km avec 2500 m de D+ dans 6 mois »*
    - *« Aide-moi à planifier ma semaine d'entraînement »*
 4. L'agent `coach` coordonne les agents que vous avez retenus et pousse vos séances directement dans le **calendrier Garmin Connect**
+
+### ⚡ Commandes courtes du quotidien
+
+Pour un usage rapide depuis le téléphone, quatre commandes courtes, format
+prévisible, qui n'écrivent ni ne modifient jamais un plan, une semaine, une
+décision ou un plan de course, et ne poussent jamais rien vers Garmin — natives
+sur **Claude Code** et **Gemini CLI** (commande dédiée), chargées comme
+n'importe quel skill sur **OpenCode** et **GitHub Copilot**, non disponibles
+sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces deux IDE, voir
+[IDE supportés](docs/ides.md)) :
+
+| Commande | Répond |
+|---|---|
+| `/today` | La séance du jour, le bilan matinal (au niveau configuré), le créneau météo si la séance est en extérieur |
+| `/why` | Pourquoi la dernière décision du coach (ou une décision nommée) a été prise — jamais une raison inventée |
+| `/week` | Le statut compact de la semaine en cours : réalisé/prévu, garde-fous |
+| `/race` | Le compte à rebours de votre objectif, le score Trail Shape, votre plan de course s'il existe |
 
 ### 🎛️ Ce qui est configurable
 

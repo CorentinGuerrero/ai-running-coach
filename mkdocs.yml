@@ -92,6 +92,10 @@ nav:
       - Nutritionniste: agents/nutritionist.md
   - Skills:
       - Vue d'ensemble: skills.md
+      - Aujourd'hui (/today): skills/today.md
+      - Pourquoi (/why): skills/why.md
+      - Semaine (/week): skills/week.md
+      - Course (/race): skills/race.md
       - Analyse GPX: skills/gpx-analysis.md
       - Comparaison de parcours: skills/course-comparison.md
       - Planification Garmin: skills/garmin-workout-scheduling.md

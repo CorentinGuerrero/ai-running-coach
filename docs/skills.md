@@ -4,12 +4,16 @@
 ![](assets/ridge.jpg)
 </div>
 
-`ai-running-coach` fournit **13 skills** que les agents chargent à la demande pour des tâches spécifiques.
+`ai-running-coach` fournit **17 skills** que les agents chargent à la demande pour des tâches spécifiques.
 
 ## Vue d'ensemble
 
 <div class="arc-skills">
 
+<div class="arc-skill"><span class="arc-skill__name"><a href="skills/today.md">Aujourd'hui (/today)</a></span><span class="arc-skill__desc">Statut du jour : séance, bilan matinal au niveau configuré, créneau météo</span></div>
+<div class="arc-skill"><span class="arc-skill__name"><a href="skills/why.md">Pourquoi (/why)</a></span><span class="arc-skill__desc">Explique la dernière décision (ou une décision nommée) du journal des décisions</span></div>
+<div class="arc-skill"><span class="arc-skill__name"><a href="skills/week.md">Semaine (/week)</a></span><span class="arc-skill__desc">Statut compact de la semaine en cours : réalisé/prévu, garde-fous</span></div>
+<div class="arc-skill"><span class="arc-skill__name"><a href="skills/race.md">Course (/race)</a></span><span class="arc-skill__desc">Compte à rebours de l'objectif, score Trail Shape, plan de course</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/gpx-analysis.md">Analyse GPX</a></span><span class="arc-skill__desc">Analyse générique d'un fichier GPX et production d'un rapport Markdown structuré</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/course-comparison.md">Comparaison de parcours</a></span><span class="arc-skill__desc">Analyse comparative de séances sur un même parcours/lieu</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/garmin-workout-scheduling.md">Planification Garmin</a></span><span class="arc-skill__desc">Push de séances planifiées dans le calendrier Garmin Connect</span></div>

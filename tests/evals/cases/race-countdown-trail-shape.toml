@@ -1,0 +1,22 @@
+# #66 — /race : compte à rebours + score Trail Shape (#63), lecture seule.
+# Fixture `trail-shape/` (voir trail-shape.toml pour le détail du calcul) :
+# objectif dans 84 jours, score 68,8/100. Le prompt ne donne aucun chiffre :
+# la preuve que la commande a bien lancé `arc_index.py trail-shape` plutôt que
+# deviné est le score cité en chiffre, jamais une estimation de tête.
+id = "race-countdown-trail-shape"
+prompt = "/race"
+fixture = "trail-shape"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Course\\**\\s*[—–-]"
+max_words = 130
+must_match = [
+  "84",
+  "\\b(6[6-9]|7[0-2])(?:[.,]\\d)?\\s*/\\s*100|score[^\\n]{0,15}(est|de|:|=|à)\\s*(6[6-9]|7[0-2])",
+]
+must_not_match = ["\\b100\\s*/\\s*100\\b"]
+tools_not_called = ["schedule_workouts", "schedule_week", "upload_workout", "upload_course", "unschedule_workout"]
+files_absent = ["planning/*.md"]

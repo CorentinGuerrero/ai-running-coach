@@ -1,0 +1,19 @@
+# #66 — /why restitue la dernière décision active DU JOURNAL, sans rien
+# inventer. Fixture `why-decision-logged` : une décision `morning_check`
+# (r5_quality_after_red, HRV sous la bande) est déjà persistée pour
+# aujourd'hui — la preuve que l'agent a lu le VRAI fichier plutôt que deviné
+# est la citation de la règle et de la valeur HRV exacte.
+id = "why-explains-logged-decision"
+prompt = "/why"
+fixture = "why-decision-logged"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Pourquoi\\**\\s*[—–-]"
+max_words = 150
+must_match = ["r5_quality_after_red", "41\\s*ms"]
+tools_not_called = ["schedule_workouts", "schedule_week", "upload_workout", "unschedule_workout"]
+files_absent = ["planning/*_decision_*.md"]
+unchanged_files = ["planning/*_decision_hrv-hold.md", "planning/*_semaine.md"]

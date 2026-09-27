@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Génère les commandes Gemini CLI depuis `agents/*.md`.
+"""Génère les commandes Gemini CLI depuis `agents/*.md` et les skills-commandes.
 
 Chaque prompt d'agent existait jusqu'ici en double : `agents/<nom>.md` et
 `config/gemini/commands/<nom>.toml`, recopié à la main. Les deux avaient déjà
 divergé (la copie Gemini du coach prescrivait `leanproxy_invoke_tool(...)` là où
 l'agent parle de l'outil direct) et `course-strategist` n'avait aucune commande.
 
-`agents/` est la source de vérité ; ce script produit l'autre surface.
+`agents/` est la source de vérité pour les commandes d'agent. Un skill peut
+aussi devenir une commande Gemini de premier niveau (ex. `/today`, `/why`,
+`/week`, `/race`, #66) en portant `gemini_command: "true"` dans son
+frontmatter — c'est le seul signal utilisé ici, aucune liste à maintenir à
+côté : un skill qui n'est qu'un outil interne (chargé par un agent, jamais
+tapé directement) n'a pas ce champ et n'obtient pas de commande.
+
+`agents/` et les skills marqués sont donc la source de vérité ; ce script
+produit l'autre surface.
 
     python3 scripts/build-gemini-commands.py            # (ré)génère
     python3 scripts/build-gemini-commands.py --check    # échoue si obsolète (CI)
@@ -23,9 +31,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO / "agents"
+SKILLS_DIR = REPO / "skills"
 OUTPUT_DIR = REPO / "config" / "gemini" / "commands"
 
-HEADER = "# Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.\n# Source : agents/{name}.md\n"
+HEADER_AGENT = "# Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.\n# Source : agents/{name}.md\n"
+HEADER_SKILL = "# Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.\n# Source : skills/{name}/SKILL.md\n"
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 
 
@@ -33,7 +43,7 @@ class GenerationError(RuntimeError):
     pass
 
 
-def parse_agent(path: Path) -> tuple:
+def parse_frontmatter(path: Path) -> tuple:
     match = FRONTMATTER.match(path.read_text(encoding="utf-8"))
     if not match:
         raise GenerationError(f"{path} : frontmatter YAML absent.")
@@ -45,7 +55,37 @@ def parse_agent(path: Path) -> tuple:
     for key in ("name", "description"):
         if key not in fields:
             raise GenerationError(f"{path} : frontmatter sans « {key} ».")
-    return fields["name"], fields["description"], match.group(2).strip()
+    return fields, match.group(2).strip()
+
+
+def parse_agent(path: Path) -> tuple:
+    fields, body = parse_frontmatter(path)
+    return fields["name"], fields["description"], body
+
+
+def command_skill_files() -> list:
+    """Skills qui sont aussi des commandes de premier niveau (`gemini_command: "true"`).
+
+    Un skill sans frontmatter valide (ou sans `name`/`description`) est déjà
+    signalé par `tests/lint/test_prompt_lint.py::TestSkillFrontmatter` — pas la
+    responsabilité de CE scan, qui ne cherche qu'un signal optionnel parmi tous
+    les skills : le laisser lever ferait échouer la génération Gemini pour un
+    problème sans rapport avec elle, sur un skill qui ne demande même pas de
+    commande."""
+    found = []
+    for path in SKILLS_DIR.glob("*/SKILL.md"):
+        try:
+            fields, _ = parse_frontmatter(path)
+        except GenerationError:
+            continue
+        if fields.get("gemini_command", "").lower() == "true":
+            found.append(path)
+    return sorted(found)
+
+
+def parse_skill_command(path: Path) -> tuple:
+    fields, body = parse_frontmatter(path)
+    return fields["name"], fields["description"], body
 
 
 def toml_basic_string(value: str) -> str:
@@ -53,15 +93,15 @@ def toml_basic_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def render(name: str, description: str, body: str) -> str:
+def render(name: str, description: str, body: str, header: str) -> str:
     # Chaîne littérale multi-ligne ('''…'''), sans séquences d'échappement : les
     # prompts contiennent des antislashs (JSON, regex) qu'une chaîne "…" mangerait.
     if "'''" in body:
         raise GenerationError(
-            f"agents/{name}.md contient ''' — incompatible avec une chaîne littérale TOML."
+            f"{name} contient ''' — incompatible avec une chaîne littérale TOML."
         )
     return (
-        HEADER.format(name=name)
+        header.format(name=name)
         + f"description = {toml_basic_string(description)}\n"
         + "prompt = '''\n"
         + body
@@ -75,10 +115,19 @@ def build() -> dict:
     agents = sorted(AGENTS_DIR.glob("*.md"))
     if not agents:
         raise GenerationError(f"aucun agent trouvé dans {AGENTS_DIR}")
-    return {
-        f"{name}.toml": render(name, description, body)
+    commands = {
+        f"{name}.toml": render(name, description, body, HEADER_AGENT)
         for name, description, body in (parse_agent(p) for p in agents)
     }
+    for skill_path in command_skill_files():
+        name, description, body = parse_skill_command(skill_path)
+        filename = f"{name}.toml"
+        if filename in commands:
+            raise GenerationError(
+                f"{skill_path} : nom « {name} » entre en collision avec une commande d'agent."
+            )
+        commands[filename] = render(name, description, body, HEADER_SKILL)
+    return commands
 
 
 def main(argv: list | None = None) -> int:

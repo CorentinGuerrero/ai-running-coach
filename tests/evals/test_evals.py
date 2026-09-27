@@ -464,6 +464,36 @@ class TestUnchangedFiles(unittest.TestCase):
             failures = runner.check(case, result)
             self.assertTrue(any("Runner_Profile.md" in f for f in failures), failures)
 
+    def test_relative_date_pattern_matches_the_materialised_name(self):
+        """#66 revue de code, BLOQUANT : un motif recopié tel quel d'un nom de
+        fixture (`0d_semaine.md`) ne correspond plus à rien une fois le fichier
+        matérialisé (`_materialize_relative_dates` le renomme en
+        `<date réelle>_semaine.md` avant que la moindre assertion ne tourne) —
+        sans traduction, `unchanged_files` "réussirait" toujours, quoi que
+        fasse l'agent. `guardrail-ok/planning/0d_semaine.md` sert de fixture
+        réelle pour ce cas."""
+        case = {"id": "guardrail-ok", "fixture": "guardrail-ok"}
+        with tempfile.TemporaryDirectory(prefix="arc-eval-relative-date-") as tmp:
+            workspace = runner.build_workspace(Path(tmp), case)
+            result = {"workspace": workspace}
+            materialised = sorted(workspace.glob("planning/*_semaine.md"))
+            self.assertEqual(len(materialised), 1, materialised)
+            # Non traduit : ne matche RIEN (c'est le bug), donc "rien n'a changé".
+            self.assertEqual(runner._changed_known_files(result, "planning/0d_semaine.md"), [])
+            # Une fois le fichier réellement modifié, le motif littéral doit
+            # quand même l'attraper via la traduction `<N>d_` -> `*_`.
+            week_file = materialised[0]
+            week_file.write_text(week_file.read_text(encoding="utf-8") + "\nModifié.\n", encoding="utf-8")
+            changed = runner._changed_known_files(result, "planning/0d_semaine.md")
+            self.assertEqual(changed, [week_file])
+
+    def test_expand_relative_date_glob_leaves_other_patterns_untouched(self):
+        self.assertEqual(runner._expand_relative_date_glob("planning/*_semaine.md"), "planning/*_semaine.md")
+        self.assertEqual(runner._expand_relative_date_glob("planning/Runner_Profile.md"),
+                          "planning/Runner_Profile.md")
+        self.assertEqual(runner._expand_relative_date_glob("planning/0d_decision_hrv-hold.md"),
+                          "planning/*_decision_hrv-hold.md")
+
 
 @unittest.skipIf(runner.skip_reason(), runner.skip_reason() or "palier C désactivé")
 class TestPromptBehaviour(unittest.TestCase):

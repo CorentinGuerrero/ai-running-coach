@@ -165,6 +165,15 @@ class TestSkillReferences(unittest.TestCase):
         self.assertFalse(missing, "skills cités par un agent mais absents de skills/ :\n  " + "\n  ".join(missing))
 
 
+def command_skill_files() -> list:
+    """Skills-commandes de premier niveau (`gemini_command: "true"`, ex. /today, #66).
+
+    Comparaison insensible à la casse, comme `scripts/build-gemini-commands.py`
+    (`.lower() == "true"`) : les deux lectures de ce même champ ne doivent
+    jamais diverger sur un « True »/« TRUE » qui passerait l'une et pas l'autre."""
+    return [p for p in skill_files() if read_frontmatter(p).get("gemini_command", "").lower() == "true"]
+
+
 class TestSurfaceParity(unittest.TestCase):
     """Chaque agent doit exister sur toutes les surfaces qu'on prétend supporter."""
 
@@ -172,6 +181,12 @@ class TestSurfaceParity(unittest.TestCase):
         commands = {p.stem for p in (REPO / "config/gemini/commands").glob("*.toml")}
         missing = sorted({p.stem for p in agent_files()} - commands)
         self.assertFalse(missing, f"agents sans commande Gemini : {missing}")
+
+    def test_every_command_skill_has_a_gemini_command(self):
+        """#66 — un skill marqué `gemini_command: "true"` doit avoir sa commande générée."""
+        commands = {p.stem for p in (REPO / "config/gemini/commands").glob("*.toml")}
+        missing = sorted({p.parent.name for p in command_skill_files()} - commands)
+        self.assertFalse(missing, f"skills-commandes sans commande Gemini : {missing}")
 
     def test_every_agent_has_a_doc_page(self):
         pages = {p.stem for p in (REPO / "docs/agents").glob("*.md")}

@@ -1,0 +1,23 @@
+# #66 — /today avec [health].morning_check = "off" : aucune donnée de santé
+# n'est récupérée NI rapportée, même si `medical/0d_health.md` existe déjà
+# dans la fixture (le mode "off" ne filtre ni ne consulte la santé du tout,
+# pas seulement "ne pas aller chercher du neuf").
+id = "today-morning-check-off"
+prompt = "/today"
+fixture = "guardrail-ok"
+
+[config.health]
+morning_check = "off"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Aujourd['’]hui\\**\\s*[—–-]"
+max_words = 130
+tools_not_called = [
+  "get_hrv_data", "get_rhr_day", "get_training_readiness",
+  "schedule_workouts", "schedule_week", "upload_workout", "unschedule_workout",
+]
+must_not_match = ["HRV", "readiness", "FC de repos"]
+files_absent = ["planning/*.md"]

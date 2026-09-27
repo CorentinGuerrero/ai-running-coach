@@ -39,8 +39,11 @@ selon le fichier — seule la langue de *sortie* est paramétrée.
 
 Tant que `config/workspace.user.toml` n'a pas de section `[coaching]` et que le
 profil de l'athlète n'existe pas, proposer `/coach-setup` en une ligne — le
-**proposer**, jamais l'imposer, et jamais deux fois dans une session. Exception :
-`/garmin-daily-sync` tourne sous cron et ne doit rien proposer du tout.
+**proposer**, jamais l'imposer, et jamais deux fois dans une session. Exceptions :
+`/garmin-daily-sync` tourne sous cron et ne doit rien proposer du tout ; les
+commandes courtes `/today`, `/why`, `/week`, `/race` (#66) répondent à une
+question factuelle précise et ne proposent jamais non plus `/coach-setup`,
+même sur une installation neuve.
 
 ## Bilan matinal — `[health].morning_check`
 

@@ -1,0 +1,25 @@
+# #66 — /today, bilan matinal `full` (défaut), séance du jour en extérieur.
+# Fixture `guardrail-ok` : le bilan de `medical/0d_health.md` (aujourd'hui) est
+# déjà persisté (HRV 62 ms, FC de repos 49 bpm, readiness 78, verdict vert) —
+# la règle de fraîcheur veut donc qu'aucun outil Garmin ne soit rappelé pour le
+# recalculer ; la preuve que la réponse vient de ce fichier plutôt que d'un
+# outil non tracé est la citation des trois valeurs EXACTES. La commande
+# n'écrit/ne modifie jamais un plan/semaine/décision et ne pousse rien vers
+# Garmin (le bilan santé/météo du jour, lui, PEUT être persisté par les règles
+# de fraîcheur habituelles — ici déjà présent, donc rien de neuf à écrire).
+id = "today-outdoor-full"
+prompt = "/today"
+fixture = "guardrail-ok"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Aujourd['’]hui\\**\\s*[—–-]"
+max_words = 130
+tools_not_called = [
+  "get_hrv_data", "get_rhr_day", "get_training_readiness",
+  "schedule_workouts", "schedule_week", "upload_workout", "unschedule_workout",
+]
+must_match = ["footing|endurance", "62", "49", "78"]
+files_absent = ["planning/*.md"]

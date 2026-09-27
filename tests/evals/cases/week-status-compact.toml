@@ -1,0 +1,16 @@
+# #66 — /week : statut compact de la semaine en cours, garde-fous inclus,
+# sans rien écrire ni pousser vers Garmin. Fixture `guardrail-ok` : une seule
+# séance bénigne (endurance) cette semaine, garde-fous ok.
+id = "week-status-compact"
+prompt = "/week"
+fixture = "guardrail-ok"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Semaine\\**\\s*[—–-]"
+max_words = 150
+tools_not_called = ["schedule_workouts", "schedule_week", "upload_workout", "unschedule_workout"]
+files_absent = ["planning/*_decision_*.md"]
+unchanged_files = ["planning/*_semaine.md"]
