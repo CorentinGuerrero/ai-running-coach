@@ -48,7 +48,11 @@ GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp"
 # celui réellement installé par --source intervals). project.scripts expose
 # `intervals-icu-mcp` + `intervals-icu-mcp-auth`, comme garmin_mcp/garmin-mcp-auth
 # ci-dessus — même mécanique `uv tool install git+…`.
-INTERVALS_MCP_REF="git+https://github.com/eddmann/intervals-icu-mcp"
+# Épinglé à un commit précis (vérifié : project.scripts, tools/*.py, réponses
+# JSON) plutôt qu'à `main` — un changement en amont (renommage d'outil, retrait
+# de champ) ne doit jamais casser silencieusement ce projet. Documenté dans
+# docs/intervals-setup.md ; mettre à jour les deux ensemble après vérification.
+INTERVALS_MCP_REF="git+https://github.com/eddmann/intervals-icu-mcp@cb91d4a0f3b4dc21f57421e029c07a8e9af11649"
 # Le serveur charge ses identifiants depuis un `.env` relatif à SON répertoire
 # de travail (pydantic-settings) — jamais depuis le dépôt : `intervals-icu-mcp-auth`
 # est donc lancé depuis ce dossier dédié, hors du projet, comme `$GARMIN_TOKENS_DIR`
@@ -293,12 +297,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-case "$SOURCE" in
-    garmin|intervals) ;;
-    *) die "Source de données inconnue : « $SOURCE ». Valides : garmin, intervals (voir --help)." ;;
-esac
-if [[ "$SOURCE" == "intervals" && "$USE_LEANPROXY" -eq 1 ]]; then
-    die "--use-leanproxy ne route que le serveur garmin — incompatible avec --source intervals (voir --help)."
+# Valide $SOURCE (défini ici pour être appelable dès l'analyse des arguments
+# ET depuis resolve_source() dans main(), qui peut réécrire $SOURCE depuis la
+# config existante).
+validate_source() {
+    case "$SOURCE" in
+        garmin|intervals) ;;
+        *) die "Source de données inconnue : « $SOURCE ». Valides : garmin, intervals (voir --help)." ;;
+    esac
+    if [[ "$SOURCE" == "intervals" && "$USE_LEANPROXY" -eq 1 ]]; then
+        die "--use-leanproxy ne route que le serveur garmin — incompatible avec --source intervals (voir --help)."
+    fi
+}
+
+# Validation immédiate UNIQUEMENT si --source a été passé explicitement : une
+# valeur invalide venue de la ligne de commande doit échouer tout de suite,
+# avant tout travail. La valeur par défaut ("garmin") ou celle résolue depuis
+# la config existante (resolve_source(), dans main() — après resolve_workspace,
+# comme resolve_agents()) est revalidée là-bas.
+if [[ "$EXPLICIT_SOURCE" -eq 1 ]]; then
+    validate_source
 fi
 
 # ---------------------------------------------------------------------------
@@ -342,6 +360,43 @@ merge_json_key() {
         --file "$file" --section "$section" --name "$name" --value "$value" \
         ${template:+--template "$template"} >/dev/null \
         || die "Échec de la mise à jour de $file (voir le message ci-dessus)."
+}
+
+# Retire une clé d'un fichier JSON si elle y est — sans effet sinon. Utilisé
+# pour nettoyer l'entrée MCP de l'AUTRE source de données avant d'écrire la
+# nouvelle (voir cleanup_stale_mcp_server()).
+remove_json_key() {
+    local file="$1" section="$2" name="$3"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} retrait de « $name » de $file (si présent)"
+        return 0
+    fi
+    [[ -f "$file" ]] || return 0
+    have python3 || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" remove-json-key \
+        --file "$file" --section "$section" --name "$name" >/dev/null \
+        || warn "Impossible de nettoyer « $name » dans $file."
+}
+
+# Noms de serveur MCP à retirer d'une config avant d'y écrire $SOURCE (#68,
+# revue PR #116) : sans ce nettoyage, basculer --source laisse l'ancien
+# serveur déclaré à côté du nouveau (l'IDE en propose un qui ne répond plus).
+# Ne couvre QUE l'axe garmin<->intervals introduit par cette story — le
+# pré-existant garmin<->leanproxy (--use-leanproxy) n'est pas traité ici,
+# hors du périmètre de #68.
+stale_mcp_server_names() {
+    if [[ "$SOURCE" == "intervals" ]]; then
+        echo "garmin"
+    else
+        echo "intervals"
+    fi
+}
+
+cleanup_stale_mcp_server() {
+    local file="$1" section="$2" stale
+    for stale in $(stale_mcp_server_names); do
+        remove_json_key "$file" "$section" "$stale"
+    done
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -526,6 +581,26 @@ resolve_agents() {
     log "Staff : $ENABLED_AGENTS"
 }
 
+# Détermine la source de données : --source (explicite, prioritaire), sinon
+# [data].source de la configuration EXISTANTE (workspace.user.toml, sinon
+# workspace.toml), sinon "garmin" — même principe que resolve_agents() pour
+# [agents].enabled. C'est ce qui évite qu'un simple `./install.sh` (sans
+# --source) ne fasse silencieusement revenir à Garmin un athlète qui a choisi
+# Intervals.icu, et qui garantit qu'une installation Garmin par défaut, elle,
+# ne voit STRICTEMENT rien changer (aucune section [data] écrite tant que
+# --source n'a jamais été demandé explicitement — voir persist_source()).
+resolve_source() {
+    if [[ "$EXPLICIT_SOURCE" -eq 0 ]] && have python3; then
+        local resolved
+        resolved="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
+            --workspace "$WORKSPACE_ROOT" --section data --key source --default garmin 2>/dev/null)" \
+            || resolved=""
+        [[ -n "$resolved" ]] && SOURCE="$resolved"
+    fi
+    validate_source
+    log "Source de données : $SOURCE"
+}
+
 # Enregistre le staff retenu dans la config personnelle.
 persist_agents() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -542,7 +617,14 @@ persist_agents() {
 
 # Enregistre la source de données retenue (#68) — sans toucher aux autres clés
 # de workspace.user.toml (set_toml_key ne remplace que [data].source).
+#
+# UNIQUEMENT si --source a été passé explicitement : une installation par
+# défaut (source résolue à "garmin" par resolve_source(), jamais demandée)
+# n'écrit ni ne touche à [data] du tout — c'est ce qui garde une installation
+# Garmin par défaut STRICTEMENT identique à avant #68 (aucune section [data]
+# ajoutée à workspace.user.toml qui n'existerait pas sans cette story).
 persist_source() {
+    [[ "$EXPLICIT_SOURCE" -eq 1 ]] || return 0
     if [[ "$DRY_RUN" -eq 1 ]]; then
         printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [data].source = $SOURCE"
         return 0
@@ -788,6 +870,48 @@ install_garmin_mcp() {
 # Garmin qui échouerait par construction n'aurait aucun sens. Les fonctionnalités
 # Garmin-only (upload de parcours, téléchargement FIT) restent simplement
 # indisponibles avec cette source — voir AGENTS.md.
+# Commande d'authentification, telle qu'affichée/exécutée partout dans ce
+# script — un seul endroit à corriger. Appel DIRECT du binaire (pas
+# `uv run intervals-icu-mcp-auth`) : le binaire est déjà sur le PATH une fois
+# `uv tool install` fait (comme garmin-mcp-auth), et `uv run` chercherait un
+# projet uv (pyproject.toml) dans le cwd — qui n'en est pas un ici.
+intervals_auth_cmd() { printf '(cd "%s" && intervals-icu-mcp-auth)' "$INTERVALS_ENV_DIR"; }
+
+# Écrit le wrapper que CHAQUE config MCP (toutes les IDE, voir mcp_server_value_intervals*)
+# référence comme `command` — jamais `intervals-icu-mcp` directement.
+#
+# Pourquoi : intervals-icu-mcp charge ses identifiants depuis un `.env` relatif
+# à SON répertoire de travail (pydantic-settings, `env_file=".env"`), pas depuis
+# une variable d'environnement passée par l'IDE — et l'IDE démarre le serveur
+# MCP avec pour cwd le dossier du PROJET, pas $INTERVALS_ENV_DIR. Un bloc
+# `"env": {"INTERVALS_ICU_API_KEY": "${VAR}"}` dans la config JSON ne marche
+# donc NULLE PART : rien n'exporte cette variable dans le processus de l'IDE,
+# certains IDE (OpenCode) n'interpolent même pas `${VAR}`, et de toute façon une
+# variable d'environnement écraserait le `.env` sans jamais l'atteindre. Le
+# wrapper force le bon cwd avant d'exec le serveur, quel que soit l'IDE.
+write_intervals_wrapper() {
+    local wrapper="$INTERVALS_ENV_DIR/run.sh"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} écriture de $wrapper"
+        return 0
+    fi
+    mkdir -p "$INTERVALS_ENV_DIR"
+    cat > "$wrapper" <<'EOF'
+#!/usr/bin/env bash
+# Généré par install.sh (--source intervals, #68) — NE JAMAIS committer ce
+# fichier ni le .env à côté de lui : intervals-icu-mcp charge ses identifiants
+# depuis un .env relatif à SON répertoire de travail (pydantic-settings), pas
+# depuis une variable d'environnement passée par l'IDE. Ce wrapper garantit ce
+# répertoire de travail quel que soit le dossier depuis lequel l'IDE lance
+# la commande MCP.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+exec intervals-icu-mcp "$@"
+EOF
+    chmod +x "$wrapper"
+    ok "Wrapper écrit : $wrapper"
+}
+
 install_intervals_mcp() {
     log "Installation de intervals-icu-mcp (accès Intervals.icu, --source intervals)"
     if have intervals-icu-mcp; then
@@ -802,6 +926,8 @@ install_intervals_mcp() {
         fi
     fi
 
+    write_intervals_wrapper
+
     if [[ "$DO_AUTH" -eq 1 ]]; then
         log "Authentification Intervals.icu (clé API + identifiant athlète, une seule fois)"
         if [[ -f "$INTERVALS_ENV_DIR/.env" ]]; then
@@ -813,16 +939,12 @@ install_intervals_mcp() {
             warn "L'authentification interactive va démarrer : clé API (https://intervals.icu/settings,"
             warn "section « Developer ») + identifiant athlète (ex. i123456)."
             mkdir -p "$INTERVALS_ENV_DIR"
-            # Le serveur charge son `.env` depuis SON répertoire de travail
-            # (pydantic-settings) — jamais depuis le dépôt : sous-coquille pour
-            # que ce `cd` reste local à cette commande, comme `uv run --directory`
-            # le ferait pour le serveur lui-même.
-            (cd "$INTERVALS_ENV_DIR" && uv run intervals-icu-mcp-auth) \
+            (cd "$INTERVALS_ENV_DIR" && intervals-icu-mcp-auth) \
                 || die "Échec de l'authentification Intervals.icu (voir le message ci-dessus)."
         fi
     else
         warn "Authentification Intervals.icu sautée (--no-auth)."
-        warn "Lancez plus tard : (cd \"$INTERVALS_ENV_DIR\" && uv run intervals-icu-mcp-auth)"
+        warn "Lancez plus tard : $(intervals_auth_cmd)"
     fi
 }
 
@@ -935,20 +1057,21 @@ mcp_leanproxy_block() {
 EOF
 }
 
-# Bloc MCP pour la source intervals.icu (--source intervals, #68). Contrairement
-# à garmin-mcp (tokens résolus par le serveur lui-même depuis $GARMIN_TOKENS_DIR,
-# aucun secret dans la config MCP), intervals-icu-mcp attend ses identifiants en
-# variables d'environnement (ou un `.env` relatif à son cwd — voir
-# install_intervals_mcp()) : `${VAR}` ci-dessous est une substitution par le
-# shell/l'IDE au lancement, jamais une valeur écrite en clair ici — même
-# convention que l'exemple déjà documenté dans docs/faq.md. Certains IDE
-# peuvent exiger une autre syntaxe de référence : voir docs/intervals-setup.md.
+# Bloc MCP pour la source intervals.icu (--source intervals, #68). Pointe sur
+# le WRAPPER écrit par write_intervals_wrapper() ($INTERVALS_ENV_DIR/run.sh),
+# jamais sur le binaire `intervals-icu-mcp` directement, et SANS bloc `env` :
+# un `"env": {"INTERVALS_ICU_API_KEY": "${VAR}"}` ne marche nulle part (rien
+# n'exporte cette variable dans le processus de l'IDE, OpenCode n'interpole
+# même pas `${VAR}`, et un `env` écraserait de toute façon le `.env` lu par le
+# serveur sans jamais l'atteindre) — voir write_intervals_wrapper() pour le
+# détail. Les identifiants vivent uniquement dans le `.env` du wrapper, écrit
+# par `intervals-icu-mcp-auth`, jamais dans cette config.
 mcp_server_value_intervals() {
-    printf '{"command": "intervals-icu-mcp", "args": [], "env": {"INTERVALS_ICU_API_KEY": "${INTERVALS_ICU_API_KEY}", "INTERVALS_ICU_ATHLETE_ID": "${INTERVALS_ICU_ATHLETE_ID}"}}'
+    printf '{"command": "%s", "args": []}' "$INTERVALS_ENV_DIR/run.sh"
 }
 
 mcp_server_value_intervals_opencode() {
-    printf '{"type": "local", "command": ["intervals-icu-mcp"], "environment": {"INTERVALS_ICU_API_KEY": "${INTERVALS_ICU_API_KEY}", "INTERVALS_ICU_ATHLETE_ID": "${INTERVALS_ICU_ATHLETE_ID}"}, "enabled": true}'
+    printf '{"type": "local", "command": ["%s"], "enabled": true}' "$INTERVALS_ENV_DIR/run.sh"
 }
 
 # Valeur JSON du serveur, au format « mcpServers » (Claude, Copilot, Cursor,
@@ -992,6 +1115,7 @@ write_opencode_config() {
     # ~/.config/opencode/opencode.json est GLOBAL : d'autres projets y déclarent
     # leurs propres serveurs MCP. On insère la clé, on ne réécrit pas le fichier.
     local cfg="$HOME/.config/opencode/opencode.json"
+    cleanup_stale_mcp_server "$cfg" mcp
     merge_json_key "$cfg" mcp "$(mcp_server_name)" "$(mcp_server_value_opencode)" \
         '{"$schema": "https://opencode.ai/config.json"}'
     ok "Serveur MCP $(mcp_server_name) présent dans $cfg"
@@ -1007,6 +1131,7 @@ write_opencode_config() {
 # GitHub Copilot CLI.
 write_project_mcp_json() {
     local cfg="$WORKSPACE_ROOT/.mcp.json"
+    cleanup_stale_mcp_server "$cfg" mcpServers
     merge_json_key "$cfg" mcpServers "$(mcp_server_name)" "$(mcp_server_value)"
     ok "Serveur MCP $(mcp_server_name) présent dans $cfg"
 }
@@ -1024,6 +1149,12 @@ write_claude_config() {
     # sinon Claude Code le laisse « Pending approval » jusqu'à une session
     # interactive — bloquant sur une machine coach sans écran (Remote Control, cron).
     approve_claude_project_mcp "$(mcp_server_name)"
+    # Désapprouve l'ancienne source (#68) — sinon ~/.claude.json continue de
+    # lister un serveur qui n'est plus dans .mcp.json comme "approuvé".
+    local stale
+    for stale in $(stale_mcp_server_names); do
+        unapprove_claude_project_mcp "$stale"
+    done
 }
 
 write_copilot_config() {
@@ -1067,6 +1198,22 @@ approve_claude_project_mcp() {
     ok "Serveur MCP $server approuvé pour ce projet ($store)"
 }
 
+# Retire un serveur de la liste des serveurs MCP approuvés pour ce projet
+# (#68) — utilisé pour nettoyer l'ancienne source après un changement de
+# --source. Sans effet si le fichier, le projet ou le serveur sont absents.
+unapprove_claude_project_mcp() {
+    local server="$1" store="$HOME/.claude.json"
+    have python3 || return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} désapprobation du serveur MCP $server pour $WORKSPACE_ROOT dans $store (si présent)"
+        return 0
+    fi
+    [[ -f "$store" ]] || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" unapprove-claude-mcp \
+        --store "$store" --project "$WORKSPACE_ROOT" --server "$server" >/dev/null \
+        || warn "Impossible de désapprouver « $server » dans $store."
+}
+
 write_gemini_config() {
     log "Configuration Gemini CLI"
     local dir="$WORKSPACE_ROOT/.gemini/commands"
@@ -1085,6 +1232,7 @@ write_gemini_config() {
 write_cursor_config() {
     log "Configuration Cursor"
     local cfg="$WORKSPACE_ROOT/.cursor/mcp.json"
+    cleanup_stale_mcp_server "$cfg" mcpServers
     merge_json_key "$cfg" mcpServers "$(mcp_server_name)" "$(mcp_server_value)"
     ok "Serveur MCP $(mcp_server_name) présent dans $cfg"
 }
@@ -1092,6 +1240,7 @@ write_cursor_config() {
 write_windsurf_config() {
     log "Configuration Windsurf"
     local cfg="$WORKSPACE_ROOT/.windsurf/mcp_config.json"
+    cleanup_stale_mcp_server "$cfg" mcpServers
     merge_json_key "$cfg" mcpServers "$(mcp_server_name)" "$(mcp_server_value)"
     ok "Serveur MCP $(mcp_server_name) présent dans $cfg"
 }
@@ -1304,10 +1453,18 @@ verify() {
                 fail=1
             fi
         done
+        if [[ -f "$INTERVALS_ENV_DIR/run.sh" ]]; then
+            ok "Wrapper MCP : présent ($INTERVALS_ENV_DIR/run.sh)"
+        else
+            warn "Wrapper MCP absent ($INTERVALS_ENV_DIR/run.sh) — relancez ./install.sh --source intervals"
+            fail=1
+        fi
         if [[ -f "$INTERVALS_ENV_DIR/.env" ]]; then
             ok "Identifiants Intervals.icu : présents ($INTERVALS_ENV_DIR)"
+        elif [[ "$DO_AUTH" -eq 0 ]]; then
+            warn "Identifiants Intervals.icu : authentification sautée (--no-auth) — lancez $(intervals_auth_cmd)"
         else
-            warn "Identifiants Intervals.icu : absents — lancez (cd \"$INTERVALS_ENV_DIR\" && uv run intervals-icu-mcp-auth)"
+            warn "Identifiants Intervals.icu : absents — lancez $(intervals_auth_cmd)"
         fi
     else
         for cmd in uv garmin-mcp; do
@@ -1365,12 +1522,16 @@ print_config_recap() {
     [[ -n "$PRESET" ]] && printf '  Préréglage : %s\n' "$PRESET"
     recap_line "IDE" "$IDE" "$(_config_origin "$EXPLICIT_IDE")"
     # --source n'est composée par AUCUN préréglage (voir la note près de
-    # EXPLICIT_SOURCE) : jamais "préréglage X" ici, seulement explicite/défaut.
-    recap_line "Source de données" "$SOURCE" "$([[ "$EXPLICIT_SOURCE" -eq 1 ]] && echo "explicite" || echo "défaut")"
+    # EXPLICIT_SOURCE) : jamais "préréglage X" ici — "explicite" (--source),
+    # "config" (résolue depuis workspace.user.toml/workspace.toml par
+    # resolve_source(), ex. un athlète intervals qui relance sans --source) ou
+    # "défaut" (jamais configuré nulle part : garmin).
+    recap_line "Source de données" "$SOURCE" \
+        "$([[ "$EXPLICIT_SOURCE" -eq 1 ]] && echo "explicite" || { [[ "$SOURCE" != "garmin" ]] && echo "config" || echo "défaut"; })"
     # Les préréglages ne touchent jamais au staff d'agents (voir apply_preset) :
     # « défaut » veut dire ici config/workspace.user.toml ou, à défaut, tous.
     recap_line "Agents" "$ENABLED_AGENTS" "$([[ "$EXPLICIT_AGENTS" -eq 1 ]] && echo "explicite" || echo "défaut")"
-    recap_line "Auth Garmin" \
+    recap_line "$([[ "$SOURCE" == "intervals" ]] && echo "Auth Intervals.icu" || echo "Auth Garmin")" \
         "$([[ "$DO_AUTH" -eq 1 ]] && echo "activée" || echo "sautée")" "$(_config_origin "$EXPLICIT_DO_AUTH")"
     recap_line "Passerelle leanproxy" \
         "$([[ "$USE_LEANPROXY" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_LEANPROXY")"
@@ -1393,6 +1554,7 @@ main() {
     resolve_workspace
     workspace_is_separate && log "Workspace : $WORKSPACE_ROOT (--workspace)"
     resolve_agents
+    resolve_source
     print_config_recap
     [[ "$DRY_RUN" -eq 1 ]] && warn "Mode dry-run : aucune modification ne sera effectuée."
     echo

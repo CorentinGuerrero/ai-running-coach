@@ -135,37 +135,43 @@ a été faite avec `./install.sh --source intervals` (ou `[data].source =
 ### Correspondance des outils — Garmin ↔ intervals.icu (#68)
 
 Ne s'applique que si `[data].source = "intervals"`. Même déclencheur, même
-cadence, même persistance MD, même contrat `arc` que documentés partout
-ailleurs dans ce fichier et dans `agents/coach.md`/`agents/medical.md` — seul
-le nom de l'outil change. Noms vérifiés dans le code source du serveur
-(`src/intervals_icu_mcp/tools/*.py`, commit de référence documenté dans
-`docs/intervals-setup.md`), jamais devinés.
+cadence, même persistance MD, même contrat `arc` **pour les lectures**.
+**Le push de séances n'est PAS un simple changement de nom d'outil** — voir
+l'avertissement sous la table. Noms et formes de réponse vérifiés dans le code
+source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
+`response_builder.py`, commit `cb91d4a` — épinglé par `INTERVALS_MCP_REF` dans
+`install.sh`, documenté dans `docs/intervals-setup.md`), jamais devinés.
 
 | Besoin | Outil `garmin` | Outil `intervals` | Note |
 |---|---|---|---|
 | HRV nocturne | `get_hrv_data` | `get_wellness_for_date` (`heart.hrv_rmssd`/`heart.hrv_sdnn`) | Un seul appel intervals.icu couvre HRV + FC de repos + sommeil. |
 | FC de repos | `get_rhr_day` | `get_wellness_for_date` (`heart.resting_hr`) | Idem — ne PAS appeler `get_wellness_data` (plage de dates) pour un seul jour. |
 | Sommeil | `get_sleep_data` | `get_wellness_for_date` (`sleep.*`) | |
-| Readiness algorithmique | `get_training_readiness` | **aucun équivalent** | intervals.icu n'expose que `subjective.readiness` (auto-déclaré par l'athlète, pas un score calculé) — jamais présenté comme équivalent. Dire explicitement l'indisponibilité (voir `[health].morning_check` ci-dessus). |
+| Readiness algorithmique | `get_training_readiness` | **aucun équivalent** | intervals.icu n'expose que `subjective.readiness` — une valeur manuelle dans le champ wellness du jour, qui peut venir de l'athlète OU d'un appareil tiers synchronisé (Oura, Whoop...), jamais un score calculé par intervals.icu lui-même — jamais présenté comme équivalent au Training Readiness Garmin. Dire explicitement l'indisponibilité (voir `[health].morning_check` ci-dessus). |
 | Activités récentes | `get_activities` / `get_activities_by_date` | `get_recent_activities` | |
-| Détail d'une activité | `get_activity` | `get_activity_details` | |
+| Détail d'une activité | `get_activity` | `get_activity_details` | Pas de fréquence cardiaque de récupération (HRR/`recovery_hr_bpm`) ni de `splits` par km sur ce serveur — champs omis, jamais inventés (impacte aussi `course-comparison`, qui exige `splits`). |
 | Événements planifiés | `get_calendar_events` / `get_scheduled_workouts` | `get_calendar_events` / `get_upcoming_workouts` | |
-| Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | |
-| Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | Passe par le skill `intervals-icu-best-practices` (`workout_doc`, vérification `start_date`) au lieu de `garmin-workout-scheduling`. |
-| Modifier/supprimer une séance planifiée | `delete_workout` / `unschedule_workout` | `update_event` / `delete_event` | |
+| Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | Ne renvoie que id/date/name/category/description/type/metrics — jamais de structure de séance. |
+| Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | **Pas un remplacement direct** — charger le skill `intervals-icu-best-practices` (pas `garmin-workout-scheduling`) : `create_event`/`update_event` n'ont PAS de paramètre structuré (pas de `workout_doc`) ; les cibles (#60) s'écrivent en texte dans `description` ; aucun upsert n'existe (vérifier `get_calendar_events` avant chaque push, pas de réutilisation de `workout_id`) ; la vérification post-push ne porte que sur les champs que `get_event` renvoie réellement. |
+| Modifier/supprimer une séance planifiée | `delete_workout` / `unschedule_workout` | `update_event` / `delete_event` | `update_event` exige un `event_id` déjà existant — jamais un upsert. |
 | Profil athlète (référence, jamais substitué au profil déclaré) | — | `get_athlete_profile` | |
 | Charge/forme (vocabulaire générique du projet, jamais les noms TrainingPeaks) | — (calculée par `scripts/arc_index.py`) | `get_fitness_summary` | Ne jamais citer `ctl`/`atl`/`form` sous ces noms dans une réponse — reformuler en charge/condition/fatigue/forme comme partout ailleurs (`docs/marques.md`). |
 
-**Fonctionnalités Garmin sans portage intervals.icu dans cette story —
-indisponibles et EXPLIQUÉES comme telles quand `[data].source = "intervals"`,
-jamais devinées ou simulées :**
+**Fonctionnalités/champs Garmin sans portage intervals.icu dans cette story —
+indisponibles et EXPLIQUÉS comme tels quand `[data].source = "intervals"`,
+jamais devinés ou simulés :**
 
 - **Téléchargement FIT** (skill `fit-download`, `session-parts-analyzer`, et
   tout KPI qui en dépend — GAP, VAM, décrochage cardiaque, durabilité) : le
   script `scripts/download_fit.py` est câblé sur `garminconnect` + les tokens
-  `~/.garminconnect`, pas sur l'API intervals.icu. Dire à l'athlète que
-  l'analyse sub-km n'est pas disponible avec cette source plutôt que d'inventer
-  des valeurs FIT.
+  `~/.garminconnect`, pas sur l'API intervals.icu. Non porté dans cette story
+  (#68) — dire à l'athlète que l'analyse sub-km n'est pas disponible avec
+  cette source plutôt que d'inventer des valeurs FIT.
+- **Fréquence cardiaque de récupération (HRR, `recovery_hr_bpm`) et `splits`
+  par km** : absents des activités synchronisées côté intervals.icu (voir la
+  table ci-dessus) — omis du bloc `arc`, jamais inventés ; `course-comparison`
+  (qui exige `splits`) n'est donc pas utilisable sur des activités
+  synchronisées depuis cette source.
 - **Upload de parcours** (`upload_course`, agent `course-strategist`) :
   `course-strategist` reste limité à l'analyse GPX locale (skill
   `gpx-analysis`) — pas d'envoi du parcours vers la montre/l'app tierce.

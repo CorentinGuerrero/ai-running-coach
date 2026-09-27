@@ -76,21 +76,23 @@ temps) plutôt qu'en remplacement complet de Garmin :
    ([`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp))
    pour l'installation exacte (clone + `uv sync`, ou `uv tool install`
    directement — voir [Configuration Intervals.icu](intervals-setup.md)).
-2. Ajoutez-le manuellement à la configuration MCP de votre IDE. Ne committez
-   jamais votre clé API : fournissez-la via une variable d'environnement de
-   votre shell (`env` supporte les références `${VAR}` selon l'IDE) plutôt que
-   de l'écrire en clair dans `.mcp.json` :
+2. Ajoutez-le manuellement à la configuration MCP de votre IDE — **jamais de
+   secret dans `.mcp.json`**, et **jamais un bloc `env` avec `${VAR}`** : le
+   serveur charge ses identifiants depuis un `.env` relatif à SON répertoire
+   de travail (`pydantic-settings`), pas depuis une variable passée par
+   l'IDE, qui démarre le processus dans le dossier du projet — voir
+   [Configuration Intervals.icu](intervals-setup.md#pourquoi-un-wrapper-et-pas-une-variable-denvironnement)
+   pour le détail et pourquoi `install.sh --source intervals` écrit un petit
+   script wrapper à la place. Si vous clonez le dépôt vous-même, `uv run
+   --directory /chemin/vers/intervals-icu-mcp intervals-icu-mcp` fixe le même
+   répertoire de travail sans wrapper :
 
    ```json
    {
      "mcpServers": {
        "intervals": {
-         "command": "intervals-icu-mcp",
-         "args": [],
-         "env": {
-           "INTERVALS_ICU_API_KEY": "${INTERVALS_ICU_API_KEY}",
-           "INTERVALS_ICU_ATHLETE_ID": "${INTERVALS_ICU_ATHLETE_ID}"
-         }
+         "command": "uv",
+         "args": ["run", "--directory", "/chemin/vers/intervals-icu-mcp", "intervals-icu-mcp"]
        }
      }
    }

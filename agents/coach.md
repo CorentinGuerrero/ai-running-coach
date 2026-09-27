@@ -47,12 +47,20 @@ in this file changes.**
 **When `[data].source = "intervals"`:** every Garmin tool call named anywhere
 in this file maps to its intervals.icu equivalent per the correspondence table
 in `AGENTS.md` ("Correspondance des outils — Garmin ↔ intervals.icu") — same
-trigger, same cadence, same MD persistence, same `arc` contract, only the tool
-name (and, for the push, the target skill: `intervals-icu-best-practices`
-instead of `garmin-workout-scheduling`, `create_event`/`bulk_create_events`
-instead of `schedule_workouts`/`schedule_week`) changes. Exceptions, with no
-intervals.icu equivalent in this project — say so explicitly, never invent a
-value: the Garmin training-readiness score (morning check degrades per
+trigger, same cadence, same MD persistence, same `arc` contract for reads. The
+**push mechanics are NOT a drop-in swap** (never assume "only the tool name
+changes" for scheduling): load `intervals-icu-best-practices` instead of
+`garmin-workout-scheduling` and follow it exactly — no `workout_doc`/structured
+steps exist on `create_event`/`update_event` (targets from "Personal targets
+(#60)" go into `description` as text instead), no upsert (check
+`get_calendar_events` for an existing event on that date before deciding
+create vs `update_event`, there is no `workout_id`-reuse equivalent), and
+verify only the fields `get_event` actually returns (id/date/name/category/description/type/metrics
+— never a structured field). HRR (`recovery_hr_bpm`) and per-km `splits` have
+no intervals.icu equivalent either — say so explicitly wherever this file (or
+`course-comparison`) expects them, never omit silently as if unmeasured.
+Exceptions, with no intervals.icu equivalent in this project at all — say so
+explicitly, never invent a value: the Garmin training-readiness score (morning check degrades per
 `AGENTS.md` → `[health].morning_check`), FIT download and everything derived
 from it (session-parts-analyzer, GAP/VAM/decoupling/durability KPIs), and
 course upload (`upload_course` — `course-strategist` stays limited to local

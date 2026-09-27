@@ -25,6 +25,8 @@ REPO = Path(__file__).resolve().parent.parent.parent
 COACH = (REPO / "agents/coach.md").read_text(encoding="utf-8")
 MEDICAL = (REPO / "agents/medical.md").read_text(encoding="utf-8")
 AGENTS_MD = (REPO / "AGENTS.md").read_text(encoding="utf-8")
+DAILY_SYNC_SKILL = (REPO / "skills/garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
+INSTALL_SH = (REPO / "install.sh").read_text(encoding="utf-8")
 
 # Phrases Garmin-mode telles qu'écrites avant #68 — copiées verbatim depuis
 # `agents/coach.md`/`agents/medical.md` (git blame antérieur à cette story).
@@ -46,6 +48,21 @@ MEDICAL_GARMIN_SENTENCES = [
     "Use `get_rhr_day` — never pull `get_sleep_data` (>400 KB) just to read resting HR.",
 ]
 
+# Idem pour skills/garmin-daily-sync/SKILL.md.
+DAILY_SYNC_GARMIN_SENTENCES = [
+    "fetch from the `garmin` MCP\n   > server: activities (with splits and `recovery_hr_bpm`), "
+    "sleep, HRV, training readiness,",
+]
+
+# Idem pour AGENTS.md — la règle "secondaire sinon" doit rester la règle par
+# défaut (source garmin, jamais configurée) : c'est la phrase qui dit que rien
+# n'installe/n'active intervals.icu sans que l'athlète l'ait demandé.
+AGENTS_MD_GARMIN_SENTENCES = [
+    "**SECONDAIRE sinon** (défaut) : uniquement si l'utilisateur le demande "
+    "explicitement (skill `intervals-icu-best-practices`), serveur non installé "
+    "par `install.sh`, configuration manuelle (`docs/faq.md`).",
+]
+
 
 class TestGarminModeTextUnchanged(unittest.TestCase):
     def test_coach_garmin_sentences_still_present_verbatim(self):
@@ -64,6 +81,24 @@ class TestGarminModeTextUnchanged(unittest.TestCase):
             "agents/medical.md : phrase(s) Garmin-mode modifiée(s) ou supprimée(s) — "
             "vérifier qu'aucun comportement source=garmin n'a changé (#68) :\n  "
             + "\n  ".join(missing),
+        )
+
+    def test_daily_sync_skill_garmin_sentences_still_present_verbatim(self):
+        missing = [s for s in DAILY_SYNC_GARMIN_SENTENCES if s not in DAILY_SYNC_SKILL]
+        self.assertFalse(
+            missing,
+            "skills/garmin-daily-sync/SKILL.md : phrase(s) Garmin-mode modifiée(s) — "
+            "vérifier qu'aucun comportement source=garmin n'a changé (#68) :\n  "
+            + "\n  ".join(missing),
+        )
+
+    def test_agents_md_secondary_rule_still_present_verbatim(self):
+        missing = [s for s in AGENTS_MD_GARMIN_SENTENCES if s not in AGENTS_MD]
+        self.assertFalse(
+            missing,
+            "AGENTS.md : la règle « secondaire sinon » a changé — intervals.icu ne "
+            "doit jamais devenir actif sans que [data].source = \"intervals\" soit "
+            "explicitement configuré (#68) :\n  " + "\n  ".join(missing),
         )
 
 
@@ -95,10 +130,45 @@ class TestDataSourceDocumented(unittest.TestCase):
         self.assertIn('source = "garmin"', toml_text)
 
     def test_install_sh_exposes_source_flag_for_both_values(self):
-        install_sh = (REPO / "install.sh").read_text(encoding="utf-8")
-        self.assertIn("--source", install_sh)
-        self.assertIn("garmin|intervals", install_sh)
-        self.assertIn("install_intervals_mcp", install_sh)
+        self.assertIn("--source", INSTALL_SH)
+        self.assertIn("garmin|intervals", INSTALL_SH)
+        self.assertIn("install_intervals_mcp", INSTALL_SH)
+
+    def test_install_sh_only_persists_source_when_explicit(self):
+        """Une installation Garmin par défaut ne doit JAMAIS écrire [data] dans
+        workspace.user.toml (revue PR #116, blocker 2) — sinon un simple
+        `./install.sh` diffère de main pour tout le monde."""
+        self.assertIn('[[ "$EXPLICIT_SOURCE" -eq 1 ]] || return 0', INSTALL_SH)
+
+    def test_install_sh_resolves_source_from_existing_config(self):
+        """Un rerun sans --source ne doit jamais faire revenir un athlète
+        intervals.icu vers garmin (revue PR #116, blocker 2)."""
+        self.assertIn("resolve_source", INSTALL_SH)
+        self.assertIn("--section data --key source --default garmin", INSTALL_SH)
+
+    def test_install_sh_never_puts_credentials_in_mcp_env_block(self):
+        """Ni .env (introuvable au démarrage du serveur par l'IDE) ni ${VAR}
+        (jamais exporté, jamais interpolé par tous les IDE) — voir
+        write_intervals_wrapper() (revue PR #116, blocker 1). La chaîne
+        `INTERVALS_ICU_API_KEY` reste CITÉE en commentaire (pour expliquer
+        pourquoi elle est évitée) : seul le corps réel des deux fonctions qui
+        construisent la config MCP ne doit plus jamais l'injecter dans un
+        `printf`."""
+        import re
+
+        for fn in ("mcp_server_value_intervals", "mcp_server_value_intervals_opencode"):
+            match = re.search(rf"^{fn}\(\) \{{(.*?)^\}}", INSTALL_SH, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(match, f"fonction {fn}() introuvable dans install.sh")
+            body = match.group(1)
+            for line in body.splitlines():
+                if line.strip().startswith("printf"):
+                    self.assertNotIn("INTERVALS_ICU_API_KEY", line, f"{fn}() : secret dans le printf JSON")
+        self.assertIn("write_intervals_wrapper", INSTALL_SH)
+        self.assertIn("INTERVALS_ENV_DIR/run.sh", INSTALL_SH)
+
+    def test_install_sh_pins_the_intervals_server_commit(self):
+        self.assertIn("INTERVALS_MCP_REF=", INSTALL_SH)
+        self.assertIn("@cb91d4a", INSTALL_SH)
 
 
 if __name__ == "__main__":
