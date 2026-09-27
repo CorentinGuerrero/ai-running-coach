@@ -150,6 +150,39 @@ Deux champs de la section « Physiologie » alimentent le
 [tableau de bord](dashboard/index.md) : **FC max** et **FC de repos de référence**
 (la **FC au seuil** et le **sexe**, facultatifs, affinent le calcul de charge).
 
+### Méthode des zones FC — `[athlete].hr_zones`
+
+```toml
+[athlete]
+hr_zones = "auto"   # auto | lthr | karvonen | percent_max
+```
+
+Détermine comment le temps en zone et la polarisation 80/20 (#43) sont
+calculés à partir des champs de la section « Physiologie » du profil :
+
+| Valeur | Méthode | Repli si le champ requis manque |
+|---|---|---|
+| `auto` (défaut) | FC au seuil (LTHR) si connue, sinon Karvonen (FC max/repos), sinon %FCmax (FC max seule) | — c'est la précédence elle-même |
+| `lthr` | Force la FC au seuil | Rien (jamais de repli implicite) |
+| `karvonen` | Force la réserve FC (FC max − FC repos) | Rien si FC max ou repos absente |
+| `percent_max` | Force le %FCmax | Rien si FC max absente |
+
+Une valeur autre que `auto` **force** cette méthode, sans repli automatique
+vers une autre si le champ requis manque au profil.
+
+## Les métriques dérivées — `[metrics]`
+
+```toml
+[metrics]
+climb_min_gain_m = 50.0      # m, gain d'altitude minimal pour détecter une montée
+climb_min_grade_pct = 5.0    # points de %, pente moyenne minimale
+```
+
+Détection des montées (VAM, #46) : les **deux** critères doivent être atteints
+pour qu'une montée soit reconnue. Ajustez au terrain habituel — montez
+`climb_min_gain_m` en plaine vallonnée pour ignorer les faux plats,
+descendez-le en montagne pour capter de courts raidillons.
+
 ## Les garde-fous — `[guardrails]`
 
 ```toml
@@ -162,7 +195,19 @@ r3_elevation_increase_max_pct = 10.0
 r4_monotony_max = 2.0
 r6_long_run_share_max_pct = 35.0
 severity_r1_acwr_projected = "warn"     # info | warn | block
+severity_r2_weekly_volume_jump = "warn"
+severity_r3_weekly_elevation_jump = "warn"
+severity_r4_monotony_projected = "warn"
+severity_r5_quality_after_red = "block"
+severity_r6_long_run_share = "warn"
+severity_r7_consecutive_quality = "warn"
 ```
+
+Chaque règle (R1 à R7) a sa propre clé `severity_<id>` — seule R5 (qualité
+après un verdict santé rouge) bloque par défaut, les autres sont `warn`. Le
+détail de chaque règle (R2 : hausse de volume, R3 : hausse de D+, R4 :
+monotonie de Foster, R6 : part de la plus longue sortie, R7 : deux séances de
+qualité rapprochées) est dans [Les garde-fous](guardrails.md#les-sept-regles).
 
 Le moteur de garde-fous déterministe ([`scripts/arc_guardrails.py`](guardrails.md))
 est un second avis purement calculé, consulté par le coach avant d'écrire une
@@ -184,6 +229,13 @@ les sources et le format de sortie.
     fermeté.
 
 ## Le drapeau de risque de blessure
+
+!!! note "Section absente de `config/workspace.toml` par défaut"
+    Contrairement aux sections ci-dessus, `[injury_risk]` n'a pas de valeurs
+    livrées dans `config/workspace.toml` — chaque seuil a un défaut intégré au
+    script (`scripts/arc_guardrails.py`). Le bloc ci-dessous n'est utile que si
+    vous voulez **surcharger** un ou plusieurs seuils : ajoutez-le à
+    `config/workspace.user.toml` avec uniquement les clés que vous changez.
 
 ```toml
 [injury_risk]
@@ -220,9 +272,26 @@ essayés. L'adresse d'écoute, elle, n'est pas réglable : `127.0.0.1` uniquemen
 [conteneur Docker](dashboard/docker.md) écoute ailleurs, derrière un reverse proxy
 authentifié.
 
-## Langue, notifications, synchronisation
+## La langue — `[language]`
 
-`[language]`, `[notifications]` et `[sync]` sont décrits dans
+```toml
+[language]
+documents = "fr"    # code ISO 639-1 des fichiers Markdown persistés
+responses = "auto"  # auto = même langue que la requête de l'utilisateur
+```
+
+| Clé | Effet |
+|---|---|
+| `documents` | Langue des fichiers Markdown écrits par les agents/skills (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`) — titres, tableaux, labels, contenu. Défaut `fr`. |
+| `responses` | Langue des réponses à l'utilisateur dans la conversation. `auto` (défaut) reprend la langue de la requête ; une valeur explicite (`en`, `nl`…) la fige, y compris pour les commandes headless (`/garmin-daily-sync`) qui n'ont pas de requête à imiter. |
+
+Les instructions des agents/skills restent en anglais ou en français selon le
+fichier — seule la langue de *sortie* (documents persistés, réponses) est
+réglée ici.
+
+## Notifications et synchronisation
+
+`[notifications]` et `[sync]` sont décrits dans
 [Votre workspace privé](workspace.md) et [Le coach dans la poche](mobile.md).
 
 ## Vérifier

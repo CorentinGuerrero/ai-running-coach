@@ -1,4 +1,4 @@
-# 🧑‍💻 IDE supportés
+# IDE supportés
 
 `ai-running-coach` supporte **6 IDE** avec une configuration automatique via le script d'installation.
 

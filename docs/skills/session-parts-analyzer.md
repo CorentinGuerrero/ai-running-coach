@@ -1,4 +1,4 @@
-# 🔬 Skill : Analyse de séances
+# Skill : Analyse de séances
 
 > **Description** : Analyse de portions spécifiques d'une séance Garmin (lignes droites, montées, sprints, intervalles, dernier km, récupérations, etc.) — détection des segments par vitesse/FC/élévation et rapport des métriques d'exécution par segment.
 

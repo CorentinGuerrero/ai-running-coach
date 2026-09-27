@@ -1,4 +1,4 @@
-# 📊 Skill : Comparaison de parcours
+# Skill : Comparaison de parcours
 
 > **Description** : Analyse comparative générique de séances sur un même parcours/lieu (ex. toutes les « Tournai Trail ») — découverte des activités via Garmin, alignement des boucles/segments comparables, montées, et rapport Markdown comparatif.
 

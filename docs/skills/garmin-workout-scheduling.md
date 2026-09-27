@@ -1,4 +1,4 @@
-# 📅 Skill : Planification Garmin
+# Skill : Planification Garmin
 
 > **Description** : Push de séances planifiées directement dans le calendrier Garmin Connect via le serveur MCP `garmin` (outils `schedule_workouts` / `schedule_week` / `upload_workout`).
 

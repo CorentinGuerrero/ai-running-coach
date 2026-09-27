@@ -1,4 +1,4 @@
-# 🚀 Démarrage rapide
+# Démarrage rapide
 
 Ce guide vous permet d'installer et de configurer `ai-running-coach` en quelques minutes.
 
@@ -50,6 +50,7 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 | `--no-auth` | Saute l'authentification Garmin |
 | `--auth` | Force l'authentification Garmin (annule un `--no-auth` composé par un préréglage) |
 | `--use-leanproxy` | Mode passerelle leanproxy-mcp (power user, optionnel) |
+| `--skip-leanproxy` | Mode direct (défaut) — annule un `--use-leanproxy` composé par un préréglage |
 | `--workspace DIR` | Données et configs IDE dans `DIR` (votre dépôt privé), moteur lié — voir [Votre workspace privé](workspace.md) |
 | `--daily-sync` | Synchronisation Garmin automatique (cron/launchd) + notification — voir [Le coach dans la poche](mobile.md) |
 | `--no-daily-sync` | Désactive la synchronisation (annule un `--daily-sync` composé par un préréglage) |

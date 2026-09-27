@@ -1,4 +1,4 @@
-# 📈 Skill : Intervals.icu
+# Skill : Intervals.icu
 
 > **Description** : Création, mise à jour et dépannage d'événements ou workouts Intervals.icu via les outils MCP Intervals.icu (`add_or_update_event`, `get_events`, `delete_event`).
 

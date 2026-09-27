@@ -1,4 +1,4 @@
-# 📊 Tableau de bord
+# Tableau de bord
 
 Le coach écrit tout dans votre workspace : séances, nuits, météo, plans, rapports.
 Le tableau de bord met ces fichiers **sous vos yeux** : courbe de forme, bilan du
@@ -68,7 +68,7 @@ détaillée : comment la lire, d'où viennent ses données, que faire si elle es
 
     Polarisation 80/20, découplage aérobie, VAM, efficacité en descente,
     durabilité et segments de montée — tout ce qui vient des échantillons FIT
-    (capture d'écran à venir).
+    téléchargés par le skill [`fit-download`](../skills/fit-download.md).
 
 -   [![Santé](../assets/dashboard/vignette-sante.webp)](views.md#sante)
 
@@ -98,6 +98,13 @@ détaillée : comment la lire, d'où viennent ses données, que faire si elle es
     VO2max estimée, temps prédits pour votre objectif, records au kilomètre — et
     toutes les hypothèses.
 
+-   [![Trail Shape](../assets/dashboard/vignette-trail-shape.webp)](views.md#trail-shape)
+
+    **[Trail Shape](views.md#trail-shape)** · *Suis-je prêt pour mon objectif ?*
+
+    Un score sur 100 : volume, plus longue sortie et D+ des huit dernières semaines
+    face aux exigences de la course — chaque composante détaillée, jamais un verdict.
+
 -   [![Calendrier](../assets/dashboard/vignette-calendrier.webp)](views.md#calendrier)
 
     **[Calendrier](views.md#calendrier)** · *Suis-je régulier ?*
@@ -108,7 +115,7 @@ détaillée : comment la lire, d'où viennent ses données, que faire si elle es
 -   **[Décisions](views.md#decisions)** · *Pourquoi cette séance a-t-elle changé ?*
 
     Le journal de chaque ajustement du coach — bilan matinal, garde-fou, blessure,
-    météo, demande de l'athlète — avec ce qui l'a justifié (capture d'écran à venir).
+    météo, demande de l'athlète — avec ce qui l'a justifié, filtrable par déclencheur.
 
 -   [![Rapports](../assets/dashboard/vignette-rapport.webp)](views.md#rapports)
 

@@ -1,4 +1,4 @@
-# 📥 Skill : Téléchargement FIT
+# Skill : Téléchargement FIT
 
 > **Description** : Téléchargement de fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassant le canal MCP**.
 

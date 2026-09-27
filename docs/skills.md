@@ -1,4 +1,4 @@
-# 🛠️ Skills
+# Skills
 
 <div class="arc-page-banner" markdown>
 ![](assets/ridge.jpg)
@@ -39,6 +39,13 @@ Les agents chargent les skills **à la demande** via l'outil `skill` de leur IDE
 - L'agent **coach** charge `garmin-workout-scheduling` avant de pousser des séances dans Garmin
 - L'agent **course-strategist** charge `gpx-analysis` pour analyser un parcours
 
+Cinq skills sont aussi des **commandes courtes**, invocables directement par
+leur nom (`/today`, `/why`, `/week`, `/race`, `/log`) plutôt que chargées par
+un agent : format de sortie prévisible, pensées pour un usage rapide depuis
+le téléphone. Les quatre premières délèguent en lecture seule à `coach`
+(jamais d'écriture) ; `/log` écrit dans `activities/`/`medical/` via `coach`,
+`nutritionist` ou `medical` selon le staff installé.
+
 ## Structure d'un skill
 
 ```
@@ -50,7 +57,7 @@ skills/<nom-du-skill>/
 
 ## Scripts Python
 
-Certains skills incluent des scripts Python :
+Certains skills incluent des scripts Python, dans leur propre dossier :
 
 | Script | Skill | Dépendances |
 |---|---|---|
@@ -60,3 +67,48 @@ Certains skills incluent des scripts Python :
 | `download_fit.py` | fit-download | `garminconnect` + `fitparse` (via l'environnement garmin-mcp) |
 | `coach_setup.py` | coach-setup | stdlib uniquement |
 | `coach_doctor.py` | coach-doctor | stdlib uniquement |
+
+D'autres vivent directement dans `scripts/` (le moteur), appelés par les
+agents ou par les commandes courtes plutôt que par un skill dédié :
+
+| Script | Appelé par | Rôle |
+|---|---|---|
+| `arc_index.py` | tous les agents, `/today` `/why` `/week` `/race`, le tableau de bord | Index SQLite dérivé + toutes les commandes de lecture (voir ci-dessous) |
+| `arc_guardrails.py` | `coach`, `garmin-workout-scheduling`, `/week` | Garde-fous déterministes (`check`) et drapeau composite de risque de blessure (`injury-risk`) — voir [Les garde-fous](guardrails.md) |
+| `arc_log.py` | skill `log` (`/log`) | Arithmétique, correspondance catalogue et fusion idempotente pour la saisie libre |
+| `arc_race_pacing.py` | `course-strategist` | Allures de course par segment depuis le modèle personnel pente → allure (#59) |
+| `arc_race_debrief.py` | `coach`, `course-strategist` | Débrief post-course plan vs réalisé, par segment (#61) |
+| `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60) |
+| `arc_trail_shape.py` | `coach`, `/race` | Score Trail Shape, préparation à l'objectif actif (#63) |
+
+### Sous-commandes de `arc_index.py`
+
+```bash
+python3 scripts/arc_index.py <commande> [options]
+```
+
+| Commande | Rôle |
+|---|---|
+| `index` | (Re)construit l'index SQLite dérivé depuis le Markdown du workspace |
+| `status` | État de l'index (fichiers indexés/hors contrat, couverture des échantillons FIT) |
+| `backfill-plan` | Liste les fichiers hors contrat et les collisions de semaine à corriger |
+| `hrv-baseline` | Baseline HRV personnelle (moyenne glissante 7 j de ln(HRV) vs référence 60 j ± 0,5 ET) |
+| `sleep-debt` | Dette de sommeil sur 7 jours (#37) |
+| `heat-acclimation` | Séances « chaudes » sur 14 jours vs `[health].heat_threshold_c` (#38) |
+| `gear` | Kilométrage des chaussures et seuils d'alerte (#40) |
+| `performance-index` | Lecture des indices ITRA/UTMB déclarés au profil (#62) |
+| `fueling` | Plafond de glucides/h réellement toléré (sorties longues running/trail, #41) |
+| `samples` | Échantillons FIT bruts d'une activité (`--activity`) |
+| `zones` | Temps en zone + polarisation 80/20 (#43) |
+| `gap` | Allure ajustée à la pente (GAP, modèle de Minetti) |
+| `decoupling` | Découplage Pa:HR / efficacité aérobie |
+| `vam` | Vitesse ascensionnelle moyenne, par montée détectée et par fenêtre (#46) |
+| `descent` | Efficacité en descente |
+| `durability` | Fade d'endurance sur séance longue (> 90 min) |
+| `climb-history` | Historique d'une montée reconnue d'une séance à l'autre (`--segment`, #49) |
+| `decisions` | Journal des décisions tracées (filtrable par date, fenêtre, déclencheur, issue) |
+| `slope-model` | Modèle personnel pente → allure (#58) |
+| `trail-shape` | Score Trail Shape (#63) |
+
+`python3 scripts/arc_index.py --help` liste toutes les options associées à
+chaque commande.

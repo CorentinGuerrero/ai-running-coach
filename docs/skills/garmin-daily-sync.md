@@ -1,4 +1,4 @@
-# 🔁 Skill : Sync quotidienne (headless)
+# Skill : Sync quotidienne (headless)
 
 > **Description** : prompt d'orchestration versionné pour la synchronisation Garmin **sans surveillance** — lancé par le cron (`scripts/daily-sync.sh`), depuis le téléphone (`/garmin-daily-sync` dans une session Remote Control) ou depuis l'IDE.
 

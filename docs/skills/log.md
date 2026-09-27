@@ -1,4 +1,4 @@
-# 📝 Skill : `/log` — saisie libre
+# Skill : `/log` — saisie libre
 
 > **Description** : Journal en une phrase — ravitaillement, hydratation, douleur, RPE — converti en blocs `arc` structurés, sans jamais inventer une valeur nutritionnelle.
 

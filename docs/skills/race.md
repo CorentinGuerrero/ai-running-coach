@@ -21,7 +21,7 @@ Le compte à rebours (`objective.days_left`) et le score viennent de
 |---|---|
 | `no_objective` | `Course — aucun objectif actif (planning/active_objective.md absent ou incomplet).` |
 | `incomplete_objective` | Compte à rebours si connu, score indisponible (distance/dénivelé manquant — jamais deviné) |
-| `race_past` | `Course — la course est passée (J+<jours>) : voir un débrief plutôt qu'une préparation.` |
+| `race_past` | `Course — la course est passée (J+<jours>) : voir un débrief plutôt qu'une préparation.` — voir [le débrief post-course](../agents/coach.md#debrief-post-course-61) |
 | `race_too_short` | Compte à rebours conservé, score non applicable à cette distance |
 | `ok` | Première ligne fixe : `Course — J-<objective.days_left> <nom de la course>, Trail Shape <score>` |
 
