@@ -5,8 +5,53 @@ Les deux chemins sont testés sur les deux OS grâce au stub `uname`.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from tests.lib.asserts import InstallAsserts
 from tests.lib.sandbox import Sandbox
+
+
+class TestDataSourceAwareTools(InstallAsserts):
+    """`[data].source` (#68) doit décider les outils autorisés en mode
+    headless — sinon `/garmin-daily-sync` reste câblé sur `mcp__garmin` même
+    quand la source configurée est `intervals`, et ne peut plus rien faire
+    (revue PR #116, blocker 3)."""
+
+    def _workspace(self, sb: Sandbox, source: str | None) -> Path:
+        ws = sb.root / "workspace"
+        (ws / "config").mkdir(parents=True)
+        (ws / "logs").mkdir()
+        lines = ['[sync]', 'runner = "claude"', "", '[notifications]', 'provider = "none"']
+        if source is not None:
+            lines += ["", "[data]", f'source = "{source}"']
+        (ws / "config/workspace.user.toml").write_text("\n".join(lines) + "\n")
+        return ws
+
+    def test_intervals_source_allows_the_intervals_server_only(self):
+        with Sandbox() as sb:
+            ws = self._workspace(sb, "intervals")
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "mcp__intervals")
+            self.assertOutputLacks(proc, "mcp__garmin")
+            self.assertOutputLacks(proc, "mcp__leanproxy")
+
+    def test_default_source_allows_the_garmin_server(self):
+        with Sandbox() as sb:
+            ws = self._workspace(sb, None)
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "mcp__garmin")
+            self.assertOutputContains(proc, "mcp__leanproxy")
+            self.assertOutputLacks(proc, "mcp__intervals")
+
+    def test_explicit_garmin_source_matches_default(self):
+        with Sandbox() as sb:
+            ws = self._workspace(sb, "garmin")
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "mcp__garmin")
+            self.assertOutputLacks(proc, "mcp__intervals")
 
 EXISTING_CRONTAB = """\
 # ma crontab à moi

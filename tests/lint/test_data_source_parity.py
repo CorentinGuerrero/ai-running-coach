@@ -26,6 +26,7 @@ COACH = (REPO / "agents/coach.md").read_text(encoding="utf-8")
 MEDICAL = (REPO / "agents/medical.md").read_text(encoding="utf-8")
 AGENTS_MD = (REPO / "AGENTS.md").read_text(encoding="utf-8")
 DAILY_SYNC_SKILL = (REPO / "skills/garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
+DAILY_SYNC_SH = (REPO / "scripts/daily-sync.sh").read_text(encoding="utf-8")
 INSTALL_SH = (REPO / "install.sh").read_text(encoding="utf-8")
 
 # Phrases Garmin-mode telles qu'écrites avant #68 — copiées verbatim depuis
@@ -169,6 +170,15 @@ class TestDataSourceDocumented(unittest.TestCase):
     def test_install_sh_pins_the_intervals_server_commit(self):
         self.assertIn("INTERVALS_MCP_REF=", INSTALL_SH)
         self.assertIn("@cb91d4a", INSTALL_SH)
+
+    def test_daily_sync_skips_garmin_token_checks_in_intervals_mode(self):
+        """check_token_alert() ne doit jamais tourner sous source=intervals —
+        intervals-icu-mcp n'a pas d'échéance de token OAuth comparable, et
+        `coach_doctor.py --check garmin_token` n'a rien à y lire (revue PR #116,
+        blocker 3)."""
+        self.assertIn('[[ "$SOURCE" == "garmin" ]] || return 0', DAILY_SYNC_SH)
+        self.assertIn('SOURCE="$(toml_get data source garmin)"', DAILY_SYNC_SH)
+
 
 
 if __name__ == "__main__":
