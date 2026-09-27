@@ -79,6 +79,13 @@ Pour chaque séance, le coach fournit :
   4. Sinon → demander à l'utilisateur
 - **Sortie par séance** : catégorie météo (🟢/🟡/🟠/🔴), heure optimale, ajustements concrets
 
+### Indices de performance (ITRA / UTMB)
+
+- **Lecture seule** : lit les indices ITRA/UTMB déclarés dans `planning/Runner_Profile.md` (`python3 scripts/arc_index.py performance-index`) pour calibrer un objectif ou discuter du niveau de l'athlète
+- **Aucune récupération automatique** : ni un script de ce dépôt, ni le coach de sa propre initiative, ne va chercher ces valeurs sur `itra.run`/`utmb.world`
+- **Sur demande explicite seulement** : si l'athlète demande une recherche, l'agent utilise son propre outil web, montre la valeur trouvée et sa source, et demande confirmation avant de l'écrire dans le profil
+- **Pas de formule inventée** : jamais de conversion numérique indice → allure/temps ; au mieux une « approximation du projet » propre à l'athlète
+
 ## Skills utilisés
 
 | Skill | Quand |

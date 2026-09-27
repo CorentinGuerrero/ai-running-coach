@@ -839,6 +839,225 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Indices de performance (#62) : ITRA / UTMB — sous-section « Historique des
+# indices » du profil, une puce datée par relevé, sur le même principe que
+# `parse_gear` (langage libre, pas des puces « Libellé : valeur »).
+#
+# Nomenclature UTMB (20K/50K/100K/100M) vérifiée ; celle des catégories ITRA
+# n'a pas pu être confirmée depuis cet environnement — la catégorie ITRA reste
+# donc du texte libre, jamais validée contre une liste fermée (voir
+# `templates/Runner_Profile.template.md` et le PR #62).
+#
+# Migration (revue de code #62) : les puces sont acceptées aussi bien
+# directement sous « ## Indices de performance (ITRA / UTMB) » que sous une
+# sous-section « ### Historique des indices » — un profil installé AVANT ce
+# sous-titre, ou un athlète qui a simplement collé ses relevés sous le titre
+# principal, doit être lu tout pareil. `_index_section` capture donc tout le
+# contenu de la section de NIVEAU du titre principal (jusqu'au prochain titre
+# de niveau égal ou supérieur), sous-titre inclus, plutôt que d'ancrer
+# spécifiquement sur le sous-titre.
+# ---------------------------------------------------------------------------
+
+# Exige ITRA ou UTMB sur la ligne de titre (revue de code #109, 2e tour) :
+# sans cette contrainte, un titre sans rapport comme « #### Indice de
+# performance VO2 » (VO2max, vue Performance du tableau de bord) matchait
+# aussi, à cause du `.*$` permissif après « de performance ».
+_INDEX_TOP_HEADING_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b.*(itra|utmb).*$", re.I | re.M)
+# Repli (revue de code #109, 3e tour) : un titre « nu », sans ITRA/UTMB — un
+# athlète qui a renommé/simplifié le titre du modèle, ou une variante plus
+# ancienne. Volontairement plus STRICT que le motif principal pour ne rien
+# accepter à tort à sa place : la ligne doit s'arrêter juste après
+# « performance », avec au plus une parenthèse en fin de ligne — jamais un
+# texte libre qui suit sans parenthèses (ce qui aurait, par exemple, laissé
+# passer « Indice de performance VO2 » à nouveau). Accepté mais SIGNALÉ (voir
+# `parse_performance_index`) : mieux vaut lire une section probable avec un
+# avertissement que la faire disparaître silencieusement.
+_INDEX_TOP_HEADING_LOOSE_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b(?:\s*\([^)\n]*\))?\s*$",
+                                          re.I | re.M)
+_INDEX_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
+_ANY_HEADING_RE = re.compile(r"^(#{1,6})\s", re.M)
+# Séparateur date / reste de la ligne : cadratin/demi-cadratin entouré d'espaces,
+# ou un tiret simple/double ENTOURÉ D'ESPACES (même discipline que
+# `_GEAR_SEGMENT_SPLIT_RE` : jamais un tiret sans espaces, qui ferait partie de
+# la date ISO elle-même — revue de code #62 : élargi à `--` pour l'athlète qui
+# tape un double tiret ASCII au lieu d'un cadratin).
+_INDEX_DATE_SPLIT_RE = re.compile(r"\s*[—–]\s*|\s+-{1,2}\s+")
+UTMB_INDEX_CATEGORIES = ("20k", "50k", "100k", "100m")
+# Unité UTMB collée au nombre avec un espace intercalé (« 100 k », « 100 K ») :
+# revue de code #62 — repliée sur la forme sans espace avant tokenisation.
+_INDEX_UTMB_UNIT_SPACING_RE = re.compile(r"(\d)\s+([km])\b", re.I)
+# Synonymes de « indice général » (sans catégorie), tous types confondus,
+# comparés une fois accents retirés et en minuscule — revue de code #62 :
+# « Général »/« general »/« global »/« Index » (ce dernier pour « UTMB Index »,
+# le nom officiel de l'indice général UTMB) doivent tous se résoudre à
+# `category = None`, pas à une fausse catégorie littérale « general »/« index ».
+_INDEX_GENERAL_SYNONYMS = {"general", "generale", "global", "globale", "index"}
+# Bornes plausibles d'un indice ITRA/UTMB (revue de code #62) : au-delà, une
+# valeur est presque sûrement une faute de saisie (un temps, un dossard...),
+# jamais un indice réel — avertie et rejetée plutôt que stockée telle quelle.
+INDEX_VALUE_MIN, INDEX_VALUE_MAX = 0, 1000
+
+
+def _strip_html_comments(text: str) -> str:
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+
+def _index_section(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """`(texte, avertissement)` de la section « Indices de performance » :
+    depuis le titre principal (n'importe quel niveau entre `##` et `####`)
+    jusqu'au prochain titre de niveau ÉGAL OU SUPÉRIEUR (donc jamais coupé par
+    la sous-section « ### Historique des indices », de niveau plus profond) —
+    ou la fin du fichier. `(None, None)` si aucun titre, strict ou nu, n'est
+    trouvé. Les commentaires HTML sont retirés avant la recherche, comme
+    `_gear_section` — l'exemple commenté du modèle ne doit jamais être lu
+    comme un relevé réel.
+
+    Titre STRICT (mentionne ITRA/UTMB) d'abord, sans avertissement. À défaut,
+    titre NU (`_INDEX_TOP_HEADING_LOOSE_RE`, revue de code #109 3e tour) —
+    accepté quand même, mais avec un avertissement : un titre renommé ou
+    simplifié par l'athlète reste plus probablement CETTE section qu'une
+    coïncidence, mieux vaut la lire en le signalant que la perdre en silence."""
+    text = _strip_html_comments(text)
+    m = _INDEX_TOP_HEADING_RE.search(text)
+    warning = None
+    if not m:
+        m = _INDEX_TOP_HEADING_LOOSE_RE.search(text)
+        if not m:
+            return None, None
+        warning = (f"titre « {m.group(0).strip()} » sans mention ITRA/UTMB — lu comme la section "
+                   "« Indices de performance » quand même, à vérifier.")
+    level = len(m.group(1))
+    rest = text[m.end():]
+    for candidate in _ANY_HEADING_RE.finditer(rest):
+        if len(candidate.group(1)) <= level:
+            return rest[: candidate.start()], warning
+    return rest, warning
+
+
+def _normalize_index_category(tokens: List[str]) -> Optional[str]:
+    """Jointure des tokens de catégorie restants (catégorie multi-mots
+    préservée, ex. « senior hommes ») ; `None` si le résultat est un synonyme
+    d'« indice général » (`_INDEX_GENERAL_SYNONYMS`), accents et casse
+    ignorés."""
+    if not tokens:
+        return None
+    category = " ".join(tokens)
+    bare = "".join(c for c in unicodedata.normalize("NFKD", category.lower()) if not unicodedata.combining(c))
+    if bare in _INDEX_GENERAL_SYNONYMS:
+        return None
+    return category
+
+
+def _parse_index_entry(raw: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Une ligne « AAAA-MM-JJ — itra|utmb [catégorie] : valeur » → `(entrée,
+    avertissement)`. `entrée` est `None` si la ligne ne respecte pas ce format
+    (date absente, type ni « itra » ni « utmb », catégorie UTMB hors
+    nomenclature, valeur hors bornes ou non numérique) — l'avertissement porte
+    alors la raison exacte.
+
+    Une date FUTURE n'est PAS vérifiée ici (revue de code #109, 2e tour) :
+    « futur » n'a de sens qu'au moment de la LECTURE, pas de l'écriture — un
+    relevé du 30 septembre 2026 était futur le jour où l'athlète l'a écrit
+    (course pas encore courue ? faute de frappe ?) mais ne l'est plus le
+    lendemain, sans que le fichier lui-même n'ait changé. Un avertissement
+    calculé ICI, au parsing, resterait donc figé « date future » en base tant
+    que le fichier ne change pas, périmé dès le jour suivant. Ce calcul vit à
+    la place dans `arc_index.performance_index`, recalculé à CHAQUE lecture
+    contre le jour courant, jamais stocké."""
+    original = raw.replace("**", "").strip()
+    parts = _INDEX_DATE_SPLIT_RE.split(original, maxsplit=1)
+    if len(parts) != 2:
+        return None, f"format non reconnu (date — type [catégorie] : valeur attendu) : « {original} »"
+    date_part, rest = parts
+    entry_date = parse_fr_date(date_part)
+    if not entry_date:
+        return None, f"date illisible, ligne ignorée : « {original} »"
+    if ":" not in rest:
+        return None, f"format non reconnu (« : valeur » manquant) : « {original} »"
+    head, value_raw = rest.split(":", 1)
+    head = _INDEX_UTMB_UNIT_SPACING_RE.sub(r"\1\2", head)
+    tokens = head.strip().lower().split()
+    if not tokens or tokens[0] not in ("itra", "utmb"):
+        return None, f"type ni « itra » ni « utmb », ligne ignorée : « {original} »"
+    kind = tokens[0]
+    category = _normalize_index_category(tokens[1:])
+    if kind == "utmb" and category and category not in UTMB_INDEX_CATEGORIES:
+        return None, (f"catégorie UTMB « {category} » inconnue (attendu : "
+                       f"{'/'.join(UTMB_INDEX_CATEGORIES)} ou aucune), ligne ignorée : « {original} »")
+    value = parse_fr_number(value_raw)
+    if value is None or not (INDEX_VALUE_MIN < value <= INDEX_VALUE_MAX):
+        return None, (f"valeur absente ou hors bornes plausibles (0 à {INDEX_VALUE_MAX}), "
+                       f"ligne ignorée : « {original} »")
+    entry = {"date": entry_date, "kind": kind, "value": value}
+    if category:
+        entry["category"] = category
+    return entry, None
+
+
+def parse_performance_index(text: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Section « Indices de performance » du profil → `(entrées, avertissements)`.
+
+    `entrées` : liste de dicts `{date, kind, value, category?, ordinal}` triée
+    par date croissante, `ordinal` (ordre d'apparition dans le fichier, avant
+    tri) servant de départage stable et explicite entre entrées de même date —
+    jamais l'ordre implicite d'une table SQL. Vide si la section est absente.
+
+    `avertissements` : un message par ligne illisible (ignorée) ou par doublon
+    exact résolu — jamais imprimés ici : c'est à l'appelant (`arc_index.store`)
+    de les faire persister, pour qu'ils restent visibles sans réapparaître en
+    bruit console à chaque réindexation (voir `arc_index.performance_index`).
+    La date FUTURE n'est PAS un avertissement de CE niveau (voir
+    `_parse_index_entry`) : elle est recalculée à la lecture par
+    `arc_index.performance_index`, jamais stockée ici.
+
+    Un doublon EXACT (même date, même type, même catégorie) sur plusieurs
+    lignes est un avertissement, pas une erreur : seule la DERNIÈRE ligne du
+    fichier est retenue (correction probable d'une valeur mal saisie plus
+    haut) — deux catégories DIFFÉRENTES à la même date ne sont jamais des
+    doublons.
+
+    AUCUNE récupération réseau ici, ni nulle part dans ce module : ces valeurs
+    ne viennent QUE de ce que l'athlète a écrit lui-même (voir AGENTS.md,
+    règle de vie privée #62 — un agent peut proposer une recherche web, mais
+    seulement sur demande explicite, et jamais l'écrire sans confirmation)."""
+    section, heading_warning = _index_section(text)
+    if not section:
+        return [], []
+    warnings: List[str] = [heading_warning] if heading_warning else []
+    parsed: List[Dict[str, Any]] = []
+    ordinal = 0
+    for line in section.splitlines():
+        m = _INDEX_TOP_BULLET_RE.match(line)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        entry, warning = _parse_index_entry(raw)
+        if entry is None:
+            warnings.append(warning)
+            continue
+        entry["ordinal"] = ordinal
+        ordinal += 1
+        parsed.append(entry)
+
+    # Doublons exacts (même date/type/catégorie) : garder la DERNIÈRE ligne du
+    # fichier, avertir sur les précédentes.
+    by_key: Dict[Tuple[str, str, Optional[str]], Dict[str, Any]] = {}
+    for entry in parsed:
+        key = (entry["date"], entry["kind"], entry.get("category"))
+        previous = by_key.get(key)
+        if previous is not None:
+            label = f"{entry['kind']}" + (f" {entry['category']}" if entry.get("category") else "")
+            warnings.append(
+                f"doublon pour {entry['date']} ({label}) : {previous['value']:g} puis {entry['value']:g} — "
+                "la dernière valeur du fichier est retenue.")
+        by_key[key] = entry
+
+    out = list(by_key.values())
+    out.sort(key=lambda e: (e["date"], e["ordinal"]))
+    return out, warnings
+
+
+# ---------------------------------------------------------------------------
 # Fichiers édités par l'humain : profil et objectif (libellés du modèle)
 # ---------------------------------------------------------------------------
 
@@ -861,6 +1080,11 @@ def parse_profile(text: str) -> Dict[str, Any]:
     gear = parse_gear(text)
     if gear:
         out["gear"] = gear
+    performance_index, performance_index_warnings = parse_performance_index(text)
+    if performance_index:
+        out["performance_index"] = performance_index
+    if performance_index_warnings:
+        out["performance_index_warnings"] = performance_index_warnings
     return _drop_none(out)
 
 

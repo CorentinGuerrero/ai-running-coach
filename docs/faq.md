@@ -128,6 +128,15 @@ Non. Les dossiers de données personnelles sont exclus du dépôt via `.gitignor
 
 Oui. Placez vos documents dans `resources/` (par exemple `resources/nutrition/catalogue-produits-*.md` pour les catalogues produits).
 
+### Mon profil est plus ancien que la section « Indices de performance » : comment l'ajouter ?
+
+`/coach-setup` n'écrase jamais une réponse existante, donc il ne rajoute pas non plus une section apparue dans le modèle après votre installation. Deux façons de faire, sur un profil existant (`planning/Runner_Profile.md`) :
+
+- **Demandez à l'agent `coach`** : il propose d'ajouter la section vide, à votre confirmation, s'il constate qu'elle manque au moment où vous parlez de votre niveau ou d'un objectif.
+- **Copiez-la vous-même** depuis `templates/Runner_Profile.template.md` (section « Indices de performance (ITRA / UTMB) ») dans votre propre `planning/Runner_Profile.md`, puis remplissez ce que vous voulez.
+
+Les deux méthodes sont équivalentes : la section n'est jamais remplie automatiquement avec une valeur trouvée sur le web (voir « Mes données personnelles sont-elles publiées ? » ci-dessus et le mandat de vie privée d'`agents/coach.md`).
+
 ## Skills
 
 ### Qu'est-ce qu'un skill ?

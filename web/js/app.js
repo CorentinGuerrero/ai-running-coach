@@ -267,6 +267,95 @@ function gearSection(gear) {
       ${warnings.map((w) => note(F.esc(w))).join("")}</section>`;
 }
 
+// Indices de performance ITRA/UTMB (#62, vue Performance) : valeur courante par
+// (type, catégorie) — la plus récente déclarée dans le profil, jamais récupérée
+// automatiquement (voir `agents/coach.md`, mandat vie privée) — plus un mini
+// graphique d'historique pour l'indice GÉNÉRAL de chaque type (sans catégorie),
+// quand au moins deux relevés existent. Les catégories (ITRA libre, UTMB
+// 20K/50K/100K/100M) n'ont chacune, en pratique, que trop peu de relevés pour
+// justifier un graphique par catégorie : leur valeur courante reste visible
+// dans le tableau, sans historique tracé.
+function indexLabel(kind, category) {
+  const name = kind === "itra" ? "ITRA" : "UTMB";
+  return category ? `${name} ${category.toUpperCase()}` : `${name} (général)`;
+}
+
+// Empêche une année en un seul chiffre (`d.slice(0,4)` sur une date déjà ISO
+// donne toujours 4 chiffres, mais mieux vaut le nom explicite qu'un slice nu
+// répété à chaque appel).
+const isoYear = (iso) => iso.slice(0, 4);
+
+function indexMiniChart(entries, kind, cls) {
+  if (entries.length < 2) return null;
+  const dates = entries.map((e) => e.date);
+  const values = entries.map((e) => e.value);
+  const label = `Historique ${indexLabel(kind, null)}`;
+  // Échelle temporelle VRAIE (`timeScale`, revue de code #62) : deux relevés
+  // espacés de dix mois ne doivent pas occuper la même distance à l'écran que
+  // deux relevés consécutifs — chaque point est positionné proportionnellement
+  // à sa date réelle, pas à son simple rang. `xLabels` porte l'année
+  // explicitement sur CHAQUE repère (`F.dayShort` + année) plutôt que de
+  // s'en remettre à l'heuristique « premiers jours du mois » de `timeChart`
+  // (pensée pour une série quotidienne dense, pas pour des relevés occasionnels
+  // qui peuvent s'étaler sur plusieurs années).
+  const xLabels = dates.map((d) => `${F.dayShort(d)} ${isoYear(d)}`);
+  // `dot`/`dot--<kind>` (revue de code #109, 2e tour, nit) : jamais la classe
+  // `line`/`line--<kind>` réutilisée telle quelle pour les points — `.chart
+  // .line { fill: none; ... }` (web/css/app.css) laisserait les points creux,
+  // invisibles sauf un mince cerne. C'est la même convention que toutes les
+  // autres séries à points du tableau de bord (`dot--hrv`, `dot--vam`…).
+  const chart = timeChart(dates, [{ type: "line", values, cls }, { type: "dots", values, cls: `dot dot--${kind}` }], [], {
+    height: 160, label, yFormat: (v) => F.num(v, 0), timeScale: true, xLabels,
+  });
+  return { chart, entries, label };
+}
+
+function performanceIndexSection(idx) {
+  const current = idx?.current || [];
+  const history = idx?.history || [];
+  const warnings = idx?.warnings || [];
+  // Calculée une seule fois, jamais imbriquée dans un <p> d'un autre bloc
+  // (revue de code #109, 2e tour, nit) : ce sont toujours des <p class="note">
+  // FRÈRES du bloc qui précède (le <div class="empty"> de l'état vide, ou le
+  // <table> de l'état rempli plus bas), jamais son enfant.
+  const warningsHtml = warnings.map((w) => note(F.esc(w))).join("");
+  if (!current.length && !history.length) {
+    const emptyHtml = empty("Pas d'indice de performance déclaré",
+      "Ajoutez, dans votre profil (« Indices de performance (ITRA / UTMB) »), une ligne par relevé au "
+      + "format : AAAA-MM-JJ — itra|utmb [catégorie] : valeur (ex. 2025-11-01 — itra : 610) — jamais "
+      + "récupéré automatiquement.");
+    return { html: emptyHtml + warningsHtml, charts: [] };
+  }
+  const rows = [...current]
+    .sort((a, b) => (a.kind === b.kind ? (a.category || "").localeCompare(b.category || "") : a.kind.localeCompare(b.kind)))
+    .map((c) => `<tr><th scope="row">${F.esc(indexLabel(c.kind, c.category))}</th>
+        <td class="num">${F.num(c.value, 0)}</td><td>${F.dayShort(c.date)} ${isoYear(c.date)}</td></tr>`)
+    .join("");
+  const charts = [];
+  for (const kind of ["itra", "utmb"]) {
+    const general = history.filter((h) => h.kind === kind && !h.category);
+    const built = indexMiniChart(general, kind, `line line--${kind}`);
+    if (built) charts.push({ id: `c-idx-${kind}`, readoutId: `r-idx-${kind}`, ...built });
+  }
+  const chartHost = (c) => `<div><h3>${F.esc(c.label)}</h3>
+      <div class="chart-host" id="${c.id}">${c.chart.svg}</div><p class="readout" id="${c.readoutId}"></p></div>`;
+  // Un seul graphique ne doit jamais se retrouver à moitié de largeur dans une
+  // grille à deux colonnes prévue pour DEUX (revue de code #62, nit) : la
+  // grille `band--split` n'est posée que si les deux séries générales existent.
+  const chartsHtml = charts.length === 2
+    ? `<div class="band--split">${charts.map(chartHost).join("")}</div>`
+    : charts.map(chartHost).join("");
+  const html = `<section class="band"><h2>Indices de performance (ITRA / UTMB)</h2>
+      <table class="data data--compact">
+        <thead><tr><th scope="col">Indice</th><th scope="col" class="num">Valeur</th><th scope="col">Date</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      ${chartsHtml}
+      ${note("Valeurs déclarées par vous dans le profil, jamais récupérées automatiquement — voir la règle de vie privée du coach.")}
+      ${warningsHtml}
+    </section>`;
+  return { html, charts };
+}
+
 // ---------------------------------------------------------------------------
 // Cadre : objectif, navigation, thème
 // ---------------------------------------------------------------------------
@@ -1428,6 +1517,7 @@ async function viewPerformance(params) {
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
   const assumptions = SUMMARY.assumptions || {};
   const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
+  const { html: indexHtml, charts: indexCharts } = performanceIndexSection(SUMMARY.performance_index);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}
     <section class="band"><h2>VO2max effective</h2>${p.vo2max_current ? `<p class="lead-num">${F.num(p.vo2max_current, 1)} <small>ml/kg/min, tendance 30 j${p.vo2max_date !== SUMMARY.today ? ` au ${F.dayShort(p.vo2max_date)}` : ""}</small></p>` : ""}${chartHtml}</section>
     <section class="band band--split"><div><h2>Prédictions</h2><table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">VDOT</th><th scope="col" class="num">Riegel</th></tr></thead><tbody>${pred}</tbody></table>
@@ -1435,6 +1525,7 @@ async function viewPerformance(params) {
       <div><h2>Records</h2>${rec}</div></section>
     ${slopeHtml}
     ${gearSection(SUMMARY.gear)}
+    ${indexHtml}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
   if (slopeChart) attachCursor($("#c-slope"), slopeChart, (i) => {
@@ -1443,6 +1534,10 @@ async function viewPerformance(params) {
     const runTxt = b.run_share != null && b.run_share < 0.95 ? ` · couru ${F.num(b.run_share * 100, 0)} %` : "";
     readout($("#r-slope"), `<strong>${slopeGradeLabel(b)}</strong> · ${F.paceFromSecPerKm(b.pace_s_km)} · ${b.source === "personal" ? `personnel (${b.n_activities} séance${b.n_activities > 1 ? "s" : ""})` : "générique"}${hrTxt}${runTxt}`);
   });
+  for (const c2 of indexCharts) {
+    attachCursor($(`#${c2.id}`), c2.chart, (i) => readout($(`#${c2.readoutId}`),
+      `<strong>${F.dateLong(c2.entries[i].date)}</strong> · ${F.num(c2.entries[i].value, 0)}`));
+  }
 }
 
 // ---------------------------------------------------------------------------

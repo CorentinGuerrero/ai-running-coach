@@ -194,7 +194,14 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # `decision_rule` (une ligne par rule_id cité, pour le filtre par règle du journal des
 # décisions, #55). #100 (revue de code) : colonnes `decision.created_at_utc` (tri correct
 # entre fuseaux) et `decision.supersedes` — voir #49 pour la version d'avant #54.
-SCHEMA_VERSION = 21
+# #62 : nouvelles tables `performance_index`/`performance_index_warning` (indices
+# de performance ITRA/UTMB) — sans ce bump, une base `.arc/coach.db` déjà
+# construite par une version antérieure ne les recrée jamais (le fichier
+# `Runner_Profile.md` inchangé est alors sauté à la réindexation, `current ==
+# SCHEMA_VERSION` restant vrai), et `performance_index()`/`/api/summary`
+# échouent avec « no such table » — panne du tableau de bord entier pour un
+# utilisateur existant (revue de code #109, 2e tour, blocker).
+SCHEMA_VERSION = 22
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -372,6 +379,30 @@ CREATE TABLE athlete (
 CREATE TABLE gear (
     source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL,
     is_default INTEGER, retired INTEGER, collision_base TEXT
+);
+-- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
+-- section « Indices de performance » du profil (`arc_legacy.
+-- parse_performance_index`). `category` est NULL pour un indice général
+-- (ITRA global, UTMB « général »/« index ») ; sinon texte libre pour l'ITRA, une
+-- des quatre valeurs `arc_legacy.UTMB_INDEX_CATEGORIES` pour l'UTMB.
+-- `ordinal` : ordre d'apparition dans le fichier (après dédoublonnage), pour
+-- départager deux relevés de même date sans dépendre de l'ordre d'insertion
+-- SQLite (revue de code #62) — `performance_index()` trie explicitement
+-- dessus. Purement déclaratif — jamais alimentée par une requête réseau (voir
+-- AGENTS.md).
+CREATE TABLE performance_index (
+    source_path TEXT, date TEXT, kind TEXT, category TEXT, value REAL, ordinal INTEGER
+);
+-- Avertissements de lecture de `performance_index` (#62, revue de code) : une
+-- ligne du profil ignorée (format illisible, valeur hors bornes, catégorie
+-- UTMB inconnue) ou acceptée mais à signaler (date future, doublon exact).
+-- Persistés ici plutôt qu'imprimés au moment du parsing pour ne réapparaître
+-- QUE lorsque le fichier change (une réindexation d'un fichier inchangé ne
+-- les recalcule jamais — voir `index_workspace`), et pour rester consultables
+-- par la CLI/le tableau de bord (`performance_index().warnings`) au lieu de se
+-- perdre dans la sortie standard d'un process qui a déjà tourné.
+CREATE TABLE performance_index_warning (
+    source_path TEXT, message TEXT, ordinal INTEGER
 );
 CREATE TABLE objective (
     source_path TEXT, name TEXT, race_date TEXT, distance_m REAL, elevation_gain_m REAL,
@@ -661,7 +692,7 @@ CREATE TABLE slope_model_meta (
 PER_FILE_TABLES = (
     "athlete", "objective", "health_day", "weather_day", "week", "planned_session",
     "nutrition_day", "report", "course_eval", "race_plan", "aid_station", "gear",
-    "decision", "decision_rule",
+    "performance_index", "performance_index_warning", "decision", "decision_rule",
 )
 
 
@@ -903,6 +934,18 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "start_date": shoe.get("start_date"), "threshold_m": shoe.get("threshold_m"),
                 "is_default": int(bool(shoe.get("default"))), "retired": int(bool(shoe.get("retired"))),
                 "collision_base": shoe.get("collision_base"),
+            })
+        for entry in g("performance_index") or []:
+            if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
+                continue
+            _insert(conn, "performance_index", {
+                "source_path": rel, "date": entry["date"], "kind": entry["kind"],
+                "category": entry.get("category"), "value": entry.get("value"),
+                "ordinal": entry.get("ordinal", 0),
+            })
+        for warning_ordinal, message in enumerate(g("performance_index_warnings") or []):
+            _insert(conn, "performance_index_warning", {
+                "source_path": rel, "message": message, "ordinal": warning_ordinal,
             })
     elif kind == "objective":
         row = {k: g(k) for k in (
@@ -2083,6 +2126,54 @@ def gear_mileage(conn) -> dict:
     return M.gear_mileage(activities, gear_defs)
 
 
+def performance_index(conn, today: Optional[date] = None) -> dict:
+    """Indices de performance ITRA/UTMB (#62) — pour la CLI (`arc_index.py
+    performance-index`) et le tableau de bord (`/api/performance-index`,
+    `/api/summary.performance_index`). N'est pas soumis à `[health].
+    morning_check` : ne dépend d'aucune donnée de santé, seulement de ce que
+    l'athlète a écrit dans son profil (voir `arc_legacy.parse_performance_index`
+    — aucune récupération réseau, ici ni ailleurs).
+
+    `history` : tous les relevés, triés par `(date, ordinal)` — `ordinal` est
+    l'ordre d'apparition dans le fichier (voir `arc_legacy.
+    parse_performance_index`), jamais l'ordre d'insertion SQLite implicite, pour
+    que deux relevés de dates différentes mais de catégories différentes à la
+    même date gardent un ordre reproductible d'une lecture à l'autre — condition
+    aussi pour que `current` (ci-dessous) soit déterministe. `current` : le
+    relevé le plus RÉCENT pour chaque couple (kind, category) — `category` vaut
+    `None` pour un indice général.
+
+    `warnings` combine deux sources bien distinctes :
+    1. persistées par `arc_index.store` (lignes illisibles ignorées, doublons
+       exacts résolus — voir `arc_legacy.parse_performance_index`), jamais
+       réimprimées à chaque réindexation (le fichier doit changer pour être
+       reparsé) ;
+    2. calculées ICI, à CHAQUE appel, contre `today` (par défaut la date du
+       jour) : un relevé dont la date est postérieure à `today` (revue de code
+       #109, 2e tour) — jamais stockée, parce que « futur » se juge au moment
+       de la LECTURE, pas de l'écriture (un relevé écrit hier comme « futur »
+       ne l'est peut-être déjà plus aujourd'hui, sans que le fichier n'ait
+       changé — un avertissement figé en base à l'écriture resterait alors
+       périmé indéfiniment).
+
+    Tout est vide si l'athlète n'a rien déclaré : c'est l'appelant (dashboard)
+    qui affiche alors l'état vide, jamais une valeur inventée."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT date, kind, category, value FROM performance_index ORDER BY date, ordinal")]
+    current: Dict[Tuple[str, Optional[str]], dict] = {}
+    for row in rows:
+        current[(row["kind"], row.get("category"))] = row
+    warnings = [r["message"] for r in conn.execute(
+        "SELECT message FROM performance_index_warning ORDER BY source_path, ordinal")]
+    today_iso = (today or date.today()).isoformat()
+    for row in rows:
+        if row["date"] > today_iso:
+            label = row["kind"] + (f" {row['category']}" if row.get("category") else "")
+            warnings.append(f"date future ({row['date']} > {today_iso}) pour {label} : {row['value']:g} — "
+                            "relevé conservé tel quel, à vérifier.")
+    return {"history": rows, "current": list(current.values()), "warnings": warnings}
+
+
 def fueling_trend(conn, today: date) -> dict:
     """Glucides/h et taux de sudation sur les sorties longues (#41) — pour la CLI
     (`arc_index.py fueling`) et pour `course-strategist` en headless (plafond
@@ -2640,9 +2731,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
-                                 "heat-acclimation", "gear", "fueling", "samples", "zones", "gap",
-                                 "decoupling", "vam", "descent", "durability", "climb-history",
-                                 "decisions", "slope-model"))
+                                 "heat-acclimation", "gear", "performance-index", "fueling", "samples",
+                                 "zones", "gap", "decoupling", "vam", "descent", "durability",
+                                 "climb-history", "decisions", "slope-model"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -2727,6 +2818,10 @@ def main(argv=None) -> int:
         return 0
     if args.command == "gear":
         print(json.dumps(gear_mileage(conn), ensure_ascii=False))
+        return 0
+    if args.command == "performance-index":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(performance_index(conn, today_date), ensure_ascii=False))
         return 0
     if args.command == "fueling":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

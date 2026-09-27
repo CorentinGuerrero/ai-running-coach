@@ -532,6 +532,15 @@ kilomètre : pas de graphique, c'est normal.
   au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
   alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
   profil — jamais masqué silencieusement.
+- **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
+  récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
+  et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de
+  l'historique des indices généraux quand au moins deux relevés existent.
+  Ces valeurs viennent **uniquement** de ce que vous avez écrit vous-même dans
+  « Indices de performance (ITRA / UTMB) » du profil — aucun script, ni aucun
+  agent de sa propre initiative, ne va les chercher sur `itra.run`/`utmb.world` ;
+  un agent ne le fait qu'à votre demande explicite, et vous montre la valeur
+  trouvée avant de l'écrire. Rien n'apparaît tant qu'aucun indice n'est déclaré.
 - **Modèle personnel pente → allure** (#58) : votre allure typique par classe de
   pente fine, apprise sur les six derniers mois (par défaut) de vos propres
   séances — pas le modèle générique de laboratoire (Minetti) appliqué à tout le
@@ -559,6 +568,7 @@ divergent disent que le terrain ou la forme du jour pèsent.
 | `activities/*.md` (course et trail : allure, FC, splits) | `scripts/arc_metrics.py` |
 | `planning/Runner_Profile.md`, `planning/active_objective.md` | FC max ; distance et D+ de l'objectif |
 | `activities/fit/*.json` (échantillons seconde par seconde) | `scripts/arc_slope_model.py` (#58) |
+| `planning/Runner_Profile.md` → « Indices de performance » | `arc_legacy.parse_performance_index`, `arc_index.performance_index` (#62) |
 
 ## Calendrier
 

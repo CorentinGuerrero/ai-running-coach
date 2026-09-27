@@ -608,6 +608,13 @@ def build(root: Path, days: int = 120, today: date | None = None, sport: str = "
 - **Sexe** : H
 - **Poids de forme** : 68,5 kg
 
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 610
+- 2026-01-15 — utmb 100k : 560
+
 ## Matériel & lieux
 
 - **Lieu par défaut** : Tournai

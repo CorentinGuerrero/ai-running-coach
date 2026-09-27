@@ -239,6 +239,14 @@ class Store:
         with self.lock:
             return I.gear_mileage(self.conn)
 
+    def performance_index(self, today: date) -> dict:
+        """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
+        `performance-index`. `today` : recalcule l'avertissement de date
+        future à CHAQUE appel (revue de code #109, 2e tour) — jamais une
+        valeur stockée qui resterait périmée d'un jour sur l'autre."""
+        with self.lock:
+            return I.performance_index(self.conn, today)
+
     def meta(self, key: str):
         row = self.one("SELECT value FROM meta WHERE key = ?", (key,))
         return json.loads(row["value"]) if row and row["value"] and row["value"][:1] in "[{" else (row or {}).get("value")
@@ -321,6 +329,7 @@ def api_summary(store: Store, q: dict) -> dict:
         "today": today.isoformat(), "settings": settings, "objective": objective, "athlete": athlete,
         "form": latest, "health": health, "sleep_debt": sleep_debt, "heat_acclimation": heat_acclimation,
         "gear": store.gear_mileage(),
+        "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "assumptions": store.meta("assumptions"),
         "compliance_trend": api_compliance_trend(store, q),
@@ -952,6 +961,19 @@ def api_durability(store: Store, q: dict) -> dict:
     return M.durability_trend(rows, today, weeks)
 
 
+def api_performance_index(store: Store, q: dict) -> dict:
+    """Indices de performance ITRA/UTMB (#62) : `/api/performance-index`.
+
+    Duplique volontairement `store.performance_index()` déjà exposée sous
+    `/api/summary.performance_index` (comme `gear`/`/api/summary.gear` n'a pas
+    besoin d'une route dédiée aujourd'hui) : la vue Performance de `web/js/
+    app.js` lit `SUMMARY.performance_index` (un seul `/api/summary` déjà
+    récupéré au chargement, pas d'aller-retour supplémentaire) — cette route
+    dédiée sert un appelant headless (agent, CLI externe) qui veut CETTE seule
+    donnée sans tout le résumé, et documente sa forme indépendamment."""
+    return store.performance_index(_today(store))
+
+
 def api_slope_model(store: Store, q: dict) -> dict:
     """Modèle personnel pente -> allure (et FC) — #58, `/api/slope-model?band=`.
 
@@ -1154,7 +1176,7 @@ ROUTES = {
     "/api/decoupling": api_decoupling, "/api/vam": api_vam, "/api/descent": api_descent,
     "/api/durability": api_durability, "/api/slope-model": api_slope_model, "/api/files": api_files,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
-    "/api/injury-risk": api_injury_risk,
+    "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
 }
 
 # ---------------------------------------------------------------------------

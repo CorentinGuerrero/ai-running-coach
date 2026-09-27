@@ -51,13 +51,39 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
   const ih = H - PAD.top - PAD.bottom;
   const n = dates.length;
   const band = opts.band ?? layers.some((l) => l.type === "bars");
+  // Échelle temporelle vraie (`opts.timeScale`, #62) : chaque point à une
+  // abscisse proportionnelle à sa date RÉELLE, pas à son rang dans le tableau —
+  // indispensable pour une série aux relevés espacés irrégulièrement (mois,
+  // parfois années), où un axe par simple rang écraserait les écarts réels.
+  // Par défaut (`false`, comportement inchangé pour tous les appelants
+  // existants) : un rang régulier, adapté aux séries à pas fixe (jour/semaine).
+  const dateMs = opts.timeScale ? dates.map((d) => Date.parse(`${d}T00:00:00Z`)) : null;
+  const span = dateMs && n > 1 ? (dateMs[n - 1] - dateMs[0] || 1) : 1;
   const x = band
     ? (i) => PAD.left + ((i + 0.5) / Math.max(n, 1)) * iw
-    : (i) => PAD.left + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-  // Inverse de x : l'indice le plus proche d'une abscisse (curseur).
+    : dateMs
+      ? (i) => PAD.left + (n <= 1 ? iw / 2 : ((dateMs[i] - dateMs[0]) / span) * iw)
+      : (i) => PAD.left + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
+  // Inverse de x : l'indice le plus proche d'une abscisse (curseur). En échelle
+  // temporelle, les points ne sont pas régulièrement espacés : recherche du
+  // plus proche par balayage (séries courtes en pratique — relevés d'indice,
+  // pas des séries quotidiennes), plutôt qu'un calcul de rang qui supposerait
+  // un espacement régulier.
   const index = band
     ? (px) => Math.floor(((px - PAD.left) / iw) * n)
-    : (px) => Math.round(((px - PAD.left) / iw) * (n - 1));
+    : dateMs
+      ? (px) => {
+          if (n <= 1) return 0;
+          const targetMs = dateMs[0] + ((px - PAD.left) / iw) * span;
+          let best = 0;
+          let bestDiff = Infinity;
+          dateMs.forEach((ms, i) => {
+            const diff = Math.abs(ms - targetMs);
+            if (diff < bestDiff) { bestDiff = diff; best = i; }
+          });
+          return best;
+        }
+      : (px) => Math.round(((px - PAD.left) / iw) * (n - 1));
   const anchor = (i) => (i === 0 && !band ? "start" : "middle");
 
   const scale = (axis) => {
@@ -104,11 +130,90 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
   if (opts.xLabels) {
     const shown = opts.xLabels.filter(Boolean).length;
     const every = shown <= Math.floor(iw / 30) ? 1 : Math.ceil(n / Math.floor(iw / 30));
-    opts.xLabels.forEach((label, i) => {
-      if (label && (every === 1 || i % every === 0 || i === n - 1)) {
-        parts.push(`<text class="tick" x="${x(i)}" y="${H - 8}" text-anchor="${anchor(i)}">${esc(label)}</text>`);
+    if (opts.timeScale) {
+      // En échelle temporelle (#62/#109), `every` seul ne suffit pas : deux
+      // dates rapprochées peuvent tomber à quelques pixels l'une de l'autre
+      // (ex. 1 et 8 mars, ~11 px) même si leur écart d'INDICE passe le filtre
+      // `every` — celui-ci suppose un espacement RÉGULIER par rang, faux ici
+      // par construction. Filtre dédié, jamais appliqué aux autres appelants
+      // (rang régulier, sans ce problème) :
+      // 1. la distance minimale entre deux libellés affichés est dérivée de
+      //    leur largeur ESTIMÉE (nombre de caractères × une largeur de
+      //    caractère approximative pour la police du tableau de bord, #109
+      //    3e tour) — jamais une constante arbitraire, qui serait tantôt trop
+      //    large pour deux libellés courts, tantôt trop étroite pour deux
+      //    libellés longs (l'année alourdit chaque repère, voir
+      //    `indexMiniChart` dans `web/js/app.js`) ;
+      // 2. le DERNIER point (le plus récent, celui qu'on lit en premier) est
+      //    TOUJOURS affiché : si son libellé chevaucherait le précédent, c'est
+      //    ce dernier qui est retiré, jamais l'inverse (#109 3e tour) ;
+      // 3. ce dernier libellé est ancré à "end" (jamais "middle") pour ne
+      //    jamais déborder du viewBox à droite : son point est au bord droit
+      //    de la zone de tracé, un ancrage centré y ferait dépasser la moitié
+      //    du texte.
+      // Pire cas, jamais la taille de bureau (revue de code #109, 3e tour,
+      // BLOQUANT visuel) : `.chart .tick` fait 11px sur bureau MAIS 21px en
+      // dessous de 36em (`web/css/app.css`, media query dédiée à la
+      // lisibilité tactile) — le SVG scale tout le RESTE proportionnellement
+      // (viewBox), mais PAS ce texte, dont la taille CSS reste fixe en
+      // pixels physiques quel que soit le facteur d'échelle du graphique.
+      // Cette fonction ne connaît pas la largeur d'écran du client (le SVG
+      // généré est le MÊME sur mobile et sur bureau) : elle doit donc estimer
+      // avec la police la PLUS GRANDE des deux, sous peine de sous-estimer
+      // largement la largeur réelle sur mobile (chevauchement constaté avec
+      // 11px : deux libellés jugés espacés de ~15 unités s'affichaient en fait
+      // à cheval l'un sur l'autre, la police réelle étant presque deux fois
+      // plus grande que l'estimation).
+      const FONT_SIZE_PX = 21;
+      const CHAR_WIDTH_FACTOR = 0.6;
+      const LABEL_GAP_MARGIN_PX = 8;
+      const estimateLabelWidth = (label) => label.length * FONT_SIZE_PX * CHAR_WIDTH_FACTOR;
+      // Étendue [gauche, droite] RÉELLE d'un libellé selon son ancrage — un
+      // label "start" (le premier point) déborde ENTIÈREMENT vers la droite
+      // depuis `xi`, jamais pour moitié comme le supposerait une simple
+      // demi-largeur symétrique (bug de la première tentative : le premier
+      // libellé, ancré "start", débordait bien plus que prévu sur le suivant).
+      const labelExtent = (label, xi, anchorType) => {
+        const w = estimateLabelWidth(label);
+        if (anchorType === "start") return [xi, xi + w];
+        if (anchorType === "end") return [xi - w, xi];
+        return [xi - w / 2, xi + w / 2];
+      };
+      const candidates = [];
+      opts.xLabels.forEach((label, i) => {
+        if (label && (every === 1 || i % every === 0 || i === n - 1)) {
+          // Le DERNIER point (le plus récent) est ancré "end" (jamais "middle")
+          // pour ne jamais déborder du viewBox à droite (#109 3e tour) : son
+          // point est au bord droit de la zone de tracé.
+          const anchorType = i === n - 1 ? "end" : anchor(i);
+          const xi = x(i);
+          const [left, right] = labelExtent(label, xi, anchorType);
+          candidates.push({ i, label, xi, anchorType, left, right });
+        }
+      });
+      const visible = [];
+      for (const c of candidates) {
+        const prev = visible[visible.length - 1];
+        const overlaps = prev && c.left < prev.right + LABEL_GAP_MARGIN_PX;
+        if (!prev || !overlaps) {
+          visible.push(c);
+        } else if (c.i === n - 1) {
+          // Le dernier libellé prime toujours : on retire le précédent plutôt
+          // que de faire disparaître celui-ci (#109 3e tour).
+          visible.pop();
+          visible.push(c);
+        }
       }
-    });
+      visible.forEach((c) => {
+        parts.push(`<text class="tick" x="${c.xi}" y="${H - 8}" text-anchor="${c.anchorType}">${esc(c.label)}</text>`);
+      });
+    } else {
+      opts.xLabels.forEach((label, i) => {
+        if (label && (every === 1 || i % every === 0 || i === n - 1)) {
+          parts.push(`<text class="tick" x="${x(i)}" y="${H - 8}" text-anchor="${anchor(i)}">${esc(label)}</text>`);
+        }
+      });
+    }
   }
   let lastMonth = opts.xLabels ? "skip" : null;
   let lastX = -Infinity;

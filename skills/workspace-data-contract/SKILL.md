@@ -198,6 +198,64 @@ méthode complète. En résumé :
   `-2`, `-3`… et une collision signalée dans `gear_mileage().warnings` — pour
   l'éviter, donnez un `id:` explicite à chaque paire du même modèle.
 
+**Indices de performance ITRA/UTMB (#62).** La section `## Indices de
+performance (ITRA / UTMB)` du profil (voir `templates/
+Runner_Profile.template.md`) déclare des relevés datés, un par puce de
+premier niveau, en langage libre — même principe que `### Chaussures`
+ci-dessus. Les puces peuvent vivre directement sous ce titre, ou sous sa
+propre sous-section `### Historique des indices` (les deux sont lues pareil —
+un profil installé avant l'ajout de cette sous-section, ou un athlète qui
+colle simplement ses relevés sous le titre principal, n'a rien à changer). Le
+titre lui-même est reconnu même renommé/simplifié SANS mention ITRA/UTMB (ex.
+« ## Indices de performance » nu, ou suivi d'une seule parenthèse comme
+« (facultatif) ») — accepté quand même, avec un avertissement (revue de code
+#109, 3e tour) plutôt que de perdre la section en silence ; un titre qui
+continue en texte libre SANS parenthèses (ex. « Indice de performance VO2 »,
+la vue Performance du tableau de bord) reste, lui, exclu.
+
+```markdown
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 610
+- 2025-11-01 — itra L : 600
+- 2026-02-15 — utmb 100k : 560
+- 2026-03-01 — utmb Général : 580
+```
+
+Format d'une puce : `AAAA-MM-JJ — itra|utmb [catégorie] : valeur`. La
+catégorie est facultative (indice général si omise, ainsi que pour tout
+synonyme de « général » — `général`/`general`/`global`/`index`, accents et
+casse ignorés, ex. « UTMB Index ») ; pour l'UTMB, seules `20k`/`50k`/`100k`/
+`100m` sont reconnues (nomenclature vérifiée, unité collée ou espacée —
+« 100k » et « 100 k » sont équivalents), toute autre valeur — comme une valeur
+hors de la plage `]0, 1000]`, une date illisible, ou une ligne qui ne respecte
+pas ce format — est **ignorée avec un avertissement**, jamais silencieusement
+ni acceptée telle quelle ; un doublon EXACT (même date/type/catégorie) garde
+la DERNIÈRE ligne du fichier, avec un avertissement sur les précédentes. La
+nomenclature des catégories ITRA (ex. `L`, `M`) n'a **pas** pu être vérifiée
+depuis cet environnement : la catégorie ITRA reste donc du texte libre (y
+compris multi-mots), non validée contre une liste fermée. `arc_legacy.
+parse_performance_index` lit cette section ; `scripts/arc_index.py` l'indexe
+dans la table dérivée `performance_index` (une ligne par relevé, plus
+`performance_index_warning` pour les avertissements de lecture) ;
+`arc_index.performance_index` (CLI `performance-index`, JSON) rend `history`
+(tous les relevés, triés par date puis par ordre d'apparition dans le
+fichier), `current` (le relevé le plus RÉCENT pour chaque couple
+type/catégorie — c'est la seule notion de « valeur actuelle », il n'y a pas de
+champ dupliqué ailleurs dans le profil) et `warnings` (les avertissements
+persistés, PLUS un avertissement de date future recalculé à CHAQUE appel
+contre le jour courant — jamais stocké, pour ne jamais rester périmé si le
+fichier ne change pas alors que la date, elle, a fini par passer).
+
+**Vie privée (critère d'acceptation #62) : aucune récupération automatique.**
+Ces valeurs ne viennent QUE de ce que l'athlète a écrit lui-même. Aucun script
+de ce dépôt ne fait de requête vers `itra.run`/`utmb.world` (verrouillé par un
+test de palier B dédié), et un agent ne peut les chercher sur le web que sur
+demande EXPLICITE de l'athlète — voir le mandat de vie privée d'`agents/
+coach.md` (« PERFORMANCE INDEX MANDATE »).
+
 `carbs_g` et `fluid_intake_ml` viennent d'une déclaration de l'athlète (gels,
 barres, boisson…) pendant ou juste après la séance — jamais une valeur
 inventée : sans déclaration, la clé est omise. Convertissez un produit du

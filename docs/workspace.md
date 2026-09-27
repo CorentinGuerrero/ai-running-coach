@@ -135,9 +135,17 @@ redémarrés : ils lisent les skills à chaque session.
 
 | Fichier | Contenu |
 |---|---|
-| `Runner_Profile.md` | Physiologie, historique de blessures, matériel, lieu par défaut, créneau habituel, préférences de coaching |
+| `Runner_Profile.md` | Physiologie, historique de blessures, indices de performance ITRA/UTMB (facultatif, jamais récupérés automatiquement), matériel, lieu par défaut, créneau habituel, préférences de coaching |
 | `active_objective.md` | La course visée, l'objectif de performance, les contraintes connues |
 
 Les deux vivent dans `planning/`, gitignoré dans le dépôt public et **versionné
 dans votre dépôt privé** si vous utilisez `--workspace`. Les agents les lisent
 avant toute planification ; aucun des deux n'est jamais écrasé une fois créé.
+
+**Profil existant, section manquante.** `/coach-setup` ne réécrit jamais une
+réponse déjà là — un profil installé avant l'ajout d'une nouvelle section au
+modèle (ex. « Indices de performance (ITRA / UTMB) ») ne la reçoit donc pas
+automatiquement. Deux façons de la rattraper : copier la section depuis
+`templates/Runner_Profile.template.md` dans votre propre `planning/
+Runner_Profile.md`, ou simplement le demander à l'agent `coach`, qui propose
+de l'ajouter (vide) à votre confirmation. Voir la FAQ pour le détail.

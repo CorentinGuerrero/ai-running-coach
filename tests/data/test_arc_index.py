@@ -5,6 +5,7 @@ trouvés sur un vrai workspace (doublons, fichiers d'analyse, fichiers sans date
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import shutil
@@ -852,6 +853,295 @@ class TestParseGear(unittest.TestCase):
         self.assertEqual(g["start_date"], "2026-03-01")
 
 
+class TestParsePerformanceIndex(unittest.TestCase):
+    """#62 — `arc_legacy.parse_performance_index` : section « Indices de
+    performance », une puce datée par relevé. Rend `(entrées, avertissements)` —
+    jamais d'impression directe (revue de code #62) : les avertissements sont
+    portés par l'appelant, pour que le tableau de bord/la CLI puissent les
+    afficher sans dépendre de la sortie standard."""
+
+    def _history(self, *lines: str, sub_heading: bool = True):
+        body = "\n".join(f"- {line}" for line in lines)
+        heading = "### Historique des indices\n\n" if sub_heading else ""
+        text = f"# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n{heading}{body}\n"
+        return L.parse_performance_index(text)
+
+    def _entries(self, *lines: str, sub_heading: bool = True):
+        entries, _ = self._history(*lines, sub_heading=sub_heading)
+        return entries
+
+    def test_present_general_itra_and_utmb(self):
+        entries = self._entries("2025-11-01 — itra : 610", "2026-02-15 — utmb : 580")
+        self.assertEqual([{k: v for k, v in e.items() if k != "ordinal"} for e in entries], [
+            {"date": "2025-11-01", "kind": "itra", "value": 610.0},
+            {"date": "2026-02-15", "kind": "utmb", "value": 580.0},
+        ])
+
+    def test_absent_when_no_section(self):
+        text = "# Profil\n\n## Physiologie\n\n- **FC max** : 188\n"
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+        self.assertNotIn("performance_index", L.parse_profile(text))
+
+    def test_partial_only_one_kind_declared(self):
+        entries = self._entries("2025-11-01 — itra : 610")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["kind"], "itra")
+
+    def test_category_is_kept_for_itra_free_form(self):
+        entries = self._entries("2025-11-01 — itra L : 600")
+        self.assertEqual(entries[0]["category"], "l")
+
+    def test_utmb_category_must_be_known(self):
+        """Catégorie UTMB hors nomenclature (`20k`/`50k`/`100k`/`100m`) : la ligne
+        est ignorée avec un avertissement, jamais acceptée telle quelle — la
+        nomenclature ITRA par catégorie, elle, reste libre (non vérifiée)."""
+        entries, warnings = self._history("2025-11-01 — utmb 200k : 500")
+        self.assertEqual(entries, [])
+        self.assertTrue(warnings)
+
+    def test_malformed_value_ignored_with_warning(self):
+        entries, warnings = self._history("2025-11-01 — itra : beaucoup")
+        self.assertEqual(entries, [])
+        self.assertTrue(warnings)
+
+    def test_missing_date_ignored_with_warning(self):
+        entries, warnings = self._history("itra : 610")
+        self.assertEqual(entries, [])
+        self.assertTrue(warnings)
+
+    def test_history_is_ordered_by_date_ascending_regardless_of_file_order(self):
+        entries = self._entries("2026-02-15 — itra : 620", "2025-11-01 — itra : 610", "2026-01-01 — itra : 615")
+        self.assertEqual([e["date"] for e in entries], ["2025-11-01", "2026-01-01", "2026-02-15"])
+
+    def test_commented_out_example_is_ignored(self):
+        text = ("# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n### Historique des indices\n\n"
+                "<!--\n- 2025-11-01 — itra : 610\n-->\n")
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+
+    # -- revue de code #62 : migration (bullets directement sous le titre principal) --
+
+    def test_bullets_directly_under_main_heading_without_sub_heading(self):
+        """Un profil installé avant le sous-titre « Historique des indices », ou un
+        athlète qui a simplement collé ses relevés sous le titre principal, doit
+        être lu tout pareil (revue de code #62, blocker 1)."""
+        entries = self._entries("2025-11-01 — itra : 610", sub_heading=False)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["value"], 610.0)
+
+    def test_bullets_both_direct_and_under_sub_heading_are_both_read(self):
+        text = ("# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n"
+                "- 2025-10-01 — itra : 600\n\n"
+                "### Historique des indices\n\n"
+                "- 2025-11-01 — itra : 610\n")
+        entries, _ = L.parse_performance_index(text)
+        self.assertEqual([e["date"] for e in entries], ["2025-10-01", "2025-11-01"])
+
+    def test_next_top_level_section_still_ends_the_section(self):
+        text = ("# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n"
+                "- 2025-11-01 — itra : 610\n\n"
+                "## Matériel & lieux\n\n"
+                "- 2099-01-01 — itra : 999\n")
+        entries, _ = L.parse_performance_index(text)
+        self.assertEqual(len(entries), 1)
+
+    def test_unrelated_heading_mentioning_performance_is_not_matched(self):
+        """Revue de code #109, 2e tour, nit : « #### Indice de performance VO2 »
+        (VO2max, vue Performance du tableau de bord) ne doit jamais être pris
+        pour le titre de la section ITRA/UTMB — seul un titre qui mentionne
+        explicitement ITRA ou UTMB l'est, ou un titre NU qui s'arrête juste
+        après « performance » (voir les tests de repli ci-dessous)."""
+        text = ("# Profil\n\n#### Indice de performance VO2\n\n"
+                "- 2025-11-01 — itra : 610\n")
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+
+    # -- revue de code #109, 3e tour : titre NU (sans ITRA/UTMB), repli --------
+
+    def test_bare_heading_without_itra_or_utmb_is_read_with_a_warning(self):
+        text = "# Profil\n\n## Indices de performance\n\n- 2025-11-01 — itra : 610\n"
+        entries, warnings = L.parse_performance_index(text)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["value"], 610.0)
+        self.assertTrue(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_bare_heading_with_trailing_parenthetical_is_read_with_a_warning(self):
+        text = "# Profil\n\n## Indices de performance (facultatif)\n\n- 2025-11-01 — itra : 610\n"
+        entries, warnings = L.parse_performance_index(text)
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_heading_with_itra_or_utmb_never_gets_the_bare_heading_warning(self):
+        text = "# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n- 2025-11-01 — itra : 610\n"
+        _, warnings = L.parse_performance_index(text)
+        self.assertFalse(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_bare_heading_with_unrelated_trailing_text_is_still_rejected(self):
+        """Le repli reste STRICT (revue de code #109, 3e tour) : un texte libre
+        après « performance » et SANS parenthèses (comme « VO2 » ci-dessus)
+        n'est jamais un titre nu accepté — seule une ligne qui s'arrête net,
+        éventuellement suivie d'une seule parenthèse, l'est."""
+        text = "# Profil\n\n#### Indice de performance VO2\n\n- 2025-11-01 — itra : 610\n"
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+
+    # -- revue de code #62 : normalisation « général »/synonymes -------------
+
+    def test_general_synonyms_normalize_to_no_category(self):
+        for line in ("2025-11-01 — itra Général : 612", "2025-11-02 — utmb général : 555",
+                     "2025-11-03 — utmb Index : 540", "2025-11-04 — itra GLOBAL : 611"):
+            with self.subTest(line=line):
+                entries = self._entries(line)
+                self.assertNotIn("category", entries[0])
+
+    def test_multi_word_category_is_preserved(self):
+        entries = self._entries("2025-11-01 — itra senior hommes : 600")
+        self.assertEqual(entries[0]["category"], "senior hommes")
+
+    def test_utmb_category_with_spaced_unit_is_collapsed(self):
+        entries = self._entries("2025-11-01 — utmb 100 k : 560")
+        self.assertEqual(entries[0]["category"], "100k")
+
+    def test_utmb_category_case_insensitive_unit(self):
+        entries = self._entries("2025-11-01 — utmb 100 K : 560")
+        self.assertEqual(entries[0]["category"], "100k")
+
+    # -- revue de code #62 : séparateur de date élargi -----------------------
+
+    def test_double_hyphen_separator(self):
+        entries = self._entries("2025-11-01 -- itra : 610")
+        self.assertEqual(entries[0]["value"], 610.0)
+
+    def test_unspaced_em_dash_separator_still_works(self):
+        entries = self._entries("2025-11-01—itra : 610")
+        self.assertEqual(entries[0]["value"], 610.0)
+
+    # -- revue de code #62 : bornes de valeur ---------------------------------
+
+    def test_value_above_max_is_dropped_with_warning(self):
+        entries, warnings = self._history("2025-11-01 — itra : 1500")
+        self.assertEqual(entries, [])
+        self.assertTrue(warnings)
+
+    def test_value_zero_is_dropped_with_warning(self):
+        entries, warnings = self._history("2025-11-01 — itra : 0")
+        self.assertEqual(entries, [])
+        self.assertTrue(warnings)
+
+    def test_value_at_max_bound_is_accepted(self):
+        entries = self._entries("2025-11-01 — itra : 1000")
+        self.assertEqual(entries[0]["value"], 1000.0)
+
+    # -- revue de code #109 (2e tour) : date future jamais vérifiée ICI --------
+    #
+    # `parse_performance_index` ne connaît pas « aujourd'hui » et ne le vérifie
+    # plus (déplacé vers `arc_index.performance_index`, voir
+    # `TestPerformanceIndexQuery` plus bas) : « futur » ne se juge qu'à la
+    # LECTURE, jamais à l'écriture — un avertissement calculé ici resterait figé
+    # en base tant que le fichier ne change pas, même après que la date soit
+    # passée.
+
+    def test_future_date_entry_is_kept_without_warning_at_parse_time(self):
+        entries, warnings = self._history("2099-01-01 — itra : 610")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(warnings, [])
+
+    # -- revue de code #62 : doublons exacts -----------------------------------
+
+    def test_exact_duplicate_keeps_last_line_with_warning(self):
+        entries, warnings = self._history("2025-11-01 — itra : 600", "2025-11-01 — itra : 620")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["value"], 620.0)
+        self.assertTrue(any("doublon" in w for w in warnings))
+
+    def test_different_category_same_date_is_not_a_duplicate(self):
+        entries, warnings = self._history("2025-11-01 — itra : 610", "2025-11-01 — itra L : 600")
+        self.assertEqual(len(entries), 2)
+        self.assertFalse(any("doublon" in w for w in warnings))
+
+    def test_ordinal_breaks_ties_in_document_order(self):
+        entries, _ = self._history("2025-11-01 — itra : 610", "2025-11-01 — utmb : 580")
+        self.assertEqual([e["kind"] for e in entries], ["itra", "utmb"])
+
+
+class TestPerformanceIndexQuery(Workspace):
+    """#62 — `arc_index.performance_index` : historique complet + valeur courante
+    (la plus récente) par (kind, category), lue depuis le workspace indexé —
+    avec les avertissements de lecture persistés (revue de code #62)."""
+
+    def test_current_is_latest_per_kind_and_category(self):
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 600
+- 2026-02-15 — itra : 620
+- 2026-01-15 — utmb 100k : 560
+""")
+        self.index()
+        result = I.performance_index(self.conn, date(2026, 9, 27))
+        self.assertEqual(len(result["history"]), 3)
+        self.assertEqual([h["date"] for h in result["history"]], ["2025-11-01", "2026-01-15", "2026-02-15"])
+        current_by_key = {(c["kind"], c.get("category")): c["value"] for c in result["current"]}
+        self.assertEqual(current_by_key[("itra", None)], 620.0)
+        self.assertEqual(current_by_key[("utmb", "100k")], 560.0)
+        self.assertEqual(result["warnings"], [])
+
+    def test_empty_when_no_history_declared(self):
+        self.write("planning/Runner_Profile.md", "# Profil\n\n- **FC max** : 188\n")
+        self.index()
+        self.assertEqual(I.performance_index(self.conn, date(2026, 9, 27)),
+                         {"history": [], "current": [], "warnings": []})
+
+    def test_future_date_warning_is_computed_fresh_at_read_time(self):
+        """Revue de code #109, 2e tour : la date future n'est JAMAIS stockée —
+        recalculée à chaque appel contre `today`. Un relevé qui était « futur »
+        hier ne doit plus l'être une fois que `today` l'a dépassé, SANS que le
+        fichier n'ait changé ni ne soit réindexé."""
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+- 2026-09-30 — itra : 630
+""")
+        self.index()
+        still_future = I.performance_index(self.conn, date(2026, 9, 27))
+        self.assertTrue(any("futur" in w for w in still_future["warnings"]))
+        no_longer_future = I.performance_index(self.conn, date(2026, 10, 5))
+        self.assertEqual(no_longer_future["warnings"], [])
+        # Le relevé lui-même reste inchangé dans les deux cas (jamais retiré).
+        self.assertEqual(len(no_longer_future["history"]), 1)
+
+    def test_warnings_are_persisted_and_survive_a_second_index_pass(self):
+        """Revue de code #62, blocker 2 : les avertissements restent lisibles via
+        `performance_index()` sans jamais réapparaître sur la sortie standard —
+        et une seconde indexation du même fichier (inchangé) ne les recalcule ni
+        ne les duplique."""
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+- 2025-11-01 — itra : 1500
+""")
+        self.index()
+        first = I.performance_index(self.conn)
+        self.assertEqual(len(first["warnings"]), 1)
+        self.index()  # fichier inchangé : pas de double avertissement
+        second = I.performance_index(self.conn)
+        self.assertEqual(second["warnings"], first["warnings"])
+
+    def test_migration_bullets_directly_under_main_heading_are_indexed(self):
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+- 2025-11-01 — itra : 610
+""")
+        self.index()
+        result = I.performance_index(self.conn)
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(result["history"][0]["value"], 610.0)
+
+
 class TestParseSleepNeed(unittest.TestCase):
     """#37, revue de code PR #82 — `_parse_sleep_need_s` est un parseur DÉDIÉ, distinct
     de `parse_fr_duration` : ce dernier lit silencieusement « 7.5 h » comme 5 h (le « h »
@@ -994,7 +1284,7 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 21)
+        self.assertEqual(I.SCHEMA_VERSION, 22)
 
     def test_real_v4_database_is_rebuilt_at_current_version(self):
         """Pas seulement « la constante vaut N » : une vraie base laissée par une
@@ -1025,6 +1315,61 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIn("garmin_activity_id", sample_columns)   # #42 (revue PR #87), pas activity_id/rowid
         sample_file_columns = {row[1] for row in conn.execute("PRAGMA table_info(sample_file)").fetchall()}
         self.assertIn("garmin_activity_id", sample_file_columns)
+        conn.close()
+
+    def test_v21_database_with_unchanged_profile_gets_performance_index_after_bump(self):
+        """#62, revue de code #109 (2e tour), blocker : une base `.arc/coach.db`
+        construite par une version d'AVANT #62 (`schema_version = 21`, sans les
+        tables `performance_index`/`performance_index_warning`) doit être
+        reconstruite à la version courante — colonnes ET tables comprises — sans
+        qu'un `Runner_Profile.md` déjà connu de cette base (même sha256, ce qui le
+        ferait sinon sauter comme « inchangé » à la réindexation) n'échappe à la
+        relecture. Sans le bump de `SCHEMA_VERSION`, `performance_index()` (donc
+        `/api/summary`) échouerait avec « no such table » pour tout utilisateur
+        dont la base existait déjà avant #62 — panne du tableau de bord entier."""
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 610
+""")
+        db_path = self.tmp / "legacy.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '21');"
+            "CREATE TABLE source_file (path TEXT PRIMARY KEY, kind TEXT, sha256 TEXT, mtime REAL, "
+            "arc_version INTEGER, parsed_ok TEXT, issues TEXT);"
+        )
+        # Le profil est déjà connu de la base, MÊME sha256 que sur disque : une base
+        # dont le SCHEMA_VERSION n'aurait pas changé le sauterait comme « inchangé »
+        # (`known and known[0] == digest` dans `index_workspace`), sans jamais
+        # peupler `performance_index` — c'est précisément ce que le bump évite en
+        # forçant la reconstruction complète (donc un `source_file` reparti à zéro).
+        digest = hashlib.sha256((self.ws / "planning/Runner_Profile.md").read_bytes()).hexdigest()
+        legacy.execute(
+            "INSERT INTO source_file VALUES (?, 'athlete', ?, 0, 0, 'ok', '[]')",
+            ("planning/Runner_Profile.md", digest))
+        legacy.commit()
+        legacy.close()
+
+        conn = I.open_db(self.ws, str(db_path))
+        self.assertEqual(
+            conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0],
+            str(I.SCHEMA_VERSION))
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        self.assertIn("performance_index", tables)
+        self.assertIn("performance_index_warning", tables)
+
+        I.index_workspace(conn, self.ws, "2026-09-27")
+        # Ce qu'`/api/summary`/`arc_index.py performance-index` appellent : ne doit
+        # jamais lever `sqlite3.OperationalError: no such table`.
+        result = I.performance_index(conn)
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(result["history"][0]["value"], 610.0)
         conn.close()
 
 
