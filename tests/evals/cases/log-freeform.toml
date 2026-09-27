@@ -24,6 +24,10 @@ fixture = "log-freeform"
 [expect]
 files_with_arc_block = ["activities/*.md", "medical/*.md"]
 files_absent = ["nutrition/*.md"]
+# La confirmation doit nommer le produit apparié du catalogue (revue de code),
+# pas seulement un total anonyme. Clé de `[expect]` : placée après un
+# `[[expect.arc_field]]`, TOML l'attacherait à cette assertion.
+must_match = ["Gel Fixture Test"]
 
 [[expect.arc_field]]
 glob = "activities/*.md"
@@ -51,10 +55,7 @@ path = "pain[0].score"
 equals = 3
 
 # Le narratif de la douleur (localisation en texte libre) reste vérifié par
-# la présence du mot, jamais par une égalité exacte de formulation. La
-# confirmation doit nommer le produit apparié du catalogue (revue de code),
-# pas seulement un total anonyme.
-must_match = ["Gel Fixture Test"]
+# la présence du mot, jamais par une égalité exacte de formulation.
 
 [[expect.file_contains_any]]
 glob = "medical/*.md"
