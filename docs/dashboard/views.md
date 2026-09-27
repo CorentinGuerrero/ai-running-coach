@@ -391,8 +391,10 @@ la liste **Plans** saute directement aux semaines qui ont un plan.
     pas encore synchronisé) compte comme faite, mais reste hors des ratios durée/D+
     des deux côtés — un ratio à 0 % serait aussi trompeur qu'optimiste.
 
-La même vue montre les semaines à venir — ici un bloc de force planifié un mois plus
-tard, avec les fiches de renforcement et le home trainer :
+La même vue montre les semaines à venir — ici une semaine d'un plan de transition sur
+dix semaines, écrit en un seul fichier multi-semaines (#69) : fiches de renforcement,
+côtes et home trainer, déjà poussés sur le calendrier Garmin, et l'extrait du plan
+du coach pour cette semaine-là :
 
 ![Une semaine à venir : séances planifiées, poussées sur le calendrier Garmin](../assets/dashboard/semaine-bloc.webp)
 
@@ -526,7 +528,7 @@ kilomètre : pas de graphique, c'est normal.
 
 **Quel est mon niveau, et que puis-je viser ?**
 
-![Performance : VO2max estimée, prédictions et records](../assets/dashboard/performance.webp)
+![Performance : VO2max estimée, prédictions, records et modèle pente → allure](../assets/dashboard/performance.webp)
 
 - **VO2max effective**, tendance sur 30 jours, estimée sur les séances de course
   qualifiantes (20 min à 3 h, au-dessus de 70 % de la FC max, sans marche).
@@ -581,6 +583,8 @@ divergent disent que le terrain ou la forme du jour pèsent.
 ## Trail Shape
 
 **Ma préparation récente couvre-t-elle ce que la course va exiger ?**
+
+![Trail Shape : score de préparation à J-3 d'un ultra de 110 km, composante par composante](../assets/dashboard/trail-shape.webp)
 
 Un score 0-100 (#63) qui compare les 8 dernières semaines glissantes
 d'entraînement aux exigences de l'objectif actif (`planning/active_objective.md`) —
@@ -702,6 +706,8 @@ prévision et le déroulé réel de l'ultra :
 
 **Mon poids et mes apports suivent-ils ?**
 
+![Nutrition : courbe de poids, moyenne 7 jours et cible, puis le détail jour par jour](../assets/dashboard/nutrition.webp)
+
 Un graphique de poids (#36) — points quotidiens, moyenne mobile 7 jours et cible — puis
 un tableau jour par jour : poids et poids cible, apports déclarés, dépense Garmin,
 glucides / protéines / lipides. Il n'y a pas de connexion MyFitnessPal : les apports
@@ -787,6 +793,7 @@ la [machine coach](headless.md) ou [derrière votre reverse proxy](docker.md).
 ![Aujourd'hui sur téléphone](../assets/dashboard/mobile-aujourdhui.webp){ width="260" }
 ![Semaine sur téléphone](../assets/dashboard/mobile-semaine.webp){ width="260" }
 ![Détail d'une séance sur téléphone](../assets/dashboard/mobile-seance.webp){ width="260" }
+![Trail Shape sur téléphone](../assets/dashboard/mobile-trail-shape.webp){ width="260" }
 
 </div>
 

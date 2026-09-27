@@ -1,4 +1,4 @@
-# 🧠 Agents
+# Agents
 
 <div class="arc-page-banner" markdown>
 ![](assets/trail-runner.jpg)
@@ -49,6 +49,11 @@ flowchart TB
 
 - La **définition et le suivi de l'objectif** (`planning/active_objective.md`)
 - La **planification hebdomadaire** et l'ajustement des séances
+- Les **garde-fous** (`scripts/arc_guardrails.py`) avant toute écriture/push, et le **journal de décisions** qui en garde la trace (`planning/YYYY-MM-DD_decision_<slug>.md`)
+- Les **cibles personnelles d'une séance** (zones FC, allure GAP, D+ de côte — `scripts/arc_workout_targets.py`) avant chaque push Garmin
+- Le score **Trail Shape** (préparation à l'objectif actif) et le **kilométrage des chaussures**
+- Les **indices de performance ITRA/UTMB**, en lecture seule
+- Le **débrief post-course** plan vs réalisé, par segment
 - Le **push des séances dans le calendrier Garmin Connect**
 - L'analyse **météo** avant chaque validation
 - La **récupération cardiaque (HRR)** dans chaque analyse de séance
@@ -66,10 +71,11 @@ flowchart TB
 
 - Analyse du **parcours** (GPX ou URL)
 - Points d'eau et ravitaillement (OpenStreetMap)
-- **3 scénarios d'allure** (prudent, nominal, ambitieux)
+- **Allures par segment**, depuis le modèle personnel pente → allure de l'athlète (`scripts/arc_race_pacing.py`), en **3 scénarios** (ambitieux, réaliste, sécurité)
 - Plan de **nutrition** et **hydratation** en course
 - Préparation **météo** et **matériel**
-- **Push de la séance dans Garmin**
+- Téléversement du **GPX enrichi** vers Garmin (points d'eau en waypoints)
+- Le **débrief post-course** (calcul), remis au coach pour l'écriture dans `rapports/`
 
 [→ Détails de l'agent stratège](agents/course-strategist.md)
 
@@ -83,6 +89,9 @@ flowchart TB
 
 - Analyse des métriques de santé (HRV, sommeil, stress)
 - **Gatekeeper** de la disponibilité à l'entraînement
+- Le **drapeau composite de risque de blessure** (`scripts/arc_guardrails.py injury-risk`) — 3 paliers, jamais un diagnostic, seuil de consultation
+- La **dette de sommeil sur 7 jours**
+- La **douleur déclarée** comme donnée structurée (via `/log`)
 - Prévention des blessures
 - Coordination avec le coach et le nutritionniste
 
@@ -98,6 +107,9 @@ flowchart TB
 
 - Suivi des **macros** (glucides, protéines, lipides)
 - Stratégie de **poids de course**
+- Le **plafond de glucides/h** réellement toléré à l'entraînement (`scripts/arc_index.py fueling`)
+- Le **taux de sudation** (dérivé des pesées avant/après séance)
+- Le **débrief post-course** : suit les écarts de glucides/h relevés vs objectif/plafond
 - Recharge en glycogène après les séances intenses
 - Comparaison apports / dépenses (calories Garmin)
 
@@ -121,9 +133,9 @@ flowchart TB
 
 | Dossier | Contenu |
 |---|---|
-| `planning/` | Objectif actif, plans hebdomadaires, profil du coureur |
+| `planning/` | Objectif actif, plans hebdomadaires, profil du coureur, plans de course, **décisions tracées** (`YYYY-MM-DD_decision_<slug>.md` — garde-fou, bilan matinal, blessure…) |
 | `activities/` | Activités Garmin synchronisées |
 | `medical/` | Santé, sommeil, récupération, météo |
 | `nutrition/` | Journaux nutritionnels |
-| `rapports/` | Rapports de synthèse hebdomadaires |
+| `rapports/` | Rapports de synthèse hebdomadaires et **débriefs post-course** (`YYYY-MM-DD_debrief_<course>.md`) |
 | `resources/` | Documents de référence (fournis par l'utilisateur) |

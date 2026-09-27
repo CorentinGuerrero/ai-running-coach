@@ -1,4 +1,4 @@
-# 📈 Skill : Intervals.icu
+# Skill : Intervals.icu
 
 > **Description** : Création, mise à jour et dépannage d'événements Intervals.icu via les outils MCP réels du serveur retenu par le projet (`create_event`, `update_event`, `delete_event`, `bulk_create_events` — [`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp), voir [Configuration Intervals.icu](../intervals-setup.md)).
 

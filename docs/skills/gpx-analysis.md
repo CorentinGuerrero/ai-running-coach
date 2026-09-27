@@ -1,4 +1,4 @@
-# 🗺️ Skill : Analyse GPX
+# Skill : Analyse GPX
 
 > **Description** : Analyse générique d'un fichier GPX (parcours de course, tracé Strava, GPX Garmin) et production d'un rapport Markdown structuré pour la planification.
 

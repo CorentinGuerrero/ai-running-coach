@@ -1,4 +1,4 @@
-# 🗂️ Votre workspace privé
+# Votre workspace privé
 
 `ai-running-coach` est un **moteur** : agents, skills, scripts, installation. Vos données —
 séances, santé, plans, rapports, ressources — sont votre **workspace**. Par défaut les deux
@@ -149,3 +149,40 @@ automatiquement. Deux façons de la rattraper : copier la section depuis
 `templates/Runner_Profile.template.md` dans votre propre `planning/
 Runner_Profile.md`, ou simplement le demander à l'agent `coach`, qui propose
 de l'ajouter (vide) à votre confirmation. Voir la FAQ pour le détail.
+
+### Déclarer vos chaussures (#40)
+
+Dans la section « Matériel & lieux » du profil, sous-section « Chaussures » :
+une puce de **premier niveau** par paire (jamais de puce indentée dessous —
+elle serait ignorée), tout facultatif sauf le nom :
+
+```
+- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — id: <identifiant> (par défaut)
+```
+
+| Segment | Rôle |
+|---|---|
+| `depuis <date>` | Date d'achat (`AAAA-MM-JJ`, ou « mars 2026 » = 1er du mois). Filtre l'attribution automatique des séances sans matériel précisé à la paire « (par défaut) » — une séance antérieure n'y est pas rattachée. |
+| `alerte <N> km` | Seuil d'usure propre à cette paire (accepte aussi « N miles »/« N mi », converti). Sans lui : **700 km par défaut**. |
+| `id: <identifiant>` | Identifiant explicite — **obligatoire** si vous rachetez le même modèle (sinon un id `-2`/`-3` est dérivé automatiquement, avec un avertissement au tableau de bord). |
+| `(par défaut)` | Chaussure attribuée aux séances sans matériel précisé. |
+| `(retirée)` | Sortie de rotation — kilométrage conservé, plus jamais d'alerte. |
+
+```
+- Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
+- Hoka Speedgoat 5 (grises) — depuis 2026-09-01 — id: speedgoat-grises
+- Nike Pegasus (retirée)
+```
+
+Le coach nomme, dans ses rapports hebdomadaires, toute paire non retirée
+ayant atteint son seuil (`python3 scripts/arc_index.py gear`).
+
+## Les décisions tracées
+
+Chaque fois qu'une séance est changée, remplacée ou annulée par un garde-fou,
+le bilan matinal ou une donnée médicale, l'agent responsable écrit un fichier
+`planning/YYYY-MM-DD_decision_<slug>.md` — la trace de **pourquoi**, lisible
+par `/why` et par le [tableau de bord](dashboard/index.md). Il porte son
+propre bloc ```arc (`trigger`, `rule_ids`, `before`/`after`, `outcome`) au
+même contrat de données que le reste du workspace — voir [le skill
+`workspace-data-contract`](skills/workspace-data-contract.md).

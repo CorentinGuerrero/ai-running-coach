@@ -1,4 +1,4 @@
-# 📡 Configuration Garmin
+# Configuration Garmin
 
 Cette page détaille l'accès à **Garmin Connect** utilisé par `ai-running-coach`.
 

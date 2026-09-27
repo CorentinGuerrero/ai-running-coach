@@ -1,4 +1,4 @@
-# 🩺 Agent Médecin
+# Agent Médecin
 
 > **Description** : Recovery Specialist & Medical Consultant — surveille le sommeil, le HRV, les blessures, et coordonne avec le Coach et le Nutritionniste.
 
@@ -14,6 +14,15 @@ L'agent **medical** est le spécialiste de la récupération et de la santé. Il
 - **Analyse des métriques** : HRV, sommeil, stress depuis Garmin pour identifier la charge physiologique
 - **Bilan matinal obligatoire (HRV + FC de repos + readiness)** : tout verdict de disponibilité s'appuie sur les trois — `get_hrv_data`, **`get_rhr_day`** et `get_training_readiness`. La FC de repos distingue un stress autonome (HRV bas, FC stable → entraînement facile, pas de repos) d'une cause **étrangère à l'entraînement** (HRV bas, FC nettement élevée → infection, déshydratation, alcool, chaleur : repos, signalement au coach). « Nettement élevée » = **> +7 bpm au-dessus de la médiane 7 jours, ou ≥ +5 deux jours de suite** ; un jour isolé à +5 est dans le bruit (±3-5 bpm). La FC de repos ne diagnostique jamais seule une surcharge d'entraînement — c'est la HRV qui le fait. Jamais de verdict sur HRV + readiness seuls.
 - **Récupération cardiaque (HRR)** : prise en compte du `recovery_hr_bpm` dans l'évaluation de la récupération
+- **Dette de sommeil sur 7 jours** (bilan `full` uniquement) : `python3 scripts/arc_index.py sleep-debt` — somme, sur les nuits mesurées, du manque par rapport au besoin déclaré au profil (sinon 7 h 30 par défaut). Nuit non mesurée jamais comptée comme un déficit nul.
+- **Douleur déclarée comme donnée** : une douleur rapportée (y compris via `/log`) est écrite STRUCTURÉE dans le bloc du jour (`pain`, liste `{location, score}`) — c'est ce que lit le drapeau composite ci-dessous, jamais un simple texte libre.
+
+### Drapeau composite de risque de blessure (#57)
+
+- **Lecture, jamais un diagnostic** : `python3 scripts/arc_guardrails.py injury-risk` combine ACWR, monotonie, douleur déclarée, écart effort perçu/charge FC mesurée, dette de sommeil et un verdict rouge récent en un niveau à **3 paliers** (`low` / `moderate` / `high`), toujours accompagné d'un avertissement non-diagnostique — jamais le nom d'une pathologie.
+- **Seuil de consultation** : dès que le drapeau rend `consult: true` (douleur sévère à elle seule, ou niveau `high` avec la douleur comme facteur), l'agent recommande explicitement un avis médical professionnel.
+- **Facteur sauté ≠ facteur rassurant** : historique insuffisant, bilan matinal désactivé (`[health].morning_check`)… chaque saut porte sa raison, jamais traité comme un signal favorable.
+- Détail complet (facteurs, poids, seuils réglables) : [Les garde-fous](../guardrails.md#drapeau-composite-de-risque-de-blessure-57).
 
 ### Coordination (délégation)
 

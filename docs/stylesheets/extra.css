@@ -121,6 +121,17 @@ html:has(.arc-hero) .md-content__inner > .md-content__inner {
   padding: 0;
 }
 
+/* The hero slides under the sticky header so the header really is
+   transparent over the photo (its white title needs the dark image). */
+html:has(.arc-hero) .arc-hero {
+  margin-top: -2.4rem;
+}
+
+/* No "edit this page" pencil floating over the landing. */
+html:has(.arc-hero) .md-content__button {
+  display: none;
+}
+
 /* The auto-generated page-title h1 is redundant under the hero */
 html:has(.arc-hero) .md-content__inner h1:first-of-type {
   display: none;
@@ -331,10 +342,21 @@ html:has(.arc-hero) .md-header--shadow {
   }
 }
 
-/* ---------- Landing sections ---------- */
+/* ---------- Landing sections ----------
+   The homepage hides Material's navigation and TOC (front matter), so the
+   content column can go edge to edge: every band is full-bleed and centres
+   its own 61rem inner column. */
+
+html:has(.arc-hero) .md-main__inner.md-grid {
+  max-width: none;
+}
+
+html:has(.arc-hero) .md-content {
+  max-width: none;
+}
 
 .arc-section {
-  padding: 5rem 0;
+  padding: 5.5rem 0;
 }
 
 .arc-section--tint {
@@ -345,9 +367,25 @@ html:has(.arc-hero) .md-header--shadow {
   background: #111a15;
 }
 
+/* Dark bands re-scope Material's own colour variables, so every nested
+   component (tabs, links, inline code) inherits the right values without
+   one-off overrides. */
 .arc-section--dark {
   background: var(--arc-pine-900);
   color: #e7ede9;
+  --md-default-fg-color: #ffffff;
+  --md-default-fg-color--light: #b8c4bd;
+  --md-default-fg-color--lighter: #8b9a92;
+  --md-default-fg-color--lightest: rgba(255, 255, 255, 0.12);
+  --md-typeset-color: #e7ede9;
+  --md-typeset-a-color: var(--arc-lime);
+  --md-accent-fg-color: #c6f26a;
+  --md-code-bg-color: rgba(255, 255, 255, 0.08);
+  --md-code-fg-color: #e7ede9;
+}
+
+[data-md-color-scheme="slate"] .arc-section--dark {
+  background: #0a1510;
 }
 
 .arc-section__inner {
@@ -356,26 +394,29 @@ html:has(.arc-hero) .md-header--shadow {
   padding: 0 1rem;
 }
 
-.arc-section h2 {
+.md-typeset .arc-section h2 {
   font-size: clamp(1.8rem, 3.4vw, 2.6rem);
   line-height: 1.12;
   margin: 0 0 1.1rem;
   max-width: 24ch;
+  text-wrap: balance;
 }
 
-.arc-section--dark h2 {
+.md-typeset .arc-section--dark h2 {
   color: #fff;
 }
 
-.arc-section__intro {
-  font-size: 1.1rem;
+.md-typeset .arc-section__intro {
+  font-size: 1.05rem;
   line-height: 1.65;
   max-width: 58ch;
   margin: 0 0 2.8rem;
   color: var(--arc-ink-soft);
+  text-wrap: pretty;
 }
 
-.arc-section--dark .arc-section__intro {
+[data-md-color-scheme="slate"] .md-typeset .arc-section__intro,
+.md-typeset .arc-section--dark .arc-section__intro {
   color: #b8c4bd;
 }
 
@@ -387,132 +428,424 @@ html:has(.arc-hero) .md-header--shadow {
   gap: 1.4rem;
 }
 
-.arc-agent {
-  background: var(--arc-stone);
+.md-typeset .arc-agent {
+  display: flex;
+  flex-direction: column;
+  background: #fbfaf6;
+  border: 1px solid rgba(20, 40, 30, 0.08);
   border-radius: 1.1rem;
-  padding: 1.8rem 1.8rem 1.6rem;
+  padding: 1.7rem 1.8rem 1.6rem;
   box-shadow: 0 1px 2px rgba(20, 40, 30, 0.06), 0 8px 24px rgba(20, 40, 30, 0.08);
 }
 
-[data-md-color-scheme="slate"] .arc-agent {
+[data-md-color-scheme="slate"] .md-typeset .arc-agent {
   background: #16201a;
+  border-color: rgba(255, 255, 255, 0.06);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.arc-agent h3 {
+.md-typeset .arc-agent__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 1rem;
+  border-radius: 0.8rem;
+  background: var(--arc-pine-800);
+  color: var(--arc-lime);
+}
+
+.md-typeset .arc-agent__icon .twemoji,
+.md-typeset .arc-agent__icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  max-height: none;
+}
+
+.md-typeset .arc-agent h3 {
   font-size: 1.3rem;
-  margin: 0 0 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
+  margin: 0 0 0.55rem;
 }
 
-.arc-agent h3 .arc-agent__icon {
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
-.arc-agent p {
-  margin: 0 0 1rem;
+.md-typeset .arc-agent p {
+  margin: 0 0 1.2rem;
   line-height: 1.6;
   color: var(--arc-ink-soft);
 }
 
-[data-md-color-scheme="slate"] .arc-agent p {
+[data-md-color-scheme="slate"] .md-typeset .arc-agent p {
   color: #b8c4bd;
 }
 
-.arc-agent blockquote {
-  margin: 0;
-  padding: 0.8rem 1rem;
-  border-radius: 0.6rem;
+/* The example prompt reads as something you would type to the agent. */
+.md-typeset .arc-agent blockquote {
+  margin: auto 0 0;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0.8rem 0.8rem 0.8rem 0.25rem;
   background: var(--arc-stone-2);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   color: var(--arc-ink);
 }
 
-[data-md-color-scheme="slate"] .arc-agent blockquote {
+[data-md-color-scheme="slate"] .md-typeset .arc-agent blockquote {
   background: #1d2a22;
   color: #e7ede9;
 }
 
-.arc-agent blockquote p {
+.md-typeset .arc-agent blockquote p {
   margin: 0;
   color: inherit;
 }
 
-/* ---------- Flow ---------- */
+/* ---------- The course: elevation profile + stages ----------
+   The signature of the landing: a trail profile, the kind printed on every
+   race bib, with one lime waypoint above each stage of a preparation. The
+   SVG keeps its aspect ratio (1000×180) so waypoints stay round and sit
+   exactly over the five equal columns below. */
 
-.arc-flow {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.6rem;
-  counter-reset: arc-step;
+.arc-profile-wrap {
+  margin: 0 0 0.4rem;
 }
 
-.arc-step {
-  position: relative;
-  padding-top: 0.4rem;
-}
-
-.arc-step__num {
-  font-family: var(--arc-display);
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--arc-lime);
-  margin-bottom: 0.7rem;
+.arc-profile {
   display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1000 / 180;
+  overflow: visible;
 }
 
-.arc-step h3 {
-  font-size: 1.2rem;
-  color: #fff;
-  margin: 0 0 0.6rem;
+.arc-profile__area {
+  fill: rgba(163, 230, 53, 0.07);
 }
 
-.arc-step p {
+.arc-profile__line {
+  fill: none;
+  stroke: rgba(231, 237, 233, 0.55);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.arc-profile__wp line {
+  stroke: rgba(163, 230, 53, 0.35);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.arc-profile__wp circle {
+  fill: var(--arc-lime);
+  stroke: var(--arc-pine-900);
+  stroke-width: 4;
+}
+
+[data-md-color-scheme="slate"] .arc-profile__wp circle {
+  stroke: #0a1510;
+}
+
+.md-typeset ol.arc-stages {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1.4rem;
   margin: 0;
+  padding: 1.4rem 0 0;
+  list-style: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.md-typeset .arc-stage {
+  margin: 0;
+  padding: 0;
+}
+
+.md-typeset .arc-stage__km {
+  display: block;
+  margin-bottom: 0.55rem;
+  font-family: var(--arc-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--arc-lime);
+}
+
+.md-typeset .arc-stage h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  color: #fff;
+  text-wrap: balance;
+}
+
+.md-typeset .arc-stage p {
+  margin: 0;
+  font-size: 0.84rem;
   line-height: 1.6;
   color: #b8c4bd;
 }
 
-/* ---------- Skills ---------- */
+.md-typeset .arc-stage a {
+  color: #e7ede9;
+  text-decoration: underline;
+  text-decoration-color: rgba(163, 230, 53, 0.6);
+  text-underline-offset: 0.2em;
+}
 
-.arc-skills {
+.md-typeset .arc-stage a:hover {
+  color: var(--arc-lime);
+}
+
+.md-typeset .arc-stage code {
+  font-size: 0.78rem;
+  padding: 0.1em 0.35em;
+  color: #e7ede9;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------- Daily commands + phone ---------- */
+
+.arc-daily {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.9rem 1.6rem;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: 3rem;
+  align-items: center;
+  margin-bottom: 4rem;
 }
 
-.arc-skill {
+.arc-commands {
   display: flex;
-  gap: 0.9rem;
+  flex-direction: column;
+}
+
+.md-typeset .arc-command {
+  display: grid;
+  grid-template-columns: 6.2rem minmax(0, 1fr);
+  gap: 1.2rem;
   align-items: baseline;
-  padding: 0.9rem 0;
+  padding: 1rem 0.9rem;
   border-bottom: 1px solid rgba(20, 40, 30, 0.12);
+  border-radius: 0.6rem;
+  color: var(--arc-ink);
+  transition: background-color 0.2s ease;
 }
 
-[data-md-color-scheme="slate"] .arc-skill {
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+.md-typeset .arc-command:first-child {
+  border-top: 1px solid rgba(20, 40, 30, 0.12);
 }
 
-.arc-skill__name {
-  font-weight: 700;
-  white-space: nowrap;
+.md-typeset .arc-command:hover,
+.md-typeset .arc-command:focus-visible {
+  background: var(--arc-stone-2);
   color: var(--arc-ink);
 }
 
-[data-md-color-scheme="slate"] .arc-skill__name {
-  color: #e7ede9;
+.md-typeset .arc-command code {
+  justify-self: start;
+  padding: 0.3em 0.7em;
+  border-radius: 2rem;
+  background: var(--arc-pine-900);
+  color: var(--arc-lime);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
-.arc-skill__desc {
+.md-typeset .arc-command span {
   color: var(--arc-ink-soft);
   line-height: 1.5;
 }
 
-[data-md-color-scheme="slate"] .arc-skill__desc {
+[data-md-color-scheme="slate"] .md-typeset .arc-command {
+  color: #e7ede9;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-command:hover,
+[data-md-color-scheme="slate"] .md-typeset .arc-command:focus-visible {
+  background: #16201a;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-command span {
   color: #b8c4bd;
+}
+
+.md-typeset figure.arc-phone {
+  width: auto;
+  margin: 0;
+  padding: 0.55rem;
+  border-radius: 2.4rem;
+  background: var(--arc-pine-950);
+  box-shadow:
+    0 1px 2px rgba(20, 40, 30, 0.2),
+    0 24px 48px -12px rgba(20, 40, 30, 0.45);
+  transform: rotate(2deg);
+}
+
+.arc-phone img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 1.9rem;
+}
+
+/* ---------- Skill families ---------- */
+
+.arc-families {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.4rem;
+}
+
+.md-typeset .arc-family h3 {
+  margin: 0 0 0.9rem;
+  padding-bottom: 0.7rem;
+  font-size: 1rem;
+  border-bottom: 2px solid var(--arc-pine-800);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-family h3 {
+  border-bottom-color: var(--arc-lime);
+}
+
+.md-typeset .arc-family ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset .arc-family li {
+  margin: 0 0 0.95rem;
+  padding: 0;
+  line-height: 1.45;
+}
+
+.md-typeset .arc-family li a {
+  display: block;
+  font-weight: 600;
+  color: var(--arc-ink);
+}
+
+.md-typeset .arc-family li a:hover {
+  color: var(--arc-pine-600);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset .arc-family li span {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--arc-ink-soft);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-family li a {
+  color: #e7ede9;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-family li a:hover {
+  color: var(--arc-lime);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .arc-family li span {
+  color: #b8c4bd;
+}
+
+/* ---------- Dashboard showcase: tabbed gallery in a window frame ---------- */
+
+.md-typeset .arc-showcase .tabbed-set {
+  margin: 0 0 2.2rem;
+  border-radius: 0;
+}
+
+.md-typeset .arc-showcase .tabbed-labels {
+  gap: 0.4rem;
+  margin-bottom: 1.2rem;
+  box-shadow: none;
+}
+
+.md-typeset .arc-showcase .tabbed-labels::before {
+  display: none;
+}
+
+.md-typeset .arc-showcase .tabbed-labels > label {
+  padding: 0.5rem 1.05rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 2rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #b8c4bd;
+}
+
+.md-typeset .arc-showcase .tabbed-labels > label:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.md-typeset .arc-showcase .tabbed-set > input:nth-child(1):checked ~ .tabbed-labels > :nth-child(1),
+.md-typeset .arc-showcase .tabbed-set > input:nth-child(2):checked ~ .tabbed-labels > :nth-child(2),
+.md-typeset .arc-showcase .tabbed-set > input:nth-child(3):checked ~ .tabbed-labels > :nth-child(3),
+.md-typeset .arc-showcase .tabbed-set > input:nth-child(4):checked ~ .tabbed-labels > :nth-child(4),
+.md-typeset .arc-showcase .tabbed-set > input:nth-child(5):checked ~ .tabbed-labels > :nth-child(5) {
+  background: var(--arc-lime);
+  border-color: var(--arc-lime);
+  color: var(--arc-pine-900);
+}
+
+.md-typeset .arc-showcase .tabbed-set > input:focus-visible ~ .tabbed-labels > label:focus-visible,
+.md-typeset .arc-showcase .tabbed-labels > label:focus-visible {
+  outline: 2px solid var(--arc-lime);
+  outline-offset: 2px;
+}
+
+/* The window frame: a quiet title bar drawn from the palette. */
+.md-typeset .arc-showcase .tabbed-content {
+  position: relative;
+  padding-top: 1.9rem;
+  border-radius: 0.9rem;
+  background: #0a1510;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 30px 60px -20px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.md-typeset .arc-showcase .tabbed-content::before {
+  content: "";
+  position: absolute;
+  top: 0.7rem;
+  left: 0.9rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0.85rem 0 0 rgba(255, 255, 255, 0.18), 1.7rem 0 0 rgba(255, 255, 255, 0.18);
+}
+
+.md-typeset .arc-showcase .tabbed-block > p {
+  margin: 0;
+}
+
+.md-typeset .arc-showcase .arc-shot {
+  display: block;
+  width: 100%;
+  margin: 0;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top left;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.md-typeset .arc-showcase .md-button {
+  padding: 0.85rem 1.7rem;
+  border-radius: 2rem;
+  border-color: rgba(255, 255, 255, 0.65);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.md-typeset .arc-showcase .md-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: #fff;
+  color: #fff;
 }
 
 /* ---------- CTA band ---------- */
@@ -521,55 +854,238 @@ html:has(.arc-hero) .md-header--shadow {
   text-align: center;
 }
 
-.arc-cta h2 {
+.md-typeset .arc-cta h2 {
   margin-left: auto;
   margin-right: auto;
 }
 
 .arc-cta__cmd {
   display: inline-block;
+  max-width: 100%;
   margin: 1.6rem 0 2rem;
   padding: 1rem 1.6rem;
   border-radius: 0.8rem;
   background: #0a1510;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.95rem;
-  color: var(--arc-lime);
   text-align: left;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-.arc-cta .md-button {
+.md-typeset .arc-cta__cmd code {
+  padding: 0;
+  background: none;
+  color: var(--arc-lime);
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.md-typeset .arc-cta .md-button {
   padding: 0.85rem 1.7rem;
   font-size: 1rem;
   border-radius: 2rem;
   font-weight: 600;
 }
 
-.arc-cta .md-button--primary {
+.md-typeset .arc-cta .md-button--primary {
   background: var(--arc-lime);
   border-color: var(--arc-lime);
   color: var(--arc-pine-900);
 }
 
-.arc-cta .md-button--primary:hover {
+.md-typeset .arc-cta .md-button--primary:hover {
   background: #b6f04a;
   border-color: #b6f04a;
   color: var(--arc-pine-900);
 }
 
-/* ---------- Disclaimer ---------- */
-
-.arc-note {
-  font-size: 0.9rem;
+.md-typeset .arc-note {
+  font-size: 0.85rem;
   color: var(--arc-ink-soft);
   max-width: 60ch;
-  margin: 0 auto;
+  margin: 2.2rem auto 0;
   line-height: 1.6;
 }
 
-[data-md-color-scheme="slate"] .arc-note {
+[data-md-color-scheme="slate"] .md-typeset .arc-note {
   color: #8b9a92;
+}
+
+.md-typeset .arc-note code {
+  font-size: 0.8rem;
+}
+
+/* ---------- Dashboard screenshots in interior pages ---------- */
+
+.md-typeset .arc-shot {
+  display: block;
+  width: 100%;
+  margin: 1.6rem 0 1.4rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(28, 43, 36, 0.12);
+  box-shadow: 0 1px 2px rgba(20, 40, 30, 0.06), 0 8px 24px rgba(20, 40, 30, 0.08);
+}
+
+/* Every dashboard capture in the docs gets the same quiet frame. */
+.md-typeset img[src*="assets/dashboard/"] {
+  border-radius: 0.6rem;
+  border: 1px solid rgba(28, 43, 36, 0.12);
+  box-shadow: 0 1px 2px rgba(20, 40, 30, 0.06), 0 8px 24px rgba(20, 40, 30, 0.08);
+}
+
+[data-md-color-scheme="slate"] .md-typeset img[src*="assets/dashboard/"] {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Guided tour of the dashboard: thumbnails cropped to the top of each view */
+.arc-tour.grid.cards img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top left;
+  border-radius: 0.4rem;
+  box-shadow: none;
+}
+
+.arc-tour.grid.cards > ul > li > p:first-child {
+  margin-top: 0;
+}
+
+/* ============================================================
+   Interior pages — reading polish
+   ============================================================ */
+
+/* Browser surfaces carry the palette too. */
+::selection {
+  background: rgba(163, 230, 53, 0.45);
+  color: var(--arc-pine-950);
+}
+
+html {
+  scrollbar-color: rgba(30, 77, 59, 0.45) transparent;
+}
+
+[data-md-color-scheme="slate"] {
+  scrollbar-color: rgba(163, 230, 53, 0.35) transparent;
+}
+
+:focus-visible {
+  outline-color: var(--arc-lime-strong);
+}
+
+.md-typeset a {
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset table:not([class]) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header: the site name speaks in the display face. */
+.md-header__topic:first-child {
+  font-family: var(--arc-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Headings: more air above than below, balanced lines. */
+.md-typeset h1 {
+  font-size: clamp(1.9rem, 3.2vw, 2.4rem);
+  line-height: 1.1;
+  color: var(--md-default-fg-color);
+  text-wrap: balance;
+}
+
+.md-typeset h2 {
+  margin-top: 2.4em;
+  text-wrap: balance;
+}
+
+.md-typeset h3 {
+  margin-top: 1.8em;
+}
+
+/* Navigation: the active page is marked in pine (lime in dark). */
+.md-nav__link--active {
+  font-weight: 600;
+}
+
+.md-nav--primary .md-nav__item--section > .md-nav__link {
+  font-family: var(--arc-display);
+  letter-spacing: -0.01em;
+}
+
+/* Tables: rounded, quiet header, readable rows. */
+.md-typeset table:not([class]) {
+  border: 1px solid rgba(20, 40, 30, 0.12);
+  border-radius: 0.6rem;
+  box-shadow: none;
+  font-size: 0.72rem;
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--arc-stone-2);
+  color: var(--arc-ink);
+  font-weight: 700;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background: #16201a;
+  color: #e7ede9;
+}
+
+/* Code blocks share the card radius. */
+.md-typeset pre > code {
+  border-radius: 0.6rem;
+}
+
+.md-typeset .highlight,
+.md-typeset pre {
+  border-radius: 0.6rem;
+}
+
+/* Admonitions: tinted surfaces instead of Material's stock border. */
+.md-typeset .admonition,
+.md-typeset details {
+  border-width: 1px;
+  border-radius: 0.7rem;
+  box-shadow: none;
+  font-size: 0.72rem;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: var(--arc-display);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+/* Grid cards (dashboard tour, overview pages): soft lift on hover. */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border-radius: 0.9rem;
+  border-color: rgba(20, 40, 30, 0.12);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:hover {
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(20, 40, 30, 0.06), 0 10px 28px rgba(20, 40, 30, 0.12);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li,
+[data-md-color-scheme="slate"] .md-typeset .grid > .card {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Footer: previous / next in the display face. */
+.md-footer__title {
+  font-family: var(--arc-display);
 }
 
 /* ---------- Responsive ---------- */
@@ -586,17 +1102,60 @@ html:has(.arc-hero) .md-header--shadow {
 
 @media (max-width: 60em) {
   .arc-team,
-  .arc-skills {
+  .arc-families {
     grid-template-columns: 1fr;
   }
 
-  .arc-flow {
+  .arc-families {
+    gap: 1.6rem;
+  }
+
+  .arc-daily {
     grid-template-columns: 1fr;
-    gap: 2rem;
+    gap: 2.4rem;
+  }
+
+  .md-typeset figure.arc-phone {
+    width: min(15rem, 72vw);
+    margin: 0 auto;
+  }
+
+  /* The profile keeps its role as a header graphic; stages stack below it
+     as a vertical course, each one hung on the lime trail line. */
+  .md-typeset ol.arc-stages {
+    grid-template-columns: 1fr;
+    gap: 1.8rem;
+    padding: 1.8rem 0 0 1.4rem;
+    border-top: 0;
+    border-left: 1px dashed rgba(163, 230, 53, 0.45);
+  }
+
+  .md-typeset .arc-stage {
+    position: relative;
+  }
+
+  .md-typeset .arc-stage::before {
+    content: "";
+    position: absolute;
+    top: 0.2rem;
+    left: calc(-1.4rem - 0.35rem);
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--arc-lime);
+    box-shadow: 0 0 0 3px var(--arc-pine-900);
+  }
+
+  .md-typeset .arc-stage p {
+    font-size: 0.9rem;
   }
 
   .arc-section {
     padding: 3.5rem 0;
+  }
+
+  .md-typeset .arc-showcase .arc-shot {
+    aspect-ratio: 4 / 5;
   }
 }
 
@@ -622,30 +1181,40 @@ html:has(.arc-hero) .md-header--shadow {
   .arc-hero .md-button {
     text-align: center;
   }
+
+  .md-typeset .arc-command {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    padding: 0.9rem 0.4rem;
+  }
+
+  .md-typeset .arc-agent {
+    padding: 1.4rem 1.3rem 1.3rem;
+  }
 }
 
-/* Capture du tableau de bord sur la page d'accueil */
-.arc-shot {
+/* ---------- Hero ridge ----------
+   The photo ends on a ridge line, not a straight edge: the same profile
+   motif as the course section, filled with the page background. */
+
+.arc-hero__ridge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  z-index: 1;
   display: block;
   width: 100%;
-  margin: 1.6rem 0 1.4rem;
-  border-radius: 0.8rem;
-  border: 1px solid rgba(28, 43, 36, 0.12);
-  box-shadow: 0 1px 2px rgba(20, 40, 30, 0.06), 0 8px 24px rgba(20, 40, 30, 0.08);
+  height: clamp(2.2rem, 6vw, 4.8rem);
+  fill: var(--md-default-bg-color);
+  pointer-events: none;
 }
 
-
-/* Visite guidée du tableau de bord : vignettes recadrées sur le haut de chaque vue */
-.arc-tour.grid.cards img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  object-fit: cover;
-  object-position: top left;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(28, 43, 36, 0.12);
+.arc-hero__inner {
+  z-index: 2;
 }
 
-.arc-tour.grid.cards > ul > li > p:first-child {
-  margin-top: 0;
+/* The hero column keeps the same side gutter as every section. */
+.arc-hero__inner {
+  padding-inline: 1rem;
 }

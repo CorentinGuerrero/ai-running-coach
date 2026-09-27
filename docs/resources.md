@@ -1,4 +1,4 @@
-# 📚 Ressources
+# Ressources
 
 Le dossier `resources/` est votre **base de connaissances personnelle** que les agents consultent pour fournir des conseils fondés sur des preuves.
 

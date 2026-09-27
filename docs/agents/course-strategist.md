@@ -1,4 +1,4 @@
-# 🗺️ Agent Stratège de course
+# Agent Stratège de course
 
 > **Description** : Course Strategy Specialist — analyse les parcours GPX ou les URL de course, construit des plans de course détaillés avec allure, nutrition, météo, matériel, et téléverse le GPX enrichi dans Garmin avec les points d'eau.
 
@@ -10,16 +10,14 @@ L'agent **course-strategist** transforme un fichier GPX ou une URL de course en 
 
 L'agent suit un workflow structuré en 8 étapes pour construire la stratégie de course :
 
-1. **Analyse du parcours** — à partir d'un fichier GPX ou d'une URL de course
-2. **Points d'eau et ravitaillement** — via OpenStreetMap
-3. **Allures par segment et 3 scénarios** — sécurité, réaliste, ambitieux, depuis
-   le modèle personnel pente → allure quand un GPX est fourni (`scripts/arc_race_pacing.py`, #59) ;
-   règles génériques en repli (URL seule, sans GPX)
-4. **Plan de nutrition** — ravitaillement en course
-5. **Plan d'hydratation** — gestion des liquides
-6. **Préparation météo** — conditions attendues
-7. **Préparation matériel** — équipement nécessaire
-8. **Push dans Garmin** — téléversement du GPX enrichi avec les waypoints
+1. **Analyse d'entrée** — GPX (analyse générique via le skill `gpx-analysis`) ou URL de course (extraction via `webfetch`)
+2. **Points d'eau et ravitaillement** — points officiels + enrichissement OpenStreetMap (Overpass), alertes sur les écarts > 8 km / > 15 km
+3. **Vérification et questions utilisateur** — comble les informations critiques manquantes (barrières horaires, terrain, points d'eau proposés) avant de continuer
+4. **Synthèse allures et temps de passage** — 3 scénarios (ambitieux, réaliste, sécurité), par segment depuis le modèle personnel pente → allure quand un GPX est fourni (`scripts/arc_race_pacing.py`, #59) ; règles génériques en repli (URL seule, sans GPX)
+5. **Plan de nutrition** — objectif glucides/h (plafonné au débit toléré à l'entraînement, #41), hydratation, produits réels si un catalogue est fourni
+6. **Météo** — si la course est à ≤ 14 jours, ajustements automatiques et acclimatation à la chaleur (#38)
+7. **Équipement et vêtements** — checklist détaillée (lampe frontale, chaussures, hydratation, matériel obligatoire)
+8. **Upload Garmin** — GPX enrichi (waypoints des ravitaillements) téléversé via `upload_course`
 
 ## Alignement avec l'objectif
 
@@ -37,10 +35,9 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 
 | Skill | Quand |
 |---|---|
-| `gpx-analysis` | analyse du parcours GPX |
-| `course-comparison` | comparaison avec des parcours connus |
-| `weather-forecast` | préparation météo |
-| `garmin-workout-scheduling` | push de la séance dans Garmin |
+| `gpx-analysis` | analyse du parcours GPX (étape 1) |
+| `weather-forecast` | préparation météo (étape 6, course à ≤ 14 jours) |
+| `workspace-data-contract` | avant d'écrire un plan de course dans `planning/` ou un plan nutrition dans `nutrition/` |
 
 ## Allures par segment (#59)
 

@@ -193,7 +193,7 @@ Borders are used sparingly: a 1px bottom rule separates skill rows; buttons use 
 - **Background:** stone on light, #16201a on dark.
 - **Shadow Strategy:** Ambient Card / Ambient Dark (see Elevation).
 - **Internal Padding:** 1.8rem 1.8rem 1.6rem.
-- **Content:** emoji icon + name (title), one role paragraph, one example prompt in a stone-2 quote block.
+- **Content:** Material icon in a pine tile (lime glyph), name (title), one role paragraph, one example prompt as a stone-2 chat bubble pinned to the card bottom.
 
 ### CTA Command Block
 - **Style:** inline-block, JetBrains Mono, lime text on near-black (#0a1510), medium radius (0.8rem), 1rem 1.6rem padding.
@@ -209,6 +209,28 @@ Borders are used sparingly: a 1px bottom rule separates skill rows; buttons use 
 - **Structure:** full-bleed image, dark scrim (linear gradient 0.62 → 0.28 → 0.78 opacity), content left-aligned.
 - **Content:** display headline, one lead sentence (46ch max), two CTAs, three trust markers (lime dots).
 - **Motion:** the title, lead, and actions rise in sequence (0s / 0.15s / 0.3s) with `cubic-bezier(0.16, 1, 0.3, 1)` over 0.8s — the system's one authored motion moment. Disabled under `prefers-reduced-motion`.
+
+### Course Profile (Signature Component)
+- **Structure:** a dark pine band holding an authored SVG elevation profile (viewBox 1000×180, aspect ratio locked so waypoints stay round), a faint lime area fill, a light stroke line, and five lime waypoints — each centred over one of five equal columns below.
+- **Stages:** `Départ → Préparation → Chaque matin → Jour J → Arrivée`, each a Sora lime label, a short title and one paragraph. It is the landing's map of the product, from install to race debrief.
+- **Mobile:** the profile stays as a header graphic; stages stack along a dashed lime line with a lime dot per stage.
+- **Echo:** the hero photo ends on the same ridge motif (`.arc-hero__ridge`, filled with the page background) instead of a straight edge.
+
+### Command List and Phone
+- **Commands:** the five short commands as rows — a pine-deep pill with the command in lime JetBrains Mono (real commands, so the Mono-Is-Data rule holds), then one sentence. Rows are links with a stone-2 hover.
+- **Phone:** a real mobile dashboard capture in a pine-950 frame (2.4rem radius, 0.55rem bezel, soft offset shadow), rotated 2°.
+
+### Skill Families
+- Three columns (Terrain et séances · Garmin et synchronisation · Installation et données), each headed by a Sora title over a 2px pine rule (lime in dark), listing skill links with a one-line description.
+
+### Dashboard Showcase
+- A dark band with Material content tabs restyled as pills (lime when active) over a window frame (near-black, three quiet dots, 0.9rem radius). Each tab shows a real capture cropped to 16:10 from the top-left, so switching never shifts layout.
+- Dark bands re-scope Material's colour variables (`--md-default-fg-color`, `--md-typeset-a-color`…) so nested components inherit light-on-pine values.
+
+### Interior Pages
+- H1s carry no emoji; icons, where needed, come from Material's icon set (`:material-*:`).
+- Tables: 1px rule, 0.6rem radius, stone-2 header, tabular numerals. Admonitions: 1px border, 0.7rem radius, Sora titles. Grid cards lift with a soft offset shadow on hover.
+- Browser surfaces: lime-tinted `::selection`, palette scrollbar, lime-strong focus ring, 0.2em underline offset.
 
 ## Do's and Don'ts
 
@@ -226,3 +248,4 @@ Borders are used sparingly: a 1px bottom rule separates skill rows; buttons use 
 - **Don't** add a kicker or eyebrow above a heading; the heading carries its own weight.
 - **Don't** use gradient text, glass-as-decoration, or zero-offset colored halos.
 - **Don't** add more than one authored motion moment; the hero rise is the only one.
+- **Don't** use emoji as icons or in page titles; use Material's icon set.

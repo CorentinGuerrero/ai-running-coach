@@ -1,4 +1,4 @@
-# 🌦️ Skill : Météo
+# Skill : Météo
 
 > **Description** : Prévisions météo (wttr.in via webfetch) pour le lieu d'entraînement, persistance de fichiers MD par jour, résolution du lieu effectif, et recommandations d'heure optimale pour les séances en extérieur.
 

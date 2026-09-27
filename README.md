@@ -109,13 +109,11 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 
 ### ⚡ Commandes courtes du quotidien
 
-Pour un usage rapide depuis le téléphone, quatre commandes courtes, format
-prévisible, qui n'écrivent ni ne modifient jamais un plan, une semaine, une
-décision ou un plan de course, et ne poussent jamais rien vers Garmin — natives
-sur **Claude Code** et **Gemini CLI** (commande dédiée), chargées comme
-n'importe quel skill sur **OpenCode** et **GitHub Copilot**, non disponibles
-sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces deux IDE, voir
-[IDE supportés](docs/ides.md)) :
+Pour un usage rapide depuis le téléphone, cinq commandes courtes, format
+prévisible — natives sur **Claude Code** et **Gemini CLI** (commande dédiée),
+chargées comme n'importe quel skill sur **OpenCode** et **GitHub Copilot**,
+non disponibles sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces
+deux IDE, voir [IDE supportés](docs/ides.md)) :
 
 | Commande | Répond |
 |---|---|
@@ -123,6 +121,12 @@ sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces deux IDE, voir
 | `/why` | Pourquoi la dernière décision du coach (ou une décision nommée) a été prise — jamais une raison inventée |
 | `/week` | Le statut compact de la semaine en cours : réalisé/prévu, garde-fous |
 | `/race` | Le compte à rebours de votre objectif, le score Trail Shape, votre plan de course s'il existe |
+| `/log` | Saisie libre en une phrase — ravitaillement, douleur, RPE — convertis en données du contrat sans jamais inventer une valeur |
+
+`/today`, `/why`, `/week` et `/race` n'écrivent ni ne modifient jamais un
+plan, une semaine, une décision ou un plan de course, et ne poussent jamais
+rien vers Garmin. `/log`, lui, écrit dans `activities/`/`medical/` (jamais
+dans `planning/`).
 
 ### 🎛️ Ce qui est configurable
 

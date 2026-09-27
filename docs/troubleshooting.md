@@ -1,4 +1,4 @@
-# 🔧 Dépannage
+# Dépannage
 
 Cette page regroupe les problèmes courants et leurs solutions.
 

@@ -1,4 +1,4 @@
-# 📱 Le coach dans la poche
+# Le coach dans la poche
 
 Le projet fonctionne dans un IDE, sur un ordinateur. Cette page explique comment garder
 le coach **toujours avec vous** — synchronisation Garmin automatique avec notification, et
@@ -198,6 +198,20 @@ Sommeil : 7 h 42, score 81
 HRV : 62 ms — équilibré (baseline 58-66)
 Readiness : 74
 Alerte : aucune
+```
+
+**Variante `Pourquoi :` (#56).** Quand une `decision` (garde-fou, bilan
+matinal rouge…) est active pour aujourd'hui ou demain, la 5<sup>e</sup> ligne
+change d'étiquette — `Pourquoi :` au lieu d'`Alerte :`, jamais les deux à la
+fois — et résume la raison de l'ajustement plutôt que de rester générique :
+
+```
+🏃 Sync Garmin
+Séances : à jour
+Sommeil : 5 h 10, score 41
+HRV : 31 ms — effondrée (baseline 48-74)
+Readiness : 22
+Pourquoi : verdict rouge (HRV effondrée) — séance VO2max à revoir (r5_quality_after_red)
 ```
 
 Pour utiliser Codex à la place de Claude Code : `runner = "codex"` dans

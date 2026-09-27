@@ -1,4 +1,4 @@
-# ⚡ Skill : Synchronisation Garmin
+# Skill : Synchronisation Garmin
 
 > **Description** : Récupération efficace des données Garmin (activités, sommeil, HRV, training readiness, métriques de santé) via le serveur MCP `garmin`.
 
