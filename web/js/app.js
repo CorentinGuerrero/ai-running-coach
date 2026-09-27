@@ -1599,14 +1599,19 @@ function trailShapeComponentRow(c) {
   // Durabilite (#63, revue de code) : "moins on fade, mieux c'est" - jamais
   // presentee comme une "cible" a atteindre par le haut (le vocabulaire des
   // trois autres lignes), mais comme un fade observe sous un PLAFOND.
-  const valuesHtml = c.id === "durability"
+  const isDurability = c.id === "durability";
+  const valuesHtml = isDurability
     ? `<span>fade ${trailShapeValue(c.actual, c.unit)} (plafond ${trailShapeValue(c.target, c.unit)})</span>`
     : `<span>${trailShapeValue(c.actual, c.unit)}</span><span class="muted"> / cible ${trailShapeValue(c.target, c.unit)}</span>`;
+  // Meme vocabulaire "plafond" que la valeur ci-dessus pour la durabilite
+  // (#63, revue de code, nit) - jamais "de la cible", reserve aux trois
+  // autres lignes qui ont une VRAIE cible a atteindre par le haut.
+  const metaRatioLabel = isDurability ? "sous le plafond" : "de la cible";
   return `<div class="ts-row">
     <div class="ts-row__label">${F.esc(c.label)}</div>
     <div class="ts-row__values">${valuesHtml}</div>
     ${trailShapeBar(c.ratio)}
-    <div class="ts-row__meta muted">${F.num(c.ratio * 100, 0)} % de la cible · poids ${F.num((c.weight_renormalized ?? c.weight) * 100, 0)} % du score</div>
+    <div class="ts-row__meta muted">${F.num(c.ratio * 100, 0)} % ${metaRatioLabel} · poids ${F.num((c.weight_renormalized ?? c.weight) * 100, 0)} % du score</div>
   </div>`;
 }
 
