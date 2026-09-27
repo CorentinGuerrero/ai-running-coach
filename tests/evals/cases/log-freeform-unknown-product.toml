@@ -21,7 +21,7 @@ unchanged_files = ["resources/nutrition/catalogue-produits-fixture.md"]
 # soit une demande de la valeur en glucides, soit un aveu explicite que le
 # produit n'est pas reconnu/dans le catalogue.
 must_match = [
-  "(quels?|quelle) (sont )?les? glucides|combien de glucides|valeur (nutritionnelle|en glucides)|je ne (trouve|connais) pas ce produit|(absent|inconnu) du catalogue|n['’]est pas dans (le|ton|votre) catalogue|(peux|peux-tu|pourrais-tu).{0,30}(indiquer|donner|préciser)",
+  "(quels?|quelle) (sont )?les? glucides|combien de glucides|valeur (nutritionnelle|en glucides)|je ne (trouve|connais) pas ce produit|(absent|inconnu) du catalogue|n['’]est pas dans (le|ton|votre) catalogue|(peux|peux-tu|pourrais-tu).{0,30}(indiquer|donner|préciser).{0,30}(glucides|produit)",
 ]
 
 [[expect.arc_field]]

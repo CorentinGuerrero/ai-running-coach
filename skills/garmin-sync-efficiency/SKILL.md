@@ -15,12 +15,28 @@ All Garmin tools are exposed by the `garmin` MCP server (direct mode) or via `le
 
 ## Rules
 
-1. **Check local files first.** Before invoking any Garmin tool, look for today's file in `activities/` (`YYYY-MM-DD_type.md`) or `medical/` (`YYYY-MM-DD_health.md`). If it exists and is fresh, work from the file — do NOT re-fetch.
+1. **Check local files first — but "exists" is not "synced".** Before invoking any Garmin
+   tool, look for today's file in `activities/` (`YYYY-MM-DD_type.md`) or `medical/`
+   (`YYYY-MM-DD_health.md`). If it exists AND carries the "synced" marker below, work from
+   the file — do NOT re-fetch. If it exists but does NOT carry that marker, it is **not yet
+   synced** — go fetch it like a missing date, then MERGE (rule 1a) rather than skip.
+1a. **"Not yet synced" marker (#67).** The `/log` skill may create a minimal `activities/`
+   or `medical/` file, before any Garmin sync ran that day, holding only athlete-declared
+   fields. That file is "not yet synced": an `activities/*.md` file with **no
+   `garmin_activity_id`**, or a `medical/*.md` file with **none of** `hrv_overnight_ms`,
+   `resting_hr_bpm`, `readiness_score`, `sleep_total_s`. Its presence must never suppress
+   that day's fetch. Once fetched, MERGE the Garmin fields into that SAME file — never write
+   a second file for the same date/session — and **never overwrite an athlete-declared key**:
+   `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg`
+   (activity) and `pain` (health) come only from the athlete, Garmin has no such field, so
+   the merge is a plain union — add the new Garmin keys, keep the declared ones byte-for-byte.
+   A file that already carries the marker (a real prior sync) is fresh and final — merge
+   never applies to it, only to a not-yet-synced one.
 2. **Fetch specific dates only.** Query one date (today or yesterday) per call. Never pull multi-week ranges into the conversation.
 3. **Persist immediately.** After each fetch, write the file to `activities/` or `medical/` FIRST — ```arc block on top (see `workspace-data-contract`), prose in the document language below — then analyze from the written file.
 4. **Never paste raw JSON** into the conversation or reasoning. Extract the fields you need into the MD file; discard the rest.
-5. **One sync per day.** Garmin data for a past date does not change — if a file for that date exists, trust it.
-6. **Batch writes, not fetches.** When multiple days are missing, fetch day-by-day and write each file as you go, rather than accumulating responses in context.
+5. **One sync per day.** Garmin data for a past date does not change — if a file for that date exists AND is already synced (rule 1a's marker present), trust it.
+6. **Batch writes, not fetches.** When multiple days are missing or not-yet-synced, fetch day-by-day and write/merge each file as you go, rather than accumulating responses in context.
 
 ## Minimal Extraction Pattern
 

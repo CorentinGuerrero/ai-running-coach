@@ -7,15 +7,18 @@
 # échapperait de toute façon à `arc_field`, qui ne voit que les fichiers
 # ÉCRITS pendant le run, `tests/evals/runner.py::_new_files`).
 #
-# Le catalogue fixture (1 « Gel Fixture Test » = 32 g de glucides) sert à
-# vérifier que 2 gels donnent 64 g, jamais une valeur générique — une petite
-# marge de tolérance absorbe un arrondi ou une reformulation de quantité par
-# le modèle, jamais une conversion différente. `fluid_intake_ml` (500 ml,
-# déclaré directement en millilitres) et `rpe` ne demandent aucune conversion :
-# vérifiés au chiffre près. La douleur va dans `medical/`, jamais dans le
-# fichier d'activité ni dans `nutrition/` (#57).
+# Prompt en "2 gels" (minuscule, pluriel, PAS le nom exact du catalogue "Gel
+# Fixture Test") exprès pour exercer le pluriel français ET la correspondance
+# PARTIELLE de `scripts/arc_log.py::match_product` (revue de code — l'ancienne
+# version citait le nom exact, ce qui ne testait jamais ce chemin). L'
+# arithmétique étant désormais entièrement déterministe (`scripts/arc_log.py`,
+# jamais le modèle), `carbs_g` est vérifié À L'EXACT (64 = 2 × 32 g), plus de
+# marge de tolérance. `fluid_intake_ml` (500 ml, déclaré directement en
+# millilitres) et `rpe` ne demandent aucune conversion : vérifiés au chiffre
+# près. La douleur va dans `medical/`, jamais dans le fichier d'activité ni
+# dans `nutrition/` (#57).
 id = "log-freeform"
-prompt = "/log Sortie de ce matin, trail, 1h30 : 2 Gel Fixture Test + 500 ml au km 15, genou gauche 3/10, RPE 7"
+prompt = "/log Sortie de ce matin, trail, 1h30 : 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7"
 fixture = "log-freeform"
 
 [expect]
@@ -25,12 +28,7 @@ files_absent = ["nutrition/*.md"]
 [[expect.arc_field]]
 glob = "activities/*.md"
 path = "carbs_g"
-min = 54
-
-[[expect.arc_field]]
-glob = "activities/*.md"
-path = "carbs_g"
-max = 74
+equals = 64
 
 [[expect.arc_field]]
 glob = "activities/*.md"
@@ -53,7 +51,11 @@ path = "pain[0].score"
 equals = 3
 
 # Le narratif de la douleur (localisation en texte libre) reste vérifié par
-# la présence du mot, jamais par une égalité exacte de formulation.
+# la présence du mot, jamais par une égalité exacte de formulation. La
+# confirmation doit nommer le produit apparié du catalogue (revue de code),
+# pas seulement un total anonyme.
+must_match = ["Gel Fixture Test"]
+
 [[expect.file_contains_any]]
 glob = "medical/*.md"
 any = ["genou"]
