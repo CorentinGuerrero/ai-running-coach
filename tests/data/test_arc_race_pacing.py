@@ -86,6 +86,21 @@ class _LongClimbFlatDescentProfile:
         return 240.0 - (d - 16000.0) * 0.03
 
 
+class _UltraClimbFlatDescentProfile:
+    """Même forme, mise à l'échelle pour dépasser `FADE_TIME_NEUTRAL_MAX_DURATION_S`
+    (6 h) même à une allure de 3 m/s (`GENERIC_BINS`) — pour vérifier que le
+    fade redevient ADDITIF (pas neutralisé) sur un ultra (revue de code #59,
+    3ᵉ tour)."""
+    total_m = 90000.0
+
+    def __call__(self, d):
+        if d <= 30000.0:
+            return d * 0.03
+        if d <= 60000.0:
+            return 900.0
+        return 900.0 - (d - 60000.0) * 0.03
+
+
 class TestSegmentCourse(unittest.TestCase):
     def setUp(self):
         self.pts = _straight_course(_ClimbFlatDescentProfile())
@@ -437,6 +452,38 @@ class TestBuildRacePlan(unittest.TestCase):
                                         start_time="07:00", race_date="2026-11-15", segment_m=750.0)
         self.assertGreater(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
 
+    def test_fade_stays_additive_beyond_six_hours_even_with_an_intensity_prediction(self):
+        # #59, 3ᵉ revue de code, should-fix : au-delà de
+        # `FADE_TIME_NEUTRAL_MAX_DURATION_S` (6 h), le fade redevient un vrai
+        # ralentissement NET même quand une prédiction Riegel/VDOT existe —
+        # l'exposant ultra lui-même n'est qu'une approximation du projet, pas
+        # une mesure du fade réel de cet athlète.
+        pts = _straight_course(_UltraClimbFlatDescentProfile(), step_m=50.0)
+        no_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=0.0, fade_source="generic",
+                                      intensity_factor=1.0, intensity_source="riegel",
+                                      start_time="07:00", race_date="2026-11-15", segment_m=1000.0)
+        with_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
+                                        intensity_factor=1.0, intensity_source="riegel",
+                                        start_time="07:00", race_date="2026-11-15", segment_m=1000.0)
+        # Plus de 6 h prédites sans fade : le régime "additif" doit s'appliquer.
+        self.assertGreater(no_fade["totals"]["time_s"]["realistic"], RP.FADE_TIME_NEUTRAL_MAX_DURATION_S)
+        self.assertGreater(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
+        self.assertTrue(any("additif" in n.lower() for n in with_fade["fade_notes"]), with_fade["fade_notes"])
+
+    def test_fade_stays_time_neutral_just_below_six_hours_with_an_intensity_prediction(self):
+        # Symétrique : sous 6 h, le régime "neutre" reste actif (déjà couvert
+        # par test_fade_is_time_neutral_when_an_intensity_prediction_exists,
+        # ici pour documenter explicitement la frontière des deux régimes).
+        pts = _straight_course(_LongClimbFlatDescentProfile(), step_m=20.0)
+        no_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=0.0, fade_source="generic",
+                                      intensity_factor=1.3, intensity_source="riegel",
+                                      start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        self.assertLess(no_fade["totals"]["time_s"]["realistic"], RP.FADE_TIME_NEUTRAL_MAX_DURATION_S)
+        with_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
+                                        intensity_factor=1.3, intensity_source="riegel",
+                                        start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        self.assertEqual(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
+
 
 # ---------------------------------------------------------------------------
 # Terrain vallonné : intégration point par point (revue de code #59, blocant)
@@ -734,12 +781,12 @@ class TestResolvers(unittest.TestCase):
 
     def test_resolve_intensity_factor_without_gpx_distance_stays_at_one(self):
         conn = self._conn()
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 3.0, None, None)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 3.0, None, None)
         self.assertEqual((factor, source, race_speed, notes), (1.0, "none", None, []))
 
     def test_resolve_intensity_factor_without_flat_reference_stays_at_one(self):
         conn = self._conn()
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, None, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "trail"}, None, 10000, 0)
         self.assertEqual((factor, source, race_speed, notes), (1.0, "none", None, []))
 
     def _insert_activity(self, conn, *, sport, distance_m, duration_s, elevation_gain_m=None, avg_hr_bpm=None,
@@ -762,13 +809,13 @@ class TestResolvers(unittest.TestCase):
         conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")
         self._insert_activity(conn, sport="trail", distance_m=22000, duration_s=8000, elevation_gain_m=774,
                                avg_hr_bpm=143, intensity="endurance")
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 10000, 0)
         self.assertEqual((factor, source, race_speed), (1.0, "none", None))
 
     def test_hard_effort_via_planned_intensity_is_accepted(self):
         conn = self._conn()
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
         self.assertEqual(source, "riegel")
         self.assertGreater(factor, 1.0)
         self.assertIsNotNone(race_speed)
@@ -777,7 +824,7 @@ class TestResolvers(unittest.TestCase):
         conn = self._conn()
         conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")  # Z3/Z4 (%FCmax repli) = 152 bpm
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, avg_hr_bpm=165)
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
         self.assertEqual(source, "riegel")
         self.assertGreater(factor, 1.0)
 
@@ -785,7 +832,7 @@ class TestResolvers(unittest.TestCase):
         conn = self._conn()
         conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, avg_hr_bpm=140)
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
         self.assertEqual((factor, source, race_speed), (1.0, "none", None))
 
     def test_longest_qualifying_hard_effort_is_preferred(self):
@@ -806,7 +853,7 @@ class TestResolvers(unittest.TestCase):
         self._insert_activity(conn, sport="trail", distance_m=10000, duration_s=3000, elevation_gain_m=200,
                                intensity="race")
         flat_reference_speed_ms = 2.9
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
             conn, {"sport": "trail"}, flat_reference_speed_ms, 10000, 0)
         self.assertEqual(source, "riegel")
         expected_reference_flat_m = 10000 + 200 * M.TRAIL_FLAT_M_PER_M_DPLUS
@@ -820,14 +867,14 @@ class TestResolvers(unittest.TestCase):
         conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (52000, 2400)")
         self._insert_activity(conn, sport="trail", distance_m=10000, duration_s=2400, intensity="race")
         # GPX réellement analysé : 31 km, bien loin des 52 km de l'objectif (> 10 %).
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 31000, 912)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 31000, 912)
         self.assertTrue(any("objectif" in n.lower() and "gpx" in n.lower() for n in notes), notes)
 
     def test_objective_close_to_gpx_does_not_warn(self):
         conn = self._conn()
         conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, 0)")
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10100, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10100, 0)
         self.assertEqual(notes, [])
 
     def test_factor_below_one_under_the_clamp_duration_is_clamped_with_a_note(self):
@@ -835,7 +882,7 @@ class TestResolvers(unittest.TestCase):
         # implausible sur une prédiction courte (< 4h30) : plafonné à 1.0.
         conn = self._conn()
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=3000, intensity="race")
-        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 4.0, 10000, 0)
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(conn, {"sport": "road"}, 4.0, 10000, 0)
         self.assertEqual(factor, 1.0)
         self.assertTrue(any("plafonné" in n.lower() for n in notes), notes)
 
@@ -848,10 +895,84 @@ class TestResolvers(unittest.TestCase):
         self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
         flat_reference_speed_ms = 2.9
         for distance_m in (5000, 10000, 21097, 42195):
-            factor, source, race_speed, notes = RP._resolve_intensity_factor(
+            factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
                 conn, {"sport": "road"}, flat_reference_speed_ms, distance_m, 0)
             self.assertEqual(source, "riegel", distance_m)
             self.assertGreater(factor, 1.0, distance_m)
+
+    def test_piecewise_riegel_matches_standard_riegel_at_or_below_the_marathon_anchor(self):
+        # #59, 3ᵉ revue de code : aucun changement de comportement pour une
+        # cible <= 42,195 km équivalent plat (le pivot par morceaux ne change
+        # rien tant que référence ET cible restent du même côté du marathon).
+        conn = self._conn()
+        self._insert_activity(conn, sport="trail", distance_m=12000, duration_s=2651, elevation_gain_m=41,
+                               intensity="tempo")
+        primary = {"sport": "trail"}
+        for target_m in (5000, 10000, 21097, 42195):
+            factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+                conn, primary, 2.9, target_m, 0)
+            self.assertEqual(source, "riegel", target_m)
+            reference_flat_m = 12000 + 41 * M.TRAIL_FLAT_M_PER_M_DPLUS
+            expected_s = M.riegel(2651, reference_flat_m, target_m, M.RIEGEL_EXPONENT["trail"])
+            self.assertAlmostEqual(target_m / race_speed, expected_s, delta=1.0, msg=target_m)
+
+    def test_piecewise_riegel_predicts_a_real_ultra_slowdown_beyond_the_marathon_anchor(self):
+        # #59, 3ᵉ revue de code, BLOQUANT : avec un exposant Riegel UNIQUE (1.15),
+        # ce même profil (référence 12 km/44:11, cible 160 km/8 000 m D+) se
+        # prédisait en ~17,6 h — plus vite que la plupart des finishers réels de
+        # ce type de course. L'exposant ultra par morceaux (`RIEGEL_ULTRA_EXPONENT`,
+        # 1.30 au-delà de 42,195 km équivalent plat) doit ralentir NETTEMENT cette
+        # prédiction.
+        conn = self._conn()
+        self._insert_activity(conn, sport="trail", distance_m=12000, duration_s=2651, elevation_gain_m=41,
+                               intensity="tempo")
+        flat_reference_speed_ms = 2.9
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+            conn, {"sport": "trail"}, flat_reference_speed_ms, 160000, 8000)
+        self.assertEqual(source, "riegel")
+        target_flat_m = 160000 + 8000 * M.TRAIL_FLAT_M_PER_M_DPLUS
+        predicted_s = target_flat_m / race_speed
+        reference_flat_m = 12000 + 41 * M.TRAIL_FLAT_M_PER_M_DPLUS
+        single_exponent_predicted_s = M.riegel(2651, reference_flat_m, target_flat_m, M.RIEGEL_EXPONENT["trail"])
+        # Nettement plus lent que l'exposant unique (bogue #59 d'origine) : au
+        # moins une heure de plus sur cette distance.
+        self.assertGreater(predicted_s, single_exponent_predicted_s + 3600)
+        # Plausible pour un ultra de ce profil : au moins 19 h (l'exposant unique
+        # prédisait ~17,6 h, un chiffre déjà écarté par la revue de code comme
+        # trop optimiste face aux références élites publiques).
+        self.assertGreater(predicted_s / 3600.0, 19.0)
+
+    def test_reference_already_beyond_the_anchor_uses_the_ultra_exponent_throughout(self):
+        # `D_ref >= 42,195 km` (revue de code #59, « gérer ce cas de façon
+        # cohérente ») : référence ET cible toutes deux au-delà du pivot ->
+        # l'exposant ultra s'applique sur tout le trajet référence -> cible,
+        # équivalent à `arc_metrics.riegel` avec l'exposant ULTRA directement.
+        conn = self._conn()
+        self._insert_activity(conn, sport="trail", distance_m=50000, duration_s=6 * 3600, intensity="race")
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+            conn, {"sport": "trail"}, 2.9, 80000, 0)
+        self.assertEqual(source, "riegel")
+        predicted_s = 80000 / race_speed
+        expected_s = M.riegel(6 * 3600, 50000, 80000, RP.RIEGEL_ULTRA_EXPONENT)
+        self.assertAlmostEqual(predicted_s, expected_s, delta=1.0)
+
+    def test_extrapolating_far_beyond_the_reference_warns_and_widens_the_safe_scenario(self):
+        # #59, 3ᵉ revue de code, should-fix : cible > 4× la référence en
+        # équivalent plat -> avertissement + plancher "safe" élargi (-12 % au
+        # lieu de -8 %).
+        conn = self._conn()
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+            conn, {"sport": "road"}, 2.9, 100000, 0)  # 100 km = 10x la référence de 10 km
+        self.assertEqual(safe_factor, RP.EXTRAPOLATION_SAFE_SCENARIO_FACTOR)
+        self.assertTrue(any("extrapol" in n.lower() or "×" in n for n in notes), notes)
+
+    def test_extrapolating_within_four_times_the_reference_keeps_the_generic_floor(self):
+        conn = self._conn()
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
+        factor, source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+            conn, {"sport": "road"}, 2.9, 21097, 0)  # ~2.1x la référence, sous le seuil de 4x
+        self.assertEqual(safe_factor, RP.GENERIC_SCENARIO_SPEED_FACTOR["safe"])
 
 
 class _Args:
@@ -913,6 +1034,79 @@ class TestHandComputedEndToEndPassageTable(unittest.TestCase):
 
         cutoffs = RP.check_cutoffs(passages["aid_station_passages"], stations, datetime(2026, 11, 15, 7, 0))
         self.assertEqual(cutoffs, [])  # pas de `cutoff` déclaré sur cette station.
+
+
+# ---------------------------------------------------------------------------
+# Bout en bout, pipeline complet : 160 km/8 000 m D+ depuis la référence citée
+# par la revue de code (12 km en 44:11) doit prédire plus de 20 h (revue de
+# code #59, 3ᵉ tour, BLOQUANT).
+# ---------------------------------------------------------------------------
+
+class _UltraOutAndBackProfile:
+    """80 km de montée à 10 %, 80 km de descente à 10 % — profil ultra stylisé
+    (pas un vrai profil trail vallonné) mais suffisant pour exercer le coût
+    RÉEL d'un relief marqué (paniers dépendants de la pente) en plus de la
+    conversion linéaire équivalent-plat utilisée pour `intensity_factor`."""
+    total_m = 160000.0
+
+    def __call__(self, d):
+        if d <= 80000.0:
+            return d * 0.10
+        return 8000.0 - (d - 80000.0) * 0.10
+
+
+class TestFullPipelineUltraSlowdown(unittest.TestCase):
+    def _conn(self):
+        conn = IDX.open_db(Path(tempfile.gettempdir()) / "arc-race-pacing-tests-nonexistent", None, True, True)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_160km_8000m_from_the_review_reference_predicts_over_twenty_hours(self):
+        # Référence EXACTE citée par la revue de code #59 (3ᵉ tour, BLOQUANT) :
+        # 12 km en 44:11 (2651 s), D+ 41 m, effort dur (tempo). Avec un exposant
+        # Riegel UNIQUE (1.15), ce même profil prédisait ~18 h — plus vite que la
+        # plupart des finishers réels de ce type de course. Avec l'exposant ultra
+        # par morceaux ET le coût réel du relief (paniers dépendants de la
+        # pente, pas seulement l'équivalence plat linéaire), la prédiction doit
+        # dépasser 20 h.
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO activity (source_path, date, sport, distance_m, duration_s, elevation_gain_m) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("ref.md", (date.today() - timedelta(days=10)).isoformat(), "trail", 12000.0, 2651.0, 41.0))
+        conn.execute("INSERT INTO planned_session (date, sport, intensity) VALUES (?, ?, ?)",
+                     ((date.today() - timedelta(days=10)).isoformat(), "trail", "tempo"))
+        conn.commit()
+        conf = {"sport": "trail"}
+        flat_reference_speed_ms = 2.9
+        intensity_factor, intensity_source, race_speed, notes, safe_factor = RP._resolve_intensity_factor(
+            conn, conf, flat_reference_speed_ms, 160000.0, 8000.0)
+        self.assertEqual(intensity_source, "riegel")
+
+        # Paniers dépendants de la pente (pas un seul panier générique) : le
+        # relief coûte RÉELLEMENT plus cher que la conversion plat linéaire.
+        bins = [
+            {"grade_mid": -0.10, "speed_ms": 3.5, "source": "personal",
+             "ci_low_speed_ms": 3.3, "ci_high_speed_ms": 3.7, "hr_bpm": 130},
+            {"grade_mid": 0.0, "speed_ms": 3.0, "source": "personal",
+             "ci_low_speed_ms": 2.8, "ci_high_speed_ms": 3.2, "hr_bpm": 145},
+            {"grade_mid": 0.10, "speed_ms": 1.0, "source": "generic",
+             "ci_low_speed_ms": None, "ci_high_speed_ms": None, "hr_bpm": None},
+        ]
+        pts = _straight_course(_UltraOutAndBackProfile(), step_m=100.0)
+        plan = RP.build_race_plan(
+            pts, bins, fade_pct=RP.DEFAULT_GENERIC_FADE_PCT, fade_source="generic",
+            intensity_factor=intensity_factor, intensity_source=intensity_source,
+            safe_scenario_factor=safe_factor, start_time="07:00", race_date="2027-01-01", segment_m=2000.0)
+        self.assertGreater(plan["totals"]["time_s"]["realistic"], 20 * 3600)
+        # Le fade reste ADDITIF (course largement > 6 h) : le total AVEC fade
+        # doit rester supérieur au total SANS fade (jamais neutralisé sur un
+        # ultra, voir ASSUMPTIONS["fade"]).
+        no_fade_plan = RP.build_race_plan(
+            pts, bins, fade_pct=0.0, fade_source="generic",
+            intensity_factor=intensity_factor, intensity_source=intensity_source,
+            safe_scenario_factor=safe_factor, start_time="07:00", race_date="2027-01-01", segment_m=2000.0)
+        self.assertGreater(plan["totals"]["time_s"]["realistic"], no_fade_plan["totals"]["time_s"]["realistic"])
 
 
 if __name__ == "__main__":

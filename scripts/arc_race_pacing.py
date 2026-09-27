@@ -198,6 +198,36 @@ INTENSITY_CLAMP_DURATION_S = 4.5 * 3600.0
 # course ou une distance arrondie.
 OBJECTIVE_GPX_MISMATCH_PCT = 10.0
 
+# Riegel PAR MORCEAUX (3ᵉ revue de code #59, BLOQUANT) — voir
+# `ASSUMPTIONS["base_pace"]` : un exposant Riegel UNIQUE (1.06 route / 1.15
+# trail) reste optimiste passé quelques heures d'effort, ce qui rendait une
+# allure d'ultra plus RAPIDE que des références élites réelles (ex. un 171 km/
+# 10 000 m D+ prédit en 18 h, plus vite que l'UTMB). `RIEGEL_ULTRA_ANCHOR_M`
+# (42,195 km — la distance MARATHON, standard bien connu) est le point de
+# pivot : l'exposant de la bande (`arc_metrics.RIEGEL_EXPONENT`) s'applique
+# JUSQU'À ce pivot, `RIEGEL_ULTRA_EXPONENT` (1.30, approximation du projet —
+# aucune source vérifiable ne fixe cette valeur précise, choisie pour
+# recouper l'ordre de grandeur de références ultra publiques) au-delà.
+RIEGEL_ULTRA_ANCHOR_M = 42195.0
+RIEGEL_ULTRA_EXPONENT = 1.30
+
+# Extrapolation Riegel trop lointaine (3ᵉ revue de code #59, should-fix) : au-delà
+# de ce ratio (cible / référence, en équivalent plat), la prédiction s'appuie sur
+# une référence trop courte pour être fiable — le scénario « safe » est alors
+# élargi (`EXTRAPOLATION_SAFE_SCENARIO_FACTOR`, -12 % au lieu du plancher
+# générique -8 %) et un avertissement est émis.
+RIEGEL_EXTRAPOLATION_RATIO = 4.0
+EXTRAPOLATION_SAFE_SCENARIO_FACTOR = 0.88
+
+# Durée de course PRÉDITE au-delà de laquelle le fade reste ADDITIF (un vrai
+# ralentissement net) plutôt que neutre en temps total (3ᵉ revue de code #59,
+# should-fix) — voir `ASSUMPTIONS["fade"]` : sur un ultra de plusieurs heures,
+# la dégradation d'endurance implicite de Riegel/VDOT (déjà approximative au-delà
+# de ce point, voir `RIEGEL_ULTRA_EXPONENT`) ne doit pas être présumée couvrir
+# EXACTEMENT le fade mesuré à l'entraînement — les deux s'additionnent plutôt
+# que de se neutraliser, en dessous ce seuil reste le régime « fade neutre ».
+FADE_TIME_NEUTRAL_MAX_DURATION_S = 6.0 * 3600.0
+
 # Clés EN ANGLAIS (contrat ```arc, AGENTS.md « clés en anglais ») — mêmes noms
 # que `race_plan.scenarios` déjà défini par le skill `workspace-data-contract`
 # (`{"ambitious": s, "realistic": s, "safe": s}`) : un plan de course par
@@ -321,7 +351,12 @@ ASSUMPTIONS = {
         "`speed × 1.06` — la mesure l'emporte seulement quand elle est PLUS large que le plancher "
         "générique, jamais quand elle est plus étroite. Un segment générique ou mixte (`ci_*` à "
         "`None`) retombe directement sur ce pourcentage fixe, signalé comme approximation du projet, "
-        "sans source vérifiable pour ces valeurs précises."
+        "sans source vérifiable pour ces valeurs précises. Le plancher « safe » lui-même est élargi à "
+        "`EXTRAPOLATION_SAFE_SCENARIO_FACTOR` (-12 %) plutôt que le générique (-8 %) quand la cible "
+        "extrapole à plus de `RIEGEL_EXTRAPOLATION_RATIO` fois la distance de la référence Riegel (voir "
+        "`ASSUMPTIONS[\"base_pace\"]`, 3ᵉ revue de code #59, should-fix) : une prédiction extrapolée "
+        "loin de toute mesure mérite une marge de sécurité plus large, pas la même que pour une "
+        "distance proche de la référence."
     ),
     "base_pace": (
         "`arc_slope_model.predict_speed` (#58) est ajusté sur la bande « endurance » (effort facile "
@@ -349,21 +384,45 @@ ASSUMPTIONS = {
         "course), ou, à défaut de plan, dont la FC moyenne dépasse la borne Z3/Z4 de l'athlète "
         "(`arc_index.athlete_hr_zone_bounds`) — la plus longue qualifiante est la plus prédictive (même "
         "principe que `arc_metrics.predictions`). Sa distance ET son D+ propres sont convertis en "
-        "équivalent plat EXACTEMENT comme la cible, avant d'appeler `arc_metrics.riegel` — les DEUX "
+        "équivalent plat EXACTEMENT comme la cible, avant d'appeler `_riegel_time_s` — les DEUX "
         "côtés de la comparaison sont ainsi en équivalent plat, jamais un mélange brut/converti qui "
         "compterait le relief deux fois. VDOT (tendance de VO2max, `metric_day.vo2max`) en repli si "
         "aucune référence dure n'est trouvée.\n\n"
+        "**Riegel PAR MORCEAUX au-delà du marathon** (3ᵉ revue de code #59, BLOQUANT) : un exposant "
+        "Riegel UNIQUE (1.06 route / 1.15 trail, `arc_metrics.RIEGEL_EXPONENT`) reste OPTIMISTE passé "
+        "quelques heures d'effort — approximation du projet, aucune source vérifiable ne chiffre "
+        "précisément ce biais pour ce calcul-ci, mais la dégradation de l'endurance sur un effort de "
+        "plusieurs heures est bien plus marquée qu'un exposant calibré sur des distances de compétition "
+        "courtes (5 km-marathon) ne le prédit. Une allure d'ultra calculée avec l'exposant unique "
+        "pouvait ainsi dépasser des références élites publiques réelles (ex. 171 km/10 000 m D+ prédit "
+        "en ~18 h, plus vite que le record de l'UTMB). `_riegel_time_s` applique donc l'exposant de la "
+        "bande JUSQU'À `RIEGEL_ULTRA_ANCHOR_M` (42,195 km équivalent plat — la distance MARATHON, un "
+        "standard bien connu et vérifiable, retenu comme pivot), `RIEGEL_ULTRA_EXPONENT` (1.30 — "
+        "approximation du projet, choisie pour recouper l'ORDRE DE GRANDEUR de repères ultra publics, "
+        "PAS une valeur mesurée pour cet athlète) au-delà. Se réduit EXACTEMENT à la formule Riegel "
+        "standard quand référence ET cible sont toutes deux au marathon ou moins (aucun changement pour "
+        "ces distances, voir les tests). Repères de calibration (« avant fade », donc avant "
+        "l'ajustement additif décrit ci-dessous ; approximatifs, dépendent de la référence RÉELLEMENT "
+        "retenue pour l'athlète, jamais une garantie) ayant guidé le choix de 1.30 : ≈ 8h30 pour 80 km/"
+        "3 500 m D+, ≈ 9h30 pour 100 km plat, ≈ 11h20 pour 100 km/5 000 m D+, ≈ 21 h pour 160 km/8 000 m "
+        "D+, ≈ 22h45 pour 171 km/10 000 m D+.\n\n"
+        "**Extrapolation trop lointaine** (3ᵉ revue de code #59, should-fix) : au-delà de "
+        "`RIEGEL_EXTRAPOLATION_RATIO` (4×) entre la distance cible et celle de la référence Riegel "
+        "retenue (toutes deux en équivalent plat), la prédiction s'appuie sur un point de mesure trop "
+        "court pour être fiable — le scénario « safe » est alors élargi "
+        "(`EXTRAPOLATION_SAFE_SCENARIO_FACTOR`, -12 % au lieu du plancher générique -8 %) et un "
+        "avertissement est ajouté à `notes`.\n\n"
         "Toutes les vitesses issues du modèle (personnel ET générique) sont multipliées par ce facteur "
         "avant d'en dériver les trois scénarios — la dispersion personnelle (IQR) est donc, elle aussi, "
         "mise à l'échelle de l'intensité de course, pas seulement le point central. Un facteur calculé "
         "sous 1.0 pour une course prédite de moins de `INTENSITY_CLAMP_DURATION_S` (4h30) est implausible "
         "(l'allure de course ne peut pas être plus lente que l'allure d'endurance sur une distance "
-        "courte) et plafonné à 1.0, avec un avertissement — au-delà de ce seuil, l'exposant de Riegel en "
-        "trail (1.15) prédit déjà, à raison, un ralentissement marqué sur un ultra, aucun plancher n'y "
-        "est appliqué. Sans distance GPX exploitable, sans référence plate personnelle, ou sans "
-        "référence dure/tendance VO2max exploitable, `intensity_factor` reste `1.0` et `intensity_source` "
-        "vaut `\"none\"` — le plan reste alors EXPLICITEMENT une allure d'ENDURANCE (jamais une allure de "
-        "course inventée), signalé en clair dans `warnings`."
+        "courte) et plafonné à 1.0, avec un avertissement — au-delà de ce seuil, l'exposant ultra "
+        "(1.30) prédit déjà, à raison, un ralentissement marqué, aucun plancher n'y est appliqué. Sans "
+        "distance GPX exploitable, sans référence plate personnelle, ou sans référence dure/tendance "
+        "VO2max exploitable, `intensity_factor` reste `1.0` et `intensity_source` vaut `\"none\"` — le "
+        "plan reste alors EXPLICITEMENT une allure d'ENDURANCE (jamais une allure de course inventée), "
+        "signalé en clair dans `warnings`."
     ),
     "fade": (
         "Le fade GAP médian des sorties longues récentes (`arc_durability`/`arc_index.durability_trend`, "
@@ -387,17 +446,26 @@ ASSUMPTIONS = {
         "aucune justification physiologique. `fade_pct_applied` (proportionnel à `durée prédite / 90 "
         "min`, plafonné à 1) est la valeur RÉELLEMENT appliquée ; `fade_pct` reste la valeur mesurée/"
         "générique brute, pour la transparence.\n\n"
-        "**Neutre en temps total quand `intensity_source != \"none\"`** (2ᵉ revue de code #59, "
-        "should-fix) : Riegel/VDOT prédisent déjà un temps de course qui intègre implicitement une "
-        "dégradation d'endurance sur la distance (l'exposant de Riegel > 1, la courbe VDOT) — appliquer "
-        "EN PLUS le fade GAP comme un ralentissement NET aurait compté cette dégradation deux fois, "
-        "gonflant le temps total au-delà de ce que Riegel/VDOT prédisent déjà. Le fade est alors "
-        "RENORMALISÉ après application (`_renormalize_fade_time_neutral`) : chaque scénario garde le "
-        "MÊME total qu'un plan sans fade (plus rapide en début de course, plus lent en fin — la FORME "
-        "reste utile pour le rythme à tenir), seule la RÉPARTITION dans le temps change, jamais le total. "
-        "Quand `intensity_source == \"none\"` (allure d'endurance simple, aucune prédiction Riegel/VDOT "
-        "sous-jacente), le fade reste un vrai ralentissement NET comme avant — rien à double-compter, "
-        "l'allure de base n'intègre alors aucune dégradation implicite."
+        "**Neutre en temps total quand `intensity_source != \"none\"` ET course prédite <= "
+        "`FADE_TIME_NEUTRAL_MAX_DURATION_S` (6 h)** (2ᵉ puis 3ᵉ revue de code #59, should-fix) : "
+        "Riegel/VDOT prédisent déjà un temps de course qui intègre implicitement une dégradation "
+        "d'endurance sur la distance (l'exposant de Riegel > 1, la courbe VDOT) — appliquer EN PLUS le "
+        "fade GAP comme un ralentissement NET aurait compté cette dégradation deux fois, gonflant le "
+        "temps total au-delà de ce que Riegel/VDOT prédisent déjà. Le fade est alors RENORMALISÉ après "
+        "application (`_renormalize_fade_time_neutral`) : chaque scénario garde le MÊME total qu'un plan "
+        "sans fade (plus rapide en début de course, plus lent en fin — la FORME reste utile pour le "
+        "rythme à tenir), seule la RÉPARTITION dans le temps change, jamais le total.\n\n"
+        "**Redevient ADDITIF (un vrai ralentissement net) au-delà de 6 h** (3ᵉ revue de code #59, "
+        "should-fix) : passé ce seuil, l'exposant ULTRA de Riegel (`RIEGEL_ULTRA_EXPONENT`, voir "
+        "ASSUMPTIONS[\"base_pace\"]) est lui-même une approximation du projet, pas une mesure — présumer "
+        "qu'il couvre EXACTEMENT le fade GAP mesuré à l'entraînement (une grandeur d'une nature "
+        "différente, issue de la durabilité sur sortie longue) serait une coïncidence non justifiée. "
+        "Les deux effets s'ADDITIONNENT donc sur un ultra plutôt que de se neutraliser — un plan de plus "
+        "de 6 h reste donc, à dessein, plus prudent (temps total plus long) qu'un simple report de la "
+        "prédiction Riegel/VDOT. Quand `intensity_source == \"none\"` (allure d'endurance simple, "
+        "aucune prédiction Riegel/VDOT sous-jacente), le fade reste ADDITIF quelle que soit la durée, "
+        "comme avant #59 — rien à double-compter, l'allure de base n'intègre alors aucune dégradation "
+        "implicite."
     ),
     "heat": (
         "Reprend TELS QUELS les seuils déjà documentés dans `agents/course-strategist.md` (ÉTAPE 6) — "
@@ -814,18 +882,24 @@ def _scale_prediction_speeds(prediction: dict, factor: float) -> dict:
     return scaled
 
 
-def _scenario_speeds(prediction: dict) -> Dict[str, Optional[float]]:
+def _scenario_speeds(prediction: dict, *, safe_factor: float = GENERIC_SCENARIO_SPEED_FACTOR["safe"]
+                      ) -> Dict[str, Optional[float]]:
     """Vitesse par scénario — voir `ASSUMPTIONS["scenarios"]` pour l'écart
-    PLANCHER appliqué à une dispersion personnelle mesurée trop étroite."""
+    PLANCHER appliqué à une dispersion personnelle mesurée trop étroite.
+    `safe_factor` (défaut : plancher générique -8 %) remplace ce plancher côté
+    « safe » UNIQUEMENT — voir `ASSUMPTIONS["base_pace"]` pour le cas d'une
+    extrapolation Riegel trop lointaine (`EXTRAPOLATION_SAFE_SCENARIO_FACTOR`,
+    -12 %), jamais le côté « ambitious »."""
     speed = prediction.get("speed_ms")
     if speed is None:
         return {s: None for s in SCENARIOS}
     ci_low, ci_high = prediction.get("ci_low_speed_ms"), prediction.get("ci_high_speed_ms")
+    ambitious_factor = GENERIC_SCENARIO_SPEED_FACTOR["ambitious"]
     if ci_low is not None and ci_high is not None:
-        safe_speed = min(ci_low, speed * GENERIC_SCENARIO_SPEED_FACTOR["safe"])
-        ambitious_speed = max(ci_high, speed * GENERIC_SCENARIO_SPEED_FACTOR["ambitious"])
+        safe_speed = min(ci_low, speed * safe_factor)
+        ambitious_speed = max(ci_high, speed * ambitious_factor)
         return {"safe": safe_speed, "realistic": speed, "ambitious": ambitious_speed}
-    return {s: speed * GENERIC_SCENARIO_SPEED_FACTOR[s] for s in SCENARIOS}
+    return {"safe": speed * safe_factor, "realistic": speed, "ambitious": speed * ambitious_factor}
 
 
 def _segment_intervals(seg: dict) -> List[Tuple[float, Optional[float]]]:
@@ -858,10 +932,14 @@ def _combine_sources(sources: Sequence[Optional[str]]) -> Optional[str]:
 
 def predict_segments(segments: Sequence[dict], bins: Sequence[dict], *,
                       fade_pct: float = 0.0, heat_factor: float = 1.0,
-                      intensity_factor: float = 1.0) -> List[dict]:
+                      intensity_factor: float = 1.0,
+                      safe_scenario_factor: float = GENERIC_SCENARIO_SPEED_FACTOR["safe"]) -> List[dict]:
     """Augmente chaque segment (`segment_course`) d'une prédiction de temps par
     scénario — pure, aucun accès disque. `bins` : `model["bins"]` d'un rapport
     `arc_slope_model.fit_slope_model`/`arc_index.slope_model_report`.
+    `safe_scenario_factor` : plancher du scénario « safe », élargi
+    (`EXTRAPOLATION_SAFE_SCENARIO_FACTOR`) quand la cible extrapole trop loin
+    de la référence Riegel — voir `ASSUMPTIONS["base_pace"]`.
 
     Intègre `Δd / v(pente locale)` sur chaque sous-intervalle du segment (voir
     `ASSUMPTIONS["rolling_terrain"]`) plutôt que de prédire une seule fois sur
@@ -917,7 +995,7 @@ def predict_segments(segments: Sequence[dict], bins: Sequence[dict], *,
                     reason_codes.add(prediction["reason_code"])
 
             fade_mult = fade_speed_multiplier(point_frac, fade_pct)
-            for scenario, base_speed in _scenario_speeds(prediction).items():
+            for scenario, base_speed in _scenario_speeds(prediction, safe_factor=safe_scenario_factor).items():
                 if base_speed is None or base_speed <= 0:
                     continue
                 effective_speed = base_speed * fade_mult / heat_factor
@@ -1182,6 +1260,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      acclimation_note: Optional[str] = None,
                      intensity_factor: float = 1.0, intensity_source: str = "none",
                      intensity_notes: Optional[Sequence[str]] = None,
+                     safe_scenario_factor: float = GENERIC_SCENARIO_SPEED_FACTOR["safe"],
                      flat_reference_speed_ms: Optional[float] = None, band: str = DEFAULT_BAND,
                      official_distance_m: Optional[float] = None,
                      start_time: str = "07:00", race_date: Optional[str] = None,
@@ -1229,7 +1308,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     # d'un total DE RÉFÉRENCE par scénario (renormalisation "fade neutre",
     # voir `_renormalize_fade_time_neutral`).
     provisional = predict_segments(raw_segments, bins, fade_pct=0.0, heat_factor=heat_factor,
-                                    intensity_factor=intensity_factor)
+                                    intensity_factor=intensity_factor, safe_scenario_factor=safe_scenario_factor)
     provisional_totals = {
         s: (sum(seg["predicted_time_s"][s] for seg in provisional if seg["predicted_time_s"][s] is not None)
             or None)
@@ -1245,15 +1324,24 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             f"(mesuré/générique : {fade_pct:.1f} %)")
 
     segments = predict_segments(raw_segments, bins, fade_pct=fade_pct_applied, heat_factor=heat_factor,
-                                 intensity_factor=intensity_factor)
+                                 intensity_factor=intensity_factor, safe_scenario_factor=safe_scenario_factor)
 
     # Fade rendu NEUTRE en temps total dès qu'une prédiction Riegel/VDOT sous-jacente
-    # existe (voir ASSUMPTIONS["fade"]) : elle intègre déjà une dégradation d'endurance
-    # sur la distance, l'ajouter EN PLUS aurait compté la fatigue deux fois.
-    if intensity_source != "none":
+    # existe (voir ASSUMPTIONS["fade"]) ET que la course PRÉDITE reste sous
+    # `FADE_TIME_NEUTRAL_MAX_DURATION_S` (6 h, 3ᵉ revue de code #59, should-fix) :
+    # au-delà, la dégradation implicite de Riegel/VDOT (elle-même approximative sur
+    # un ultra, voir `RIEGEL_ULTRA_EXPONENT`) ne doit pas être présumée couvrir
+    # EXACTEMENT le fade mesuré — les deux s'additionnent plutôt que de s'annuler.
+    if intensity_source != "none" and predicted_duration_s is not None \
+            and predicted_duration_s <= FADE_TIME_NEUTRAL_MAX_DURATION_S:
         segments, renorm_note = _renormalize_fade_time_neutral(segments, provisional_totals)
         if renorm_note:
             fade_notes.append(renorm_note)
+    elif intensity_source != "none" and fade_pct_applied > 0 and predicted_duration_s is not None:
+        fade_notes.append(
+            f"course prédite ≈ {predicted_duration_s / 3600.0:.1f} h (> "
+            f"{FADE_TIME_NEUTRAL_MAX_DURATION_S / 3600.0:.0f} h) : le fade reste ADDITIF (pas neutralisé) "
+            "malgré une prédiction Riegel/VDOT — voir ASSUMPTIONS['fade'].")
 
     passages = compute_passages(segments, aid_stations)
     cutoffs = check_cutoffs(passages["aid_station_passages"], aid_stations, start_dt)
@@ -1355,6 +1443,30 @@ def _flat_equivalent_m(distance_m: Optional[float], elevation_gain_m: Optional[f
     return flat_m
 
 
+def _riegel_time_s(time_s: float, distance_m: float, target_m: float, exponent: float,
+                    ultra_exponent: float = RIEGEL_ULTRA_EXPONENT,
+                    anchor_m: float = RIEGEL_ULTRA_ANCHOR_M) -> Optional[float]:
+    """Riegel PAR MORCEAUX (3ᵉ revue de code #59, BLOQUANT) — voir
+    `ASSUMPTIONS["base_pace"]` : `exponent` (bande route/trail,
+    `arc_metrics.RIEGEL_EXPONENT`) jusqu'à `anchor_m` (42,195 km équivalent
+    plat, la distance MARATHON), `ultra_exponent` (1.30) au-delà. Passe par le
+    temps AU PIVOT (`anchor_m`), projeté depuis `distance_m`/`time_s` avec
+    l'exposant du côté où `distance_m` se trouve — gère `distance_m >=
+    anchor_m` de façon cohérente (référence déjà ultra : tout le trajet
+    référence -> pivot -> cible utilise alors le même exposant si les deux
+    sont au-delà du pivot, `ultra_exponent` s'annule algébriquement dans ce
+    cas et redonne la formule Riegel directe référence -> cible). Se réduit
+    EXACTEMENT à `arc_metrics.riegel` quand référence ET cible sont toutes
+    deux `<= anchor_m` (aucun changement pour un marathon ou moins, voir les
+    tests). `None` si une entrée est invalide."""
+    if time_s <= 0 or distance_m <= 0 or target_m <= 0:
+        return None
+    exp_to_anchor = exponent if distance_m <= anchor_m else ultra_exponent
+    time_at_anchor = time_s * (anchor_m / distance_m) ** exp_to_anchor
+    exp_from_anchor = exponent if target_m <= anchor_m else ultra_exponent
+    return time_at_anchor * (target_m / anchor_m) ** exp_from_anchor
+
+
 def _select_hard_reference(conn, conf: dict) -> Optional[dict]:
     """Meilleur effort RÉCENT et DUR (planifié tempo+/seuil/VO2max/course, ou à
     défaut de plan FC moyenne au-dessus de la borne Z3/Z4 de l'athlète) — voir
@@ -1386,21 +1498,27 @@ def _select_hard_reference(conn, conf: dict) -> Optional[dict]:
 
 def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optional[float],
                                gpx_distance_m: Optional[float],
-                               gpx_elevation_gain_m: Optional[float]) -> Tuple[float, str, Optional[float], List[str]]:
-    """`(intensity_factor, intensity_source, race_flat_speed_ms, notes)` — voir
-    `ASSUMPTIONS["base_pace"]`. `intensity_source` : `"riegel"` (méthode
-    retenue en priorité, référence dure exigée), `"vdot"` (repli) ou `"none"`
-    (facteur `1.0`, allure d'endurance inchangée). La cible est TOUJOURS le
-    GPX analysé (`gpx_distance_m`/`gpx_elevation_gain_m`), jamais `planning/
-    active_objective.md` (2ᵉ revue de code #59, BLOQUANT) — un avertissement
-    est ajouté à `notes` si l'objectif diffère sensiblement du GPX."""
+                               gpx_elevation_gain_m: Optional[float]
+                               ) -> Tuple[float, str, Optional[float], List[str], float]:
+    """`(intensity_factor, intensity_source, race_flat_speed_ms, notes,
+    safe_scenario_factor)` — voir `ASSUMPTIONS["base_pace"]`. `intensity_source` :
+    `"riegel"` (méthode retenue en priorité, référence dure exigée), `"vdot"`
+    (repli) ou `"none"` (facteur `1.0`, allure d'endurance inchangée). La
+    cible est TOUJOURS le GPX analysé (`gpx_distance_m`/`gpx_elevation_gain_m`),
+    jamais `planning/active_objective.md` (2ᵉ revue de code #59, BLOQUANT) —
+    un avertissement est ajouté à `notes` si l'objectif diffère sensiblement
+    du GPX. `safe_scenario_factor` est élargi
+    (`EXTRAPOLATION_SAFE_SCENARIO_FACTOR`) quand la cible extrapole à plus de
+    `RIEGEL_EXTRAPOLATION_RATIO` fois la distance de la référence Riegel (3ᵉ
+    revue de code #59, should-fix)."""
     notes: List[str] = []
+    default_safe_factor = GENERIC_SCENARIO_SPEED_FACTOR["safe"]
     if not flat_reference_speed_ms or flat_reference_speed_ms <= 0:
-        return 1.0, "none", None, notes
+        return 1.0, "none", None, notes, default_safe_factor
     primary = conf.get("sport", "trail")
     target_flat_m = _flat_equivalent_m(gpx_distance_m, gpx_elevation_gain_m, primary)
     if target_flat_m <= 0:
-        return 1.0, "none", None, notes
+        return 1.0, "none", None, notes, default_safe_factor
 
     obj = conn.execute("SELECT distance_m, elevation_gain_m FROM objective LIMIT 1").fetchone()
     if obj and obj["distance_m"]:
@@ -1415,11 +1533,26 @@ def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optiona
     exponent = M.RIEGEL_EXPONENT.get(primary, M.RIEGEL_EXPONENT["road"])
     predicted_s: Optional[float] = None
     source = "none"
+    safe_scenario_factor = default_safe_factor
     reference = _select_hard_reference(conn, conf)
     if reference:
         reference_flat_m = _flat_equivalent_m(reference["distance_m"], reference.get("elevation_gain_m"), primary)
-        predicted_s = M.riegel(reference["duration_s"], reference_flat_m, target_flat_m, exponent)
+        predicted_s = _riegel_time_s(reference["duration_s"], reference_flat_m, target_flat_m, exponent)
+        if predicted_s is not None:
+            predicted_s = round(predicted_s)  # jamais de fausse précision sous la seconde (comme arc_metrics.riegel)
         source = "riegel"
+        # Extrapolation trop lointaine (3ᵉ revue de code #59, should-fix) : la
+        # référence est trop courte pour porter confiance à la prédiction —
+        # élargit le scénario "safe" plutôt que de le laisser artificiellement
+        # étroit (voir ASSUMPTIONS["base_pace"]).
+        if reference_flat_m > 0 and target_flat_m / reference_flat_m > RIEGEL_EXTRAPOLATION_RATIO:
+            safe_scenario_factor = EXTRAPOLATION_SAFE_SCENARIO_FACTOR
+            notes.append(
+                f"la cible ({target_flat_m:.0f} m équivalent plat) fait plus de "
+                f"{RIEGEL_EXTRAPOLATION_RATIO:g}× la référence Riegel retenue ({reference_flat_m:.0f} m) : "
+                f"prédiction extrapolée loin de toute mesure — scénario « safe » élargi "
+                f"({round((1 - EXTRAPOLATION_SAFE_SCENARIO_FACTOR) * 100)} % au lieu de "
+                f"{round((1 - default_safe_factor) * 100)} %).")
     if not predicted_s:
         vo2max_row = conn.execute(
             "SELECT vo2max FROM metric_day WHERE vo2max IS NOT NULL ORDER BY date DESC LIMIT 1").fetchone()
@@ -1428,7 +1561,7 @@ def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optiona
             predicted_s = M.predict_time_vdot(current_vdot, target_flat_m)
             source = "vdot"
     if not predicted_s or predicted_s <= 0:
-        return 1.0, "none", None, notes
+        return 1.0, "none", None, notes, default_safe_factor
 
     race_flat_speed_ms = target_flat_m / predicted_s
     factor = race_flat_speed_ms / flat_reference_speed_ms
@@ -1436,8 +1569,9 @@ def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optiona
     # Plancher (2ᵉ revue de code #59, BLOQUANT) — voir ASSUMPTIONS["base_pace"] :
     # sous `INTENSITY_CLAMP_DURATION_S` (4h30), un facteur < 1.0 est implausible
     # (l'allure de course ne peut pas être plus lente que l'allure d'endurance
-    # mesurée sur une distance courte). Aucun plancher au-delà : l'exposant de
-    # Riegel en trail (1.15) prédit déjà, à raison, un ralentissement marqué.
+    # mesurée sur une distance courte). Aucun plancher au-delà : l'exposant
+    # ultra (1.30 au-delà du marathon, `RIEGEL_ULTRA_EXPONENT`) prédit déjà,
+    # à raison, un ralentissement marqué.
     if predicted_s < INTENSITY_CLAMP_DURATION_S and factor < 1.0:
         notes.append(
             f"facteur d'intensité calculé ({factor:.2f}) sous 1.0 pour une course prédite de "
@@ -1446,7 +1580,7 @@ def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optiona
             "distance) — plafonné à 1.0.")
         factor = 1.0
 
-    return factor, source, race_flat_speed_ms, notes
+    return factor, source, race_flat_speed_ms, notes, safe_scenario_factor
 
 
 def _load_aid_stations(path: Optional[str]) -> List[dict]:
@@ -1538,8 +1672,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # La cible d'intensité est TOUJOURS le GPX ANALYSÉ, jamais l'objectif (voir
     # ASSUMPTIONS["base_pace"], 2ᵉ revue de code #59, BLOQUANT).
     gpx_distance_m, gpx_elevation_gain_m, _gpx_elevation_loss_m = course_totals(pts)
-    intensity_factor, intensity_source, _race_flat_speed, intensity_notes = _resolve_intensity_factor(
-        conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
+    intensity_factor, intensity_source, _race_flat_speed, intensity_notes, safe_scenario_factor = \
+        _resolve_intensity_factor(conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
 
     try:
@@ -1547,7 +1681,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pts, bins, aid_stations=aid_stations, fade_pct=fade_pct, fade_source=fade_source,
             temp_max_c=temp_max_c, acclimated=acclimated, acclimation_note=acclimation_note,
             intensity_factor=intensity_factor, intensity_source=intensity_source,
-            intensity_notes=intensity_notes,
+            intensity_notes=intensity_notes, safe_scenario_factor=safe_scenario_factor,
             flat_reference_speed_ms=flat_reference_speed_ms, band=args.band,
             official_distance_m=args.official_distance_m,
             start_time=args.start, race_date=args.race_date, segment_m=args.segment_m)
