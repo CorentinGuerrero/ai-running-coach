@@ -45,7 +45,7 @@ Le script d'installation enregistre le serveur MCP `garmin` dans votre IDE avec 
       "command": "garmin-mcp",
       "args": ["stdio"],
       "env": {
-        "GARMIN_ENABLED_TOOLS": "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file"
+        "GARMIN_ENABLED_TOOLS": "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status"
       }
     }
   }
@@ -103,7 +103,7 @@ servers:
         args:
             - stdio
         env:
-            - GARMIN_ENABLED_TOOLS: "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file"
+            - GARMIN_ENABLED_TOOLS: "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status"
         cwd: .
       timeout: 300s
       connect_timeout: 10s
@@ -112,6 +112,23 @@ servers:
 
 !!! note "Config existante"
     Le script **ne remplace pas** une configuration existante. Si `config.yaml` ou `leanproxy_servers.yaml` existent déjà, ils sont conservés.
+
+!!! warning "Liste blanche déjà installée avant un ajout d'outil"
+    Conséquence directe de la note ci-dessus : une installation leanproxy déjà
+    en place ne reçoit **pas automatiquement** un outil ajouté plus tard à
+    `GARMIN_TOOL_WHITELIST` (ex. `get_stats`/`get_lactate_threshold`/
+    `get_training_status`, story #65) — `~/.config/leanproxy_servers.yaml`
+    n'est réécrit que s'il est absent. Éditez sa ligne `GARMIN_ENABLED_TOOLS`
+    à la main pour y ajouter le nouvel outil, plutôt que de réinstaller :
+
+    ```bash
+    grep -n GARMIN_ENABLED_TOOLS ~/.config/leanproxy_servers.yaml
+    # ajoutez le(s) nouveau(x) outil(s) à la fin de la liste, séparés par une virgule
+    ```
+
+    Appelez ensuite les nouveaux outils via
+    `leanproxy_invoke_tool(server="garmin", tool="get_stats", arguments={...})`
+    (voir `skills/garmin-sync-efficiency/SKILL.md`), pas directement.
 
 ## Authentification
 

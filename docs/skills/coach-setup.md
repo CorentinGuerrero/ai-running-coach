@@ -34,6 +34,23 @@ tant qu'aucune configuration n'existe — ils le proposent, ils ne l'imposent pa
 | `planning/Runner_Profile.md` | Votre profil : physiologie, blessures, matériel, préférences. Installé depuis un modèle, rempli en conversation. |
 | `planning/active_objective.md` | L'objectif en cours, installé depuis un modèle. |
 
+## Pré-remplissage physiologique depuis Garmin
+
+Si le serveur MCP `garmin` répond, le coach essaie de récupérer :
+
+- votre **FC max**, observée comme le maximum de vos séances course à
+  pied/trail des 180 derniers jours (pas une vraie FC max testée : une borne
+  basse, affichée comme telle, et seulement à partir de 5 séances) ;
+- votre **FC de repos**, comme moyenne sur 7 jours (jamais la valeur du seul
+  jour) — sauf si vous avez coupé le bilan matinal (`[health].morning_check =
+  "off"`), auquel cas ce champ n'est même pas interrogé ;
+- votre **FC au seuil (LTHR)** et votre dernier **VO2max**.
+
+Il vous montre chaque valeur trouvée avec sa **source et sa date** — vous
+confirmez ou corrigez, rien n'est écrit sans votre accord. Hors ligne, en cas
+d'erreur Garmin, ou si une métrique manque : le coach repasse silencieusement
+à la question classique, sans jamais inventer de valeur.
+
 ## Relancer
 
 Sans risque : `/coach-setup` ne pose que les questions **sans réponse** et ne

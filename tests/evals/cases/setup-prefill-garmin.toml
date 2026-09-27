@@ -1,0 +1,64 @@
+# Story #65 : `/coach-setup` récupère FC max/repos, FC au seuil (LTHR) et
+# VO2max via le MCP `garmin` quand il est disponible, propose les valeurs avec
+# leur source et leur date, et n'écrit que ce que l'athlète confirme. Prompt
+# volontairement directif : le runner (`claude -p`) tourne en un seul tour, il
+# n'y a personne pour répondre à une vraie question de suivi — le prompt SIMULE
+# donc un athlète qui répond à tout et confirme le pré-remplissage d'un coup.
+#
+# Revue de code (PR #112) : la FC max ne vient JAMAIS de `get_stats` (valeur du
+# jour, ~187 chez le stub) mais du MAXIMUM observé sur `get_activities_by_date`
+# parmi les `type` CONTENANT « run » (183 chez le stub, sur une séance
+# `treadmill_running` — hors de l'ancien ensemble figé {running,
+# trail_running}, qui aurait rendu 178 : ce cas vérifie donc un filtre par
+# sous-chaîne, pas une liste fermée — cycling à 192, la FC la plus haute de
+# toutes, reste exclu) ; la FC de repos vient de `last_7_days_avg_resting_hr`
+# (48 chez le stub), jamais de la valeur du jour (47).
+id = "setup-prefill-garmin"
+prompt = """
+/coach-setup
+
+Pour aller vite, voici mes réponses à toutes les questions de configuration
+que tu comptes me poser, dans l'ordre où le script les liste : style factuel,
+fermeté équilibrée, longueur brève, discipline trail, aucun sport croisé,
+staff coach seul, bilan matinal complet, langue des documents français,
+langue des réponses auto, unités métriques. Écris-les sans me les reposer.
+
+Ensuite, propose-moi de remplir mon profil physiologique : va chercher sur
+Garmin tout ce que tu peux (FC max, FC de repos, FC au seuil, VO2max),
+montre-moi les valeurs trouvées avec leur source et leur date, et considère
+que je confirme CHACUNE d'elles telle quelle, sans correction.
+"""
+fixture = "empty"
+
+[expect]
+tools_called = ["get_activities_by_date", "get_stats", "get_lactate_threshold", "get_training_status"]
+files_created = ["planning/Runner_Profile.md", "config/workspace.user.toml"]
+max_words = 450
+
+# Valeurs canned du stub (`stub_garmin_mcp.CANNED`) — présentes dans le profil
+# UNIQUEMENT si l'agent a bien proposé puis écrit, via
+# `coach_setup.py --apply-profile`, la bonne source pour chaque champ (jamais
+# la valeur du jour de `get_stats` pour FC max/FC de repos). Ancrées sur le
+# libellé du modèle pour éviter un faux positif sur un nombre qui
+# apparaîtrait ailleurs par coïncidence.
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc max** : 183"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc de repos de référence** : 48"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc au seuil** : 168"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["vo2max (garmin)** : 52"]
+
+# La provenance doit être tracée en commentaire HTML (coach_setup.py
+# --apply-profile, `source`), pas seulement la valeur brute.
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["<!-- source : garmin"]

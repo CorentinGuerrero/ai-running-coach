@@ -45,6 +45,9 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `race-plan-personal-model` | — | — |
 | `setup-first-run` | — | — |
 | `setup-idempotent` | — | — |
+| `setup-prefill-garmin` | — | — |
+| `setup-prefill-garmin-error` | — | — |
+| `setup-prefill-garmin-morning-off` | — | — |
 | `sleep-debt` | — | — |
 | `sport-road-no-elevation` | — | — |
 | `sport-trail-elevation` | — | — |
