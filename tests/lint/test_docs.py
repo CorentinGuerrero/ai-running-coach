@@ -75,12 +75,100 @@ def _slugify(heading: str) -> str:
     except ImportError:
         pass
 
+    return _slugify_fallback(heading)
+
+
+def _slugify_fallback(heading: str) -> str:
+    """Repli utilisé quand `markdown` n'est pas installé (le cas de la CI du
+    palier B, qui n'installe pas les dépendances docs).
+
+    Reproduit exactement l'approche de Python-Markdown
+    (`markdown.extensions.toc.slugify`) : `encode("ascii", "ignore")` après la
+    normalisation NFKD, PAS un simple retrait des diacritiques combinants. La
+    différence compte pour une lettre sans décomposition ASCII : « œ », « ß »
+    n'ont pas de forme NFKD qui isole un diacritique à retirer — un filtre par
+    `unicodedata.combining()` les laisse tels quels (« cœur » → « cœur »),
+    alors que l'encodage ASCII avec `errors="ignore"` les fait disparaître
+    purement et simplement (« cœur » → « cur », comme le fait réellement
+    Python-Markdown).
+    """
     import unicodedata
 
-    text = unicodedata.normalize("NFKD", heading)
-    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
-    text = re.sub(r"[^\w\s-]", "", text).strip()
+    text = unicodedata.normalize("NFKD", heading).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^\w\s-]", "", text).strip().lower()
     return re.sub(r"[-\s]+", "-", text)
+
+
+# Titres qui exercent chacun un piège différent du slugifier — voir les deux
+# classes de test ci-dessous. Une lettre sans décomposition ASCII (œ, ß) est
+# le cas qui a fait dériver une version antérieure du repli (elle utilisait
+# `unicodedata.combining()`, qui ne les touche pas, au lieu d'un encodage
+# ASCII avec `errors="ignore"`, qui les supprime — comme Python-Markdown).
+SLUGIFY_CASES = {
+    "œ": "Cœur et œuvre",
+    "ß": "Straße",
+    "accents": "Préréglages — été, garçon",
+    "underscores": "under_score_word",
+    "backticks": "Préréglages (`--preset`)",
+    "double_dash": "A -- B",
+    "em_dash": "Em—dash here",
+    "emoji": "Emoji 🚀 Test",
+    "apostrophe": "L’apostrophe typographique",
+}
+
+
+class TestSlugifyFallbackMatchesRealMarkdown(unittest.TestCase):
+    """Le repli (utilisé quand `markdown` n'est pas installé) doit produire
+    EXACTEMENT la même ancre que `markdown.extensions.toc.slugify`, la vraie
+    implémentation utilisée par mkdocs-material en production.
+
+    Ignoré si `markdown` n'est pas disponible dans cet environnement (c'est le
+    cas du palier B tel qu'exécuté en CI, qui n'installe pas les dépendances
+    de `requirements-docs.txt`) — `test_slugify_fallback_hardcoded_expectations`
+    ci-dessous verrouille ces mêmes cas sans dépendre du paquet.
+    """
+
+    def setUp(self):
+        try:
+            from markdown.extensions.toc import slugify  # noqa: F401
+        except ImportError:
+            self.skipTest("le paquet « markdown » n'est pas installé dans cet environnement")
+
+    def test_fallback_matches_real_slugify(self):
+        from markdown.extensions.toc import slugify as real_slugify
+
+        mismatches = []
+        for label, heading in SLUGIFY_CASES.items():
+            expected = real_slugify(heading, "-")
+            got = _slugify_fallback(heading)
+            if got != expected:
+                mismatches.append(f"{label} ({heading!r}) : repli={got!r} réel={expected!r}")
+        self.assertFalse(mismatches, "repli divergent du vrai slugify mkdocs :\n  " + "\n  ".join(mismatches))
+
+
+class TestSlugifyFallbackHardcodedExpectations(unittest.TestCase):
+    """Verrouille le repli avec des valeurs figées — tourne dans TOUTE CI,
+    avec ou sans `markdown` installé (contrairement au test ci-dessus)."""
+
+    EXPECTED = {
+        "Cœur et œuvre": "cur-et-uvre",
+        "Straße": "strae",
+        "Préréglages — été, garçon": "prereglages-ete-garcon",
+        "under_score_word": "under_score_word",
+        "Préréglages (`--preset`)": "prereglages-preset",
+        "A -- B": "a-b",
+        "Em—dash here": "emdash-here",
+        "Emoji 🚀 Test": "emoji-test",
+        "L’apostrophe typographique": "lapostrophe-typographique",
+    }
+
+    def test_fallback_hardcoded_expectations(self):
+        mismatches = [
+            f"{heading!r} : attendu {expected!r}, obtenu {_slugify_fallback(heading)!r}"
+            for heading, expected in self.EXPECTED.items()
+            if _slugify_fallback(heading) != expected
+        ]
+        self.assertFalse(mismatches, "repli du slugifier :\n  " + "\n  ".join(mismatches))
 
 
 class TestNav(unittest.TestCase):
