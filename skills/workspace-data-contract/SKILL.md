@@ -554,7 +554,13 @@ persistés, jamais une seconde implémentation dans l'agent). Le coach recopie
 dans le texte libre, sous le bloc, au minimum : l'écart de temps total,
 l'écart par segment (citer les identifiants `s01`, `s02`… du plan — stables
 d'un appel à l'autre, #59), le fade mesuré vs prévu, et les `findings` du
-script (ex. `depart_trop_rapide`, `glucides_sous_objectif`). Aligne les
+script (ex. `depart_trop_rapide`, `glucides_sous_objectif`). **Un segment (ou
+le bloc `fade`) marqué `resolution: "low"` n'est PAS un fait** : son delta
+individuel est une interpolation, pas une mesure — ne le citez jamais tel
+quel, regroupez ces segments (« résolution insuffisante sur s03-s06, non
+exploitables individuellement ») ou omettez-les, et appuyez-vous sur les
+totaux et les `findings` (qui n'utilisent déjà que les segments
+`resolution: "high"`). Aligne les
 splits kilométriques de l'activité sur les bornes du plan par mise à l'échelle
 PROPORTIONNELLE de la distance cumulée (jamais du temps) quand les deux
 mesures totales diffèrent — voir `scripts/arc_race_debrief.py::ASSUMPTIONS`
@@ -598,7 +604,7 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | `distance_m`, `elevation_gain_m`, `target_time_s` | nombre | |
 | `start_time` | date-heure | départ |
 | `scenarios` | objet | `{"ambitious": s, "realistic": s, "safe": s}` en secondes |
-| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement) |
+| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement), `stop_s` (nombre, secondes — temps d'arrêt PRÉVU à ce ravito, #61 : repris par `arc_race_pacing.py`/`arc_race_debrief.py` au lieu du défaut générique (90 s) dès qu'il est renseigné ; à ne persister que pour un ravito dont l'arrêt attendu diffère vraiment du défaut, ex. repas chaud ou drop bag) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
 | `gear` | liste | matériel obligatoire et conseillé |
 | `segments` | liste d'objets | allures par segment depuis le modèle personnel (#59) — voir ci-dessous |

@@ -13,6 +13,7 @@ assertion sur un fichier, pas une devinette sur du texte.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -517,20 +518,32 @@ def _changed_known_files(result: dict, pattern: str) -> list:
     exclus de `_new_files`), dont le contenu a changé pendant le run — voir
     `_write_fixture_snapshot`. Un fichier dont le hash de snapshot est `None`
     (ancien format sans hash, ou snapshot absent) n'est jamais rapporté comme
-    changé : mieux vaut ne rien affirmer que rapporter un faux positif."""
+    changé : mieux vaut ne rien affirmer que rapporter un faux positif.
+
+    Itère sur les entrées du SNAPSHOT (l'état AVANT le run) qui correspondent
+    au motif — jamais sur les fichiers actuellement présents dans le
+    workspace (revue de code #61, 3ᵉ tour, should-fix) : un fichier
+    SUPPRIMÉ ou DÉPLACÉ par l'agent ne serait alors plus jamais vu par
+    `workspace.glob(pattern)` et échapperait entièrement à la détection,
+    alors qu'un déplacement ou une suppression est exactement le genre de
+    changement silencieux que cette assertion doit attraper. Un fichier connu
+    du snapshot mais absent du workspace après le run compte donc lui aussi
+    comme « changé »."""
     known = _load_snapshot(result)
     if not known:
         return []
+    workspace = result["workspace"]
     changed = []
-    for p in result["workspace"].glob(pattern):
-        if not p.is_file():
+    for rel, old_hash in known.items():
+        if old_hash is None or not fnmatch.fnmatch(rel, pattern):
             continue
-        rel = p.relative_to(result["workspace"]).as_posix()
-        old_hash = known.get(rel)
-        if rel in known and old_hash is not None:
-            new_hash = hashlib.sha256(p.read_bytes()).hexdigest()
-            if new_hash != old_hash:
-                changed.append(p)
+        p = workspace / rel
+        if not p.is_file():
+            changed.append(p)  # supprimé, ou déplacé ailleurs
+            continue
+        new_hash = hashlib.sha256(p.read_bytes()).hexdigest()
+        if new_hash != old_hash:
+            changed.append(p)
     return sorted(changed)
 
 

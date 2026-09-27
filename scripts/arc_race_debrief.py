@@ -138,10 +138,15 @@ FADE_HALF_FRACTION = 0.5
 
 # Départ trop rapide (`ASSUMPTIONS["findings"]`) : approximation du projet,
 # aucune source vérifiable ne fixe ces seuils précis pour CE calcul — ils
-# encadrent un ordre de grandeur raisonnable (départ nettement plus vite que
-# prévu, suivi d'un fade nettement supérieur à celui déjà anticipé par le plan).
+# encadrent un ordre de grandeur raisonnable. Un départ rapide n'est signalé
+# QUE s'il a été « payé » plus tard (le reste de la course, pondéré par le
+# recouvrement de distance, est réellement plus lent que le plan d'au moins
+# `REST_SLOWDOWN_PCT_THRESHOLD`) — jamais sur le seul fade (voir
+# `_build_findings`, revue de code #61 3ᵉ tour, BLOQUANT), qui peut paraître
+# dégradé même sans aucun ralentissement RÉEL si le départ était simplement
+# rapide sans contrepartie.
 FAST_START_DELTA_PCT_THRESHOLD = -5.0
-FAST_START_FADE_EXCESS_PCT_THRESHOLD = 3.0
+REST_SLOWDOWN_PCT_THRESHOLD = 3.0
 FAST_START_FRACTION = 1.0 / 3.0  # même repère « premier tiers » que arc_race_pacing (fade)
 
 # Glucides (approximation du projet) : sous l'objectif de plus de cette marge
@@ -240,9 +245,16 @@ ASSUMPTIONS = {
         "d'entraînement comme `arc_durability`/`arc_race_pacing` : un débrief de course compare la "
         "course entière). `fade_actual_pct`/`fade_planned_pct` : écart relatif de l'allure moyenne de la "
         "2ᵉ moitié par rapport à la 1ère (positif = ralentissement). `fade_vs_plan_pct` = fade réel moins "
-        "fade déjà anticipé par le plan (temps planifiés PAR SEGMENT, arrêts ravito inclus comme "
-        "`ASSUMPTIONS['aid_stations']`). Absent si un segment du plan n'a pas de `predicted_time_s` pour "
-        "le scénario choisi (rien à comparer côté plan)."
+        "fade déjà anticipé par le plan, depuis `_planned_checkpoints_with_stops` — un arrêt ravito est "
+        "modélisé comme un SAUT à la borne du segment qui l'atteint, JAMAIS étalé linéairement sur tout "
+        "le segment (revue de code #61, 2ᵉ tour, should-fix : sinon, un point milieu qui tombe DANS un "
+        "segment porteur d'un arrêt se voit imputer une part de cet arrêt avant même qu'il ait eu lieu, "
+        "biaisant le fade planifié — observé jusqu'à +6.8 points sur une course par ailleurs parfaite). "
+        "`resolution` (`\"high\"`/`\"low\"`) : `\"low\"` dès que le point milieu, réel OU planifié, tombe "
+        "STRICTEMENT entre deux points de donnée (interpolé, jamais mesuré) — un fade `\"low\"` reste dans "
+        "la sortie mais N'ALIMENTE JAMAIS `depart_trop_rapide` (qui ne l'utilise de toute façon plus, voir "
+        "`ASSUMPTIONS['findings']`) et ne doit pas être cité comme un fait dans le rapport. Absent si un "
+        "segment du plan n'a pas de `predicted_time_s` pour le scénario choisi (rien à comparer côté plan)."
     ),
     "aid_stations": (
         "#59 (`arc_race_pacing.compute_passages`) exclut le temps de ravito de `segments[].predicted_time_s` "
@@ -264,11 +276,13 @@ ASSUMPTIONS = {
         "Règles simples à seuils documentés (approximation du projet, aucune littérature vérifiable ne "
         "fixe ces valeurs précises) : `depart_trop_rapide` si le delta PONDÉRÉ PAR LE RECOUVREMENT en "
         "distance avec le premier tiers de course (pas seulement les segments ENTIÈREMENT contenus dans "
-        "ce tiers — un segment plus grossier qui déborde compte pour la part qu'il recouvre, revue de "
-        "code #9) est sous `FAST_START_DELTA_PCT_THRESHOLD` (-5 %, départ nettement plus vite que prévu) "
-        "ET que `fade_vs_plan_pct` dépasse `FAST_START_FADE_EXCESS_PCT_THRESHOLD` (+3 points, fade "
-        "nettement supérieur à celui déjà anticipé) — les deux conditions ensemble, jamais l'une seule. "
-        "Seuls les segments `resolution: \"high\"` entrent dans ce calcul (voir ASSUMPTIONS['resolution']). "
+        "ce tiers — un segment plus grossier qui déborde compte pour la part qu'il recouvre) est sous "
+        "`FAST_START_DELTA_PCT_THRESHOLD` (-5 %, départ nettement plus vite que prévu) ET que le delta "
+        "PONDÉRÉ du RESTE de la course (au-delà du premier tiers) dépasse `REST_SLOWDOWN_PCT_THRESHOLD` "
+        "(+3 %, réellement plus lent que prévu, pas seulement une variation du fade — revue de code #61, "
+        "3ᵉ tour, BLOQUANT : un départ rapide jamais « payé » plus tard n'est pas un problème, même si le "
+        "fade mesuré paraît dégradé) — les deux conditions ensemble, jamais l'une seule. Seuls les "
+        "segments `resolution: \"high\"` entrent dans ces deux calculs (voir ASSUMPTIONS['resolution']). "
         "Glucides : `glucides_sous_objectif` si le débit réalisé est sous l'objectif de plus de "
         "`CARBS_UNDER_TARGET_TOLERANCE_PCT` (15 %) ; `glucides_au_dessus_plafond` si le débit réalisé "
         "dépasse le plafond connu (`--carbs-ceiling-g-h`) — jamais présenté comme un trouble digestif "
@@ -371,18 +385,35 @@ def _interpolate_cum_time(checkpoints: Sequence[Tuple[float, float]], target_m: 
     points de `checkpoints` (croissants, `(0, 0)` en tête) qui l'encadrent —
     voir `ASSUMPTIONS["alignment"]`. Clampé aux bornes si `target_m` déborde
     (ne devrait pas arriver après mise à l'échelle sur la distance totale du
-    plan, sauf incohérence des données d'entrée)."""
+    plan, sauf incohérence des données d'entrée).
+
+    Plusieurs points peuvent partager EXACTEMENT la même distance : un arrêt
+    immobile sur des échantillons FIT (plusieurs échantillons à la même
+    distance pendant l'arrêt), ou un saut délibéré du plan à la borne d'un
+    ravito (voir `_planned_checkpoints_with_stops`). Rend alors TOUJOURS la
+    DERNIÈRE valeur de temps rencontrée à cette distance (should-fix #61, 2ᵉ
+    revue de code) — cohérent avec la convention qui charge l'arrêt ravito au
+    segment qui l'atteint : une borne de segment qui tombe pile sur un ravito
+    obtient ainsi le temps APRÈS l'arrêt côté réalisé comme côté plan, jamais
+    le temps d'ARRIVÉE au ravito avant d'avoir attendu."""
     if target_m <= checkpoints[0][0]:
         return checkpoints[0][1]
-    for i in range(1, len(checkpoints)):
-        d0, t0 = checkpoints[i - 1]
-        d1, t1 = checkpoints[i]
-        if target_m <= d1 + 1e-9:
-            if d1 - d0 <= 0:
-                return t1
-            frac = (target_m - d0) / (d1 - d0)
-            return t0 + frac * (t1 - t0)
-    return checkpoints[-1][1]
+    n = len(checkpoints)
+    i = 1
+    while i < n and checkpoints[i][0] < target_m - 1e-9:
+        i += 1
+    if i >= n:
+        return checkpoints[-1][1]
+    if abs(checkpoints[i][0] - target_m) <= 1e-9:
+        while i + 1 < n and abs(checkpoints[i + 1][0] - checkpoints[i][0]) <= 1e-9:
+            i += 1
+        return checkpoints[i][1]
+    d0, t0 = checkpoints[i - 1]
+    d1, t1 = checkpoints[i]
+    if d1 - d0 <= 0:
+        return t1
+    frac = (target_m - d0) / (d1 - d0)
+    return t0 + frac * (t1 - t0)
 
 
 def _boundary_span_m(checkpoints: Sequence[Tuple[float, float]], target_m: float,
@@ -459,6 +490,45 @@ def _planned_time_with_stops(segments: Sequence[dict], aid_stations: Sequence[di
     return own, cumulative
 
 
+def _planned_checkpoints_with_stops(segments: Sequence[dict], aid_stations: Sequence[dict],
+                                     scenario: str) -> Optional[List[Tuple[float, float]]]:
+    """Points `(distance_m, temps_s)` du plan pour une interpolation FINE (le
+    fade, `_compute_fade`) — PONCTUÉS d'un SAUT (deux points à la MÊME
+    distance) à la borne de chaque segment qui atteint un ravito, jamais un
+    arrêt étalé linéairement sur tout le segment (should-fix #61, 2ᵉ revue de
+    code) : `_planned_time_with_stops` donne le temps total (course + arrêt)
+    d'un segment, correct pour une comparaison BORNE À BORNE, mais une requête
+    à une distance STRICTEMENT À L'INTÉRIEUR de ce segment (ex. le point milieu
+    du fade) interpolerait sinon une partie de l'arrêt AVANT que l'athlète ne
+    l'ait réellement pris — physiquement, on court le segment, PUIS on
+    s'arrête au ravito. Le saut place donc le point « juste après l'effort
+    couru, avant l'arrêt » et « après l'arrêt » à la MÊME distance (bornée par
+    le segment) ; `_interpolate_cum_time` rend alors la DERNIÈRE valeur pour
+    toute requête à cette distance, et la valeur PRÉ-saut pour toute requête
+    strictement à l'intérieur du segment — jamais une part de l'arrêt imputée
+    trop tôt. Rend `None` si un segment n'a pas de `predicted_time_s` pour
+    `scenario` (rien à construire au-delà)."""
+    aid_sorted = sorted((a for a in aid_stations if a.get("km") is not None), key=lambda a: a["km"])
+    idx = 0
+    cum = 0.0
+    checkpoints: List[Tuple[float, float]] = [(0.0, 0.0)]
+    for seg in segments:
+        predicted = (seg.get("predicted_time_s") or {}).get(scenario)
+        if predicted is None:
+            return None
+        cum += predicted
+        km_end_m = seg["km_end"] * 1000.0
+        checkpoints.append((km_end_m, cum))  # fin de l'effort couru, AVANT arrêt éventuel
+        stop_added = 0.0
+        while idx < len(aid_sorted) and aid_sorted[idx]["km"] <= seg["km_end"] + 1e-9:
+            stop_added += aid_sorted[idx].get("stop_s", RP.DEFAULT_AID_STATION_STOP_S)
+            idx += 1
+        if stop_added > 0:
+            cum += stop_added
+            checkpoints.append((km_end_m, cum))  # saut : l'arrêt est pris ICI, pas avant
+    return checkpoints
+
+
 def detect_stops(samples: Sequence[dict], *,
                   speed_threshold_ms: float = STOP_SPEED_MS_THRESHOLD,
                   distance_eps_m: float = STOP_DISTANCE_EPS_M,
@@ -495,18 +565,40 @@ def detect_stops(samples: Sequence[dict], *,
         if duration >= min_duration_s:
             stops.append((start["distance_m"], start["t_s"], duration))
 
-    # Mécanisme 2 : quasi-absence de distance parcourue (auto-pause) — voir
-    # docstring. Fonctionne même si `speed_ms` est absent.
-    i, n = 0, len(pts)
-    while i < n - 1:
-        j = i + 1
-        while j < n and (pts[j]["distance_m"] - pts[i]["distance_m"]) < distance_eps_m:
-            j += 1
-        duration = pts[j - 1]["t_s"] - pts[i]["t_s"]
-        if duration >= min_duration_s:
-            mid_m = (pts[i]["distance_m"] + pts[j - 1]["distance_m"]) / 2.0
-            stops.append((mid_m, pts[i]["t_s"], duration))
-        i = j if j > i + 1 else i + 1
+    # Mécanisme 2 : écart de temps consécutif >= `min_duration_s` couvrant
+    # presque aucune distance — capte une auto-pause qui n'enregistre RIEN
+    # pendant l'arrêt (un seul échantillon juste avant, un seul juste après,
+    # très espacés en temps). Fonctionne même si `speed_ms` est absent.
+    #
+    # BLOQUANT (revue de code #61, 2ᵉ tour) : une PREMIÈRE version de ce
+    # mécanisme ancrait un point `i` puis étendait `j` tant que la distance
+    # cumulée depuis `i` restait sous `distance_eps_m`, avant de faire sauter
+    # `i` à `j`. À l'allure normale d'une course (quelques m/s), UN SEUL pas
+    # d'échantillonnage suffit déjà à rester sous `distance_eps_m` (quelques
+    # mètres) : l'ancre avançait donc par bonds de 2 au moindre pas normal,
+    # et pouvait « sauter par-dessus » l'unique échantillon juste AVANT une
+    # vraie auto-pause — la paire qui enjambe réellement le vide n'était donc
+    # JAMAIS testée (`detect_stops([… , distance_m=2996.67, t=899], [distance_m=3000.0,
+    # t=990], …])` rendait `[]` malgré un arrêt de 91 s). Cette version teste
+    # CHAQUE PAIRE consécutive indépendamment (jamais d'ancrage qui saute des
+    # échantillons), puis fusionne les paires adjacentes qui qualifient toutes
+    # les deux en un seul arrêt continu (rare, mais possible avec plusieurs
+    # écarts consécutifs). Un arrêt enregistré NORMALEMENT (samples soutenus à
+    # vitesse quasi nulle, dt = 1 s entre eux) n'est PAS capté ici — c'est le
+    # rôle du mécanisme 1 ci-dessus, indépendant et cumulé.
+    hits = [i for i in range(1, len(pts))
+            if pts[i]["t_s"] - pts[i - 1]["t_s"] >= min_duration_s
+            and pts[i]["distance_m"] - pts[i - 1]["distance_m"] < distance_eps_m]
+    merged: List[Tuple[int, int]] = []
+    for idx in hits:
+        if merged and merged[-1][1] == idx - 1:
+            merged[-1] = (merged[-1][0], idx)
+        else:
+            merged.append((idx - 1, idx))
+    for start_idx, end_idx in merged:
+        duration = pts[end_idx]["t_s"] - pts[start_idx]["t_s"]
+        mid_m = (pts[start_idx]["distance_m"] + pts[end_idx]["distance_m"]) / 2.0
+        stops.append((mid_m, pts[start_idx]["t_s"], duration))
 
     return stops
 
@@ -640,6 +732,9 @@ def build_race_debrief(plan: dict, activity: dict, *,
     segment_debriefs = []
     weighted_first_third_num = 0.0
     weighted_first_third_den = 0.0
+    weighted_rest_num = 0.0
+    weighted_rest_den = 0.0
+    first_third_boundary_m = plan_total_m * FAST_START_FRACTION
     for seg in segments:
         km_start_m, km_end_m = seg["km_start"] * 1000.0, seg["km_end"] * 1000.0
 
@@ -679,10 +774,14 @@ def build_race_debrief(plan: dict, activity: dict, *,
             if cum_planned is not None:
                 entry["cumulative_drift_s"] = round(t_end - cum_planned, 1)
             if resolution == "high":
-                overlap_km = (min(km_end_m, plan_total_m * FAST_START_FRACTION) - km_start_m) / 1000.0
-                if overlap_km > 0:
-                    weighted_first_third_num += entry["delta_pct"] * overlap_km
-                    weighted_first_third_den += overlap_km
+                first_third_overlap_km = (min(km_end_m, first_third_boundary_m) - km_start_m) / 1000.0
+                if first_third_overlap_km > 0:
+                    weighted_first_third_num += entry["delta_pct"] * first_third_overlap_km
+                    weighted_first_third_den += first_third_overlap_km
+                rest_overlap_km = (km_end_m - max(km_start_m, first_third_boundary_m)) / 1000.0
+                if rest_overlap_km > 0:
+                    weighted_rest_num += entry["delta_pct"] * rest_overlap_km
+                    weighted_rest_den += rest_overlap_km
         segment_debriefs.append(_drop_none(entry))
 
     total_actual_s = covered_m and _interpolate_cum_time(scaled_checkpoints, covered_m) or 0.0
@@ -716,7 +815,7 @@ def build_race_debrief(plan: dict, activity: dict, *,
     elif last_cum_planned is not None:
         totals["planned_time_s_partial"] = round(last_cum_planned, 1)
 
-    fade = _compute_fade(segments, scaled_checkpoints, plan_total_m, planned_cumulative, truncated, covered_m)
+    fade = _compute_fade(segments, scaled_checkpoints, plan_total_m, aid_stations, scenario, truncated)
 
     carbs = {}
     resolved_actual_carbs = carbs_actual_g_h
@@ -744,7 +843,8 @@ def build_race_debrief(plan: dict, activity: dict, *,
             aid_times = []
 
     findings, suggested_profile_updates = _build_findings(
-        weighted_first_third_num, weighted_first_third_den, fade,
+        weighted_first_third_num, weighted_first_third_den,
+        weighted_rest_num, weighted_rest_den,
         carbs, carbs_ceiling_g_h, totals,
     )
 
@@ -783,12 +883,23 @@ def _weather_subset(weather: dict) -> dict:
 
 
 def _compute_fade(segments: Sequence[dict], scaled_checkpoints: Sequence[Tuple[float, float]],
-                   plan_total_m: float, planned_cumulative: Dict[str, Optional[float]],
-                   truncated: bool, covered_m: float) -> dict:
+                   plan_total_m: float, aid_stations: Sequence[dict], scenario: str,
+                   truncated: bool) -> dict:
     """Voir `ASSUMPTIONS["fade"]`. Rend un dict vide si les segments du plan
     n'ont pas tous un temps planifié connu (rien à comparer côté plan), ou si
     la course est tronquée (`ASSUMPTIONS["truncated"]` — comparer un fade sur
-    une distance partielle n'a pas de sens)."""
+    une distance partielle n'a pas de sens).
+
+    Utilise `_planned_checkpoints_with_stops` (should-fix #61, 2ᵉ revue de
+    code) plutôt que le cumul par segment : un arrêt ravito modélisé comme un
+    SAUT à la borne du segment qui l'atteint, jamais étalé linéairement sur
+    tout le segment, qui biaiserait le point milieu s'il tombe dedans.
+
+    `resolution` (`"high"`/`"low"`) : `"low"` dès que le point milieu (réel OU
+    planifié) tombe STRICTEMENT entre deux points de donnée — interpoler un
+    point milieu jamais mesuré directement rend le fade lui-même une
+    approximation, jamais un fait à citer tel quel (voir
+    `ASSUMPTIONS["resolution"]`)."""
     if truncated:
         return {}
     half_m = plan_total_m * FADE_HALF_FRACTION
@@ -803,12 +914,9 @@ def _compute_fade(segments: Sequence[dict], scaled_checkpoints: Sequence[Tuple[f
         fade["actual_pct"] = round(
             (pace_second_half_actual - pace_first_half_actual) / pace_first_half_actual * 100.0, 1)
 
-    planned_checkpoints: List[Tuple[float, float]] = [(0.0, 0.0)]
-    for seg in segments:
-        cum = planned_cumulative.get(seg["id"])
-        if cum is None:
-            return _drop_none(fade) if "actual_pct" in fade else {}
-        planned_checkpoints.append((seg["km_end"] * 1000.0, cum))
+    planned_checkpoints = _planned_checkpoints_with_stops(segments, aid_stations, scenario)
+    if planned_checkpoints is None:
+        return _drop_none(fade) if "actual_pct" in fade else {}
 
     t_half_planned = _interpolate_cum_time(planned_checkpoints, half_m)
     t_end_planned = planned_checkpoints[-1][1]
@@ -821,10 +929,15 @@ def _compute_fade(segments: Sequence[dict], scaled_checkpoints: Sequence[Tuple[f
             (pace_second_half_planned - pace_first_half_planned) / pace_first_half_planned * 100.0, 1)
         if "actual_pct" in fade:
             fade["vs_plan_pct"] = round(fade["actual_pct"] - fade["planned_pct"], 1)
+    if fade:
+        interpolated = (_boundary_span_m(scaled_checkpoints, half_m) > 0
+                         or _boundary_span_m(planned_checkpoints, half_m) > 0)
+        fade["resolution"] = "low" if interpolated else "high"
     return fade
 
 
-def _build_findings(first_third_num: float, first_third_den: float, fade: dict,
+def _build_findings(first_third_num: float, first_third_den: float,
+                     rest_num: float, rest_den: float,
                      carbs: dict, carbs_ceiling_g_h: Optional[float],
                      totals: dict) -> Tuple[List[dict], List[dict]]:
     findings: List[dict] = []
@@ -838,17 +951,33 @@ def _build_findings(first_third_num: float, first_third_den: float, fade: dict,
                        f"({'plus rapide' if totals['delta_pct'] < 0 else 'plus lent'} que prévu).",
         })
 
-    if first_third_den > 0 and "vs_plan_pct" in fade:
+    # `depart_trop_rapide` (revue de code #61, 3ᵉ tour, BLOQUANT) : un départ
+    # rapide qui n'est jamais « payé » plus tard (le reste de la course reste
+    # sur plan, voire plus rapide) n'est PAS un problème — seulement une
+    # course courue vite dans l'ensemble. L'ancienne condition (départ rapide
+    # + `fade.vs_plan_pct` positif) se déclenchait à tort dès qu'un simple
+    # écart d'échelle temporelle entre 1ère et 2ᵉ moitié apparaissait, même
+    # sans aucun ralentissement RÉEL après le premier tiers (repro : 12×1 km à
+    # 300 s/km, km 1-4 à 282 s puis EXACTEMENT sur plan ensuite — total -72 s,
+    # aucune contrepartie payée, `fade.vs_plan_pct` pourtant positif). La
+    # condition exige maintenant EXPLICITEMENT que le reste de la course (au
+    # DELÀ du premier tiers, pondéré par le recouvrement de distance, mêmes
+    # segments `resolution: "high"` uniquement) soit PLUS LENT que le plan
+    # d'au moins `REST_SLOWDOWN_PCT_THRESHOLD` (+3 points — approximation du
+    # projet) — jamais le fade (lui-même une approximation du point milieu,
+    # voir `ASSUMPTIONS["resolution"]`), qui ne sert plus qu'à l'affichage.
+    if first_third_den > 0 and rest_den > 0:
         avg_first_third_pct = first_third_num / first_third_den
+        avg_rest_pct = rest_num / rest_den
         if avg_first_third_pct <= FAST_START_DELTA_PCT_THRESHOLD and \
-                fade["vs_plan_pct"] >= FAST_START_FADE_EXCESS_PCT_THRESHOLD:
+                avg_rest_pct >= REST_SLOWDOWN_PCT_THRESHOLD:
             findings.append({
                 "code": "depart_trop_rapide",
                 "severity": "warning",
                 "message": (
                     f"Premier tiers de course {abs(avg_first_third_pct):.1f} % plus rapide que le plan, "
-                    f"suivi d'un fade {fade['vs_plan_pct']:+.1f} points au-delà de celui déjà anticipé "
-                    "par le plan : probable lien de cause à effet."
+                    f"mais le reste de la course {avg_rest_pct:+.1f} % plus lent que prévu : le départ "
+                    "rapide a probablement été payé plus tard."
                 ),
             })
             suggested.append({

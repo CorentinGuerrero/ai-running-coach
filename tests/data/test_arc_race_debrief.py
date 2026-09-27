@@ -258,6 +258,28 @@ class TestFastStartFade(unittest.TestCase):
         codes = [f["code"] for f in result["findings"]]
         self.assertNotIn("depart_trop_rapide", codes)
 
+    def test_fast_start_never_paid_for_does_not_fire(self):
+        """#61, revue de code, 3ᵉ tour, BLOQUANT : un départ rapide jamais
+        « payé » plus tard (le reste de la course reste sur plan, voire plus
+        rapide) n'est pas un problème — même si le fade en résultant paraît
+        dégradé. Repro exact de la revue : 12x1 km à 300 s/km, km 1-4 à 282 s
+        puis EXACTEMENT sur plan ensuite (total -72 s, jamais de contrepartie)."""
+        segments = []
+        for i in range(12):
+            segments.append({
+                "id": f"s{i + 1:02d}", "km_start": float(i), "km_end": float(i + 1), "distance_m": 1000.0,
+                "predicted_time_s": {"realistic": 300}, "pace_s_km": {"realistic": 300},
+            })
+        plan = {"arc": 1, "kind": "race_plan", "date": "2026-01-01", "race_name": "X", "race_date": "2026-01-08",
+                "scenarios": {"realistic": 3600}, "segments": segments}
+        durations = [282, 282, 282, 282] + [300] * 8
+        activity = _activity([(i + 1, d) for i, d in enumerate(durations)], date="2026-01-08")
+        result = D.build_race_debrief(plan, activity)
+        self.assertAlmostEqual(result["totals"]["delta_s"], -72.0, places=1)
+        codes = [f["code"] for f in result["findings"]]
+        self.assertNotIn("depart_trop_rapide", codes)
+        self.assertEqual(result["suggested_profile_updates"], [])
+
     def test_low_resolution_segments_excluded_from_finding(self):
         """Des segments SOUS la granularité des splits (750 m contre 1 km),
         même avec un vrai départ rapide, ne doivent PAS alimenter le drapeau
@@ -462,6 +484,32 @@ class TestAidStationTimes(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertGreaterEqual(result[0]["actual_stop_s"], 30.0)
 
+    def test_autopause_gap_detected_in_realistic_1hz_stream(self):
+        """#61, revue de code, BLOQUANT 2 : repro exact de la 2ᵉ revue de code —
+        un flux RÉALISTE à 1 Hz (un échantillon par seconde, allure constante
+        3,33 m/s), avec un unique écart de 91 s à la distance 3000 m ne
+        couvrant que 3,3 m (auto-pause qui n'enregistre RIEN pendant l'arrêt).
+        L'ancienne mécanique (ancrage + saut) « absorbait » l'échantillon juste
+        AVANT l'écart par bonds de 2 (chaque pas normal, 3,33 m, restait déjà
+        sous `STOP_DISTANCE_EPS_M`) et ne testait donc jamais la paire qui
+        enjambe réellement l'arrêt — `detect_stops` rendait `[]` malgré un
+        arrêt de 91 s bien réel."""
+        speed = 1000.0 / 300.0  # 3.33 m/s, un split de 300 s/km
+        samples = [{"t_s": t, "distance_m": round(t * speed, 2), "speed_ms": speed} for t in range(900)]
+        gap_start_distance = samples[-1]["distance_m"]
+        # Écart de 91 s : le prochain échantillon n'arrive qu'à t=990, avec
+        # seulement 3,3 m de distance supplémentaire (aucun échantillon
+        # intermédiaire — l'auto-pause n'a RIEN enregistré pendant l'arrêt).
+        samples.append({"t_s": 990, "distance_m": round(gap_start_distance + 3.3, 2), "speed_ms": speed})
+        resume_distance = samples[-1]["distance_m"]
+        samples.extend({"t_s": 990 + k, "distance_m": round(resume_distance + k * speed, 2), "speed_ms": speed}
+                        for k in range(1, 200))
+        stops = D.detect_stops(samples)
+        self.assertEqual(len(stops), 1, stops)
+        mid_m, start_t, duration = stops[0]
+        self.assertAlmostEqual(start_t, 899, delta=1)
+        self.assertGreaterEqual(duration, 90.0)
+
     def test_samples_missing_distance_are_skipped(self):
         """#61, revue de code, BLOQUANT 4 : une distance manquante ne doit
         jamais lever de TypeError, seulement être ignorée."""
@@ -478,6 +526,36 @@ class TestFitSampleAlignment(unittest.TestCase):
     """#61, revue de code, BLOQUANT 3/4 : `--fit` doit aligner directement sur
     les échantillons (résolution fine), pas sur les splits km, et accepter le
     format brut fitparse via `arc_samples.normalise_records`."""
+
+    def test_aid_station_exactly_on_segment_boundary(self):
+        """#61, revue de code, 3ᵉ tour, should-fix 4 : un ravito PILE sur une
+        borne de segment (8x750 m, ravito au km 3.0 = fin de s04/début de s05)
+        avec un arrêt réel dans les échantillons FIT. Avant le correctif,
+        `_interpolate_cum_time` rendait la PREMIÈRE valeur trouvée à cette
+        distance (avant l'arrêt) pour la requête de fin de s04 ET la même
+        valeur pour le début de s05, faisant déborder l'arrêt entier sur s05 :
+        s04 -28.6 %, s05 +40 % sur une course par ailleurs parfaite."""
+        segments = []
+        for i in range(8):
+            segments.append({
+                "id": f"s{i + 1:02d}", "km_start": round(i * 0.75, 3), "km_end": round((i + 1) * 0.75, 3),
+                "distance_m": 750.0, "predicted_time_s": {"realistic": 225}, "pace_s_km": {"realistic": 300},
+            })
+        plan = {"arc": 1, "kind": "race_plan", "date": "2026-09-20", "race_name": "X", "race_date": "2026-09-27",
+                "aid_stations": [{"km": 3.0, "name": "R"}], "segments": segments}
+        speed = 750.0 / 225.0  # 300 s/km exactement
+        samples = [{"t_s": t, "distance_m": round(t * speed, 3), "speed_ms": speed} for t in range(900)]
+        # Arrêt réel de 90 s pile à 3000 m (fin de s04 = début de s05).
+        stop_t0 = samples[-1]["t_s"] + 1
+        samples.extend({"t_s": stop_t0 + k, "distance_m": 3000.0, "speed_ms": 0.0} for k in range(90))
+        resume_t0 = samples[-1]["t_s"] + 1
+        samples.extend({"t_s": resume_t0 + k, "distance_m": round(3000.0 + k * speed, 3), "speed_ms": speed}
+                        for k in range(901))  # jusqu'à 6000 m pile (900 * speed = 3000 m restants)
+        activity = _activity([(1, 300)], distance_m=6000.0, date="2026-09-27")
+        result = D.build_race_debrief(plan, activity, fit_samples=samples)
+        by_id = {s["id"]: s for s in result["segments"]}
+        self.assertAlmostEqual(by_id["s04"]["delta_pct"], 0.0, delta=1.0)
+        self.assertAlmostEqual(by_id["s05"]["delta_pct"], 0.0, delta=1.0)
 
     def test_build_checkpoints_from_samples(self):
         samples = [{"t_s": 0, "distance_m": 100.0}, {"t_s": 30, "distance_m": 200.0},
@@ -565,11 +643,18 @@ class TestRealPlanNonRegression(unittest.TestCase):
         plan = self._load("plan.json")
         activity = self._load("activity.json")
         result = D.build_race_debrief(plan, activity)
-        # Course courue exactement sur plan (bruit résiduel du plan réel,
-        # arrondi à la minute par segment côté arc_race_pacing) : quelques
-        # dizaines de secondes sur ~4150 s, jamais les +209 s / dizaines de %
-        # observées avant le correctif des arrêts ravito (BLOQUANT 2).
-        self.assertLess(abs(result["totals"]["delta_pct"]), 2.0)
+        # Course courue exactement sur plan : le résidu observé (~0,7 %, 29 s
+        # sur ~4150 s) n'est PAS un arrondi de segment — `arc_race_pacing`
+        # arrondit `predicted_time_s` à la SECONDE près (`SEGMENT_ROUND_S`),
+        # jamais à la minute (cet arrondi-là ne s'applique qu'aux CUMULS
+        # affichés, `PASSAGE_ROUND_S`, jamais recomposé ici). Il vient de ce
+        # que `scenarios.realistic` du plan (prédiction Riegel/VDOT globale)
+        # et la somme de `segments[].predicted_time_s` (modèle pente -> allure
+        # par segment) sont deux calculs INDÉPENDANTS dans `arc_race_pacing.py`
+        # — proches par construction, jamais garantis identiques au-delà d'un
+        # petit résidu. Jamais les +209 s / dizaines de % observés avant le
+        # correctif des arrêts ravito (BLOQUANT 2, 2ᵉ revue de code).
+        self.assertLess(abs(result["totals"]["delta_pct"]), 1.0)
         codes = [f["code"] for f in result["findings"]]
         self.assertNotIn("depart_trop_rapide", codes)
         self.assertEqual(result["suggested_profile_updates"], [])

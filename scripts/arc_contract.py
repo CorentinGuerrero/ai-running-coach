@@ -432,7 +432,14 @@ SUBSCHEMA = {
         # au-delà de 24 admises) et une date-heure ISO 8601 complète — voir
         # `scripts/arc_race_pacing.py::ASSUMPTIONS["cutoffs"]` pour le détail des trois
         # formats (barrière du surlendemain d'un ultra, #59).
-        "optional": {"services": "list", "cutoff": "str", "cutoff_day": "int+"},
+        # `stop_s` (#61, épopée #23) : temps d'arrêt PRÉVU à ce ravito, secondes —
+        # repris tel quel par `scripts/arc_race_pacing.py`/`scripts/arc_race_debrief.py`
+        # (`aid_station.get("stop_s", DEFAULT_AID_STATION_STOP_S)`, 90 s par défaut) au
+        # lieu du défaut générique dès qu'il est renseigné. Persisté par
+        # `course-strategist` seulement quand un temps d'arrêt différent du défaut est
+        # réellement attendu (ravito avec repas chaud, drop bag…) — jamais une valeur
+        # inventée pour un ravito simple.
+        "optional": {"services": "list", "cutoff": "str", "cutoff_day": "int+", "stop_s": "num+"},
     },
     "water_point": {
         "required": {"km": "num+", "source": _enum(WATER_SOURCE)},

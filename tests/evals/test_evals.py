@@ -380,6 +380,31 @@ class TestUnchangedFiles(unittest.TestCase):
             changed = runner._changed_known_files(result, "planning/Runner_Profile.md")
             self.assertEqual(changed, [profile])
 
+    def test_deleted_known_file_is_reported(self):
+        """#61, revue de code, 3ᵉ tour, should-fix : un fichier connu du
+        snapshot mais SUPPRIMÉ (ou déplacé ailleurs) pendant le run doit
+        échouer — itérer sur les fichiers ACTUELS du workspace (comme le
+        faisait une première version) ne le verrait jamais, puisqu'il n'y est
+        plus du tout."""
+        case = {"id": "race-debrief", "fixture": "race-debrief"}
+        with tempfile.TemporaryDirectory(prefix="arc-eval-unchanged-") as tmp:
+            workspace = runner.build_workspace(Path(tmp), case)
+            result = {"workspace": workspace}
+            profile = workspace / "planning" / "Runner_Profile.md"
+            profile.unlink()
+            changed = runner._changed_known_files(result, "planning/Runner_Profile.md")
+            self.assertEqual(changed, [profile])
+
+    def test_moved_known_file_is_reported(self):
+        case = {"id": "race-debrief", "fixture": "race-debrief"}
+        with tempfile.TemporaryDirectory(prefix="arc-eval-unchanged-") as tmp:
+            workspace = runner.build_workspace(Path(tmp), case)
+            result = {"workspace": workspace}
+            profile = workspace / "planning" / "Runner_Profile.md"
+            profile.rename(workspace / "planning" / "Runner_Profile.md.bak")
+            changed = runner._changed_known_files(result, "planning/Runner_Profile.md")
+            self.assertEqual(changed, [profile])
+
     def test_new_file_is_never_reported_as_changed(self):
         """Un fichier écrit PENDANT le run (absent du snapshot) relève de
         `files_created`/`files_with_arc_block`, jamais de `unchanged_files`."""
