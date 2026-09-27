@@ -5,6 +5,7 @@ trouvés sur un vrai workspace (doublons, fichiers d'analyse, fichiers sans date
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import shutil
@@ -943,6 +944,15 @@ class TestParsePerformanceIndex(unittest.TestCase):
         entries, _ = L.parse_performance_index(text)
         self.assertEqual(len(entries), 1)
 
+    def test_unrelated_heading_mentioning_performance_is_not_matched(self):
+        """Revue de code #109, 2e tour, nit : « #### Indice de performance VO2 »
+        (VO2max, vue Performance du tableau de bord) ne doit jamais être pris
+        pour le titre de la section ITRA/UTMB — seul un titre qui mentionne
+        explicitement ITRA ou UTMB l'est."""
+        text = ("# Profil\n\n#### Indice de performance VO2\n\n"
+                "- 2025-11-01 — itra : 610\n")
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+
     # -- revue de code #62 : normalisation « général »/synonymes -------------
 
     def test_general_synonyms_normalize_to_no_category(self):
@@ -990,21 +1000,16 @@ class TestParsePerformanceIndex(unittest.TestCase):
         entries = self._entries("2025-11-01 — itra : 1000")
         self.assertEqual(entries[0]["value"], 1000.0)
 
-    # -- revue de code #62 : date future ---------------------------------------
+    # -- revue de code #109 (2e tour) : date future jamais vérifiée ICI --------
+    #
+    # `parse_performance_index` ne connaît pas « aujourd'hui » et ne le vérifie
+    # plus (déplacé vers `arc_index.performance_index`, voir
+    # `TestPerformanceIndexQuery` plus bas) : « futur » ne se juge qu'à la
+    # LECTURE, jamais à l'écriture — un avertissement calculé ici resterait figé
+    # en base tant que le fichier ne change pas, même après que la date soit
+    # passée.
 
-    def test_future_date_is_kept_with_warning(self):
-        text = "# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n- 2099-01-01 — itra : 610\n"
-        entries, warnings = L.parse_performance_index(text, today="2026-09-27")
-        self.assertEqual(len(entries), 1)
-        self.assertTrue(any("futur" in w for w in warnings))
-
-    def test_past_date_relative_to_today_has_no_future_warning(self):
-        text = "# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n- 2025-11-01 — itra : 610\n"
-        entries, warnings = L.parse_performance_index(text, today="2026-09-27")
-        self.assertEqual(len(entries), 1)
-        self.assertEqual(warnings, [])
-
-    def test_no_today_means_no_future_check(self):
+    def test_future_date_entry_is_kept_without_warning_at_parse_time(self):
         entries, warnings = self._history("2099-01-01 — itra : 610")
         self.assertEqual(len(entries), 1)
         self.assertEqual(warnings, [])
@@ -1044,7 +1049,7 @@ class TestPerformanceIndexQuery(Workspace):
 - 2026-01-15 — utmb 100k : 560
 """)
         self.index()
-        result = I.performance_index(self.conn)
+        result = I.performance_index(self.conn, date(2026, 9, 27))
         self.assertEqual(len(result["history"]), 3)
         self.assertEqual([h["date"] for h in result["history"]], ["2025-11-01", "2026-01-15", "2026-02-15"])
         current_by_key = {(c["kind"], c.get("category")): c["value"] for c in result["current"]}
@@ -1055,7 +1060,27 @@ class TestPerformanceIndexQuery(Workspace):
     def test_empty_when_no_history_declared(self):
         self.write("planning/Runner_Profile.md", "# Profil\n\n- **FC max** : 188\n")
         self.index()
-        self.assertEqual(I.performance_index(self.conn), {"history": [], "current": [], "warnings": []})
+        self.assertEqual(I.performance_index(self.conn, date(2026, 9, 27)),
+                         {"history": [], "current": [], "warnings": []})
+
+    def test_future_date_warning_is_computed_fresh_at_read_time(self):
+        """Revue de code #109, 2e tour : la date future n'est JAMAIS stockée —
+        recalculée à chaque appel contre `today`. Un relevé qui était « futur »
+        hier ne doit plus l'être une fois que `today` l'a dépassé, SANS que le
+        fichier n'ait changé ni ne soit réindexé."""
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+- 2026-09-30 — itra : 630
+""")
+        self.index()
+        still_future = I.performance_index(self.conn, date(2026, 9, 27))
+        self.assertTrue(any("futur" in w for w in still_future["warnings"]))
+        no_longer_future = I.performance_index(self.conn, date(2026, 10, 5))
+        self.assertEqual(no_longer_future["warnings"], [])
+        # Le relevé lui-même reste inchangé dans les deux cas (jamais retiré).
+        self.assertEqual(len(no_longer_future["history"]), 1)
 
     def test_warnings_are_persisted_and_survive_a_second_index_pass(self):
         """Revue de code #62, blocker 2 : les avertissements restent lisibles via
@@ -1230,7 +1255,7 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 21)
+        self.assertEqual(I.SCHEMA_VERSION, 22)
 
     def test_real_v4_database_is_rebuilt_at_current_version(self):
         """Pas seulement « la constante vaut N » : une vraie base laissée par une
@@ -1261,6 +1286,61 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIn("garmin_activity_id", sample_columns)   # #42 (revue PR #87), pas activity_id/rowid
         sample_file_columns = {row[1] for row in conn.execute("PRAGMA table_info(sample_file)").fetchall()}
         self.assertIn("garmin_activity_id", sample_file_columns)
+        conn.close()
+
+    def test_v21_database_with_unchanged_profile_gets_performance_index_after_bump(self):
+        """#62, revue de code #109 (2e tour), blocker : une base `.arc/coach.db`
+        construite par une version d'AVANT #62 (`schema_version = 21`, sans les
+        tables `performance_index`/`performance_index_warning`) doit être
+        reconstruite à la version courante — colonnes ET tables comprises — sans
+        qu'un `Runner_Profile.md` déjà connu de cette base (même sha256, ce qui le
+        ferait sinon sauter comme « inchangé » à la réindexation) n'échappe à la
+        relecture. Sans le bump de `SCHEMA_VERSION`, `performance_index()` (donc
+        `/api/summary`) échouerait avec « no such table » pour tout utilisateur
+        dont la base existait déjà avant #62 — panne du tableau de bord entier."""
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 610
+""")
+        db_path = self.tmp / "legacy.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '21');"
+            "CREATE TABLE source_file (path TEXT PRIMARY KEY, kind TEXT, sha256 TEXT, mtime REAL, "
+            "arc_version INTEGER, parsed_ok TEXT, issues TEXT);"
+        )
+        # Le profil est déjà connu de la base, MÊME sha256 que sur disque : une base
+        # dont le SCHEMA_VERSION n'aurait pas changé le sauterait comme « inchangé »
+        # (`known and known[0] == digest` dans `index_workspace`), sans jamais
+        # peupler `performance_index` — c'est précisément ce que le bump évite en
+        # forçant la reconstruction complète (donc un `source_file` reparti à zéro).
+        digest = hashlib.sha256((self.ws / "planning/Runner_Profile.md").read_bytes()).hexdigest()
+        legacy.execute(
+            "INSERT INTO source_file VALUES (?, 'athlete', ?, 0, 0, 'ok', '[]')",
+            ("planning/Runner_Profile.md", digest))
+        legacy.commit()
+        legacy.close()
+
+        conn = I.open_db(self.ws, str(db_path))
+        self.assertEqual(
+            conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0],
+            str(I.SCHEMA_VERSION))
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        self.assertIn("performance_index", tables)
+        self.assertIn("performance_index_warning", tables)
+
+        I.index_workspace(conn, self.ws, "2026-09-27")
+        # Ce qu'`/api/summary`/`arc_index.py performance-index` appellent : ne doit
+        # jamais lever `sqlite3.OperationalError: no such table`.
+        result = I.performance_index(conn)
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(result["history"][0]["value"], 610.0)
         conn.close()
 
 

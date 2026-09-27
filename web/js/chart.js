@@ -130,10 +130,22 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
   if (opts.xLabels) {
     const shown = opts.xLabels.filter(Boolean).length;
     const every = shown <= Math.floor(iw / 30) ? 1 : Math.ceil(n / Math.floor(iw / 30));
+    // En échelle temporelle (`timeScale`, #62/#109), `every` seul ne suffit pas :
+    // deux dates rapprochées peuvent tomber à quelques pixels l'une de l'autre
+    // (ex. 1 et 8 mars, ~11 px) même si leur écart d'INDICE passe le filtre
+    // `every` — celui-ci suppose un espacement RÉGULIER par rang, faux ici par
+    // construction. On ajoute donc un filtre par DISTANCE EN PIXELS entre deux
+    // libellés affichés consécutifs, en plus de `every` (jamais à la place :
+    // les autres appelants, en rang régulier, n'ont pas ce problème et gardent
+    // leur comportement inchangé).
+    const minLabelGapPx = 60;
+    let lastLabelX = -Infinity;
     opts.xLabels.forEach((label, i) => {
-      if (label && (every === 1 || i % every === 0 || i === n - 1)) {
-        parts.push(`<text class="tick" x="${x(i)}" y="${H - 8}" text-anchor="${anchor(i)}">${esc(label)}</text>`);
-      }
+      if (!label || !(every === 1 || i % every === 0 || i === n - 1)) return;
+      const xi = x(i);
+      if (opts.timeScale && xi - lastLabelX < minLabelGapPx) return;
+      lastLabelX = xi;
+      parts.push(`<text class="tick" x="${xi}" y="${H - 8}" text-anchor="${anchor(i)}">${esc(label)}</text>`);
     });
   }
   let lastMonth = opts.xLabels ? "skip" : null;

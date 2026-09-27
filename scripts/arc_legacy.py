@@ -858,7 +858,11 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
 # spécifiquement sur le sous-titre.
 # ---------------------------------------------------------------------------
 
-_INDEX_TOP_HEADING_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b.*$", re.I | re.M)
+# Exige ITRA ou UTMB sur la ligne de titre (revue de code #109, 2e tour) :
+# sans cette contrainte, un titre sans rapport comme « #### Indice de
+# performance VO2 » (VO2max, vue Performance du tableau de bord) matchait
+# aussi, à cause du `.*$` permissif après « de performance ».
+_INDEX_TOP_HEADING_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b.*(itra|utmb).*$", re.I | re.M)
 _INDEX_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
 _ANY_HEADING_RE = re.compile(r"^(#{1,6})\s", re.M)
 # Séparateur date / reste de la ligne : cadratin/demi-cadratin entouré d'espaces,
@@ -921,14 +925,22 @@ def _normalize_index_category(tokens: List[str]) -> Optional[str]:
     return category
 
 
-def _parse_index_entry(raw: str, today: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _parse_index_entry(raw: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Une ligne « AAAA-MM-JJ — itra|utmb [catégorie] : valeur » → `(entrée,
     avertissement)`. `entrée` est `None` si la ligne ne respecte pas ce format
     (date absente, type ni « itra » ni « utmb », catégorie UTMB hors
     nomenclature, valeur hors bornes ou non numérique) — l'avertissement porte
-    alors la raison exacte. Une date future par rapport à `today` (fourni par
-    l'appelant, `None` = pas de vérification) est acceptée mais signalée
-    (`entrée` non `None`, `avertissement` renseigné quand même)."""
+    alors la raison exacte.
+
+    Une date FUTURE n'est PAS vérifiée ici (revue de code #109, 2e tour) :
+    « futur » n'a de sens qu'au moment de la LECTURE, pas de l'écriture — un
+    relevé du 30 septembre 2026 était futur le jour où l'athlète l'a écrit
+    (course pas encore courue ? faute de frappe ?) mais ne l'est plus le
+    lendemain, sans que le fichier lui-même n'ait changé. Un avertissement
+    calculé ICI, au parsing, resterait donc figé « date future » en base tant
+    que le fichier ne change pas, périmé dès le jour suivant. Ce calcul vit à
+    la place dans `arc_index.performance_index`, recalculé à CHAQUE lecture
+    contre le jour courant, jamais stocké."""
     original = raw.replace("**", "").strip()
     parts = _INDEX_DATE_SPLIT_RE.split(original, maxsplit=1)
     if len(parts) != 2:
@@ -956,13 +968,10 @@ def _parse_index_entry(raw: str, today: Optional[str] = None) -> Tuple[Optional[
     entry = {"date": entry_date, "kind": kind, "value": value}
     if category:
         entry["category"] = category
-    warning = None
-    if today and entry_date > today:
-        warning = f"date future ({entry_date} > {today}), relevé conservé tel quel — à vérifier : « {original} »"
-    return entry, warning
+    return entry, None
 
 
-def parse_performance_index(text: str, today: Optional[str] = None) -> Tuple[List[Dict[str, Any]], List[str]]:
+def parse_performance_index(text: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Section « Indices de performance » du profil → `(entrées, avertissements)`.
 
     `entrées` : liste de dicts `{date, kind, value, category?, ordinal}` triée
@@ -970,11 +979,13 @@ def parse_performance_index(text: str, today: Optional[str] = None) -> Tuple[Lis
     tri) servant de départage stable et explicite entre entrées de même date —
     jamais l'ordre implicite d'une table SQL. Vide si la section est absente.
 
-    `avertissements` : un message par ligne illisible (ignorée) ou par relevé
-    accepté mais à signaler (date future, doublon exact) — jamais imprimés ici
-    : c'est à l'appelant (`arc_index.store`) de les faire persister, pour
-    qu'ils restent visibles sans réapparaître en bruit console à chaque
-    réindexation (voir `arc_index.performance_index`).
+    `avertissements` : un message par ligne illisible (ignorée) ou par doublon
+    exact résolu — jamais imprimés ici : c'est à l'appelant (`arc_index.store`)
+    de les faire persister, pour qu'ils restent visibles sans réapparaître en
+    bruit console à chaque réindexation (voir `arc_index.performance_index`).
+    La date FUTURE n'est PAS un avertissement de CE niveau (voir
+    `_parse_index_entry`) : elle est recalculée à la lecture par
+    `arc_index.performance_index`, jamais stockée ici.
 
     Un doublon EXACT (même date, même type, même catégorie) sur plusieurs
     lignes est un avertissement, pas une erreur : seule la DERNIÈRE ligne du
@@ -997,12 +1008,10 @@ def parse_performance_index(text: str, today: Optional[str] = None) -> Tuple[Lis
         if not m:
             continue
         raw = m.group(1).strip()
-        entry, warning = _parse_index_entry(raw, today)
+        entry, warning = _parse_index_entry(raw)
         if entry is None:
             warnings.append(warning)
             continue
-        if warning:
-            warnings.append(warning)
         entry["ordinal"] = ordinal
         ordinal += 1
         parsed.append(entry)
@@ -1029,11 +1038,8 @@ def parse_performance_index(text: str, today: Optional[str] = None) -> Tuple[Lis
 # Fichiers édités par l'humain : profil et objectif (libellés du modèle)
 # ---------------------------------------------------------------------------
 
-def parse_profile(text: str, today: Optional[str] = None) -> Dict[str, Any]:
-    """`planning/Runner_Profile.md` → champs utiles aux calculs (SI).
-
-    `today` (AAAA-MM-JJ, `None` = pas de vérification) : transmis à
-    `parse_performance_index` pour signaler un relevé daté dans le futur."""
+def parse_profile(text: str) -> Dict[str, Any]:
+    """`planning/Runner_Profile.md` → champs utiles aux calculs (SI)."""
     b = parse_bullets(text)
     sex = normalize_label(_pick(b, "sexe") or "")
     out = {
@@ -1051,7 +1057,7 @@ def parse_profile(text: str, today: Optional[str] = None) -> Dict[str, Any]:
     gear = parse_gear(text)
     if gear:
         out["gear"] = gear
-    performance_index, performance_index_warnings = parse_performance_index(text, today)
+    performance_index, performance_index_warnings = parse_performance_index(text)
     if performance_index:
         out["performance_index"] = performance_index
     if performance_index_warnings:

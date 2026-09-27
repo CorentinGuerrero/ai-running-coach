@@ -30,6 +30,7 @@ remplacement.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 import unittest
@@ -73,37 +74,35 @@ def extract_labels(text: str) -> list:
     return out
 
 
-# Un appel `_pick(b, "...", "...")` (arguments littéraux uniquement — le seul
-# style utilisé par `parse_profile`, jamais une variable).
-_PICK_CALL_RE = re.compile(r"_pick\(\s*b\s*,\s*((?:\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"
-                            r"(?:\s*,\s*(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'))*)\)")
-_STRING_LITERAL_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
-
-
-def _parse_profile_source() -> str:
-    """Corps de `def parse_profile(...)` dans `arc_legacy.py`, jusqu'à la
-    prochaine définition de fonction de premier niveau (ou la fin du fichier)."""
-    text = ARC_LEGACY.read_text(encoding="utf-8")
-    start = text.index("\ndef parse_profile(")
-    rest = text[start + 1:]
-    next_def = re.search(r"\ndef ", rest[1:])
-    return rest[: next_def.start() + 1] if next_def else rest
+def _parse_profile_ast() -> ast.FunctionDef:
+    """Nœud AST de `def parse_profile(...)` dans `arc_legacy.py` — une analyse
+    syntaxique réelle (revue de code #109, 2e tour), jamais un regex sur le
+    texte source : robuste à la mise en forme (retours à la ligne, espaces,
+    commentaires en fin de ligne...) qu'un motif de texte devrait sans cesse
+    réajuster."""
+    tree = ast.parse(ARC_LEGACY.read_text(encoding="utf-8"), filename=str(ARC_LEGACY))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "parse_profile":
+            return node
+    raise AssertionError("def parse_profile(...) introuvable dans arc_legacy.py")
 
 
 def pick_literals_in_parse_profile() -> list:
     """Le PREMIER libellé littéral de chaque appel `_pick(b, ...)` dans
-    `parse_profile` — lu directement dans le CODE SOURCE, jamais recopié à la
-    main ici. Seul le premier argument est le libellé CANONIQUE, celui que le
-    modèle actuel doit porter (`_pick` le préfère avant tout repli) : les
-    arguments suivants sont des alias de secours pour un LIBELLÉ PLUS ANCIEN
-    (ex. « fc seuil » pour d'anciens profils écrits avant que le modèle ne dise
-    « FC au seuil ») — par construction absents du modèle actuel, ils feraient
-    échouer le test à tort s'ils étaient exigés eux aussi."""
+    `parse_profile` — lu depuis l'AST du CODE SOURCE, jamais recopié à la main
+    ici. Seul le premier argument après `b` est le libellé CANONIQUE, celui
+    que le modèle actuel doit porter (`_pick` le préfère avant tout repli) :
+    les arguments suivants sont des alias de secours pour un LIBELLÉ PLUS
+    ANCIEN (ex. « fc seuil » pour d'anciens profils écrits avant que le modèle
+    ne dise « FC au seuil ») — par construction absents du modèle actuel, ils
+    feraient échouer le test à tort s'ils étaient exigés eux aussi."""
     literals = []
-    for call in _PICK_CALL_RE.finditer(_parse_profile_source()):
-        first = next(_STRING_LITERAL_RE.finditer(call.group(1)), None)
-        if first:
-            literals.append(first.group(1) if first.group(1) is not None else first.group(2))
+    for node in ast.walk(_parse_profile_ast()):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_pick"):
+            continue
+        # args[0] est `b` ; args[1] (s'il existe) est le libellé canonique.
+        if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+            literals.append(node.args[1].value)
     return literals
 
 

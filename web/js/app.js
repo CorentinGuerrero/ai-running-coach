@@ -299,7 +299,12 @@ function indexMiniChart(entries, kind, cls) {
   // (pensée pour une série quotidienne dense, pas pour des relevés occasionnels
   // qui peuvent s'étaler sur plusieurs années).
   const xLabels = dates.map((d) => `${F.dayShort(d)} ${isoYear(d)}`);
-  const chart = timeChart(dates, [{ type: "line", values, cls }, { type: "dots", values, cls }], [], {
+  // `dot`/`dot--<kind>` (revue de code #109, 2e tour, nit) : jamais la classe
+  // `line`/`line--<kind>` réutilisée telle quelle pour les points — `.chart
+  // .line { fill: none; ... }` (web/css/app.css) laisserait les points creux,
+  // invisibles sauf un mince cerne. C'est la même convention que toutes les
+  // autres séries à points du tableau de bord (`dot--hrv`, `dot--vam`…).
+  const chart = timeChart(dates, [{ type: "line", values, cls }, { type: "dots", values, cls: `dot dot--${kind}` }], [], {
     height: 160, label, yFormat: (v) => F.num(v, 0), timeScale: true, xLabels,
   });
   return { chart, entries, label };
@@ -309,12 +314,17 @@ function performanceIndexSection(idx) {
   const current = idx?.current || [];
   const history = idx?.history || [];
   const warnings = idx?.warnings || [];
+  // Calculée une seule fois, jamais imbriquée dans un <p> d'un autre bloc
+  // (revue de code #109, 2e tour, nit) : ce sont toujours des <p class="note">
+  // FRÈRES du bloc qui précède (le <div class="empty"> de l'état vide, ou le
+  // <table> de l'état rempli plus bas), jamais son enfant.
+  const warningsHtml = warnings.map((w) => note(F.esc(w))).join("");
   if (!current.length && !history.length) {
-    return { html: empty("Pas d'indice de performance déclaré",
-      `Ajoutez, dans votre profil (« Indices de performance (ITRA / UTMB) »), `
-      + `une ligne par relevé au format : AAAA-MM-JJ — itra|utmb [catégorie] : valeur `
-      + `(ex. 2025-11-01 — itra : 610) — jamais récupéré automatiquement.`)
-      + (warnings.length ? warnings.map((w) => note(F.esc(w))).join("") : ""), charts: [] };
+    const emptyHtml = empty("Pas d'indice de performance déclaré",
+      "Ajoutez, dans votre profil (« Indices de performance (ITRA / UTMB) »), une ligne par relevé au "
+      + "format : AAAA-MM-JJ — itra|utmb [catégorie] : valeur (ex. 2025-11-01 — itra : 610) — jamais "
+      + "récupéré automatiquement.");
+    return { html: emptyHtml + warningsHtml, charts: [] };
   }
   const rows = [...current]
     .sort((a, b) => (a.kind === b.kind ? (a.category || "").localeCompare(b.category || "") : a.kind.localeCompare(b.kind)))
@@ -341,7 +351,7 @@ function performanceIndexSection(idx) {
         <tbody>${rows}</tbody></table>
       ${chartsHtml}
       ${note("Valeurs déclarées par vous dans le profil, jamais récupérées automatiquement — voir la règle de vie privée du coach.")}
-      ${warnings.map((w) => note(F.esc(w))).join("")}
+      ${warningsHtml}
     </section>`;
   return { html, charts };
 }

@@ -239,11 +239,13 @@ class Store:
         with self.lock:
             return I.gear_mileage(self.conn)
 
-    def performance_index(self) -> dict:
+    def performance_index(self, today: date) -> dict:
         """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
-        `performance-index`."""
+        `performance-index`. `today` : recalcule l'avertissement de date
+        future à CHAQUE appel (revue de code #109, 2e tour) — jamais une
+        valeur stockée qui resterait périmée d'un jour sur l'autre."""
         with self.lock:
-            return I.performance_index(self.conn)
+            return I.performance_index(self.conn, today)
 
     def meta(self, key: str):
         row = self.one("SELECT value FROM meta WHERE key = ?", (key,))
@@ -327,7 +329,7 @@ def api_summary(store: Store, q: dict) -> dict:
         "today": today.isoformat(), "settings": settings, "objective": objective, "athlete": athlete,
         "form": latest, "health": health, "sleep_debt": sleep_debt, "heat_acclimation": heat_acclimation,
         "gear": store.gear_mileage(),
-        "performance_index": store.performance_index(),
+        "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "assumptions": store.meta("assumptions"),
         "compliance_trend": api_compliance_trend(store, q),
@@ -969,7 +971,7 @@ def api_performance_index(store: Store, q: dict) -> dict:
     récupéré au chargement, pas d'aller-retour supplémentaire) — cette route
     dédiée sert un appelant headless (agent, CLI externe) qui veut CETTE seule
     donnée sans tout le résumé, et documente sa forme indépendamment."""
-    return store.performance_index()
+    return store.performance_index(_today(store))
 
 
 def api_slope_model(store: Store, q: dict) -> dict:

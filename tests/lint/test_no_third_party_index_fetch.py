@@ -11,8 +11,11 @@ qui irait chercher `itra.run`/`utmb.world` de son propre chef à l'indexation,
 Ce test ne cherche PAS ces domaines dans les prompts (`agents/`, `skills/*.md`)
 ni dans la documentation (`docs/`) : les CITER en documentation (règle de vie
 privée, exemple d'URL à ne jamais appeler automatiquement) est légitime et
-même attendu. Il ne cherche que dans le CODE EXÉCUTABLE (revue de code #62,
-élargi au-delà des seuls scripts Python d'origine) :
+même attendu. Il ne cherche que dans le CODE EXÉCUTABLE, parmi les fichiers
+SUIVIS PAR GIT (`git ls-files`, revue de code #109 2e tour — jamais un `rglob`
+depuis la racine du dépôt, qui descendrait sans le vouloir dans une autre
+copie de travail sous `.claude/worktrees/`, ou un `.venv` local, imbriqués
+sous la même racine) :
 
 - `scripts/**/*.py`, `skills/**/*.py` — scripts Python du moteur ;
 - `**/*.sh` (dont `install.sh` à la racine, `scripts/*.sh`) — scripts shell ;
@@ -28,6 +31,7 @@ le regex.
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,17 +50,29 @@ ALLOWLIST = {
 }
 
 
+def _tracked_files() -> list:
+    """Chemins relatifs suivis par git (`git ls-files`) — jamais un `rglob`
+    depuis la racine (revue de code #109, 2e tour) : ce dépôt tourne
+    couramment avec d'autres copies de travail sous `.claude/worktrees/`, ou
+    un `.venv` local, imbriqués sous la même racine — un `rglob("*.sh")`/
+    `rglob("*.py")` non filtré y descendrait et scannerait le contenu d'une
+    AUTRE branche (ou d'un environnement virtuel) plutôt que celui de CETTE
+    revue. `git ls-files` ne rend que ce que le dépôt suit réellement."""
+    proc = subprocess.run(["git", "-C", str(REPO), "ls-files"],
+                          capture_output=True, text=True, check=True)
+    return proc.stdout.splitlines()
+
+
 def scanned_files() -> list:
     """Scripts Python, scripts shell et code de tableau de bord (`web/js`) —
-    voir la liste en tête de module. `.git/` exclu explicitement (objets
-    internes, jamais du code exécuté)."""
-    patterns = [
-        (REPO / "scripts").rglob("*.py"),
-        (REPO / "skills").rglob("*.py"),
-        REPO.rglob("*.sh"),
-        (REPO / "web" / "js").rglob("*.js"),
-    ]
-    files = {p for pattern in patterns for p in pattern if ".git" not in p.parts}
+    voir la liste en tête de module — parmi les fichiers suivis par git."""
+    files = []
+    for rel in _tracked_files():
+        is_engine_python = (rel.startswith("scripts/") or rel.startswith("skills/")) and rel.endswith(".py")
+        is_shell = rel.endswith(".sh")
+        is_dashboard_js = rel.startswith("web/js/") and rel.endswith(".js")
+        if is_engine_python or is_shell or is_dashboard_js:
+            files.append(REPO / rel)
     return sorted(files)
 
 

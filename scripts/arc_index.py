@@ -194,7 +194,14 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # `decision_rule` (une ligne par rule_id cité, pour le filtre par règle du journal des
 # décisions, #55). #100 (revue de code) : colonnes `decision.created_at_utc` (tri correct
 # entre fuseaux) et `decision.supersedes` — voir #49 pour la version d'avant #54.
-SCHEMA_VERSION = 21
+# #62 : nouvelles tables `performance_index`/`performance_index_warning` (indices
+# de performance ITRA/UTMB) — sans ce bump, une base `.arc/coach.db` déjà
+# construite par une version antérieure ne les recrée jamais (le fichier
+# `Runner_Profile.md` inchangé est alors sauté à la réindexation, `current ==
+# SCHEMA_VERSION` restant vrai), et `performance_index()`/`/api/summary`
+# échouent avec « no such table » — panne du tableau de bord entier pour un
+# utilisateur existant (revue de code #109, 2e tour, blocker).
+SCHEMA_VERSION = 22
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -807,18 +814,14 @@ def expected_keys(kind: str, data: dict, conf: dict) -> List[str]:
     return []
 
 
-def read_file(path: Path, rel: str, conf: dict, today: Optional[str] = None) -> Tuple[Optional[str], dict, int, str, List[str]]:
-    """Rend (kind, données, arc_version, parsed_ok, problèmes).
-
-    `today` (AAAA-MM-JJ) : transmis à `L.parse_profile` pour signaler un
-    relevé d'indice de performance daté dans le futur (#62) ; sans effet sur
-    les autres types de fichiers."""
+def read_file(path: Path, rel: str, conf: dict) -> Tuple[Optional[str], dict, int, str, List[str]]:
+    """Rend (kind, données, arc_version, parsed_ok, problèmes)."""
     text = path.read_text(encoding="utf-8", errors="replace")
     kind = classify(rel)
     issues: List[str] = []
 
     if kind in ("athlete", "objective"):          # fichiers humains : puces du modèle
-        data = L.parse_profile(text, today) if kind == "athlete" else L.parse_objective(text)
+        data = L.parse_profile(text) if kind == "athlete" else L.parse_objective(text)
         data["body_md"] = text
         return kind, data, 0, "ok" if data else "partial", issues
 
@@ -1834,7 +1837,6 @@ def weekly_polarisation(conn, weeks: int, today: date) -> List[dict]:
 def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
     """Indexe (incrémental) puis recalcule les métriques. Rend un résumé."""
     conf = settings(load_config(workspace))
-    effective_today = today or date.today().isoformat()
     seen = set()
     counts = {"indexed": 0, "unchanged": 0, "removed": 0}
     for path in discover(workspace):
@@ -1847,7 +1849,7 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
             counts["unchanged"] += 1
             continue
         _purge(conn, rel)
-        kind, data, arc_version, parsed_ok, issues = read_file(path, rel, conf, effective_today)
+        kind, data, arc_version, parsed_ok, issues = read_file(path, rel, conf)
         twin = None
         if kind == "activity" and data.get("garmin_activity_id"):
             twin = conn.execute("SELECT source_path FROM activity WHERE garmin_activity_id = ? AND source_path != ?",
@@ -2124,7 +2126,7 @@ def gear_mileage(conn) -> dict:
     return M.gear_mileage(activities, gear_defs)
 
 
-def performance_index(conn) -> dict:
+def performance_index(conn, today: Optional[date] = None) -> dict:
     """Indices de performance ITRA/UTMB (#62) — pour la CLI (`arc_index.py
     performance-index`) et le tableau de bord (`/api/performance-index`,
     `/api/summary.performance_index`). N'est pas soumis à `[health].
@@ -2139,13 +2141,23 @@ def performance_index(conn) -> dict:
     même date gardent un ordre reproductible d'une lecture à l'autre — condition
     aussi pour que `current` (ci-dessous) soit déterministe. `current` : le
     relevé le plus RÉCENT pour chaque couple (kind, category) — `category` vaut
-    `None` pour un indice général. `warnings` : messages persistés par
-    `arc_index.store` (lignes illisibles ignorées, dates futures, doublons
-    exacts résolus) — voir `arc_legacy.parse_performance_index`, jamais
-    réimprimés à chaque réindexation (le fichier doit changer pour qu'ils
-    soient recalculés). Tout est vide si l'athlète n'a rien déclaré : c'est
-    l'appelant (dashboard) qui affiche alors l'état vide, jamais une valeur
-    inventée."""
+    `None` pour un indice général.
+
+    `warnings` combine deux sources bien distinctes :
+    1. persistées par `arc_index.store` (lignes illisibles ignorées, doublons
+       exacts résolus — voir `arc_legacy.parse_performance_index`), jamais
+       réimprimées à chaque réindexation (le fichier doit changer pour être
+       reparsé) ;
+    2. calculées ICI, à CHAQUE appel, contre `today` (par défaut la date du
+       jour) : un relevé dont la date est postérieure à `today` (revue de code
+       #109, 2e tour) — jamais stockée, parce que « futur » se juge au moment
+       de la LECTURE, pas de l'écriture (un relevé écrit hier comme « futur »
+       ne l'est peut-être déjà plus aujourd'hui, sans que le fichier n'ait
+       changé — un avertissement figé en base à l'écriture resterait alors
+       périmé indéfiniment).
+
+    Tout est vide si l'athlète n'a rien déclaré : c'est l'appelant (dashboard)
+    qui affiche alors l'état vide, jamais une valeur inventée."""
     rows = [dict(r) for r in conn.execute(
         "SELECT date, kind, category, value FROM performance_index ORDER BY date, ordinal")]
     current: Dict[Tuple[str, Optional[str]], dict] = {}
@@ -2153,6 +2165,12 @@ def performance_index(conn) -> dict:
         current[(row["kind"], row.get("category"))] = row
     warnings = [r["message"] for r in conn.execute(
         "SELECT message FROM performance_index_warning ORDER BY source_path, ordinal")]
+    today_iso = (today or date.today()).isoformat()
+    for row in rows:
+        if row["date"] > today_iso:
+            label = row["kind"] + (f" {row['category']}" if row.get("category") else "")
+            warnings.append(f"date future ({row['date']} > {today_iso}) pour {label} : {row['value']:g} — "
+                            "relevé conservé tel quel, à vérifier.")
     return {"history": rows, "current": list(current.values()), "warnings": warnings}
 
 
@@ -2802,7 +2820,8 @@ def main(argv=None) -> int:
         print(json.dumps(gear_mileage(conn), ensure_ascii=False))
         return 0
     if args.command == "performance-index":
-        print(json.dumps(performance_index(conn), ensure_ascii=False))
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(performance_index(conn, today_date), ensure_ascii=False))
         return 0
     if args.command == "fueling":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
