@@ -527,6 +527,28 @@ def _new_files(case: dict, result: dict, pattern: str) -> list:
                   if p.is_file() and not (fixture / p.relative_to(result["workspace"])).exists())
 
 
+# Segment de motif copié tel quel d'un nom de fichier de fixture (`0d_semaine.md`),
+# jamais mis à jour pour la forme matérialisée (`_materialize_relative_dates`
+# renomme `<N>d_reste.md` en `<date réelle>_reste.md` AVANT que la moindre
+# assertion ne tourne, voir #66 revue de code) : sans cette conversion, un motif
+# `unchanged_files`/`_changed_known_files` recopié depuis le nom de fixture ne
+# correspond plus à AUCUN fichier réel du workspace et l'assertion "réussit"
+# silencieusement, quoi que fasse l'agent — un faux négatif de test, pas une
+# vérification.
+RELATIVE_DATE_GLOB_SEGMENT = re.compile(r"^\d+d_(.+)$")
+
+
+def _expand_relative_date_glob(pattern: str) -> str:
+    """Traduit un segment `<N>d_...` littéral d'un motif en le joker qui
+    correspond au nom matérialisé (`*_...`), segment de chemin par segment de
+    chemin — un motif qui n'utilise pas cette convention (déjà un vrai joker,
+    ou un nom fixe) traverse inchangé."""
+    return "/".join(
+        f"*_{m.group(1)}" if (m := RELATIVE_DATE_GLOB_SEGMENT.match(part)) else part
+        for part in pattern.split("/")
+    )
+
+
 def _changed_known_files(result: dict, pattern: str) -> list:
     """Fichiers correspondant au motif, DÉJÀ présents dans la fixture (donc
     exclus de `_new_files`), dont le contenu a changé pendant le run — voir
@@ -546,6 +568,7 @@ def _changed_known_files(result: dict, pattern: str) -> list:
     known = _load_snapshot(result)
     if not known:
         return []
+    pattern = _expand_relative_date_glob(pattern)
     workspace = result["workspace"]
     changed = []
     for rel, old_hash in known.items():

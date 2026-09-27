@@ -64,11 +64,23 @@ def parse_agent(path: Path) -> tuple:
 
 
 def command_skill_files() -> list:
-    """Skills qui sont aussi des commandes de premier niveau (`gemini_command: "true"`)."""
-    return sorted(
-        p for p in SKILLS_DIR.glob("*/SKILL.md")
-        if parse_frontmatter(p)[0].get("gemini_command", "").lower() == "true"
-    )
+    """Skills qui sont aussi des commandes de premier niveau (`gemini_command: "true"`).
+
+    Un skill sans frontmatter valide (ou sans `name`/`description`) est déjà
+    signalé par `tests/lint/test_prompt_lint.py::TestSkillFrontmatter` — pas la
+    responsabilité de CE scan, qui ne cherche qu'un signal optionnel parmi tous
+    les skills : le laisser lever ferait échouer la génération Gemini pour un
+    problème sans rapport avec elle, sur un skill qui ne demande même pas de
+    commande."""
+    found = []
+    for path in SKILLS_DIR.glob("*/SKILL.md"):
+        try:
+            fields, _ = parse_frontmatter(path)
+        except GenerationError:
+            continue
+        if fields.get("gemini_command", "").lower() == "true":
+            found.append(path)
+    return sorted(found)
 
 
 def parse_skill_command(path: Path) -> tuple:

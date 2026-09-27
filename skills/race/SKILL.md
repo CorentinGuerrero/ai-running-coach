@@ -1,59 +1,77 @@
 ---
 name: race
-description: Short command — invoked as /race. Countdown to the next objective plus a readiness summary (Trail Shape score, #63) and the race plan (#59) if one exists. Read-only. Load when the user runs /race or asks how race prep is going.
+description: Short command — invoked as /race. Countdown to the next objective plus a readiness summary (Trail Shape score, #63) and the race plan (#59) if one exists. Never writes a plan/race-plan file and never pushes to Garmin. Load when the user runs /race or asks how race prep is going.
 gemini_command: "true"
 ---
 
-# `/race` — countdown and readiness, read-only
+# `/race` — countdown and readiness, never writes a plan
 
 Thin wrapper around existing signals: the active objective's countdown, the
 Trail Shape score as ONE indicator among others (never the only word on
 readiness), and the race plan when `course-strategist` already produced one.
-Writes nothing, plans nothing, pushes nothing.
+It never writes or edits a plan/race-plan file, and never pushes anything to
+Garmin.
 
 ## Configuration read first
 
-`config/workspace.toml` / `config/workspace.user.toml` — `[language].responses`,
-`[coaching].verbosity`, `[agents].enabled`, `[athlete].units`.
+`config/workspace.toml` / `config/workspace.user.toml` — `[language].responses`
+(falls back to `[language].documents` when `auto` and the command is invoked
+bare), `[coaching].verbosity`, `[agents].enabled`, `[athlete].units`.
 
 ## Delegation
 
-If `coach` is enabled, delegate via `task` to **`coach`**, English prompt +
-"Respond in <language>":
+If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
+**`coach`**, English prompt + "Respond in <language>":
 
-> Read-only: run `python3 scripts/arc_index.py trail-shape` for the active
-> objective's countdown (`days_left`) and Trail Shape `score` (present it as
-> ONE indicator, with its `data_confidence`/`notes` when the status is not
-> `"ok"` — e.g. `"no_objective"`, `"incomplete_objective"` — never silently
-> upgrade a low-confidence or missing score into a confident verdict). If a
-> race plan exists (`planning/*.md` with `kind: "race_plan"` for this
-> objective, story #59), name it and its pace/nutrition/gear scenario count
-> without re-deriving new numbers. Do not write anything, do not create or
-> edit a race plan, do not push anything to Garmin.
+> Run `python3 scripts/arc_index.py trail-shape` and report its `status`
+> field — handle EVERY value, never assume `"ok"`:
+> - `"no_objective"`: no active objective — say so, no countdown, no score.
+> - `"incomplete_objective"`: countdown available (`objective.days_left`) but
+>   no score — say the distance/elevation target is missing, never guess it.
+> - `"race_past"`: the race date has already passed — say so, point to a
+>   debrief instead of a readiness score.
+> - `"race_too_short"`: the objective is below the score's distance floor —
+>   say so, no score.
+> - `"ok"`: report the countdown (`objective.days_left`, NOT a top-level
+>   `days_left`) and the `score`, one indicator among others — when
+>   `data_confidence` is `"low"`, say so explicitly rather than presenting the
+>   score as a confident verdict. If a race plan exists (`planning/*.md` with
+>   `kind: "race_plan"` for this objective, story #59), name it and its pace/
+>   nutrition/gear scenario count without re-deriving new numbers.
+>
+> Do not write anything, do not create or edit a plan/race-plan file, do not
+> push anything to Garmin.
 
-If `coach` is not enabled, run `scripts/arc_index.py trail-shape` and look for
-a `race_plan` yourself.
+If `coach` is not enabled, or if you cannot delegate at all (no `task`/
+subagent tool available, e.g. running as a bare Gemini CLI command), run
+`scripts/arc_index.py trail-shape` and look for a `race_plan` yourself.
 
 ## Output contract
 
-**First line, fixed prefix**, translated to `[language].responses` (French
-default):
+**First line, fixed shape** — start with the translated word for "Race"
+(French default: "Course"), optionally wrapped in Markdown emphasis or
+preceded by a heading marker, then an em dash/en dash/hyphen, then the
+countdown/status:
 
 ```
-Course — J-<days_left> <nom de la course>, Trail Shape <score ou "indisponible : <raison>">
+Course — J-<objective.days_left> <nom de la course>, Trail Shape <score ou "indisponible : <raison>">
 ```
 
-When `trail-shape`'s `status` is not `"ok"`:
+Per `trail-shape`'s `status`, when it is not `"ok"`:
 
 - `"no_objective"`: `Course — aucun objectif actif (planning/active_objective.md absent ou incomplet).`
-- `"incomplete_objective"`: keep the countdown if `days_left` is known, and say
-  the score is unavailable because the distance/elevation target is missing —
-  never guess it.
+- `"incomplete_objective"`: keep the countdown (`objective.days_left`) if
+  known, and say the score is unavailable because the distance/elevation
+  target is missing — never guess it.
+- `"race_past"`: `Course — la course est passée (J+<jours>) : voir un débrief plutôt qu'une préparation.`
+- `"race_too_short"`: keep the countdown, say the score does not apply to a
+  course this short.
 
 Then, respecting `[coaching].verbosity`:
 
 - the countdown detail (target distance/elevation, from `active_objective.md`);
-- the Trail Shape components/notes when `standard`/`detailed` (skip at `brief`);
+- the Trail Shape components/notes when `standard`/`detailed` (skip at
+  `brief`), always naming a `"low"` `data_confidence` when it applies;
 - one line naming the race plan (scenario count, last updated) if one exists,
   or "aucun plan de course encore" — never inventing pace numbers here (that
-  is `course-strategist`'s job, not this read-only summary).
+  is `course-strategist`'s job, not this summary).

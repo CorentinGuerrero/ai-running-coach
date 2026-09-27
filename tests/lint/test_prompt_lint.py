@@ -166,8 +166,12 @@ class TestSkillReferences(unittest.TestCase):
 
 
 def command_skill_files() -> list:
-    """Skills-commandes de premier niveau (`gemini_command: "true"`, ex. /today, #66)."""
-    return [p for p in skill_files() if read_frontmatter(p).get("gemini_command") == "true"]
+    """Skills-commandes de premier niveau (`gemini_command: "true"`, ex. /today, #66).
+
+    Comparaison insensible à la casse, comme `scripts/build-gemini-commands.py`
+    (`.lower() == "true"`) : les deux lectures de ce même champ ne doivent
+    jamais diverger sur un « True »/« TRUE » qui passerait l'une et pas l'autre."""
+    return [p for p in skill_files() if read_frontmatter(p).get("gemini_command", "").lower() == "true"]
 
 
 class TestSurfaceParity(unittest.TestCase):

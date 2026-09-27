@@ -57,6 +57,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `sync-activity-arc-fields` | — | — |
 | `sync-declared-fuel` | — | — |
 | `sync-writes-arc-block` | — | — |
+| `today-morning-check-minimal` | — | — |
 | `today-morning-check-off` | — | — |
 | `today-outdoor-full` | — | — |
 | `trail-shape` | — | — |
@@ -71,8 +72,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 > puis remplacez ce tableau par le relevé obtenu.
 
 <!-- Régénéré via `python3 tests/evals/render_results.py --results <(echo '{}')`
-     (#66) : `today-outdoor-full`, `today-morning-check-off`,
-     `why-explains-logged-decision`, `week-status-compact` et
-     `race-countdown-trail-shape` ont été ajoutés par cette régénération. Date
-     et modèle remis à `_jamais exécuté_`/« défaut » à la main après
-     régénération : aucune exécution réelle n'a eu lieu. -->
+     (#66, revue de code) : `today-outdoor-full`, `today-morning-check-off`,
+     `today-morning-check-minimal`, `why-explains-logged-decision`,
+     `week-status-compact` et `race-countdown-trail-shape` ont été ajoutés par
+     cette régénération. Date et modèle remis à `_jamais exécuté_`/« défaut »
+     à la main après régénération : aucune exécution réelle n'a eu lieu. -->

@@ -1,0 +1,23 @@
+# #66 revue de code — /today avec [health].morning_check = "minimal" : readiness
+# seule (78, déjà persistée dans `medical/0d_health.md`), jamais HRV ni FC de
+# repos, jamais d'annulation sur la seule readiness à ce niveau.
+id = "today-morning-check-minimal"
+prompt = "/today"
+fixture = "guardrail-ok"
+
+[config.health]
+morning_check = "minimal"
+
+[config.language]
+responses = "fr"
+
+[expect]
+first_line_matches = "^[#*_>\\s]*Aujourd['’]hui\\**\\s*[—–-]"
+max_words = 130
+tools_not_called = [
+  "get_hrv_data", "get_rhr_day", "get_training_readiness",
+  "schedule_workouts", "schedule_week", "upload_workout",
+]
+must_match = ["78"]
+must_not_match = ["HRV", "FC de repos"]
+files_absent = ["planning/*.md"]

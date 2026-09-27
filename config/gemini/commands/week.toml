@@ -1,47 +1,73 @@
 # Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.
 # Source : skills/week/SKILL.md
-description = "Short command — invoked as /week. Compact status of this week's plan (done/planned/remaining load, guardrail status) as a table/list. Read-only. Load when the user runs /week or asks for a status of the current week."
+description = "Short command — invoked as /week. Compact status of this week's plan (done/planned/remaining load, guardrail status) as a table/list. Never writes a plan/week/decision file and never pushes to Garmin. Load when the user runs /week or asks for a status of the current week."
 prompt = '''
 # `/week` — compact status of the current week
 
-Thin wrapper: no new planning logic, no write. Reports the current week's
-sessions with their status (done/planned/remaining) and the load, plus the
-guardrail verdict, in a short table.
+Thin wrapper: no new planning logic. Reports the current week's sessions with
+their status and the load, plus the guardrail verdict, in a short table. It
+never writes or edits a plan/week/decision file, and never calls a Garmin
+write tool.
 
 ## Configuration read first
 
-`config/workspace.toml` / `config/workspace.user.toml` — `[language].responses`,
-`[coaching].verbosity`, `[agents].enabled`, `[athlete].units`.
+`config/workspace.toml` / `config/workspace.user.toml` — `[language].responses`
+(falls back to `[language].documents` when `auto` and the command is invoked
+bare), `[coaching].verbosity`, `[agents].enabled`, `[athlete].units`.
+
+## Finding the current week
+
+Find the week file(s) by `kind: "week"` inside `planning/*.md` — **never** by
+a filename pattern such as `Semaine_*.md`: a multi-week plan (#113) may name
+its file after its first Monday while covering several weeks in one `weeks`
+array, so filename matching alone can miss the week that actually covers
+today. Once the file is found, run:
+
+```bash
+python3 scripts/arc_guardrails.py check --week <file> [--week-start <lundi de la semaine du jour>]
+```
+
+Pass `--week-start` explicitly whenever the resolved file could contain more
+than one week (a `weeks` array, #113) so the guardrail check targets the
+Monday that actually covers today, rather than whichever week the command
+defaults to. A single-week file needs no `--week-start`.
 
 ## Delegation
 
-If `coach` is enabled, delegate via `task` to **`coach`**, English prompt +
-"Respond in <language>":
+If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
+**`coach`**, English prompt + "Respond in <language>":
 
-> Read-only status, not a validation or a re-plan: locate the week file(s)
-> covering today (`planning/Semaine_YYYY-MM-DD.md`, Monday of the week — if a
-> multi-week plan means more than one file could apply, use the CLI/selector
-> that resolves the current week rather than re-parsing file names by hand).
-> For each session in that week: date, type, status (`done`/`planned`/
-> `skipped`/`cancelled`), and its load contribution (duration or distance).
-> Sum done vs planned load. Then run `python3 scripts/arc_guardrails.py check
-> --week <file> --today <date>` and report its verdict (ok / block / warn-info
-> / input error — see `agents/coach.md`'s guardrails section for the three
-> outcomes) as a single status word, never a full re-explanation (that is
-> `/why`'s job). Do not modify the week file, do not push anything to Garmin,
-> do not propose changes — only report facts already on record.
+> Report the status of the week covering today (see the week-selection rule
+> above — find it by `kind: "week"`, not by filename). For each session in
+> that week: date, type, status (one of the contract's `SESSION_STATUS`
+> values — `planned`, `done`, `missed`, `moved`, `cancelled` — never any other
+> word), and its load contribution (duration or distance). Sum done vs
+> planned load. Then run `python3 scripts/arc_guardrails.py check --week
+> <file> [--week-start <date>]` and report its verdict as a single status
+> word (ok / block / warn-info / input error — see `agents/coach.md`'s
+> guardrails section for the three real outcomes plus the CLI's own input-
+> error exit code), never a full re-explanation (that is `/why`'s job). Do
+> not modify the week file or write a new plan/week/decision file, do not
+> push anything to Garmin, do not propose changes — only report facts already
+> on record.
 
-If `coach` is not enabled, read the week file(s) and run the guardrails check
-yourself.
+If `coach` is not enabled, or if you cannot delegate at all (no `task`/
+subagent tool available, e.g. running as a bare Gemini CLI command), find the
+week file(s) and run the guardrails check yourself.
 
 ## Output contract
 
-**First line, fixed prefix**, translated to `[language].responses` (French
-default):
+**First line, fixed shape** — start with the translated word for "Week"
+(French default: "Semaine"), optionally wrapped in Markdown emphasis or
+preceded by a heading marker, then an em dash/en dash/hyphen, then the status:
 
 ```
-Semaine — <réalisé>/<prévu> (unité selon [athlete].units), garde-fous : <ok|bloqué|à surveiller>
+Semaine — <réalisé>/<prévu> (unité selon [athlete].units), garde-fous : <ok|bloqué|à surveiller|entrée invalide>
 ```
+
+`garde-fous : entrée invalide` covers the guardrails CLI's own input-error
+exit code (bad JSON, missing `week_start`…) — distinct from a real `block`
+verdict, never conflated with it.
 
 Then, respecting `[coaching].verbosity` (`brief` = the table only, `standard`/
 `detailed` add a short comment per flagged session):

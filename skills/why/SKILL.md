@@ -1,6 +1,6 @@
 ---
 name: why
-description: Short command — invoked as /why. Explains the latest (or a named) coach decision from the decision log (planning/*_decision_*.md, #54): reason codes, data used, before/after. Never invents a rationale absent from the log. Read-only. Load when the user runs /why or asks why a session changed.
+description: Short command — invoked as /why. Explains the latest (or a named) coach decision from the decision log (planning/*_decision_*.md, #54): reason codes, data used, before/after. Never invents a rationale absent from the log. Never writes anything. Load when the user runs /why or asks why a session changed.
 gemini_command: "true"
 ---
 
@@ -10,17 +10,19 @@ This skill reads the `decision` log (see `workspace-data-contract`'s
 `decision` section) and reports **exactly** what it contains — trigger, rule
 IDs, inputs, before/after, outcome. It never fabricates a reason from a
 general impression, an alert that was never traced into a `decision` file, or
-a guess about what "probably" happened.
+a guess about what "probably" happened. It never writes or edits any file.
 
 ## Configuration read first
 
 Same resolution as every other command: `config/workspace.toml` then
-`config/workspace.user.toml`, `[language].responses`, `[coaching].verbosity`,
-`[agents].enabled`.
+`config/workspace.user.toml`, `[language].responses` (falls back to
+`[language].documents` when `auto` and the command is invoked bare),
+`[coaching].verbosity`, `[agents].enabled`.
 
 ## Which decision
 
-Parse the argument passed after `/why` (`{{args}}` in the Gemini command):
+Parse the argument passed after `/why` — the text the user typed following
+the command, if any:
 
 - **A date** (`AAAA-MM-JJ` or a relative word like "hier"/"demain"/"aujourd'hui"
   resolved against today): look up that exact date.
@@ -30,30 +32,32 @@ Parse the argument passed after `/why` (`{{args}}` in the Gemini command):
 - **No argument**: the most recent **active** decision (`outcome` `applied` or
   `proposed`, i.e. `superseded`/`rejected_by_athlete` excluded) — run
   `python3 scripts/arc_index.py decisions --active` and take the one with the
-  latest `created_at`. Widen the search only if nothing is found for
-  today/tomorrow — `arc_index.py decisions` with no `--date` lists every known
-  decision.
+  latest `created_at`.
 
 ## Delegation
 
-If `coach` is enabled, delegate via `task` to the agent **`coach`**, English
-prompt + "Respond in <language>":
+If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
+the agent **`coach`**, English prompt + "Respond in <language>":
 
-> Read-only: find the decision requested (see selection rule above — pass the
-> resolved date/slug along) using `python3 scripts/arc_index.py decisions
-> [--date <date>] [--active]` and, if that does not resolve it, reading
+> Find the decision requested (see selection rule above — pass the resolved
+> date/slug along) using `python3 scripts/arc_index.py decisions [--date
+> <date>] [--active]` and, if that does not resolve it, reading
 > `planning/*_decision_*.md` directly. Report ONLY what that file's fields
 > say: `trigger`, `rule_ids`, `inputs`, `sources`, `before`/`after`, `outcome`,
 > `summary`. Do not add a rationale that is not in one of these fields. If no
 > matching decision exists, say so plainly — never invent one from an alert or
 > an impression that was never logged. Do not write or modify any file.
 
-If `coach` is not enabled, do the same lookup yourself.
+If `coach` is not enabled, or if you cannot delegate at all (no `task`/
+subagent tool available, e.g. running as a bare Gemini CLI command), do the
+same lookup yourself.
 
 ## Output contract
 
-**First line, fixed prefix**, translated to `[language].responses` (French
-default):
+**First line, fixed shape** — start with the translated word for "Why"
+(French default: "Pourquoi"), optionally wrapped in Markdown emphasis or
+preceded by a heading marker, then an em dash/en dash/hyphen, then the
+summary:
 
 ```
 Pourquoi — <résumé de la décision (son champ `summary`) ou « aucune décision trouvée »>
