@@ -5,7 +5,7 @@
 - **Nom** : Trail des Collines Fictives
 - **Date** : dans 6 semaines
 - **Distance** : 5 km
-- **Dénivelé positif** : 250 m
+- **Dénivelé positif** : 119 m
 - **Lieu** : Tournai
 - **Lien / trace GPX** : course.gpx (à la racine du workspace)
 

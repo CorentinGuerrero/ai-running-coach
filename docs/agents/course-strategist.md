@@ -45,15 +45,22 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 
 Quand un GPX est fourni, l'agent délègue le calcul des allures à
 `scripts/arc_race_pacing.py plan` plutôt que d'estimer à la main : découpage du
-parcours en segments (distance cible fusionnée par pente similaire),
-prédiction du temps de chaque segment depuis le modèle personnel pente →
-allure (`scripts/arc_slope_model.py`, #58), fade de fin de course depuis la
-durabilité récente (`scripts/arc_durability.py`, #48, ou un repli générique
-signalé comme tel), ajustement chaleur/acclimatation (#38) et vérification des
-barrières horaires. Chaque segment porte sa **provenance**
+parcours en segments (distance cible fusionnée par pente similaire), intégré
+point par point (pas la seule pente moyenne — un aller-retour compte plus
+qu'un plat) pour prédire le temps de chaque segment depuis le modèle personnel
+pente → allure (`scripts/arc_slope_model.py`, #58), mis à l'échelle de
+l'intensité de COURSE visée (Riegel/VDOT, `scripts/arc_metrics.py`, #33 —
+`arc_slope_model` ne connaît que l'allure d'ENDURANCE d'entraînement). Fade de
+fin de course depuis la durabilité récente (`scripts/arc_durability.py`, #48,
+ou un repli générique signalé comme tel, échelonné à la durée réelle de la
+course), ajustement chaleur/acclimatation (#38) et vérification des barrières
+horaires (formats `HH:MM`, `+HH:MM` élapsé ou date-heure ISO 8601 pour un
+ultra multi-jours). Chaque segment porte sa **provenance**
 (`personal`/`generic`/`mixed`) — le plan la cite explicitement, jamais un
-scénario qui prétendrait à une précision que l'historique ne permet pas.
-Persisté dans le champ `segments` du bloc ```arc `race_plan` (voir
+scénario qui prétendrait à une précision que l'historique ne permet pas ; un
+GPX sans altitude exploitable déclenche un avertissement explicite (`warnings`)
+plutôt qu'un plan silencieusement faux. Persisté dans le champ `segments` du
+bloc ```arc `race_plan` (voir
 [le skill `workspace-data-contract`](../skills/workspace-data-contract.md)) —
 socle du futur débrief post-course segment par segment.
 

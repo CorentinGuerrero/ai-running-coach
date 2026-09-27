@@ -2,40 +2,50 @@
 #
 # Fixture `race-plan-personal-model/` : un GPX fictif (`course.gpx`, coordonnées
 # de la zone conventionnelle du dépôt, montée à 8 % puis plat puis descente à
-# 8 %) + deux footings plats en endurance fondamentale (7-9 semaines dans le
-# passé, FIT synthétiques à vérité connue via `tests.lib.synthetic.sample_session`)
-# suffisants pour établir une référence plate PERSONNELLE (`arc_slope_model`,
-# #58 : `MIN_BIN_ACTIVITIES = 2`, `MIN_BIN_TIME_S = 180`), mais AUCUNE donnée
+# 8 %, D+ mesuré ≈ 119 m — voir `planning/active_objective.md`) + deux footings
+# plats en endurance fondamentale (7-9 semaines dans le passé, FIT synthétiques
+# à vérité connue via `tests.lib.synthetic.sample_session`) suffisants pour
+# établir une référence plate PERSONNELLE (`arc_slope_model`, #58 :
+# `MIN_BIN_ACTIVITIES = 2`, `MIN_BIN_TIME_S = 180`), mais AUCUNE donnée
 # personnelle en côte/descente — le repli générique (Minetti) s'applique donc à
 # ces segments-là. `scripts/arc_race_pacing.py plan` sur ce GPX rend
-# systématiquement un plan à provenance MIXTE : le segment plat central en
-# `"personal"`, la montée et la descente en `"generic"` — exactement le
-# scénario visé par le critère d'acceptation #59 (« le plan indique la
-# provenance par segment »), sans avoir à construire un historique complet de
-# plusieurs mois pour couvrir toutes les pentes (voir la note de #59 sur le
-# coût d'un cas C complet « modèle personnel »).
+# systématiquement un plan à provenance MIXTE : le segment plat central
+# (`segments[1]`, deuxième segment déterministe de la segmentation par défaut,
+# voir `tests/data/test_arc_race_pacing.py`) en `"personal"`, la montée et la
+# descente en `"generic"`/`"mixed"` — exactement le scénario visé par le
+# critère d'acceptation #59 (« le plan indique la provenance par segment »),
+# sans avoir à construire un historique complet de plusieurs mois pour couvrir
+# toutes les pentes (voir la note de #59 sur le coût d'un cas C complet
+# « modèle personnel »).
 #
 # Le nom de fichier est imposé dans le prompt (`planning/plan-collines-fictives.md`)
 # pour que `arc_field` cible précisément le plan de course écrit par l'agent,
 # jamais une autre écriture possible dans `planning/` (ex. une fiche
 # `course_eval` du skill gpx-analysis, qui n'a ni `segments` ni `scenarios`).
+#
+# Regex `must_match` LIÉES (revue de code #59, should-fix) : deux mentions
+# indépendantes de « plat »/« personnel » et « générique » n'importe où dans la
+# réponse ne prouvaient pas que l'agent avait attribué la BONNE provenance à la
+# BONNE portion de terrain (un agent qui confondrait montée et plat aurait pu
+# satisfaire les anciennes regex tout aussi bien). Chaque regex exige
+# maintenant la co-occurrence, à moins de 200 caractères, du type de terrain et
+# de sa provenance réelle : « plat » proche de « personnel » (le plat central
+# est le seul segment personnel de la fixture), « montée »/« descente » proche
+# de « générique » (aucune donnée personnelle sur ces pentes).
 id = "race-plan-personal-model"
 prompt = """Construis le plan de course pour mon objectif actif (voir planning/active_objective.md), \
 à partir du fichier GPX ./course.gpx à la racine du workspace. Calcule les allures par segment avec \
 le script scripts/arc_race_pacing.py (épopée #59) plutôt qu'à la main, et dis-moi explicitement quels \
 segments du parcours reposent sur mon historique personnel et lesquels sont estimés génériquement, \
-faute de données sur cette pente. Sauvegarde le plan sous planning/plan-collines-fictives.md."""
+faute de données sur cette pente. Sauvegarde le plan sous planning/plan-collines-fictives.md, puis \
+téléverse le GPX enrichi sur Garmin comme le prévoit ton étape 8."""
 fixture = "race-plan-personal-model"
 
 [expect]
 tools_called = ["upload_course"]
-# Le plan doit dire, en clair, que la provenance est mixte (personnel ET générique) —
-# pas seulement citer les deux mots au hasard : au moins une formulation associant
-# la notion de repli/estimation générique à l'absence de données personnelles sur
-# cette pente (montée/descente), ET une mention de l'historique/du modèle personnel.
 must_match = [
-  "(?i)(g[ée]n[ée]rique|estimation g[ée]n[ée]rique|repli g[ée]n[ée]rique|mod[èe]le g[ée]n[ée]rique)",
-  "(?i)(personnel|historique|mod[èe]le personnel)",
+  "(?is)plat.{0,200}personnel",
+  "(?is)(mont|desc).{0,200}g[ée]n[ée]rique",
 ]
 
 # Le plan persisté porte des segments avec une provenance EXPLICITE (jamais une
@@ -46,6 +56,15 @@ glob = "planning/plan-collines-fictives.md"
 path = "segments[*].source"
 in = ["personal", "generic", "mixed"]
 
+# Le segment plat central (`segments[1]`, deuxième segment de la segmentation
+# déterministe par défaut — voir `tests/data/test_arc_race_pacing.py`) est
+# TOUJOURS personnel sur cette fixture : la seule pente couverte par les deux
+# footings d'entraînement.
+[[expect.arc_field]]
+glob = "planning/plan-collines-fictives.md"
+path = "segments[1].source"
+equals = "personal"
+
 # Bornes kilométriques croissantes et positives (déterminisme de la
 # segmentation, voir `arc_race_pacing.ASSUMPTIONS["segmentation"]`).
 [[expect.arc_field]]
@@ -54,13 +73,14 @@ path = "segments[*].km_start"
 min = 0
 
 # Les trois scénarios existent et restent dans un ordre de grandeur plausible
-# pour 5 km/250 m D+ à l'allure d'endurance de la fixture (~15-70 min selon le
-# scénario et le fade/chaleur appliqués) — bornes larges, volontairement : ce
-# cas vérifie la provenance et la structure, pas la précision de la seconde.
+# pour 5 km/119 m D+ (voir `planning/active_objective.md`), à l'allure de
+# COURSE mise à l'échelle par `intensity_factor` (#59, ASSUMPTIONS["base_pace"])
+# — bornes larges, volontairement : ce cas vérifie la provenance et la
+# structure, pas la précision de la seconde.
 [[expect.arc_field]]
 glob = "planning/plan-collines-fictives.md"
 path = "scenarios.realistic"
-min = 900
+min = 300
 
 [[expect.arc_field]]
 glob = "planning/plan-collines-fictives.md"

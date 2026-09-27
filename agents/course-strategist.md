@@ -137,24 +137,50 @@ python3 scripts/arc_race_pacing.py plan \
   --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue>
 ```
 
-`--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "stop_s": 90}]`
-(`cutoff`/`stop_s` optionnels). Sans `--temp-max-c`, lance d'abord le skill
-`weather-forecast` puis repasse la température max prévue ici — le script
-n'accède lui-même à aucun réseau. Le script résout SEUL : le modèle personnel
-pente -> allure (#58, bande « endurance »), le fade de fin de course depuis la
-durabilité récente (#48, médiane, ou repli générique documenté et signalé
-`fade_source: "generic"`), l'acclimatation chaleur (#38) et les barrières
-horaires — ne recalcule aucun de ces éléments toi-même.
+`--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
+(`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
+élapsé ou une date-heure ISO 8601 complète pour une barrière du surlendemain
+sur un ultra). `--official-distance-m <distance officielle>` si le GPX mesure
+une distance sensiblement différente de la distance officielle de course
+(rééchelonne les `km` de ravitaillement dessus). Sans `--temp-max-c`, lance
+d'abord le skill `weather-forecast` puis repasse la température max prévue ici
+— le script n'accède lui-même à aucun réseau. Le script résout SEUL : le
+modèle personnel pente -> allure (#58, bande « endurance »), l'intensité de
+course (Riegel/VDOT depuis `planning/active_objective.md`, #33), le fade de
+fin de course depuis la durabilité récente (#48, médiane, ou repli générique
+documenté et signalé `fade_source: "generic"`, échelonné à la durée réelle de
+la course), l'acclimatation chaleur (#38) et les barrières horaires — ne
+recalcule aucun de ces éléments toi-même.
 
 Le JSON rendu porte `segments[]` (id, bornes km, pente, temps prédit par
 scénario, **`source`** : `personal`/`generic`/`mixed`), `totals`,
-`cutoffs` (statut `ok`/`tendu`/`hors_delai` par scénario) et
-`provenance_summary`. **Cite la provenance par segment dans le plan** (critère
-d'acceptation #59) — au minimum la part personnelle/générique globale
-(`provenance_summary`), idéalement les segments génériques nommément si le
-parcours en compte peu (ex. « les 3 premiers km, en montée, sont prédits
-depuis ton modèle personnel ; le final en descente technique repose sur
-l'estimation générique, faute d'historique suffisant sur cette pente »).
+`cutoffs` (statut `ok`/`tendu`/`hors_delai` par scénario), `provenance_summary`,
+`intensity_factor`/`intensity_source` et `warnings`. **Cite la provenance par
+segment dans le plan** (critère d'acceptation #59) — au minimum la part
+personnelle/générique globale (`provenance_summary`), idéalement les segments
+génériques nommément si le parcours en compte peu (ex. « les 3 premiers km, en
+montée, sont prédits depuis ton modèle personnel ; le final en descente
+technique repose sur l'estimation générique, faute d'historique suffisant sur
+cette pente »).
+
+**Dis toujours ce que représente l'allure de base** (revue de code #59) :
+si `intensity_source` vaut `"riegel"` ou `"vdot"`, les allures reflètent
+l'intensité de COURSE visée (mise à l'échelle depuis ton allure d'endurance
+via `intensity_factor`) — dis-le en une phrase courte. Si `intensity_source`
+vaut `"none"`, dis EXPLICITEMENT à l'athlète que les allures affichées sont
+encore ton allure D'ENTRAÎNEMENT (endurance), pas une allure de course, faute
+d'objectif chiffré ou d'historique suffisant pour la prédire — ne laisse
+jamais croire à une allure de course quand ce n'en est pas une.
+
+**`warnings` non vide -> ne persiste PAS le plan tel quel** (revue de code
+#59) : un GPX sans altitude ou avec une couverture incomplète rend des
+segments à pente supposée nulle, potentiellement très éloignés du terrain
+réel. Signale le problème à l'athlète (« le GPX ne contient pas d'altitude,
+je ne peux pas distinguer une montée d'un plat ») et redemande un fichier avec
+profil d'altitude — ou confirme explicitement avec lui qu'il accepte un plan
+approximatif avant de sauvegarder, en le disant noir sur blanc dans le fichier
+persisté.
+
 Persiste le tableau `segments` du script directement dans le champ
 `segments` du bloc ```arc (voir `workspace-data-contract` skill, `race_plan`)
 — jamais une réécriture manuelle qui perdrait la provenance ou les temps

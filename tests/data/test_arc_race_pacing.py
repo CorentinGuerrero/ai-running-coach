@@ -22,13 +22,16 @@ from __future__ import annotations
 
 import math
 import sys
+import tempfile
 import unittest
+from datetime import date, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO))
 
+import arc_index as IDX  # noqa: E402
 import arc_race_pacing as RP  # noqa: E402
 
 # Zone fictive conventionnelle du dépôt pour toute coordonnée de test (#49,
@@ -64,6 +67,22 @@ class _ClimbFlatDescentProfile:
         if d <= 2000.0:
             return 80.0
         return 80.0 - (d - 2000.0) * 0.08
+
+
+class _LongClimbFlatDescentProfile:
+    """Même forme que `_ClimbFlatDescentProfile`, mise à l'échelle pour que la
+    course prédite dépasse largement le seuil de sortie longue (90 min,
+    `arc_metrics.LONG_RUN_MIN_DURATION_S`) : le fade ne doit alors PAS être
+    réduit par l'échelonnement durée/#48 (`ASSUMPTIONS["fade"]`), et son effet
+    doit rester visible après arrondi à la minute des totaux cumulés."""
+    total_m = 24000.0
+
+    def __call__(self, d):
+        if d <= 8000.0:
+            return d * 0.03
+        if d <= 16000.0:
+            return 240.0
+        return 240.0 - (d - 16000.0) * 0.03
 
 
 class TestSegmentCourse(unittest.TestCase):
@@ -140,14 +159,20 @@ GENERIC_BINS = [
 class TestPredictSegments(unittest.TestCase):
     def test_flat_personal_segment_predicted_time_hand_computed(self):
         # Panier exact au point milieu 0.0 (pas d'interpolation) : vitesse
-        # cible = 3.0 m/s -> 500 m / 3.0 = 166.67 s (arrondi à 166.7 dans le module).
+        # cible = 3.0 m/s -> 500 m / 3.0 = 166.67 s, arrondi à la seconde (167).
+        # `safe`/`ambitious` passent par le plancher générique (ASSUMPTIONS
+        # ["scenarios"]) : la dispersion mesurée (ci_low=2.8, ci_high=3.2) est
+        # plus ÉTROITE côté « safe » que le plancher générique (speed × 0.92 =
+        # 2.76 < 2.8) -> safe = 500 / 2.76 = 181 s ; côté « ambitious », la
+        # mesure (3.2) est déjà PLUS large que le plancher (speed × 1.06 =
+        # 3.18) -> ambitious = 500 / 3.2 = 156 s (mesure conservée).
         segs = [{"id": "s01", "km_start": 0.0, "km_end": 0.5, "distance_m": 500.0,
                  "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0}]
         out = RP.predict_segments(segs, PERSONAL_BINS, fade_pct=0.0, heat_factor=1.0)
         self.assertEqual(out[0]["source"], "personal")
-        self.assertAlmostEqual(out[0]["predicted_time_s"]["realistic"], 500.0 / 3.0, places=1)
-        self.assertAlmostEqual(out[0]["predicted_time_s"]["safe"], 500.0 / 2.8, places=1)
-        self.assertAlmostEqual(out[0]["predicted_time_s"]["ambitious"], 500.0 / 3.2, delta=0.1)
+        self.assertEqual(out[0]["predicted_time_s"]["realistic"], round(500.0 / 3.0))
+        self.assertEqual(out[0]["predicted_time_s"]["safe"], round(500.0 / 2.76))
+        self.assertEqual(out[0]["predicted_time_s"]["ambitious"], round(500.0 / 3.2))
         # safe (le plus lent) doit toujours être le temps le plus long.
         self.assertGreater(out[0]["predicted_time_s"]["safe"], out[0]["predicted_time_s"]["realistic"])
         self.assertGreater(out[0]["predicted_time_s"]["realistic"], out[0]["predicted_time_s"]["ambitious"])
@@ -168,7 +193,7 @@ class TestPredictSegments(unittest.TestCase):
         realistic = out[0]["predicted_time_s"]["realistic"]
         safe = out[0]["predicted_time_s"]["safe"]
         ambitious = out[0]["predicted_time_s"]["ambitious"]
-        self.assertAlmostEqual(realistic, 1000.0 / 3.0, places=1)
+        self.assertEqual(realistic, round(1000.0 / 3.0))
         self.assertGreater(safe, realistic)
         self.assertGreater(realistic, ambitious)
 
@@ -185,9 +210,11 @@ class TestPredictSegments(unittest.TestCase):
                  "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0}]
         base = RP.predict_segments(segs, PERSONAL_BINS, fade_pct=0.0, heat_factor=1.0)
         hot = RP.predict_segments(segs, PERSONAL_BINS, fade_pct=0.0, heat_factor=1.10)
+        # Chaque scénario est arrondi INDÉPENDAMMENT à la seconde (`base` et `hot`) :
+        # une marge d'une seconde absorbe le double arrondi.
         for scenario in RP.SCENARIOS:
             self.assertAlmostEqual(
-                hot[0]["predicted_time_s"][scenario], base[0]["predicted_time_s"][scenario] * 1.10, delta=0.1)
+                hot[0]["predicted_time_s"][scenario], base[0]["predicted_time_s"][scenario] * 1.10, delta=1.0)
 
     def test_provenance_summary_shares_sum_to_100(self):
         segs = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
@@ -207,15 +234,47 @@ class TestFade(unittest.TestCase):
         self.assertEqual(RP.fade_speed_multiplier(1.0 / 3.0, 10.0), 1.0)
 
     def test_full_fade_at_finish(self):
-        self.assertAlmostEqual(RP.fade_speed_multiplier(1.0, 9.0), 0.91)
+        # Calibré pour que la MOYENNE du dernier tiers égale fade_pct (voir
+        # ASSUMPTIONS["fade"]) : à l'arrivée (t=1), réduction = 1 × (4/3) ×
+        # (9/100) = 12 % -> multiplicateur 0.88 (PAS 0.91, qui ne ferait que
+        # 0,75 × 9 % de moyenne sur le dernier tiers).
+        self.assertAlmostEqual(RP.fade_speed_multiplier(1.0, 9.0), 0.88)
 
     def test_fade_ramps_linearly_between_first_third_and_finish(self):
         # À mi-chemin entre le premier tiers (1/3) et l'arrivée (1.0), soit
-        # km_frac = 2/3 : la moitié du fade est appliquée.
-        self.assertAlmostEqual(RP.fade_speed_multiplier(2.0 / 3.0, 10.0), 0.95, places=4)
+        # km_frac = 2/3 : t = 0.5, réduction = 0.5 × (4/3) × (10/100) ≈ 6,67 %.
+        self.assertAlmostEqual(RP.fade_speed_multiplier(2.0 / 3.0, 10.0), 1.0 - 0.5 * (4.0 / 3.0) * 0.10, places=6)
+
+    def test_last_third_mean_reduction_equals_fade_pct(self):
+        # Preuve directe de la calibration (ASSUMPTIONS["fade"]) : la MOYENNE
+        # de la réduction sur le dernier tiers (échantillonné finement) égale
+        # `fade_pct`, pas seulement la valeur ponctuelle à l'arrivée.
+        fade_pct = 12.0
+        n = 1000
+        reductions = [1.0 - RP.fade_speed_multiplier(2.0 / 3.0 + i / n * (1.0 / 3.0), fade_pct) for i in range(n)]
+        self.assertAlmostEqual(sum(reductions) / n, fade_pct / 100.0, places=3)
 
     def test_zero_fade_pct_is_a_no_op(self):
         self.assertEqual(RP.fade_speed_multiplier(1.0, 0.0), 1.0)
+
+    def test_extreme_fade_never_goes_below_the_floor(self):
+        self.assertGreaterEqual(RP.fade_speed_multiplier(1.0, 500.0), RP.FADE_MIN_SPEED_FACTOR)
+
+
+class TestScaleFadeToDuration(unittest.TestCase):
+    def test_race_shorter_than_long_run_threshold_scales_fade_down(self):
+        half_threshold_s = RP.M.LONG_RUN_MIN_DURATION_S / 2.0
+        self.assertAlmostEqual(RP.scale_fade_to_duration(10.0, half_threshold_s), 5.0)
+
+    def test_race_at_or_above_threshold_keeps_fade_unscaled(self):
+        self.assertEqual(RP.scale_fade_to_duration(10.0, RP.M.LONG_RUN_MIN_DURATION_S), 10.0)
+        self.assertEqual(RP.scale_fade_to_duration(10.0, RP.M.LONG_RUN_MIN_DURATION_S * 2), 10.0)
+
+    def test_unknown_duration_leaves_fade_unchanged(self):
+        self.assertEqual(RP.scale_fade_to_duration(10.0, None), 10.0)
+
+    def test_zero_fade_is_a_no_op(self):
+        self.assertEqual(RP.scale_fade_to_duration(0.0, 60.0), 0.0)
 
 
 class TestHeat(unittest.TestCase):
@@ -259,22 +318,25 @@ class TestPassagesAndCutoffs(unittest.TestCase):
         return RP.predict_segments(segs, GENERIC_BINS, fade_pct=0.0, heat_factor=1.0)
 
     def test_aid_station_stop_time_is_added_to_every_later_segment(self):
+        # Les temps de passage/totaux cumulés sont arrondis à la MINUTE
+        # (`RP.PASSAGE_ROUND_S`), jamais à la seconde — voir
+        # `ASSUMPTIONS["cutoffs"]`/le docstring du module sur la précision.
         segs = self._segments()
         stations = [{"km": 1.0, "name": "Ravito", "stop_s": 60.0}]
         passages = RP.compute_passages(segs, stations)
         before = segs[0]["predicted_time_s"]["realistic"]
         after_two_segments = segs[0]["predicted_time_s"]["realistic"] + segs[1]["predicted_time_s"]["realistic"]
-        self.assertAlmostEqual(passages["segment_passages"][0]["realistic"], round(before))
+        self.assertEqual(passages["segment_passages"][0]["realistic"], RP._round_passage(before))
         # Le second passage inclut les 60 s d'arrêt ravito en plus des deux segments.
-        self.assertAlmostEqual(passages["totals_s"]["realistic"], round(after_two_segments + 60.0), delta=1)
+        self.assertEqual(passages["totals_s"]["realistic"], RP._round_passage(after_two_segments + 60.0))
 
     def test_default_aid_station_stop_when_unspecified(self):
         segs = self._segments()
         stations = [{"km": 1.0, "name": "Ravito"}]
         passages = RP.compute_passages(segs, stations)
         total_running = sum(s["predicted_time_s"]["realistic"] for s in segs)
-        self.assertAlmostEqual(
-            passages["totals_s"]["realistic"], round(total_running + RP.DEFAULT_AID_STATION_STOP_S), delta=1)
+        self.assertEqual(
+            passages["totals_s"]["realistic"], RP._round_passage(total_running + RP.DEFAULT_AID_STATION_STOP_S))
 
     def test_cutoff_with_large_margin_is_ok(self):
         segs = self._segments()
@@ -321,12 +383,363 @@ class TestBuildRacePlan(unittest.TestCase):
         self.assertGreater(plan["totals"]["time_s"]["safe"], plan["totals"]["time_s"]["ambitious"])
 
     def test_fade_makes_the_plan_slower_than_without_fade(self):
-        pts = _straight_course(_ClimbFlatDescentProfile())
+        # Course longue (~2h13 à 3 m/s, largement au-dessus du seuil de sortie
+        # longue de 90 min) : le fade n'est donc PAS réduit par l'échelonnement
+        # durée/#48, et son effet reste visible après arrondi à la minute.
+        pts = _straight_course(_LongClimbFlatDescentProfile(), step_m=20.0)
         no_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=0.0, fade_source="generic",
-                                      start_time="07:00", race_date="2026-11-15", segment_m=500.0)
+                                      start_time="07:00", race_date="2026-11-15", segment_m=750.0)
         with_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
-                                        start_time="07:00", race_date="2026-11-15", segment_m=500.0)
+                                        start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        self.assertEqual(with_fade["fade_pct_applied"], 8.0)
         self.assertGreater(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
+
+    def test_fade_is_scaled_down_for_a_race_shorter_than_the_long_run_threshold(self):
+        # Course courte (~17 min à 3 m/s) : un fade mesuré sur sortie longue
+        # (90 min) ne doit s'appliquer que PARTIELLEMENT (ASSUMPTIONS["fade"]).
+        pts = _straight_course(_ClimbFlatDescentProfile())
+        plan = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
+                                   start_time="07:00", race_date="2026-11-15", segment_m=500.0)
+        self.assertLess(plan["fade_pct_applied"], 8.0)
+        self.assertGreater(plan["fade_pct_applied"], 0.0)
+        self.assertTrue(plan["fade_notes"])
+
+
+# ---------------------------------------------------------------------------
+# Terrain vallonné : intégration point par point (revue de code #59, blocant)
+# ---------------------------------------------------------------------------
+
+class _RollingProfile:
+    """Aller-retour +12 %/-12 % tous les 375 m sur 750 m : pente MOYENNE quasi
+    nulle, mais un temps réel bien plus long qu'un vrai plat de même longueur
+    (voir `ASSUMPTIONS["rolling_terrain"]`)."""
+    total_m = 750.0
+
+    def __call__(self, d):
+        if d <= 375.0:
+            return d * 0.12
+        return 375.0 * 0.12 - (d - 375.0) * 0.12
+
+
+class TestRollingTerrainIntegration(unittest.TestCase):
+    def test_rolling_terrain_is_slower_than_naive_average_grade_time(self):
+        pts = _straight_course(_RollingProfile(), step_m=5.0)
+        segs = RP.segment_course(pts, target_segment_m=750.0, merge_grade_delta_pct=999.0)
+        # Un seul segment couvre tout l'aller-retour (fusion forcée pour ce test :
+        # ce qui nous intéresse est l'intégration DANS un segment, pas la
+        # segmentation elle-même).
+        self.assertEqual(len(segs), 1)
+        self.assertAlmostEqual(segs[0]["grade_mean_pct"], 0.0, delta=0.5)
+
+        bins = [
+            {"grade_mid": -0.12, "speed_ms": 4.0, "source": "personal",
+             "ci_low_speed_ms": 3.8, "ci_high_speed_ms": 4.2, "hr_bpm": 130},
+            {"grade_mid": 0.0, "speed_ms": 3.0, "source": "personal",
+             "ci_low_speed_ms": 2.8, "ci_high_speed_ms": 3.2, "hr_bpm": 145},
+            {"grade_mid": 0.12, "speed_ms": 1.5, "source": "personal",
+             "ci_low_speed_ms": 1.3, "ci_high_speed_ms": 1.7, "hr_bpm": 165},
+        ]
+        integrated = RP.predict_segments(segs, bins, fade_pct=0.0, heat_factor=1.0)
+        integrated_time = integrated[0]["predicted_time_s"]["realistic"]
+
+        # Repère de comparaison : le temps qu'on obtiendrait en prédisant UNE
+        # SEULE FOIS sur la pente moyenne (l'ancien comportement, bogué) — un
+        # segment "à la main" sans `_profile` retombe sur ce calcul (voir
+        # `_segment_intervals`).
+        naive_seg = [{"id": "naive", "km_start": segs[0]["km_start"], "km_end": segs[0]["km_end"],
+                      "distance_m": segs[0]["distance_m"], "grade_mean_pct": segs[0]["grade_mean_pct"],
+                      "elevation_gain_m": segs[0]["elevation_gain_m"],
+                      "elevation_loss_m": segs[0]["elevation_loss_m"]}]
+        naive = RP.predict_segments(naive_seg, bins, fade_pct=0.0, heat_factor=1.0)
+        naive_time = naive[0]["predicted_time_s"]["realistic"]
+
+        # Le vrai temps intégré doit être NETTEMENT plus lent que le calcul naïf
+        # sur la pente moyenne (~0 %, vitesse 3.0 m/s) — la montée coûte plus
+        # que ce que la descente ne fait gagner (modèle de Minetti).
+        self.assertGreater(integrated_time, naive_time)
+        self.assertGreater(integrated_time, segs[0]["distance_m"] / 3.0 * 1.05)
+
+
+# ---------------------------------------------------------------------------
+# Panier central snapé sur 0 % (revue de code #59, should-fix)
+# ---------------------------------------------------------------------------
+
+class TestSnapFlatGrade(unittest.TestCase):
+    def test_tiny_grade_inside_the_center_bin_is_snapped_to_zero(self):
+        tiny = RP._CENTER_BIN_HI / 2.0
+        self.assertEqual(RP._snap_flat_grade(tiny), 0.0)
+        self.assertEqual(RP._snap_flat_grade(-tiny), 0.0)
+
+    def test_grade_outside_the_center_bin_is_left_unchanged(self):
+        outside = RP._CENTER_BIN_HI + 0.05
+        self.assertEqual(RP._snap_flat_grade(outside), outside)
+
+    def test_none_grade_is_left_unchanged(self):
+        self.assertIsNone(RP._snap_flat_grade(None))
+
+    def test_gps_noise_near_flat_does_not_spuriously_produce_mixed_source(self):
+        # Panier plat personnel voisin d'un panier générique : sans le snap, une
+        # pente de bruit GPS de quelques dixièmes de point interpolerait entre
+        # les deux et étiquetterait à tort le segment "mixed".
+        bins = [
+            {"grade_mid": 0.0, "speed_ms": 3.0, "source": "personal",
+             "ci_low_speed_ms": 2.8, "ci_high_speed_ms": 3.2, "hr_bpm": 145},
+            {"grade_mid": 0.10, "speed_ms": 2.0, "source": "generic",
+             "ci_low_speed_ms": None, "ci_high_speed_ms": None, "hr_bpm": None},
+        ]
+        noisy_grade_pct = (RP._CENTER_BIN_HI / 2.0) * 100.0
+        seg = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                "grade_mean_pct": noisy_grade_pct, "elevation_gain_m": 3.0, "elevation_loss_m": 0.0}]
+        out = RP.predict_segments(seg, bins, fade_pct=0.0, heat_factor=1.0)
+        self.assertEqual(out[0]["source"], "personal")
+
+
+# ---------------------------------------------------------------------------
+# Altitude manquante (revue de code #59, blocant)
+# ---------------------------------------------------------------------------
+
+class TestMissingElevation(unittest.TestCase):
+    def test_gpx_without_any_elevation_still_predicts_a_nonzero_plan(self):
+        pts = [{"lat": SAFE_LAT, "lon": SAFE_LON + i * (100.0 / M_PER_DEG_LON), "ele": None} for i in range(20)]
+        plan = RP.build_race_plan(pts, GENERIC_BINS, start_time="07:00", race_date="2026-11-15", segment_m=500.0)
+        self.assertGreater(plan["totals"]["time_s"]["realistic"], 0)
+        self.assertTrue(any("altitude" in w.lower() for w in plan["warnings"]))
+        for seg in plan["segments"]:
+            self.assertEqual(seg["grade_mean_pct"], None)
+            self.assertIn("missing_elevation", seg["reason_code"] or "")
+
+    def test_elevation_coverage_pct_helper(self):
+        pts_full = [{"ele": 10.0}, {"ele": 20.0}]
+        pts_partial = [{"ele": 10.0}, {"ele": None}]
+        pts_empty: list = []
+        self.assertEqual(RP.elevation_coverage_pct(pts_full), 100.0)
+        self.assertEqual(RP.elevation_coverage_pct(pts_partial), 50.0)
+        self.assertEqual(RP.elevation_coverage_pct(pts_empty), 100.0)
+
+    def test_partial_missing_elevation_warns_without_failing_the_plan(self):
+        pts = _straight_course(_ClimbFlatDescentProfile(), step_m=5.0)
+        # La moitié des points perdent leur altitude (un GPX partiellement corrompu).
+        for i, p in enumerate(pts):
+            if i % 2 == 0:
+                p["ele"] = None
+        plan = RP.build_race_plan(pts, GENERIC_BINS, start_time="07:00", race_date="2026-11-15", segment_m=500.0)
+        self.assertGreater(plan["totals"]["time_s"]["realistic"], 0)
+        self.assertTrue(any("altitude manquante" in w.lower() for w in plan["warnings"]))
+
+    def test_missing_elevation_segment_gets_a_note(self):
+        seg = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                "grade_mean_pct": None, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+                "_profile": [(1000.0, None)]}]
+        out = RP.predict_segments(seg, GENERIC_BINS, fade_pct=0.0, heat_factor=1.0)
+        self.assertEqual(out[0]["reason_code"], "missing_elevation")
+        self.assertIsNotNone(out[0]["predicted_time_s"]["realistic"])
+        self.assertTrue(any("altitude manquante" in n for n in out[0]["notes"]))
+
+
+# ---------------------------------------------------------------------------
+# Ravitaillement au-delà de la fin du GPX / rééchelonnage (revue de code #59)
+# ---------------------------------------------------------------------------
+
+class TestAidStationBeyondCourseEnd(unittest.TestCase):
+    def _segments(self):
+        segs = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                 "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0}]
+        return RP.predict_segments(segs, GENERIC_BINS, fade_pct=0.0, heat_factor=1.0)
+
+    def test_station_beyond_the_measured_end_is_attached_to_the_finish(self):
+        segs = self._segments()
+        stations = [{"km": 5.0, "name": "Arrivée théorique"}]  # bien au-delà du dernier segment (1 km)
+        passages = RP.compute_passages(segs, stations)
+        self.assertEqual(len(passages["aid_station_passages"]), 1)
+        entry = passages["aid_station_passages"][0]
+        self.assertIn("note", entry)
+        self.assertIn("au-delà", entry["note"])
+        self.assertEqual(entry["realistic"], passages["segment_passages"][-1]["realistic"])
+
+    def test_rescale_aid_stations_maps_official_km_onto_measured_distance(self):
+        stations = [{"km": 10.0, "name": "mi-course"}]
+        # GPX mesuré à 9 km pour une course officielle de 10 km -> ratio 0.9.
+        rescaled = RP.rescale_aid_stations(stations, measured_total_m=9000.0, official_distance_m=10000.0)
+        self.assertAlmostEqual(rescaled[0]["km"], 9.0)
+        # Distances manquantes : inchangé.
+        self.assertEqual(RP.rescale_aid_stations(stations, None, 10000.0), stations)
+        self.assertEqual(RP.rescale_aid_stations(stations, 9000.0, None), stations)
+
+
+# ---------------------------------------------------------------------------
+# Barrières horaires multi-jours (revue de code #59, should-fix)
+# ---------------------------------------------------------------------------
+
+class TestCutoffFormats(unittest.TestCase):
+    def _passage(self, seconds):
+        return [{"km": 10.0, "name": "Ravito", "safe": seconds, "realistic": seconds, "ambitious": seconds}]
+
+    def test_elapsed_format_supports_more_than_24_hours(self):
+        start = datetime(2026, 11, 15, 7, 0)
+        stations = [{"km": 10.0, "name": "Ravito", "cutoff": "+30:00"}]
+        # 29 h de course (104 400 s), barrière à +30 h -> marge positive d'1 h.
+        cutoffs = RP.check_cutoffs(self._passage(29 * 3600), stations, start)
+        self.assertEqual(cutoffs[0]["realistic"]["margin_s"], 3600)
+        self.assertEqual(cutoffs[0]["realistic"]["status"], "ok")
+
+    def test_iso_datetime_expresses_an_absolute_day_two_barrier(self):
+        start = datetime(2026, 11, 15, 7, 0)
+        stations = [{"km": 10.0, "name": "Ravito", "cutoff": "2026-11-16T10:30:00"}]
+        # Passage à +27h30 (98 100 s) = 2026-11-16T10:30:00 pile -> marge nulle.
+        cutoffs = RP.check_cutoffs(self._passage(27 * 3600 + 1800), stations, start)
+        self.assertEqual(cutoffs[0]["realistic"]["margin_s"], 0)
+
+    def test_cutoff_day_disambiguates_a_same_looking_hhmm_on_day_two(self):
+        start = datetime(2026, 11, 15, 7, 0)
+        # "10:00" SANS cutoff_day est le jour même (10:00 > 07:00 de départ) :
+        # passage à +2h (09:00) -> marge d'1h, "ok".
+        stations_day1 = [{"km": 10.0, "name": "Ravito", "cutoff": "10:00"}]
+        cutoffs_day1 = RP.check_cutoffs(self._passage(2 * 3600), stations_day1, start)
+        self.assertEqual(cutoffs_day1[0]["realistic"]["status"], "ok")
+        # "10:00" AVEC cutoff_day=2 : le lendemain 10:00, une marge bien plus
+        # généreuse que la barrière du jour même pour le MÊME passage.
+        stations_day2 = [{"km": 10.0, "name": "Ravito", "cutoff": "10:00", "cutoff_day": 2}]
+        cutoffs_day2 = RP.check_cutoffs(self._passage(2 * 3600), stations_day2, start)
+        self.assertGreater(cutoffs_day2[0]["realistic"]["margin_s"], cutoffs_day1[0]["realistic"]["margin_s"])
+
+    def test_unreadable_cutoff_is_ignored_not_raised(self):
+        start = datetime(2026, 11, 15, 7, 0)
+        stations = [{"km": 10.0, "name": "Ravito", "cutoff": "pas une heure"}]
+        self.assertEqual(RP.check_cutoffs(self._passage(3600), stations, start), [])
+
+
+# ---------------------------------------------------------------------------
+# Résolveurs CLI (`_resolve_*`) — conn SQLite en mémoire, sans fichiers réels
+# ---------------------------------------------------------------------------
+
+class TestResolvers(unittest.TestCase):
+    def _conn(self):
+        conn = IDX.open_db(Path(tempfile.gettempdir()) / "arc-race-pacing-tests-nonexistent", None, True, True)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _conf(self):
+        return IDX.settings(IDX.load_config(Path(tempfile.gettempdir()) / "arc-race-pacing-tests-nonexistent"))
+
+    def test_resolve_fade_falls_back_to_generic_without_durability_data(self):
+        conn = self._conn()
+        fade_pct, source = RP._resolve_fade(conn, date(2026, 9, 27), _Args(fade_pct=None, fade_weeks=None))
+        self.assertEqual((fade_pct, source), (RP.DEFAULT_GENERIC_FADE_PCT, "generic"))
+
+    def test_resolve_fade_honours_an_explicit_override(self):
+        conn = self._conn()
+        fade_pct, source = RP._resolve_fade(conn, date(2026, 9, 27), _Args(fade_pct=3.5, fade_weeks=None))
+        self.assertEqual((fade_pct, source), (3.5, "override"))
+
+    def test_resolve_model_bins_empty_workspace(self):
+        conn = self._conn()
+        bins, flat_ref = RP._resolve_model_bins(conn, self._conf(), _Args(band="endurance", months=None, today=None))
+        self.assertEqual(bins, [])
+        self.assertIsNone(flat_ref)
+
+    def test_resolve_acclimated_is_none_without_any_session_considered(self):
+        # #59, revue de code : AUCUNE séance dans la fenêtre (pas seulement
+        # aucune séance chaude) doit rendre `None`, jamais `False`.
+        conn = self._conn()
+        acclimated, note = RP._resolve_acclimated(conn, self._conf(), date(2026, 9, 27), temp_max_c=30.0)
+        self.assertIsNone(acclimated)
+        self.assertIsNone(note)
+
+    def test_resolve_acclimated_is_none_below_the_heat_threshold(self):
+        conn = self._conn()
+        acclimated, note = RP._resolve_acclimated(conn, self._conf(), date(2026, 9, 27), temp_max_c=18.0)
+        self.assertIsNone(acclimated)
+        self.assertIsNone(note)
+
+    def test_resolve_intensity_factor_without_objective_stays_at_one(self):
+        conn = self._conn()
+        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 3.0)
+        self.assertEqual((factor, source, race_speed), (1.0, "none", None))
+
+    def test_resolve_intensity_factor_without_flat_reference_stays_at_one(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, 0)")
+        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "trail"}, None)
+        self.assertEqual((factor, source, race_speed), (1.0, "none", None))
+
+    def test_resolve_intensity_factor_uses_riegel_from_a_recent_five_km_effort(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, NULL)")
+        conn.execute("INSERT INTO activity (source_path, date, sport, distance_m) VALUES (?, ?, ?, ?)",
+                     ("x.md", date.today().isoformat(), "running", 5000.0))
+        activity_id = conn.execute("SELECT id FROM activity").fetchone()[0]
+        for km in range(1, 6):
+            conn.execute(
+                "INSERT INTO activity_split (activity_id, km, distance_m, duration_s) VALUES (?, ?, ?, ?)",
+                (activity_id, km, 1000.0, 300.0))
+        conn.commit()
+        # Référence plate personnelle (endurance, footing) : 2.9 m/s, bien plus
+        # lente qu'un effort récent de 5 km en 25 min (~3.33 m/s) -> facteur > 1.
+        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9)
+        self.assertEqual(source, "riegel")
+        self.assertGreater(factor, 1.0)
+        self.assertIsNotNone(race_speed)
+
+
+class _Args:
+    """Espace de noms minimal imitant `argparse.Namespace` pour les résolveurs
+    CLI — seuls les attributs qu'ils lisent réellement sont fournis."""
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Bout en bout, main-calculé : montée + plat + descente, paniers connus, fade
+# et ravitaillement (revue de code #59)
+# ---------------------------------------------------------------------------
+
+class TestHandComputedEndToEndPassageTable(unittest.TestCase):
+    def test_climb_flat_descent_with_fade_and_aid_station(self):
+        # Trois segments construits À LA MAIN (pas de `_profile` : pente
+        # uniforme par segment, cas déjà couvert par `_segment_intervals`),
+        # paniers PERSONNELS exacts aux points milieux (aucune interpolation).
+        segs = [
+            {"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+             "grade_mean_pct": 10.0, "elevation_gain_m": 100.0, "elevation_loss_m": 0.0},
+            {"id": "s02", "km_start": 1.0, "km_end": 2.0, "distance_m": 1000.0,
+             "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0},
+            {"id": "s03", "km_start": 2.0, "km_end": 3.0, "distance_m": 1000.0,
+             "grade_mean_pct": -10.0, "elevation_gain_m": 0.0, "elevation_loss_m": 100.0},
+        ]
+        bins = [
+            {"grade_mid": -0.10, "speed_ms": 4.0, "source": "personal",
+             "ci_low_speed_ms": 3.8, "ci_high_speed_ms": 4.2, "hr_bpm": 130},
+            {"grade_mid": 0.0, "speed_ms": 2.0, "source": "personal",
+             "ci_low_speed_ms": 1.9, "ci_high_speed_ms": 2.1, "hr_bpm": 145},
+            {"grade_mid": 0.10, "speed_ms": 1.0, "source": "personal",
+             "ci_low_speed_ms": 0.9, "ci_high_speed_ms": 1.1, "hr_bpm": 165},
+        ]
+        # Fade nul, chaleur nulle : temps "realistic" main-calculés = distance / vitesse du panier.
+        predicted = RP.predict_segments(segs, bins, fade_pct=0.0, heat_factor=1.0)
+        expected_realistic = {"s01": round(1000.0 / 1.0), "s02": round(1000.0 / 2.0), "s03": round(1000.0 / 4.0)}
+        for seg in predicted:
+            self.assertEqual(seg["predicted_time_s"]["realistic"], expected_realistic[seg["id"]], seg["id"])
+            self.assertEqual(seg["source"], "personal")
+
+        stations = [{"km": 1.5, "name": "Ravito du plat", "stop_s": 120.0}]
+        passages = RP.compute_passages(predicted, stations)
+
+        # Passage cumulé (realistic) à la fin de s01 = 1000 s (arrondi à la
+        # minute la plus proche).
+        self.assertEqual(passages["segment_passages"][0]["realistic"], RP._round_passage(1000.0))
+        # Ravito au km 1.5 : `compute_passages` ne teste la présence d'un ravito
+        # qu'aux BORNES de segment, jamais en cours de segment — la station est
+        # donc rattachée à la fin du PREMIER segment dont `km_end` atteint/dépasse
+        # son propre km (ici s02, km_end = 2.0 >= 1.5), avec le cumul APRÈS s02
+        # en entier : s01 (1000 s) + s02 (500 s) = 1500 s.
+        self.assertEqual(passages["aid_station_passages"][0]["realistic"], RP._round_passage(1500.0))
+        # Total = s01 (1000) + s02 (500) + arrêt ravito (120) + s03 (250) = 1870 s.
+        expected_total = RP._round_passage(1000.0 + 500.0 + 120.0 + 250.0)
+        self.assertEqual(passages["totals_s"]["realistic"], expected_total)
+
+        cutoffs = RP.check_cutoffs(passages["aid_station_passages"], stations, datetime(2026, 11, 15, 7, 0))
+        self.assertEqual(cutoffs, [])  # pas de `cutoff` déclaré sur cette station.
 
 
 if __name__ == "__main__":
