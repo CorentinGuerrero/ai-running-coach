@@ -101,8 +101,9 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | **`date`** | date | jour de la séance (celui du nom de fichier) |
 | **`sport`** | `running` `trail` `strength` `indoor_cycling` `home_trainer` `hiking` `walking` `elliptical` `rest` `cycling` `swimming` `rowing` | = le `<type>` du nom de fichier |
 | **`duration_s`** | nombre | durée totale |
-| `garmin_activity_id` | entier | identifiant Garmin — clé de jointure, à toujours renseigner après un sync |
-| `name` | texte | nom Garmin de l'activité |
+| `garmin_activity_id` | entier | identifiant Garmin — clé de jointure, à toujours renseigner après un sync `[data].source = "garmin"` |
+| `intervals_activity_id` | texte | identifiant Intervals.icu (#68, ex. `"i12345678"`) — CHAÎNE, jamais confondue avec `garmin_activity_id` (entier). À renseigner à la place de `garmin_activity_id`, jamais en plus, après un sync `[data].source = "intervals"` |
+| `name` | texte | nom de l'activité (Garmin ou Intervals.icu selon la source) |
 | `location` | texte | lieu / parcours (sert à la comparaison de parcours) |
 | `start_time` | date-heure | |
 | `distance_m` | nombre | |

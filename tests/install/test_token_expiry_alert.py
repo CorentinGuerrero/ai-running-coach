@@ -464,3 +464,95 @@ class TestAuthFailureExplicitNotification(TokenAlertSandbox):
                 f"une seule notification attendue (alerte d'expiration), pas de doublon 401 : {calls}",
             )
             self.assertIn("expiré", calls[0].lower())
+
+
+class DataSourceSandbox(TokenAlertSandbox):
+    """Comme `TokenAlertSandbox`, mais avec `[data].source` en plus de
+    `[notifications]` dans la même config personnelle (#68, revue PR #116)."""
+
+    def _configure(self, sb: Sandbox, source: str, **notif_kwargs) -> None:
+        self._configure_notifications(sb, **notif_kwargs)
+        cfg = sb.repo / "config/workspace.user.toml"
+        cfg.write_text(cfg.read_text() + f'\n[data]\nsource = "{source}"\n')
+
+    def _fake_claude(self, sb: Sandbox, stdout: str, exit_code: int = 0) -> Path:
+        fake_bin = sb.root / "fake-claude-bin"
+        fake_bin.mkdir(exist_ok=True)
+        fake_claude = fake_bin / "claude"
+        fake_claude.write_text(
+            "#!/usr/bin/env bash\n"
+            f"cat <<'EOF'\n{stdout}\nEOF\n"
+            f"exit {exit_code}\n"
+        )
+        fake_claude.chmod(0o755)
+        return fake_bin
+
+    def _path_with_fake_claude(self, fake_bin: Path) -> str:
+        return f"{fake_bin}:{STUBS_DIR}:{os.environ.get('PATH', '')}"
+
+
+class TestTokenAlertSkippedUnderIntervalsSource(DataSourceSandbox):
+    """#68 (revue PR #116, should-fix) : `check_token_alert()` n'a rien à
+    vérifier pour intervals.icu (pas de token OAuth à durée limitée) — un
+    scénario qui alerterait à coup sûr sous Garmin (tokens à J-10) ne doit
+    produire STRICTEMENT AUCUNE notification sous `[data].source =
+    "intervals"`."""
+
+    def test_expiring_garmin_like_tokens_produce_no_alert_under_intervals(self):
+        with Sandbox() as sb:
+            self._configure(sb, "intervals")
+            # Des tokens Garmin à J-10 déclencheraient normalement l'alerte
+            # J-14 (voir test_j14_tier_sends_one_alert_with_renewal_command) —
+            # ici, ils doivent être totalement ignorés.
+            tokens_dir = _tokens_dir_with_days_left(sb, 10)
+            proc = self._run(sb, tokens_dir, NOW)
+            self.assertSucceeded(proc)
+            self.assertEqual(self._token_alert_calls(sb), [])
+            self.assertEqual(self._curl_messages(sb), [], "aucune notification attendue de bout en bout")
+
+    def test_expired_garmin_like_tokens_still_produce_no_alert_under_intervals(self):
+        with Sandbox() as sb:
+            self._configure(sb, "intervals")
+            tokens_dir = _tokens_dir_with_days_left(sb, -5)  # expiré sous Garmin
+            proc = self._run(sb, tokens_dir, NOW)
+            self.assertSucceeded(proc)
+            self.assertEqual(self._token_alert_calls(sb), [])
+
+
+class TestIntervalsAuthFailureNotification(DataSourceSandbox):
+    """#68 (revue PR #116, should-fix) : un vrai 401 intervals.icu — texte réel
+    d'`ICUAPIError` (`intervals_icu_mcp/client.py`, vérifié) — doit produire une
+    notification « Authentification Intervals.icu », avec la commande de
+    renouvellement intervals.icu (jamais `garmin-mcp-auth`)."""
+
+    def test_raw_icu_401_gets_an_intervals_specific_notification(self):
+        with Sandbox() as sb:
+            self._configure(sb, "intervals")
+            tokens_dir = _tokens_dir_with_days_left(sb, 60)  # hors sujet ici, mais requis par _run
+            raw_tool_output = "Unauthorized. Check your API key and athlete ID."
+            fake_bin = self._fake_claude(sb, raw_tool_output, exit_code=1)
+            proc = self._run(sb, tokens_dir, NOW, PATH=self._path_with_fake_claude(fake_bin))
+            self.assertFailed(proc)
+            calls = self._curl_messages(sb)
+            self.assertEqual(len(calls), 1, f"attendu 1 notification, vu {calls}")
+            self.assertIn("Authentification Intervals.icu refusée", calls[0])
+            self.assertIn("intervals-icu-mcp-auth", calls[0])
+            self.assertNotIn("garmin-mcp-auth", calls[0])
+            self.assertNotIn("Garmin", calls[0])
+
+    def test_erreur_line_naming_intervals_auth_gets_the_intervals_notification(self):
+        with Sandbox() as sb:
+            self._configure(sb, "intervals")
+            tokens_dir = _tokens_dir_with_days_left(sb, 60)
+            final_message = (
+                "Séances : aucune nouvelle\n"
+                "```resume\n"
+                "ERREUR : clé API intervals.icu invalide — relancer intervals-icu-mcp-auth\n"
+                "```\n"
+            )
+            fake_bin = self._fake_claude(sb, final_message, exit_code=0)
+            proc = self._run(sb, tokens_dir, NOW, PATH=self._path_with_fake_claude(fake_bin))
+            self.assertSucceeded(proc)
+            calls = self._curl_messages(sb)
+            self.assertEqual(len(calls), 1, f"attendu 1 notification, vu {calls}")
+            self.assertIn("Authentification Intervals.icu", calls[0])

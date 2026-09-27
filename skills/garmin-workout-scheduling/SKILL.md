@@ -5,7 +5,12 @@ description: Use to push planned training sessions directly to the Garmin Connec
 
 # Garmin Workout Scheduling — Garmin Calendar First
 
-Push planned sessions straight onto the Garmin Connect calendar. **Garmin is the primary destination**; Intervals.icu is secondary (only if the user explicitly wants events there). All schemas below are TESTED on the live Garmin API via `garmin-mcp`.
+Push planned sessions straight onto the Garmin Connect calendar. **Garmin is the primary destination when `[data].source = "garmin"` (default)**; Intervals.icu is secondary (only if the user explicitly wants events there). All schemas below are TESTED on the live Garmin API via `garmin-mcp`.
+
+**`[data].source = "intervals"` (#68):** none of this applies — this whole
+skill, and every tool below, is Garmin-only. Load `intervals-icu-best-practices`
+instead and push via `create_event`/`bulk_create_events` on the `intervals`
+MCP server.
 
 ## Tool Access
 

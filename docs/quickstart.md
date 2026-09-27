@@ -45,6 +45,7 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 |---|---|
 | `--preset NOM` | Préréglage qui compose les options ci-dessous : `laptop`, `coach-server` ou `docker` — voir [Préréglages](#prereglages) |
 | `--ide claude` | Installe pour un IDE précis (`claude`, `copilot`, `opencode`, `gemini`, `cursor`, `windsurf`) |
+| `--source intervals` | Source de données primaire : `garmin` (défaut) ou `intervals` (sans montre Garmin) — voir [Configuration Intervals.icu](intervals-setup.md) |
 | `--agents LISTE` | Staff à installer, ex. `coach,nutritionist` — voir [Configuration](configuration.md#le-staff-agents) |
 | `--no-medical` | Tous les agents sauf le médecin |
 | `--no-auth` | Saute l'authentification Garmin |
@@ -68,6 +69,14 @@ soit son ordre sur la ligne de commande (`--preset laptop --daily-sync`
 revient exactement à `--daily-sync --preset laptop`) — y compris pour
 **éteindre** une valeur qu'un préréglage aurait allumée, avec `--auth`,
 `--no-daily-sync` ou `--no-remote-control`.
+
+`--source` n'est composée par AUCUN préréglage — les préréglages décrivent
+**où** vous installez (laptop, machine coach, machine coach + Docker), pas
+**quelle source de données** vous avez ; les deux se combinent librement
+(ex. `--preset coach-server --source intervals`). Le récapitulatif affiché
+avant toute action indique l'origine de chaque valeur retenue —
+`explicite`, `préréglage <nom>` ou `défaut` (jamais `préréglage` pour
+`--source`, toujours `explicite` ou `défaut`).
 
 | Préréglage | Équivaut à | Pour qui |
 |---|---|---|

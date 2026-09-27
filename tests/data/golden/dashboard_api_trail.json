@@ -812,6 +812,7 @@
           "garmin_activity_id": 90000000039,
           "gear_id": null,
           "id": 28,
+          "intervals_activity_id": null,
           "load": 95.49,
           "load_source": "trimp",
           "location": "Tournai",

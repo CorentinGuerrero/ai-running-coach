@@ -165,3 +165,8 @@ Les agents accèdent aux outils Garmin directement (mode direct) ou via `leanpro
 | Erreur de connexion | Vérifiez que `garmin-mcp` fonctionne : `garmin-mcp stdio` |
 
 Voir aussi la page [Dépannage](troubleshooting.md).
+
+!!! info "Pas de montre Garmin ?"
+    `./install.sh --source intervals` remplace tout ce qui précède par
+    Intervals.icu (COROS, Suunto, Polar, Apple...) — voir
+    [Configuration Intervals.icu](intervals-setup.md).

@@ -4,7 +4,7 @@
 
 `ai-running-coach` est un projet open-source qui fournit des **agents IA** et des **skills** pour aider les coureurs à préparer un objectif (course, trail, ultra) avec l'aide d'un assistant IA dans leur IDE préféré.
 
-Le projet est **en français par défaut** (la langue des documents générés est configurable via `config/workspace.toml`). Il est connecté principalement à **Garmin Connect**, installé et configuré automatiquement par `./install.sh` ; **Intervals.icu** est supporté en destination secondaire, uniquement sur demande explicite — son serveur MCP n'est pas installé par `install.sh` (configuration manuelle, voir [la FAQ](docs/faq.md#comment-configurer-intervalsicu-optionnel)).
+Le projet est **en français par défaut** (la langue des documents générés est configurable via `config/workspace.toml`). Il est connecté par défaut à **Garmin Connect**, installé et configuré automatiquement par `./install.sh`. **Intervals.icu** peut aussi être la source primaire — pour les athlètes sans montre Garmin (COROS, Suunto, Polar, Apple) — avec `./install.sh --source intervals` (voir [Configuration Intervals.icu](docs/intervals-setup.md)) ; sans cette option, il reste disponible en destination secondaire, uniquement sur demande explicite (configuration manuelle, voir [la FAQ](docs/faq.md#comment-configurer-intervalsicu-sans-passer-par-installsh)).
 
 ## ✨ Ce que le projet apporte
 

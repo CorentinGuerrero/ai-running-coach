@@ -209,7 +209,12 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # « gagnant » d'une collision disparaît). Sans ce bump, une base déjà construite
 # par une version antérieure n'a pas la colonne et `store()`/les requêtes du
 # tableau de bord échoueraient avec « no such column ».
-SCHEMA_VERSION = 23
+# #68 : `activity` gagne la colonne `intervals_activity_id` (TEXT — identifiant
+# Intervals.icu, une CHAÎNE, jamais confondue avec `garmin_activity_id` qui
+# reste un entier) pour les activités synchronisées depuis `[data].source =
+# "intervals"`. Sans ce bump, une base déjà construite par une version
+# antérieure n'a pas la colonne et l'insertion échouerait avec « no such column ».
+SCHEMA_VERSION = 24
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -420,7 +425,7 @@ CREATE TABLE objective (
 );
 CREATE TABLE activity (
     id INTEGER PRIMARY KEY, source_path TEXT, arc_version INTEGER, date TEXT, sport TEXT,
-    name TEXT, location TEXT, garmin_activity_id INTEGER, start_time TEXT,
+    name TEXT, location TEXT, garmin_activity_id INTEGER, intervals_activity_id TEXT, start_time TEXT,
     distance_m REAL, duration_s REAL, moving_duration_s REAL, elevation_gain_m REAL,
     elevation_loss_m REAL, avg_hr_bpm REAL, max_hr_bpm REAL, recovery_hr_bpm REAL,
     avg_cadence_spm REAL, calories_kcal REAL, te_aerobic REAL, te_anaerobic REAL, rpe REAL,
@@ -972,6 +977,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
         activity_id = _insert(conn, "activity", {
             "source_path": rel, "arc_version": arc_version, "date": g("date"), "sport": g("sport"),
             "name": g("name"), "location": g("location"), "garmin_activity_id": g("garmin_activity_id"),
+            "intervals_activity_id": g("intervals_activity_id"),
             "start_time": g("start_time"), "distance_m": g("distance_m"), "duration_s": g("duration_s"),
             "moving_duration_s": g("moving_duration_s"), "elevation_gain_m": g("elevation_gain_m"),
             "elevation_loss_m": g("elevation_loss_m"), "avg_hr_bpm": g("avg_hr_bpm"),

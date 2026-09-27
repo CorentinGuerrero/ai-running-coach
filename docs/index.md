@@ -163,7 +163,7 @@ Des protocoles précis que l'IA suit à la lettre. Cinq d'entre eux sont des com
 <li><a href="skills/garmin-workout-scheduling/">Planification Garmin</a><span>séances poussées au calendrier</span></li>
 <li><a href="skills/garmin-sync-efficiency/">Synchronisation Garmin</a><span>récupérer sans saturer le contexte</span></li>
 <li><a href="skills/garmin-daily-sync/">Sync quotidienne</a><span>headless, résumé poussé sur le téléphone</span></li>
-<li><a href="skills/intervals-icu-best-practices/">Intervals.icu</a><span>destination secondaire, à la demande</span></li>
+<li><a href="skills/intervals-icu-best-practices/">Intervals.icu</a><span>source primaire avec <code>--source intervals</code>, secondaire sinon</span></li>
 </ul>
 </div>
 

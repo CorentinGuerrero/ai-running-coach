@@ -1,6 +1,15 @@
 # Agent Coach
 
-> **Description** : Expert Trail Running Coach — valide les plans d'entraînement, analyse les données Garmin et ajuste les séances.
+> **Description** : Expert Trail Running Coach — valide les plans d'entraînement, analyse les données Garmin (ou Intervals.icu, `[data].source`, #68) et ajuste les séances.
+
+!!! info "`[data].source` (#68)"
+    Tout ce qui suit est écrit pour `[data].source = "garmin"` (défaut) — rien
+    ne change tant que cette clé vaut `garmin` ou est absente. Avec
+    `[data].source = "intervals"`, les outils Garmin cités plus bas ont un
+    équivalent intervals.icu (table de correspondance dans `AGENTS.md`) —
+    sauf le push de séances, qui n'est PAS un simple changement de nom
+    d'outil : voir [Configuration Intervals.icu](../intervals-setup.md) et le
+    skill `intervals-icu-best-practices`.
 
 ## Rôle
 

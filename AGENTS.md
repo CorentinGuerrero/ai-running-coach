@@ -23,6 +23,7 @@ héritage.
 | `[sport].disciplines` | Sports croisés réellement pratiqués — les seuls à programmer. |
 | `[agents].enabled` | **Seuls agents joignables.** Ne jamais déléguer à un agent absent. |
 | `[health].morning_check` | `full` \| `minimal` \| `off` — voir ci-dessous. |
+| `[data].source` | `garmin` (défaut) \| `intervals` — source de données primaire des agents. Voir « Backends MCP » et la table de correspondance des outils ci-dessous (#68). |
 | `[health].heat_threshold_c` | Seuil (°C, borne incluse) « séance chaude » pour le KPI d'acclimatation à la chaleur (#38, `scripts/arc_index.py heat-acclimation`). Défaut `25.0`. Indépendant de `morning_check` ; une valeur invalide n'interrompt jamais l'index (repli sur le défaut, avertissement). |
 | `[athlete].profile` | Profil de l'athlète, défaut `planning/Runner_Profile.md`. |
 | `[athlete].units` | `metric` \| `imperial`. |
@@ -54,6 +55,18 @@ même sur une installation neuve.
 | `off` | Aucune donnée de santé récupérée, aucun filtrage. Planification sur la charge, l'historique `activities/` et le ressenti déclaré. |
 
 Ne jamais réactiver silencieusement un niveau plus strict que celui configuré.
+
+**Avec `[data].source = "intervals"` (#68) :** intervals.icu n'a pas de score de
+readiness algorithmique équivalent à celui de Garmin — seul un champ
+`subjective.readiness` existe côté intervals.icu, une valeur manuelle du jour
+qui peut venir de l'athlète OU d'un appareil tiers synchronisé (Oura, Whoop...),
+jamais un score calculé par intervals.icu. À `full`, le bilan devient donc HRV + FC de repos
+(les deux dans le même appel `get_wellness_for_date`) **et l'indisponibilité du
+readiness est dite explicitement** ("readiness indisponible — source
+intervals.icu"), jamais remplacée par le champ subjectif présenté comme
+équivalent. À `minimal`, la ligne unique devient "readiness indisponible
+(source intervals.icu)" plutôt qu'un score. Voir la table de correspondance
+ci-dessous.
 
 ## Carte des dossiers
 
@@ -109,9 +122,61 @@ est destinée à l'utilisateur.
 
 ## Backends MCP
 
-- **`garmin`** — activités, sommeil, HRV, readiness, **calendrier des séances planifiées (destination PRIMAIRE)**, upload parcours/séances. **Mode direct par défaut** : le serveur MCP `garmin` expose `garmin-mcp` avec une liste blanche d'outils (`GARMIN_ENABLED_TOOLS`). **Mode passerelle (optionnel, power user)** : `leanproxy_invoke_tool(server="garmin", tool="...")` via leanproxy-mcp (économie de tokens ~98 %, chargement paresseux des schémas).
-- **`Intervals.icu`** — événements, wellness, séances planifiées (**SECONDAIRE** : uniquement si l'utilisateur le demande explicitement)
+**`[data].source` décide lequel des deux est la destination PRIMAIRE (#68) —
+voir la table de configuration ci-dessus.** Par défaut (`source = "garmin"`),
+rien ne change par rapport au comportement historique : la section ci-dessous
+et la table de correspondance qui suit ne prennent effet que si l'installation
+a été faite avec `./install.sh --source intervals` (ou `[data].source =
+"intervals"` posé à la main).
+
+- **`garmin`** — activités, sommeil, HRV, readiness, **calendrier des séances planifiées**, upload parcours/séances. **Mode direct par défaut** : le serveur MCP `garmin` expose `garmin-mcp` avec une liste blanche d'outils (`GARMIN_ENABLED_TOOLS`). **Mode passerelle (optionnel, power user)** : `leanproxy_invoke_tool(server="garmin", tool="...")` via leanproxy-mcp (économie de tokens ~98 %, chargement paresseux des schémas). **PRIMAIRE si `[data].source = "garmin"` (défaut)** ; sinon non installé par `install.sh` (voir ci-dessous).
+- **`Intervals.icu`** — événements, wellness, activités, via le serveur MCP communautaire [`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp) (48 outils, `intervals-icu-mcp` + `intervals-icu-mcp-auth`, voir `docs/intervals-setup.md`). **PRIMAIRE si `[data].source = "intervals"`** (installé par `./install.sh --source intervals`) : `coach`/`medical`/`garmin-daily-sync` utilisent alors ses outils au lieu de ceux de `garmin`, table de correspondance ci-dessous. **SECONDAIRE sinon** (défaut) : uniquement si l'utilisateur le demande explicitement (skill `intervals-icu-best-practices`), serveur non installé par `install.sh`, configuration manuelle (`docs/faq.md`).
 - **Absents localement** : `myfitnesspal` (utiliser les rapports manuels), `nexus-mcp` (RAG — déploiement Docker VPS uniquement ; localement utiliser `resources/` + historique MD)
+
+### Correspondance des outils — Garmin ↔ intervals.icu (#68)
+
+Ne s'applique que si `[data].source = "intervals"`. Même déclencheur, même
+cadence, même persistance MD, même contrat `arc` **pour les lectures**.
+**Le push de séances n'est PAS un simple changement de nom d'outil** — voir
+l'avertissement sous la table. Noms et formes de réponse vérifiés dans le code
+source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
+`response_builder.py`, commit `cb91d4a` — épinglé par `INTERVALS_MCP_REF` dans
+`install.sh`, documenté dans `docs/intervals-setup.md`), jamais devinés.
+
+| Besoin | Outil `garmin` | Outil `intervals` | Note |
+|---|---|---|---|
+| HRV nocturne | `get_hrv_data` | `get_wellness_for_date` (`heart.hrv_rmssd`/`heart.hrv_sdnn`) | Un seul appel intervals.icu couvre HRV + FC de repos + sommeil. |
+| FC de repos | `get_rhr_day` | `get_wellness_for_date` (`heart.resting_hr`) | Idem — ne PAS appeler `get_wellness_data` (plage de dates) pour un seul jour. |
+| Sommeil | `get_sleep_data` | `get_wellness_for_date` (`sleep.*`) | |
+| Readiness algorithmique | `get_training_readiness` | **aucun équivalent** | intervals.icu n'expose que `subjective.readiness` — une valeur manuelle dans le champ wellness du jour, qui peut venir de l'athlète OU d'un appareil tiers synchronisé (Oura, Whoop...), jamais un score calculé par intervals.icu lui-même — jamais présenté comme équivalent au Training Readiness Garmin. Dire explicitement l'indisponibilité (voir `[health].morning_check` ci-dessus). |
+| Activités récentes | `get_activities` / `get_activities_by_date` | `get_recent_activities` | |
+| Détail d'une activité | `get_activity` | `get_activity_details` | Pas de fréquence cardiaque de récupération (HRR/`recovery_hr_bpm`) ni de `splits` par km sur ce serveur — champs omis, jamais inventés (impacte aussi `course-comparison`, qui exige `splits`). Renseigner `intervals_activity_id` (chaîne, ex. `"i12345678"`) sur `activities/*.md` au lieu de `garmin_activity_id` (entier) — `workspace-data-contract`. |
+| Événements planifiés | `get_calendar_events` / `get_scheduled_workouts` | `get_calendar_events` / `get_upcoming_workouts` | |
+| Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | Ne renvoie que id/date/name/category/description/type/metrics — jamais de structure de séance. |
+| Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | **Pas un remplacement direct** — charger le skill `intervals-icu-best-practices` (pas `garmin-workout-scheduling`) : `create_event`/`update_event` n'ont PAS de paramètre structuré (pas de `workout_doc`) ; les cibles (#60) s'écrivent en texte dans `description` ; aucun upsert n'existe (vérifier `get_calendar_events` avant chaque push, pas de réutilisation de `workout_id`) ; la vérification post-push ne porte que sur les champs que `get_event` renvoie réellement. |
+| Modifier/supprimer une séance planifiée | `delete_workout` / `unschedule_workout` | `update_event` / `delete_event` | `update_event` exige un `event_id` déjà existant — jamais un upsert. |
+| Profil athlète (référence, jamais substitué au profil déclaré) | — | `get_athlete_profile` | |
+| Charge/forme (vocabulaire générique du projet, jamais les noms TrainingPeaks) | — (calculée par `scripts/arc_index.py`) | `get_fitness_summary` | Ne jamais citer `ctl`/`atl`/`form` sous ces noms dans une réponse — reformuler en charge/condition/fatigue/forme comme partout ailleurs (`docs/marques.md`). |
+
+**Fonctionnalités/champs Garmin sans portage intervals.icu dans cette story —
+indisponibles et EXPLIQUÉS comme tels quand `[data].source = "intervals"`,
+jamais devinés ou simulés :**
+
+- **Téléchargement FIT** (skill `fit-download`, `session-parts-analyzer`, et
+  tout KPI qui en dépend — GAP, VAM, décrochage cardiaque, durabilité) : le
+  script `scripts/download_fit.py` est câblé sur `garminconnect` + les tokens
+  `~/.garminconnect`, pas sur l'API intervals.icu. Non porté dans cette story
+  (#68) — dire à l'athlète que l'analyse sub-km n'est pas disponible avec
+  cette source plutôt que d'inventer des valeurs FIT.
+- **Fréquence cardiaque de récupération (HRR, `recovery_hr_bpm`) et `splits`
+  par km** : absents des activités synchronisées côté intervals.icu (voir la
+  table ci-dessus) — omis du bloc `arc`, jamais inventés ; `course-comparison`
+  (qui exige `splits`) n'est donc pas utilisable sur des activités
+  synchronisées depuis cette source.
+- **Upload de parcours** (`upload_course`, agent `course-strategist`) :
+  `course-strategist` reste limité à l'analyse GPX locale (skill
+  `gpx-analysis`) — pas d'envoi du parcours vers la montre/l'app tierce.
+- **Score de readiness Garmin** : voir la table ci-dessus.
 
 ## Règles de fraîcheur des données
 
@@ -125,7 +190,7 @@ est destinée à l'utilisateur.
   existante), installation de `planning/Runner_Profile.md` et `planning/active_objective.md`
   depuis `templates/`. Relancer la commande est sans effet.
 - `garmin-workout-scheduling` — push des séances planifiées au calendrier Garmin (schéma DTO exact, détail force, idempotence, vérification après push)
-- `intervals-icu-best-practices` — pièges de création/mise à jour d'événements (`workout_doc`, vérification `start_date`) ; secondaire, Garmin d'abord
+- `intervals-icu-best-practices` — pièges de création/mise à jour d'événements (`workout_doc`, vérification `start_date`) ; **primaire si `[data].source = "intervals"`** (push de séances), secondaire (Garmin d'abord) sinon
 - `garmin-sync-efficiency` — discipline de récupération pour éviter l'explosion du contexte
 - `workspace-data-contract` — **schéma du bloc ```` ```arc ````** par type de fichier (activité, santé, météo, semaine, nutrition, rapport, évaluation de parcours, plan de course), unités SI, validation par `scripts/arc_index.py --validate`. Charger avant d'écrire un fichier du workspace.
 - `arc-backfill` — met au contrat les fichiers écrits avant lui, par lots, à partir de la liste produite par `python3 scripts/arc_index.py backfill-plan`.

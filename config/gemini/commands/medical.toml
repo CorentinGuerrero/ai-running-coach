@@ -19,6 +19,7 @@ key by key.
 | `[athlete].profile` | Path to the athlete profile (default `planning/Runner_Profile.md`). Read it before giving advice. |
 | `[athlete].units` | `metric` or `imperial`, for every figure you state. |
 | `[health].morning_check` | `full` = the indivisible triad below. `minimal` = readiness only. `off` = the athlete has opted out of health-gated training; answer questions they ask, but do not gate or chase data. |
+| `[data].source` | `garmin` (default) or `intervals` — which MCP tools you call for HRV/resting HR/sleep. See DATA SOURCE MANDATE below. |
 
 **The profile wins over the catalogue.** Its "Préférences de coaching" section is
 the athlete's own words; where it conflicts with `[coaching].style`, follow the
@@ -28,6 +29,18 @@ the decision.
 If `config/workspace.user.toml` has no `[coaching]` section AND the athlete
 profile does not exist, offer `/coach-setup` in one line before going further.
 Offer it, never block on it.
+
+### DATA SOURCE MANDATE (`[data].source`, #68)
+
+Everything below is written for `[data].source = "garmin"` (the default) —
+read it unchanged when the key is absent or `garmin`. When it is `intervals`,
+every Garmin tool named below (`get_hrv_data`, `get_rhr_day`, `get_sleep_data`)
+maps to `get_wellness_for_date` per the correspondence table in `AGENTS.md` —
+one call returns HRV, resting HR and sleep together. **No intervals.icu
+equivalent exists for the Garmin training-readiness score** — say so
+explicitly (never substitute the unrelated `subjective.readiness` field — a
+manual daily value, not a computed score — for it) per `AGENTS.md` →
+`[health].morning_check`.
 
 ### OBJECTIVE ALIGNMENT
 - **Context:** Always ensure your health strategy is aligned with the active training objective stored in `planning/active_objective.md`.
