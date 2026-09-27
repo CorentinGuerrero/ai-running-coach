@@ -11,6 +11,14 @@ Garmin MCP responses are verbose JSON. Pulling wide date ranges or raw payloads 
 
 All Garmin tools are exposed by the `garmin` MCP server (direct mode) or via `leanproxy_invoke_tool(server="garmin", ...)` (power-user mode). Useful tools include `get_sleep_data`, `get_hrv_data`, `get_rhr_day`, `get_training_readiness`, `get_activities`, `upload_course`, `upload_workout`, `get_courses`.
 
+**`[data].source = "intervals"` (#68):** this whole skill still applies (check
+local files first, one date per call, persist immediately, no raw JSON) —
+against the `intervals` MCP server instead, whose tools cover the same needs
+with fewer calls: `get_wellness_for_date` alone returns sleep + HRV + resting
+HR (rules 3 above still apply, one call is still "one fetch"), `get_recent_activities`
+replaces `get_activities`. No equivalent for `get_training_readiness`, `upload_course`
+or `upload_workout` — see the correspondence table in `AGENTS.md`.
+
 > **Resting HR:** use `get_rhr_day(date)`. It returns the value directly. `get_sleep_data` also contains it, but that payload can exceed 400 KB — never pull it just to read resting HR.
 
 ## Rules
@@ -21,18 +29,24 @@ All Garmin tools are exposed by the `garmin` MCP server (direct mode) or via `le
    the file — do NOT re-fetch. If it exists but does NOT carry that marker, it is **not yet
    synced** — go fetch it like a missing date, then MERGE (rule 1a) rather than skip.
 1a. **"Not yet synced" marker (#67).** The `/log` skill may create a minimal `activities/`
-   or `medical/` file, before any Garmin sync ran that day, holding only athlete-declared
-   fields. That file is "not yet synced": an `activities/*.md` file with **no
-   `garmin_activity_id`**, or a `medical/*.md` file with **none of** `hrv_overnight_ms`,
-   `resting_hr_bpm`, `readiness_score`, `sleep_total_s`. Its presence must never suppress
-   that day's fetch. Once fetched, MERGE the Garmin fields into that SAME file — never write
+   or `medical/` file, before any sync ran that day, holding only athlete-declared
+   fields. That file is "not yet synced": an `activities/*.md` file with **no activity id
+   for the configured source** — `garmin_activity_id` at `[data].source = "garmin"` (default),
+   `intervals_activity_id` at `"intervals"` (#68 — check the field matching the CONFIGURED
+   source, never both, never the wrong one: an intervals-mode file with no
+   `intervals_activity_id` is not yet synced even if it happens to carry an unrelated
+   `garmin_activity_id` from before a source switch) — or a `medical/*.md` file with **none of**
+   `hrv_overnight_ms`, `resting_hr_bpm`, `readiness_score`, `sleep_total_s` (health keys are
+   the SAME regardless of source — see the correspondence table in `AGENTS.md`; no
+   source-specific health marker exists). Its presence must never suppress
+   that day's fetch. Once fetched, MERGE the fetched fields into that SAME file — never write
    a second file for the same date/session — and **never overwrite an athlete-declared key**:
    `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg`
-   (activity) and `pain` (health) come only from the athlete, Garmin has no such field, so
-   the merge is a plain union — add the new Garmin keys, keep the declared ones byte-for-byte.
+   (activity) and `pain` (health) come only from the athlete, neither source has such a field, so
+   the merge is a plain union — add the new keys, keep the declared ones byte-for-byte.
    A file that already carries the marker (a real prior sync) is fresh and final — merge
    never applies to it, only to a not-yet-synced one. A synced health file that genuinely has
-   no HRV/RHR that day (Garmin returned nothing, e.g. watch not worn overnight), or a manual
+   no HRV/RHR that day (the source returned nothing, e.g. watch not worn overnight), or a manual
    activity with no watch involved at all, will keep matching this marker and so gets
    re-fetched on every run within `lookback_days` — harmless (an idempotent no-op merge, at
    most a wasted API call), never a data-corruption risk, so don't special-case it.

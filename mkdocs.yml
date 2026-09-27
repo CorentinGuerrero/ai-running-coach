@@ -75,6 +75,7 @@ nav:
       - Démarrage rapide: quickstart.md
       - Configuration: configuration.md
       - Configuration Garmin: garmin-setup.md
+      - Configuration Intervals.icu: intervals-setup.md
       - IDE supportés: ides.md
       - Votre workspace privé: workspace.md
       - Le coach dans la poche: mobile.md

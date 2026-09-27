@@ -83,6 +83,28 @@ avec `morning_check = "off"`.
     booléen) ne fait planter ni `scripts/arc_index.py`, ni le tableau de bord :
     un avertissement est affiché et le défaut (25 °C) s'applique à la place.
 
+## La source de données — `[data].source` (#68)
+
+```toml
+[data]
+source = "garmin"   # garmin (défaut) | intervals
+```
+
+Écrite automatiquement par `./install.sh --source garmin|intervals` — voir
+[Configuration Garmin](garmin-setup.md) et
+[Configuration Intervals.icu](intervals-setup.md). Change les outils MCP
+appelés par `coach`/`medical`/`garmin-daily-sync` pour les activités, la
+santé et le calendrier planifié (table de correspondance complète dans
+`AGENTS.md`). Sans montre Garmin, `intervals` ouvre le projet aux données
+COROS/Suunto/Polar/Apple synchronisées sur Intervals.icu.
+
+!!! warning "Fonctionnalités indisponibles avec `intervals`"
+    Le score de readiness algorithmique de Garmin, le téléchargement FIT (et
+    les KPI qui en dépendent) et l'upload de parcours n'ont pas d'équivalent
+    câblé dans ce projet côté Intervals.icu — l'agent le dit explicitement
+    plutôt que d'inventer une valeur. Détail dans
+    [Configuration Intervals.icu](intervals-setup.md).
+
 ## Le style de coaching — `[coaching]`
 
 ```toml

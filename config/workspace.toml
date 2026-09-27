@@ -111,6 +111,21 @@ morning_check = "full"
 # Indépendant de `morning_check` (jointure activité/météo, pas du bilan matinal).
 heat_threshold_c = 25.0
 
+[data]
+# Source de données primaire des agents (#68).
+#   "garmin"    — Garmin Connect, via garmin-mcp (défaut, comportement historique)
+#   "intervals" — intervals.icu (ouvre le projet aux montres non-Garmin : COROS,
+#                 Suunto, Polar, Apple — tout ce qu'intervals.icu synchronise),
+#                 via le serveur MCP communautaire eddmann/intervals-icu-mcp
+# Change la source des outils appelés par `coach`/`medical`/`garmin-daily-sync`
+# (voir la table de correspondance dans AGENTS.md) et la destination du push de
+# séances planifiées. Certaines fonctionnalités Garmin (téléchargement FIT,
+# upload de parcours, score de readiness algorithmique) n'ont pas d'équivalent
+# côté intervals.icu et sont alors explicitement indisponibles plutôt que
+# devinées — voir AGENTS.md, section « Backends MCP ». `./install.sh --source
+# intervals` installe le serveur correspondant et écrit cette clé.
+source = "garmin"
+
 [metrics]
 # VAM sur les montées détectées (#46) : gain d'altitude minimal (m) et pente
 # moyenne minimale (points de pourcentage, ex. 5 = 5 %) pour qu'une montée soit

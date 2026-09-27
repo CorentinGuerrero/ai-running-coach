@@ -360,28 +360,37 @@ class TestIntervalsStubFraming(StubProcessTestCase):
         self.assertEqual(response["result"]["serverInfo"]["name"], "intervals-stub")
 
     def test_tools_call_default_wellness(self):
+        # Nom et forme vérifiés (#68, revue PR #116) contre eddmann/intervals-icu-mcp :
+        # snake_case, enveloppe `{"data": {...}, "metadata": {...}}`
+        # (`ResponseBuilder.build_response`), champ imbriqué `heart.resting_hr`
+        # sous `data` (PAS `restingHR` plat, PAS de kebab-case, PAS un objet
+        # racine sans enveloppe — hypothèses antérieures non vérifiées).
         proc = self.start()
         self.initialize(proc)
-        self.call(proc, "get-wellness-for-date")
+        self.call(proc, "get_wellness_for_date")
         response = self.recv(proc)
         payload = json.loads(response["result"]["content"][0]["text"])
-        self.assertIn("restingHR", payload)
+        self.assertIn("metadata", payload)
+        self.assertIn("resting_hr", payload["data"]["heart"])
 
     def test_shares_the_call_log_format_with_garmin(self):
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "calls.log"
             proc = self.start(tool_log=log_path)
             self.initialize(proc)
-            self.call(proc, "get-recent-activities")
+            self.call(proc, "get_recent_activities")
             self.recv(proc)
             entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-            self.assertEqual(entries[0]["tool"], "get-recent-activities")
+            self.assertEqual(entries[0]["tool"], "get_recent_activities")
             self.assertEqual(entries[0]["server"], "intervals")
 
     def test_injected_error_matches_garmin_semantics(self):
-        proc = self.start(stub_config={"get-wellness-for-date": {"error": "empty"}})
+        # `error = "empty"` vide tout le gabarit `default` — ici l'enveloppe
+        # entière (`{"data": ..., "metadata": ...}`), pas seulement `data` :
+        # écart de fidélité assumé et documenté en tête de stub_intervals_mcp.py.
+        proc = self.start(stub_config={"get_wellness_for_date": {"error": "empty"}})
         self.initialize(proc)
-        self.call(proc, "get-wellness-for-date")
+        self.call(proc, "get_wellness_for_date")
         response = self.recv(proc)
         payload = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(payload, {})

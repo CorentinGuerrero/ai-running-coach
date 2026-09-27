@@ -740,8 +740,24 @@ def _load_config(workspace: Path) -> dict:
         return {}
 
 
+def check_garmin_check_not_applicable(check_id: str) -> dict:
+    """#68 : `[data].source = "intervals"` — ni tokens OAuth Garmin ni serveur
+    MCP `garmin` à vérifier ici (aucun des deux n'est installé/enregistré
+    avec cette source). Un statut `error`/`warning` serait un faux diagnostic
+    (« tokens absents », « garmin-mcp introuvable ») pour un athlète qui n'a
+    jamais eu de compte Garmin — `info`, jamais une panne."""
+    return build_check(
+        check_id, "info",
+        "[data].source = \"intervals\" — vérification Garmin non applicable.",
+        fix=None,
+    )
+
+
 def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: Path, probe_mcp: bool) -> dict:
     config = _load_config(workspace)
+    source = (config.get("data") or {}).get("source", "garmin")
+    if check_id in ("garmin_token", "garmin_mcp") and source == "intervals":
+        return check_garmin_check_not_applicable(check_id)
     if check_id == "garmin_token":
         return check_garmin_token(now, tokens_dir)
     if check_id == "garmin_mcp":

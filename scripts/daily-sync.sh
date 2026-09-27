@@ -46,10 +46,26 @@ NOTIFY="$ARC_ENGINE_ROOT/scripts/notify.sh"
 [[ -f "$SKILL_FILE" ]] || die "Skill introuvable : $SKILL_FILE"
 mkdir -p "$LOG_DIR"
 
-# Outils autorisés en mode non interactif : serveur MCP garmin (tous ses outils),
-# délégation au coach (Agent/Task), skills, lecture/écriture des MD, scripts
-# Python du projet. Rien d'autre.
-CLAUDE_TOOLS="mcp__garmin,mcp__leanproxy,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+# Source de données (#68) — [data].source, défaut garmin (voir AGENTS.md,
+# « Backends MCP », et install.sh --source). Décide le serveur MCP autorisé,
+# le libellé des notifications et la commande de renouvellement suggérée.
+SOURCE="$(toml_get data source garmin)"
+if [[ "$SOURCE" == "intervals" ]]; then
+    # Outils autorisés en mode non interactif : serveur MCP intervals (tous ses
+    # outils), délégation au coach (Agent/Task), skills, lecture/écriture des
+    # MD, scripts Python du projet. Rien d'autre. Pas de leanproxy : passerelle
+    # garmin uniquement (install.sh refuse déjà --use-leanproxy + --source intervals).
+    CLAUDE_TOOLS="mcp__intervals,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    SOURCE_LABEL="Intervals.icu"
+    AUTH_CMD_HINT="(cd \"$HOME/.config/ai-running-coach/intervals-icu-mcp\" && intervals-icu-mcp-auth)"
+else
+    # Outils autorisés en mode non interactif : serveur MCP garmin (tous ses outils),
+    # délégation au coach (Agent/Task), skills, lecture/écriture des MD, scripts
+    # Python du projet. Rien d'autre.
+    CLAUDE_TOOLS="mcp__garmin,mcp__leanproxy,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    SOURCE_LABEL="Garmin"
+    AUTH_CMD_HINT="uv run garmin-mcp-auth"
+fi
 # En mode -p, un serveur MCP déclaré dans .mcp.json (portée projet) n'est chargé
 # que s'il a été approuvé interactivement ; on le passe explicitement.
 MCP_CONFIG="$ARC_WORKSPACE/.mcp.json"
@@ -65,7 +81,7 @@ build_command() {
             if [[ -f "$MCP_CONFIG" ]]; then
                 CMD+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
             else
-                warn "$MCP_CONFIG absent — lancez './install.sh --ide claude' (serveur MCP garmin)."
+                warn "$MCP_CONFIG absent — lancez './install.sh --ide claude' (serveur MCP $SOURCE_LABEL)."
             fi ;;
         codex)
             have codex || [[ "$DRY_RUN" -eq 1 ]] || die "codex introuvable — installez Codex CLI : npm i -g @openai/codex"
@@ -227,6 +243,11 @@ notify() {
 TOKEN_ALERT_SENT_THIS_RUN=0
 
 check_token_alert() {
+    # Garmin uniquement (#68) : intervals-icu-mcp n'a pas d'échéance de token
+    # comparable (clé API + ID athlète, pas d'OAuth à durée limitée) —
+    # `coach_doctor.py --check garmin_token` n'a d'ailleurs aucun sens à lire
+    # ici pour cette source. Skip explicite, jamais une fausse alerte Garmin.
+    [[ "$SOURCE" == "garmin" ]] || return 0
     local token_alerts provider
     token_alerts="$(toml_get notifications token_alerts true)"
     [[ "$token_alerts" == "true" ]] || return 0
@@ -377,18 +398,25 @@ print(check.get("expires_at") or "")
 AUTH_FAILURE_KIND=""
 AUTH_FAILURE_LINE=""
 detect_auth_failure() {
-    local run_log erreur_line
+    local run_log erreur_line raw_pattern erreur_pattern
     AUTH_FAILURE_KIND=""
     AUTH_FAILURE_LINE=""
     run_log="$(awk '/^===== /{buf=""} {buf = buf $0 ORS} END{printf "%s", buf}' "$LOG_FILE" 2>/dev/null)"
-    if printf '%s' "$run_log" | grep -qiE \
-        'garminconnectauthenticationerror|401 client error: unauthorized for url: https://connect(api)?\.garmin\.com|error retrieving [a-z ]+ data: authentication failed'
-    then
+    if [[ "$SOURCE" == "intervals" ]]; then
+        # Texte réel de `ICUAPIError` (intervals_icu_mcp/client.py, vérifié
+        # contre eddmann/intervals-icu-mcp) pour un 401 : "Unauthorized. Check
+        # your API key and athlete ID.", restitué tel quel par ResponseBuilder.
+        raw_pattern='unauthorized\. check your api key and athlete id'
+        erreur_pattern='^ERREUR.*(intervals-icu-mcp-auth|cl[ée] api|athlete id|401)'
+    else
+        raw_pattern='garminconnectauthenticationerror|401 client error: unauthorized for url: https://connect(api)?\.garmin\.com|error retrieving [a-z ]+ data: authentication failed'
+        erreur_pattern='^ERREUR.*(garmin-mcp-auth|tokens? garmin (expir|invalid|refus)|401)'
+    fi
+    if printf '%s' "$run_log" | grep -qiE "$raw_pattern"; then
         AUTH_FAILURE_KIND="raw"
         return 0
     fi
-    erreur_line="$(printf '%s' "$run_log" \
-        | grep -iE '^ERREUR.*(garmin-mcp-auth|tokens? garmin (expir|invalid|refus)|401)' | tail -n1)"
+    erreur_line="$(printf '%s' "$run_log" | grep -iE "$erreur_pattern" | tail -n1)"
     if [[ -n "$erreur_line" ]]; then
         AUTH_FAILURE_KIND="erreur"
         AUTH_FAILURE_LINE="$erreur_line"
@@ -399,7 +427,7 @@ detect_auth_failure() {
 
 main() {
     build_command
-    log "Synchronisation Garmin — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)"
+    log "Synchronisation $SOURCE_LABEL — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)"
     log "Workspace : $ARC_WORKSPACE (moteur : $ARC_ENGINE_ROOT)"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -431,21 +459,24 @@ main() {
         if detect_auth_failure; then
             if [[ "$TOKEN_ALERT_SENT_THIS_RUN" -eq 1 ]]; then
                 # L'alerte d'expiration envoyée juste avant la synchronisation couvre
-                # déjà ce même problème (tokens expirés) — pas de doublon.
+                # déjà ce même problème (tokens expirés) — pas de doublon. Garmin
+                # uniquement : cette variable ne passe à 1 que dans check_token_alert,
+                # qui retourne tôt en mode intervals (#68).
                 warn "Garmin — alerte d'expiration déjà envoyée ce run, pas de notification supplémentaire."
             elif [[ "$AUTH_FAILURE_KIND" == "raw" ]]; then
-                # Texte HTTP réel de garminconnect/garmin_mcp : le 401 est un fait constaté.
-                notify "🔑 Authentification Garmin refusée" 5 "key,warning" \
-                    "Synchronisation interrompue (401) — renouvelez avec : uv run garmin-mcp-auth. Voir logs/sync-$(date +%F).log."
+                # Texte HTTP réel du serveur MCP (garminconnect/garmin_mcp, ou
+                # ICUAPIError d'intervals-icu-mcp) : le 401 est un fait constaté.
+                notify "🔑 Authentification $SOURCE_LABEL refusée" 5 "key,warning" \
+                    "Synchronisation interrompue (401) — renouvelez avec : $AUTH_CMD_HINT. Voir logs/sync-$(date +%F).log."
             else
                 # Détecté via la formulation ERREUR de l'agent : la cause réelle peut ne
                 # PAS être un 401 (ex. un problème réseau/DNS mal diagnostiqué par
                 # l'agent) — on relaie sa ligne telle quelle plutôt que d'affirmer « 401 ».
-                notify "🔑 Authentification Garmin — action requise" 5 "key,warning" \
+                notify "🔑 Authentification $SOURCE_LABEL — action requise" 5 "key,warning" \
                     "Synchronisation interrompue — ${AUTH_FAILURE_LINE#ERREUR : } Voir logs/sync-$(date +%F).log."
             fi
         else
-            notify "❌ Sync Garmin échouée" 4 "warning" "Exécuteur $RUNNER, code $rc. Voir logs/sync-$(date +%F).log sur la machine coach."
+            notify "❌ Sync $SOURCE_LABEL échouée" 4 "warning" "Exécuteur $RUNNER, code $rc. Voir logs/sync-$(date +%F).log sur la machine coach."
         fi
         exit "$rc"
     fi
@@ -460,17 +491,17 @@ main() {
     ok "Résumé :"
     printf '%s\n' "$resume"
 
-    local title="🏃 Sync Garmin" priority=3 tags="running"
+    local title="🏃 Sync $SOURCE_LABEL" priority=3 tags="running"
     if detect_auth_failure; then
-        title="🔑 Authentification Garmin refusée"; priority=5; tags="key,warning"
+        title="🔑 Authentification $SOURCE_LABEL refusée"; priority=5; tags="key,warning"
         # N'ajoute la commande que si l'agent (ERREUR du skill) ne l'a pas déjà écrite.
-        if ! printf '%s' "$resume" | grep -qi 'garmin-mcp-auth'; then
-            resume="$resume — renouvelez avec : uv run garmin-mcp-auth"
+        if ! printf '%s' "$resume" | grep -qiF "$AUTH_CMD_HINT"; then
+            resume="$resume — renouvelez avec : $AUTH_CMD_HINT"
         fi
     elif printf '%s' "$resume" | grep -qi '^ERREUR'; then
-        title="⚠️ Sync Garmin"; priority=4; tags="warning"
+        title="⚠️ Sync $SOURCE_LABEL"; priority=4; tags="warning"
     elif printf '%s' "$resume" | grep -qi '^À jour'; then
-        title="Sync Garmin — à jour"; priority=2; tags="running"
+        title="Sync $SOURCE_LABEL — à jour"; priority=2; tags="running"
     fi
     # Une ligne « Pourquoi : » (#56) signale un ajustement (garde-fou r5…) : la
     # notification mérite plus d'attention qu'une sync ordinaire, MÊME si elle

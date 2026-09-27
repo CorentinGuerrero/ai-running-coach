@@ -126,21 +126,29 @@ risqueraient d'écraser la fusion l'un de l'autre.
    si l'athlète en cite une autre — « la sortie de ce matin », « hier »).
    - **Un seul fichier** ce jour-là → c'est lui.
    - **Aucun fichier, en session INTERACTIVE** → essayez d'abord un sync
-     Garmin ciblé sur cette date (`garmin-sync-efficiency`, `get_activities`)
-     avant de créer quoi que ce soit : la séance existe peut-être déjà côté
-     Garmin sans avoir encore de fichier local. Un sync réussi crée le fichier
-     complet (avec `garmin_activity_id`) — reprenez alors l'étape 2 dessus.
+     ciblé sur cette date avec les outils de la source configurée
+     (`garmin-sync-efficiency`, `[data].source` — #68) avant de créer quoi que
+     ce soit : la séance existe peut-être déjà côté Garmin/Intervals.icu sans
+     avoir encore de fichier local. `[data].source = "garmin"` (défaut) :
+     `get_activities`, fichier complet avec `garmin_activity_id`.
+     `[data].source = "intervals"` : `get_recent_activities`, fichier complet
+     avec `intervals_activity_id` (chaîne) à la place — jamais les deux
+     champs sur la même activité. Un sync réussi (l'un ou l'autre) — reprenez
+     alors l'étape 2 dessus.
    - **Toujours aucun fichier après ce sync, mais le sport et la durée (ou
      l'heure de début et de fin) sont donnés dans le même message** (« sortie
      de ce matin, trail, 1h30 ») → créez le fichier minimal (`sport`,
      `duration_s`, `date`, **sans** `garmin_activity_id`) plutôt que de faire
      attendre l'athlète pour une information qu'il vient de donner —
      `duration_s` vient alors de sa propre déclaration, ce n'est pas une
-     valeur inventée. **L'absence de `garmin_activity_id` est le marqueur
-     « pas encore synchronisé »** (voir `garmin-sync-efficiency`, règle 1a) :
-     une synchronisation Garmin ultérieure (`/garmin-daily-sync` ou une
-     session interactive) doit fusionner ses champs dans CE fichier plutôt que
-     de le prendre pour une séance déjà traitée ou d'en créer un second.
+     valeur inventée. **L'absence de l'identifiant de la source configurée est
+     le marqueur « pas encore synchronisé »** (`garmin_activity_id` à
+     `[data].source = "garmin"`, `intervals_activity_id` à `"intervals"` —
+     voir `garmin-sync-efficiency`, règle 1a, #68) : une synchronisation
+     ultérieure (`/garmin-daily-sync` ou une session interactive, avec les
+     outils de la source configurée) doit fusionner ses champs dans CE fichier
+     plutôt que de le prendre pour une séance déjà traitée ou d'en créer un
+     second.
    - **Rien pour identifier au moins le sport et la durée** → demandez à
      quelle séance (sport, heure) cela se rapporte plutôt que de créer un
      fichier `activity` avec une `duration_s` inventée (obligatoire au
