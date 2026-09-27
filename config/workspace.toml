@@ -46,9 +46,28 @@ token_alert_days = [14, 3]
 # Synchronisation Garmin automatique (voir docs/mobile.md et scripts/daily-sync.sh).
 # Exécuteur headless : "claude" (Claude Code, `claude -p`) | "codex" (Codex CLI, `codex exec`).
 runner = "claude"
-# Heures locales de lancement (cron/launchd) — installées par `./install.sh --daily-sync`.
+# Déclenchement (réinstaller avec `./install.sh --daily-sync` après un changement) :
+#   "schedule" — le LLM tourne aux heures fixes de `times`, qu'il y ait du neuf ou non.
+#   "watch"    — scripts/garmin_watch.py interroge Garmin toutes les `watch_interval_min`
+#                minutes SANS LLM (un appel HTTP, zéro token) et ne lance la synchronisation
+#                que si une séance ou le sommeil du jour manque dans le workspace : le bilan
+#                matinal suit votre réveil réel, une séance du soir est traitée le soir.
+#                Garmin uniquement ([data].source = "garmin") — voir docs/mobile.md.
+mode = "schedule"
+# Heures locales de lancement en mode "schedule" (cron/launchd).
 # Défaut : après la nuit (sommeil/HRV synchronisés) et après la sortie du midi.
 times = ["07:15", "14:15"]
+# Mode "watch" : intervalle entre deux sondages Garmin (1 à 59 min).
+watch_interval_min = 15
+# Mode "watch" : délai après le dernier envoi de la montre avant de lancer le LLM, le
+# temps que Garmin calcule score de sommeil et readiness.
+settle_min = 10
+# Mode "watch" : écart minimal entre deux runs LLM, et plafond de runs par jour.
+min_gap_min = 30
+max_runs_per_day = 6
+# Mode "watch" : filet de sécurité — si aucun run n'a eu lieu à ces heures, un run complet
+# part quand même (tokens expirés, sonde aveugle…). `[]` le désactive.
+fallback_times = ["21:30"]
 # Nombre de jours à vérifier (aujourd'hui inclus) — seuls les fichiers MD manquants sont récupérés.
 lookback_days = 2
 # Après chaque run, `git add -A && git commit && git push` dans le workspace s'il est

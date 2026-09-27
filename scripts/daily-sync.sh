@@ -10,6 +10,7 @@
 #   scripts/daily-sync.sh              # exécution (appelée par cron/launchd)
 #   scripts/daily-sync.sh --dry-run    # affiche la commande sans l'exécuter
 #   scripts/daily-sync.sh --runner codex
+#   scripts/daily-sync.sh --trigger activity:123,morning   # passé par garmin_watch.py
 #
 # Configuration : section [sync] de config/workspace.toml (runner, lookback_days)
 # et [notifications] (voir scripts/setup-ntfy.sh). S'exécute dans le workspace
@@ -21,11 +22,13 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 
 DRY_RUN=0
 RUNNER=""
+TRIGGER=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=1; shift ;;
         --runner) RUNNER="$2"; shift 2 ;;
-        --help|-h) sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --trigger) TRIGGER="$2"; shift 2 ;;
+        --help|-h) sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Option inconnue : $1 (voir --help)" ;;
     esac
 done
@@ -42,6 +45,15 @@ LOG_DIR="$ARC_WORKSPACE/logs"
 LOG_FILE="$LOG_DIR/sync-$(date +%F).log"
 LOCK_FILE="$LOG_DIR/.sync.lock"
 NOTIFY="$ARC_ENGINE_ROOT/scripts/notify.sh"
+
+# Déclencheurs détectés par scripts/garmin_watch.py (#watch) : un indice pour
+# l'agent (quoi récupérer en priorité), jamais une restriction — les dates
+# manquantes de la fenêtre restent récupérées. Format fermé : il finit dans un prompt.
+if [[ -n "$TRIGGER" && ! "$TRIGGER" =~ ^(morning|activity:[0-9]+)(,(morning|activity:[0-9]+))*$ ]]; then
+    die "Déclencheur invalide : « $TRIGGER » (attendu : morning, activity:<id>, séparés par des virgules)."
+fi
+SYNC_ARGS="lookback_days=$LOOKBACK"
+[[ -z "$TRIGGER" ]] || SYNC_ARGS+=", trigger=$TRIGGER"
 
 [[ -f "$SKILL_FILE" ]] || die "Skill introuvable : $SKILL_FILE"
 mkdir -p "$LOG_DIR"
@@ -74,7 +86,7 @@ build_command() {
     case "$RUNNER" in
         claude)
             have claude || [[ "$DRY_RUN" -eq 1 ]] || die "claude introuvable — installez Claude Code : curl -fsSL https://claude.ai/install.sh | bash"
-            CMD=(claude -p "/garmin-daily-sync (lookback_days=$LOOKBACK)"
+            CMD=(claude -p "/garmin-daily-sync ($SYNC_ARGS)"
                  --permission-mode acceptEdits
                  --allowedTools "$CLAUDE_TOOLS"
                  --output-format text)
@@ -88,7 +100,7 @@ build_command() {
             # Codex n'a pas de slash-command projet : on passe le corps du skill en prompt.
             local prompt
             prompt="$(awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$SKILL_FILE")"
-            prompt="lookback_days=$LOOKBACK. Follow these instructions exactly:
+            prompt="$SYNC_ARGS. Follow these instructions exactly:
 $prompt"
             CMD=(codex exec --full-auto --cd "$ARC_WORKSPACE" "$prompt") ;;
         *) die "Exécuteur inconnu : $RUNNER (claude|codex)" ;;
@@ -427,7 +439,7 @@ detect_auth_failure() {
 
 main() {
     build_command
-    log "Synchronisation $SOURCE_LABEL — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)"
+    log "Synchronisation $SOURCE_LABEL — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)${TRIGGER:+, déclencheurs : $TRIGGER}"
     log "Workspace : $ARC_WORKSPACE (moteur : $ARC_ENGINE_ROOT)"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -448,7 +460,7 @@ main() {
 
     local output rc=0
     {
-        echo "===== $(date '+%F %T') — runner=$RUNNER lookback=$LOOKBACK ====="
+        echo "===== $(date '+%F %T') — runner=$RUNNER lookback=$LOOKBACK trigger=${TRIGGER:-planifié} ====="
     } >> "$LOG_FILE"
     cd "$ARC_WORKSPACE"
     output="$("${CMD[@]}" 2>>"$LOG_FILE")" || rc=$?
