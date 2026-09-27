@@ -74,7 +74,15 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
     const t = niceTicks(min, max, o.ticks || 4);
     const lo = o.min ?? t.lo;
     const hi = o.max ?? t.hi;
-    return { lo, hi, ticks: t.ticks.filter((v) => v >= lo && v <= hi), y: (v) => PAD.top + ih - ((v - lo) / (hi - lo || 1)) * ih };
+    // `o.invert` (défaut absent = comportement inchangé) : la petite valeur en haut,
+    // la grande en bas — utile pour une allure (plus RAPIDE = nombre plus petit),
+    // où « en haut » doit rester « meilleur », comme pour toute autre série du
+    // tableau de bord. Mathématiquement l'exacte réciproque de la formule non
+    // inversée ci-dessous (`frac` vers 0 en haut au lieu du bas) : aucune autre
+    // série existante ne passe `invert`, donc aucun changement pour elles.
+    const frac = (v) => (v - lo) / (hi - lo || 1);
+    const y = o.invert ? (v) => PAD.top + frac(v) * ih : (v) => PAD.top + ih - frac(v) * ih;
+    return { lo, hi, ticks: t.ticks.filter((v) => v >= lo && v <= hi), y };
   };
   const axes = { y: scale("y") };
   if (opts.y2) axes.y2 = scale("y2");
