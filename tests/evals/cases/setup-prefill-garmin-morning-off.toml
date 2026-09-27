@@ -29,7 +29,7 @@ max_words = 450
 
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
-any = ["fc max** : 178"]
+any = ["fc max** : 183"]
 
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"

@@ -222,6 +222,40 @@ class TestApplyProfile(SetupCase):
             content = (sb.repo / "planning/Runner_Profile.md").read_text()
             self.assertNotIn("None", content)
 
+    def test_asterisks_only_value_is_treated_as_blank(self):
+        """`« ** »` disparaîtrait entièrement une fois `**` retiré par tout
+        lecteur du fichier (revue de code #112, 2ᵉ tour) — jamais une valeur
+        à écrire, même si la ligne semble « remplie » avant nettoyage."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "**"})))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(data["skipped"], ["FC max"])
+
+    def test_rejects_a_list_value(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": [182, 183]}))
+            self.assertFailed(proc, "liste refusée comme valeur")
+            self.assertOutputContains(proc, "liste")
+
+    def test_rejects_a_dict_value(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": {"nested": "object"}, "source": "x"},
+            }))
+            self.assertFailed(proc, "objet refusé comme valeur")
+            self.assertOutputContains(proc, "objet")
+
+    def test_rejects_a_list_source(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182", "source": ["a", "b"]},
+            }))
+            self.assertFailed(proc, "liste refusée comme source")
+
     def test_rejects_a_newline_in_the_value(self):
         with Sandbox() as sb:
             self.setup(sb, "--scaffold")
@@ -281,14 +315,32 @@ class TestApplyProfile(SetupCase):
     def test_accepts_the_bold_colon_label_style_when_empty(self):
         """`- **FC max :**` (deux-points DANS le gras) est un style toléré par
         `arc_legacy.parse_bullets` — doit être reconnu comme le même champ,
-        pas comme un libellé inconnu."""
+        pas comme un libellé inconnu, et le `**` fermant ne doit JAMAIS
+        disparaître à l'écriture (revue de code #112, 2ᵉ tour :
+        « - **FC max :** 182 » devenait « - **FC max : 182 »)."""
         with Sandbox() as sb:
             self.setup(sb, "--scaffold")
             profile = sb.repo / "planning/Runner_Profile.md"
             profile.write_text(profile.read_text().replace("- **FC max** :", "- **FC max :**"))
             data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "182"})))
             self.assertEqual(data["written"], ["FC max"])
-            self.assertFileContains(profile, "182")
+            self.assertFileContains(profile, "- **FC max :** 182")
+            self.assertFileLacks(profile, "- **FC max : 182")
+
+    def test_accepts_the_bold_colon_label_style_with_a_hint_comment(self):
+        """Même style, mais le champ porte en plus le commentaire d'aide du
+        modèle — le `**` fermant ET le commentaire doivent survivre."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            profile = sb.repo / "planning/Runner_Profile.md"
+            profile.write_text(profile.read_text().replace(
+                "- **FC au seuil** : <!-- FC tenue ~1 h à fond (seuil lactique), ex. 172 -->",
+                "- **FC au seuil :** <!-- FC tenue ~1 h à fond (seuil lactique), ex. 172 -->",
+            ))
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC au seuil": "168"})))
+            self.assertEqual(data["written"], ["FC au seuil"])
+            self.assertFileContains(profile, "- **FC au seuil :** 168 <!-- FC tenue")
+            self.assertFileLacks(profile, "- **FC au seuil : 168")
 
     def test_bold_colon_label_style_already_filled_is_never_overwritten(self):
         with Sandbox() as sb:

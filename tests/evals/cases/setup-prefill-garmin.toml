@@ -7,9 +7,12 @@
 #
 # Revue de code (PR #112) : la FC max ne vient JAMAIS de `get_stats` (valeur du
 # jour, ~187 chez le stub) mais du MAXIMUM observé sur `get_activities_by_date`
-# (180 j, running/trail_running uniquement — 178 chez le stub, cycling à 192
-# exclu) ; la FC de repos vient de `last_7_days_avg_resting_hr` (48 chez le
-# stub), jamais de la valeur du jour (47).
+# parmi les `type` CONTENANT « run » (183 chez le stub, sur une séance
+# `treadmill_running` — hors de l'ancien ensemble figé {running,
+# trail_running}, qui aurait rendu 178 : ce cas vérifie donc un filtre par
+# sous-chaîne, pas une liste fermée — cycling à 192, la FC la plus haute de
+# toutes, reste exclu) ; la FC de repos vient de `last_7_days_avg_resting_hr`
+# (48 chez le stub), jamais de la valeur du jour (47).
 id = "setup-prefill-garmin"
 prompt = """
 /coach-setup
@@ -40,7 +43,7 @@ max_words = 450
 # apparaîtrait ailleurs par coïncidence.
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
-any = ["fc max** : 178"]
+any = ["fc max** : 183"]
 
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"

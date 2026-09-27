@@ -45,11 +45,17 @@ must_match = ["fc max|fréquence cardiaque|fc de repos|fc au seuil"]
 # n'a été écrite à leur place. « FC max » n'a jamais de commentaire dans le
 # modèle (ligne vide suivie directement d'un retour à la ligne) ; « FC au
 # seuil » garde son commentaire d'aide d'origine (mot-clé propre au modèle,
-# jamais réécrit) tant qu'il n'a jamais été rempli.
+# jamais réécrit) tant qu'il n'a jamais été rempli. Ancré sur « : <!-- fc
+# tenue » (colon SUIVI DIRECTEMENT du commentaire, sans valeur entre les
+# deux) plutôt que sur le simple mot « seuil lactique » (revue de code #112,
+# 2ᵉ tour) : `coach_setup.py` conserve désormais le commentaire d'aide APRÈS
+# une valeur écrite (`- **FC au seuil** : 168 <!-- ... -->`), donc l'ancienne
+# assertion resterait vraie même si la valeur avait été (incorrectement)
+# écrite — elle ne prouvait plus rien.
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
 any = ["**fc max** :\n"]
 
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
-any = ["seuil lactique), ex. 172"]
+any = ["fc au seuil** : <!-- fc tenue"]

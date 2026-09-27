@@ -84,7 +84,7 @@ paquet `garmin_mcp` réellement installé (0.1.0), jamais d'une supposition.
 
 | Champ du profil | Outil MCP | Champ de la réponse |
 |---|---|---|
-| FC max | `get_activities_by_date(start_date=J-180, end_date=aujourd'hui)`, paginé (`next_page` tant que `has_more`) | `max(max_hr_bpm)` sur les activités dont `type` ∈ `running`/`trail_running` |
+| FC max | `get_activities_by_date(start_date=J-180, end_date=aujourd'hui)`, paginé (`next_page` tant que `has_more`) | `max(max_hr_bpm)` sur les activités dont `type` CONTIENT « run » |
 | FC de repos de référence | `get_stats(date=aujourd'hui)` — **uniquement si `[health].morning_check` ≠ `"off"`** | `last_7_days_avg_resting_hr` (moyenne 7 j — **jamais** `resting_heart_rate_bpm`, qui est la valeur DU JOUR) |
 | FC au seuil (LTHR) | `get_lactate_threshold()` (sans dates → dernier relevé) | `lactate_threshold_heart_rate_bpm` |
 | VO2max (Garmin) | `get_training_status(date=aujourd'hui)` | `vo2_max` |
@@ -110,8 +110,13 @@ maximum observé sur les séances course à pied récentes, et ce n'est qu'un
 PLANCHER, jamais une vraie FC max testée :
 
 - Parcourez `get_activities_by_date` sur les 180 derniers jours (paginez avec
-  `next_page` tant que `has_more` est vrai), filtrez `type` ∈ `running` /
-  `trail_running`, prenez le maximum de `max_hr_bpm`.
+  `next_page` tant que `has_more` est vrai), filtrez toute activité dont
+  `type` CONTIENT la sous-chaîne « run » (`running`, `trail_running`,
+  `treadmill_running`, `track_running`, `ultra_run`, etc. — jamais un
+  ensemble figé de deux valeurs : un nouveau `typeKey` Garmin contenant
+  « run » doit être reconnu sans mise à jour du skill), à l'exclusion de tout
+  ce qui n'en contient pas (`cycling`, `hiking`, `walking`...), prenez le
+  maximum de `max_hr_bpm` sur ce qui reste.
 - **N < 5 séances filtrées → n'affichez rien, repli sur la question classique.**
   Une poignée de séances ne dit rien d'une vraie FC max.
 - Présentez-la EXPLICITEMENT comme une borne basse, jamais comme une FC max
@@ -138,8 +143,11 @@ configuré (voir AGENTS.md § Bilan matinal).
   observée de 182 sur tes 12 dernières séances — je le note ? »), et
   n'écrivez que ce que l'athlète confirme ou corrige. Une valeur corrigée par
   l'athlète prime toujours sur celle de Garmin. Pour la LTHR, montrez aussi
-  `speed_hr_date`/`is_stale` si présents : une valeur `is_stale` mérite d'être
-  signalée avant confirmation.
+  `speed_hr_date` (date du relevé) si présent. **`is_stale` ne concerne PAS
+  la LTHR** : dans `get_lactate_threshold()` (module `training.py` de
+  `garmin_mcp`), ce champ vient de `power.get("isStale")`, la section
+  puissance/FTP — pas la FC/vitesse au seuil — ne l'affichez pas pour ce champ
+  (revue de code #112).
 - Écrivez les valeurs confirmées avec :
 
   ```bash

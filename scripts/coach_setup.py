@@ -33,19 +33,36 @@ QUESTIONS_FILE = ENGINE / "config/setup-questions.toml"
 TEMPLATES = ENGINE / "templates"
 PROFILE_FILE = "planning/Runner_Profile.md"
 
-# Puce de premier niveau — MÊME alternative que `arc_legacy.parse_bullets`
-# (`_BULLET_RE`) : « **Libellé** : valeur » ET « **Libellé :** valeur »
-# (revue de code #65) doivent être reconnues comme LE MÊME champ, sans quoi un
-# profil édité à la main dans ce second style se ferait déclarer « libellé
-# inconnu » à tort. Capture le préfixe exact (jamais reconstruit : on ne
-# renomme jamais un libellé) jusqu'au « : » séparateur inclus, et le reste de
-# la ligne (valeur déjà écrite, ou vide/commentaire dans le modèle).
-_PROFILE_BULLET_RE = re.compile(r"^(?P<prefix>[-*]\s+(?P<label>\*\*[^*]+\*\*|[^:\n]+?)\s*:)(?P<rest>.*)$")
+# Puce de premier niveau, TROIS styles de libellé — « **Libellé** : valeur »
+# (le style du modèle), « **Libellé :** valeur » (deux-points DANS le gras,
+# toléré par `arc_legacy.parse_bullets`) et un libellé nu (repli tolérant,
+# même alternative que `_BULLET_RE`). Le premier alternatif DOIT être essayé
+# avant le second (`**Libellé :**` matcherait aussi `\*\*[^*]+\*\*` sans le
+# `:` final si on inversait l'ordre) et DOIT inclure le `**` fermant dans le
+# préfixe (revue de code #112, 2ᵉ tour) : le préfixe est écrit tel quel en cas
+# de réécriture, un `**` fermant capturé dans `rest` au lieu de `prefix`
+# disparaîtrait de la ligne écrite (« - **FC max :** 182 » devenait
+# « - **FC max : 182 »). Pas de groupe `label` séparé : `arc_legacy.
+# normalize_label` retire de toute façon tous les « * » et le « : » final,
+# donc le préfixe (bullet marker excepté) sert directement de libellé pour
+# les TROIS styles — voir `_profile_label`.
+_PROFILE_BULLET_RE = re.compile(
+    r"^(?P<prefix>[-*]\s+(?:\*\*[^*]+?:\s*\*\*|\*\*[^*]+\*\*\s*:|[^:\n]+?\s*:))(?P<rest>.*)$"
+)
 # Puce indentée (sous-liste) — `- **Zones / seuils** :` suivi de `  - Z1 : ...`
 # compte comme un champ déjà rempli (revue de code #65) même si la ligne du
 # libellé lui-même est vide.
 _SUB_BULLET_RE = re.compile(r"^\s+[-*]\s+")
 _INJECTION_CHARS_RE = re.compile(r"[\r\n]")
+
+
+def _profile_label(prefix: str) -> str:
+    """Libellé normalisé d'un préfixe de puce (`_PROFILE_BULLET_RE.group('prefix')`),
+    quel que soit son style (« **Libellé** : », « **Libellé :** » ou nu) :
+    `arc_legacy.normalize_label` retire déjà tout « * » et le « : » final, il
+    suffit de lui retirer d'abord le marqueur de puce (`- `/`* `)."""
+    return arc_legacy.normalize_label(re.sub(r"^[-*]\s+", "", prefix))
+
 
 # Modèles déposés dans le workspace au premier démarrage : un fichier cité comme
 # source de vérité par les agents doit exister pour de bon.
@@ -164,12 +181,30 @@ def _strip_html_comments(text: str) -> str:
 
 
 def _is_blank_answer(raw) -> bool:
-    """`None` (JSON `null`) ou une chaîne vide/blanche — jamais une valeur à
-    écrire. Sans ce garde-fou, `json.loads` rend `None` pour un `null`, et
-    `str(None)` écrirait le texte littéral « None » dans le profil — un champ
-    qu'aucune correction manuelle ultérieure ne rouvrirait, puisqu'il serait
-    alors considéré comme déjà rempli (revue de code #65)."""
-    return raw is None or not str(raw).strip()
+    """`None` (JSON `null`), une chaîne vide/blanche, ou une valeur qui ne
+    contient QUE des `*` (« ** », qui disparaîtrait entièrement une fois
+    `.replace("**", "")` appliqué par la lecture — un champ qui semblerait
+    rempli dans le fichier mais rendrait une chaîne vide à tout parseur,
+    revue de code #112, 2ᵉ tour) — jamais une valeur à écrire. Sans le premier
+    garde-fou, `json.loads` rend `None` pour un `null`, et `str(None)`
+    écrirait le texte littéral « None » dans le profil — un champ qu'aucune
+    correction manuelle ultérieure ne rouvrirait, puisqu'il serait alors
+    considéré comme déjà rempli (revue de code #65)."""
+    if raw is None:
+        return True
+    text = str(raw).strip()
+    return not text or not text.replace("*", "").strip()
+
+
+def _ensure_scalar(raw, raw_label: str, field: str) -> None:
+    """`value`/`source` doivent être une chaîne ou un nombre — jamais une
+    liste ni un objet JSON, qui s'écrirait tel quel (`str([...])`) dans le
+    profil sous une forme illisible et potentiellement injectante (revue de
+    code #112, 2ᵉ tour)."""
+    if isinstance(raw, (list, dict)):
+        raise ConfigError(
+            f"« {raw_label} » : « {field} » doit être une chaîne ou un nombre, pas une liste/un objet."
+        )
 
 
 def _followed_by_sub_bullets(lines: list, index: int) -> bool:
@@ -193,11 +228,12 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
     Un libellé absent du fichier actuel est une erreur : les libellés du modèle
     ne sont jamais inventés ni renommés (cf. AGENTS.md). Un champ déjà rempli
     (même via une sous-liste indentée) est simplement ignoré (`skipped`),
-    jamais écrasé. `value`/`source` ne tolèrent ni retour à la ligne (une
-    valeur ne tient jamais sur plusieurs puces) ni, pour `source`, la séquence
-    `--` (elle refermerait prématurément le commentaire HTML `<!-- ... -->`
-    et injecterait du Markdown arbitraire dans le fichier) — ces deux cas
-    lèvent `ConfigError` plutôt que de corrompre silencieusement le profil.
+    jamais écrasé. `value`/`source` doivent être une chaîne ou un nombre
+    (jamais une liste/un objet), ne tolèrent ni retour à la ligne (une valeur
+    ne tient jamais sur plusieurs puces) ni, pour `source`, la séquence `--`
+    (elle refermerait prématurément le commentaire HTML `<!-- ... -->` et
+    injecterait du Markdown arbitraire dans le fichier) — ces cas lèvent
+    `ConfigError` plutôt que de corrompre silencieusement le profil.
     """
     path = workspace / PROFILE_FILE
     if not path.is_file():
@@ -213,6 +249,9 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
             raw_value, source = raw_answer.get("value"), raw_answer.get("source")
         else:
             raw_value, source = raw_answer, None
+
+        _ensure_scalar(raw_value, raw_label, "value")
+        _ensure_scalar(source, raw_label, "source")
 
         if _is_blank_answer(raw_value):
             skipped.append(raw_label)
@@ -235,7 +274,7 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
         match_index = None
         for index, line in enumerate(lines):
             match = _PROFILE_BULLET_RE.match(line)
-            if match and arc_legacy.normalize_label(match.group("label")) == target:
+            if match and _profile_label(match.group("prefix")) == target:
                 match_index = index
                 break
         if match_index is None:
