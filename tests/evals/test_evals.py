@@ -357,6 +357,43 @@ class TestRelativeDateFixtures(unittest.TestCase):
             self.assertLessEqual(week_start, today)
             self.assertGreater(week_start, today - datetime.timedelta(days=7))
 
+    def test_today_plus_n_placeholder_resolves_to_a_future_date(self):
+        """#63, revue de code (blocage 4) : `{{TODAY+N}}` doit toujours résoudre à
+        une date FUTURE (aujourd'hui + N jours), quelle que soit la date du run —
+        contrairement à `<N>d_...`/`{{DATE}}`, qui ne produisent que des dates
+        PASSÉES. Sans lui, une date de course codée en dur dans une fixture finit
+        par passer (`status: "race_past"`), puis, avant ça, par devenir un
+        objectif « trop loin » qui ne l'était pas au moment d'écrire la fixture —
+        voir `fixtures/trail-shape/planning/active_objective.md`."""
+        import datetime
+
+        case = {"id": "trail-shape", "fixture": "trail-shape"}
+        with tempfile.TemporaryDirectory(prefix="arc-eval-today-plus-") as tmp:
+            workspace = runner.build_workspace(Path(tmp), case)
+            content = (workspace / "planning" / "active_objective.md").read_text(encoding="utf-8")
+            self.assertNotRegex(content, r"\{\{TODAY\+\d+\}\}", "placeholder non substitué")
+            match = re.search(r"\*\*Date\*\*\s*:\s*(\d{4}-\d{2}-\d{2})", content)
+            self.assertIsNotNone(match, "date de course introuvable après substitution")
+            race_date = datetime.date.fromisoformat(match.group(1))
+            self.assertGreater(race_date, datetime.date.today(), "{{TODAY+N}} doit rester dans le futur")
+
+    def test_today_plus_n_is_exactly_n_days_ahead(self):
+        """Vérifie l'arithmétique elle-même sur un fichier jetable, indépendamment
+        de toute fixture réelle — `{{TODAY+84}}` doit résoudre à exactement
+        aujourd'hui + 84 jours, ni plus ni moins."""
+        import datetime
+
+        with tempfile.TemporaryDirectory(prefix="arc-eval-today-plus-math-") as tmp:
+            workspace = Path(tmp)
+            probe = workspace / "probe.md"
+            probe.write_text("date future : {{TODAY+84}}\n", encoding="utf-8")
+            runner._materialize_relative_dates(workspace)
+            content = probe.read_text(encoding="utf-8")
+            match = re.search(r"date future : (\d{4}-\d{2}-\d{2})", content)
+            self.assertIsNotNone(match)
+            resolved = datetime.date.fromisoformat(match.group(1))
+            self.assertEqual(resolved, datetime.date.today() + datetime.timedelta(days=84))
+
 
 class TestUnchangedFiles(unittest.TestCase):
     """#61, revue de code : `expect.unchanged_files` doit détecter qu'un fichier

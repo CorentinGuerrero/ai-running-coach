@@ -201,6 +201,15 @@ def load_cases() -> list:
 # affectée : aucun fichier `<N>d_...` à réécrire.
 RELATIVE_DATE_NAME = re.compile(r"^(\d+)d_(.+)$")
 
+# `{{TODAY+N}}` (#63, revue de code — blocage 4) : date future, N jours après
+# AUJOURD'HUI réel, résolue par la même passe GÉNÉRIQUE que `{{TODAY}}` ci-dessous
+# (indépendante de l'offset `<N>d_` d'un nom de fichier, qui lui ne produit que des
+# dates PASSÉES). Sert un objectif dont la date de course doit rester dans le futur
+# indéfiniment (`planning/active_objective.md`) — un objectif codé en dur devient
+# tôt ou tard une course passée, puis un « objectif trop loin » qui ne l'était pas
+# au moment d'écrire la fixture (voir `fixtures/trail-shape/`).
+TODAY_PLUS_RE = re.compile(r"\{\{TODAY\+(\d+)\}\}")
+
 
 def _materialize_relative_dates(workspace: Path) -> None:
     today = date.today()
@@ -251,8 +260,13 @@ def _materialize_relative_dates(workspace: Path) -> None:
             content = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if not any(tok in content for tok in ("{{TODAY}}", "{{WEEK_START}}", "{{PREV_WEEK_START}}")):
+        has_today_plus = TODAY_PLUS_RE.search(content)
+        if not has_today_plus and not any(
+                tok in content for tok in ("{{TODAY}}", "{{WEEK_START}}", "{{PREV_WEEK_START}}")):
             continue
+        if has_today_plus:
+            content = TODAY_PLUS_RE.sub(
+                lambda m: (today + timedelta(days=int(m.group(1)))).isoformat(), content)
         content = (content.replace("{{TODAY}}", today_iso)
                    .replace("{{PREV_WEEK_START}}", prev_week_start_iso)
                    .replace("{{WEEK_START}}", week_start_iso))

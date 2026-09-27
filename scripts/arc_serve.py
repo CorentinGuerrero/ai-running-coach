@@ -974,6 +974,19 @@ def api_performance_index(store: Store, q: dict) -> dict:
     return store.performance_index(_today(store))
 
 
+def api_trail_shape(store: Store, q: dict) -> dict:
+    """Score « Trail Shape » (#63) : `/api/trail-shape`.
+
+    Délègue ENTIÈREMENT à `I.trail_shape_report` (donc à
+    `arc_trail_shape.trail_shape_report` — formule, constantes, cas limites),
+    même fonction que la CLI `arc_index.py trail-shape` : aucun second calcul
+    ici. Aucune donnée de santé lue (le score n'en utilise aucune, voir
+    `arc_trail_shape` docstring)."""
+    today = _today(store)
+    with store.lock:
+        return I.trail_shape_report(store.conn, today)
+
+
 def api_slope_model(store: Store, q: dict) -> dict:
     """Modèle personnel pente -> allure (et FC) — #58, `/api/slope-model?band=`.
 
@@ -1175,6 +1188,7 @@ ROUTES = {
     "/api/calendar": api_calendar, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
     "/api/decoupling": api_decoupling, "/api/vam": api_vam, "/api/descent": api_descent,
     "/api/durability": api_durability, "/api/slope-model": api_slope_model, "/api/files": api_files,
+    "/api/trail-shape": api_trail_shape,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
 }

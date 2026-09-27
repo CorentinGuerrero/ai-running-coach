@@ -570,6 +570,57 @@ divergent disent que le terrain ou la forme du jour pèsent.
 | `activities/fit/*.json` (échantillons seconde par seconde) | `scripts/arc_slope_model.py` (#58) |
 | `planning/Runner_Profile.md` → « Indices de performance » | `arc_legacy.parse_performance_index`, `arc_index.performance_index` (#62) |
 
+## Trail Shape
+
+**Ma préparation récente couvre-t-elle ce que la course va exiger ?**
+
+Un score 0-100 (#63) qui compare les 8 dernières semaines glissantes
+d'entraînement aux exigences de l'objectif actif (`planning/active_objective.md`) —
+sans jamais utiliser de donnée de santé (aucune HRV, FC de repos ou readiness
+n'entre dans ce calcul, quel que soit `[health].morning_check`) :
+
+- **Volume hebdomadaire** (km-effort ITRA, distance + D+/100, #35) : moyenne
+  sur la fenêtre — **course/trail uniquement**, la randonnée et la marche ne
+  comptent pas — comparée à une cible sous-linéaire de l'effort de course
+  (une simple proportion serait triviale pour un 10 km et irréaliste pour un
+  ultra, voir `arc_trail_shape.weekly_volume_target_km`).
+- **Plus longue sortie** : distance de la plus longue sortie de la fenêtre
+  (**course/trail uniquement**), comparée à une cible continue en fonction de
+  la distance de course (`arc_trail_shape.longest_run_target_m`).
+- **D+ max d'une séance** : dénivelé positif de la sortie la plus « montante »
+  de la fenêtre, comparée à 50 % du D+ de la course (plafonnée à 2 500 m) —
+  absente si la course n'a pas de D+ renseigné ou un D+ nul (route). **Seule
+  composante qui compte aussi la randonnée/power-hiking** : grimper à pied
+  sans courir reste une préparation légitime à la tolérance du dénivelé,
+  contrairement aux deux composantes ci-dessus.
+- **Durabilité** (#48) : fade GAP moyen sur les sorties longues éligibles de
+  la fenêtre, affiché comme un fade sous un plafond (« moins on fade, mieux
+  c'est » — jamais une cible à atteindre par le haut) — absente si aucune
+  sortie longue n'est éligible.
+
+Chaque composante affiche sa cible, sa valeur observée et son ratio (plafonné
+à 100 %) — unités distinctes selon la composante (un dénivelé ne s'affiche
+jamais comme une distance, un km-effort n'est pas une distance brute). Le
+score global pondère ces ratios ; une composante absente ne pénalise jamais
+le score, son poids est redistribué sur les autres (annoncé dans le texte,
+piloté par un code stable — `far_horizon`, `low_confidence`,
+`durability_omitted` — jamais un mot cherché dans le texte français). Un
+bandeau signale une confiance réduite quand moins de 4 des 8 semaines de la
+fenêtre ont au moins une séance de course à pied/trail.
+
+**Aucune des cibles ci-dessus n'est une norme publiée** — ce sont des
+approximations du projet, réglables en tête de `scripts/arc_trail_shape.py`,
+documentées comme telles (jamais présentées comme un chiffre validé par la
+littérature). Un indicateur parmi d'autres pour le coach, jamais un verdict —
+et **aucun affûtage n'est détecté** : une baisse de volume dans les dernières
+semaines avant la course, signe d'un bon affûtage, peut faire baisser le
+score sans que ce soit un problème.
+
+| Alimentée par | Calcul |
+|---|---|
+| `planning/active_objective.md` (distance, D+, date de course) | `scripts/arc_trail_shape.py` |
+| `activities/*.md` (course/trail des 8 dernières semaines) | `scripts/arc_metrics.py` (km-effort ITRA #35, durabilité #48), `scripts/arc_trail_shape.py` |
+
 ## Calendrier
 
 **Suis-je régulier ?**
@@ -736,6 +787,7 @@ nourrit :
 | Semaine | `planning/Semaine_<lundi>.md`, `activities/*.md` | coach, synchronisation |
 | Séances | `activities/<date>_<sport>.md` | synchronisation |
 | Performance | `activities/*.md`, `planning/Runner_Profile.md`, `planning/active_objective.md` | synchronisation, vous |
+| Trail Shape | `activities/*.md` (8 dernières semaines), `planning/active_objective.md` | synchronisation, vous |
 | Calendrier | `activities/*.md` | synchronisation |
 | Rapports | `rapports/*.md` | coach |
 | Nutrition | `nutrition/<date>_nutrition.md` | nutritionniste |

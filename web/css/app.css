@@ -215,6 +215,23 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .facts--grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: 0.9rem 1.5rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.25rem; }
 .facts--grid dd { font-size: 1rem; font-weight: 600; }
 
+.lead-num.pos { color: var(--ok); } .lead-num.neg { color: var(--bad); }
+
+/* ---------------------------------------------------------------- Trail Shape (#63) */
+
+.ts-components { display: flex; flex-direction: column; gap: 1rem; }
+.ts-row { padding-bottom: 0.9rem; border-bottom: 1px solid var(--line); }
+.ts-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.ts-row__label { font-weight: 600; margin-bottom: 0.2rem; }
+.ts-row__values { font-variant-numeric: tabular-nums; margin-bottom: 0.35rem; }
+.ts-row__meta { font-size: 0.82rem; margin-top: 0.3rem; }
+.ts-row__omitted { font-size: 0.9rem; }
+.ts-bar { display: block; width: 100%; max-width: 24rem; height: 10px; }
+.ts-bar__track { fill: var(--surface-2); }
+.ts-bar__fill--pos { fill: var(--ok); }
+.ts-bar__fill--mid { fill: var(--warn); }
+.ts-bar__fill--neg { fill: var(--bad); }
+
 /* ---------------------------------------------------------------- tendance de conformité (#33) */
 
 .trend { display: block; width: 100%; max-width: 10rem; height: 2.4rem; margin: 0.6rem 0 0.2rem; overflow: visible; }
