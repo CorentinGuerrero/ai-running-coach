@@ -1,14 +1,19 @@
 # #61 — débrief post-course : plan vs réalisé, par segment (épopée #23).
 #
 # Fixture `race-debrief/` : un plan de course déjà persisté
-# (`planning/plan-collines-fictives.md`, 4 segments d'1 km, allure réaliste
-# constante 300 s/km, #59) et l'activité de la course elle-même déjà
-# synchronisée (`activities/<date>_trail.md`, splits 260/270/330/340 s —
-# départ nettement plus rapide que le plan, gros fade en seconde moitié).
-# Aucun outil Garmin n'est nécessaire : les deux fichiers existent déjà dans
-# le workspace, l'agent doit seulement lancer `scripts/arc_race_debrief.py`
-# et persister le rapport — ce cas ne re-teste donc PAS la synchronisation
-# Garmin (déjà couverte par `sync-writes-arc-block`/`sync-activity-arc-fields`).
+# (`planning/plan-collines-fictives.md`, 4 segments d'1 km — même granularité
+# que les splits de l'activité, donc `resolution: "high"` sur les quatre,
+# allure réaliste constante 300 s/km, #59, `race_date` en `{{TODAY}}`) et
+# l'activité de la course elle-même déjà synchronisée
+# (`activities/0d_trail.md`, date `{{DATE}}` = aujourd'hui, splits
+# 260/270/330/340 s — départ nettement plus rapide que le plan, gros fade en
+# seconde moitié, suffisant pour déclencher `depart_trop_rapide` une fois les
+# BLOQUANTS de la première revue de code corrigés : dernier split, arrêts
+# ravito, résolution insuffisante). Aucun outil Garmin n'est nécessaire : les
+# deux fichiers existent déjà dans le workspace, l'agent doit seulement lancer
+# `scripts/arc_race_debrief.py` et persister le rapport — ce cas ne re-teste
+# donc PAS la synchronisation Garmin (déjà couverte par
+# `sync-writes-arc-block`/`sync-activity-arc-fields`).
 #
 # Le nom de fichier du rapport est imposé dans le prompt
 # (`rapports/debrief-collines.md`) pour que `arc_field` cible précisément le
@@ -16,7 +21,7 @@
 # la convention réelle (`rapports/YYYY-MM-DD_debrief_<course>.md`) dépend d'une
 # date que ce cas ne fixe pas.
 id = "race-debrief"
-prompt = """Fais le débrief de ma course d'hier (Trail des Collines Fictives) par rapport à mon plan \
+prompt = """Fais le débrief de ma course d'aujourd'hui (Trail des Collines Fictives) par rapport à mon plan \
 planning/plan-collines-fictives.md, en utilisant scripts/arc_race_debrief.py (épopée #61) plutôt qu'à la \
 main. Cite les segments du plan (s01, s02...) concernés par les écarts les plus notables. Sauvegarde le \
 rapport sous rapports/debrief-collines.md."""
@@ -24,11 +29,18 @@ fixture = "race-debrief"
 
 [expect]
 # Regex liée (co-occurrence à moins de 200 caractères) : la réponse doit citer
-# au moins un identifiant de segment réel du plan (jamais une invention), pas
-# seulement le mot « segment » isolément.
+# au moins un identifiant de segment réel du plan (jamais une invention) ET
+# le qualifier d'un mot lié au constat réel de la fixture (départ rapide ou
+# fade) — pas seulement le mot « segment » isolément, ni n'importe quel écart.
 must_match = [
   "(?is)s0[1-4].{0,200}(rapide|lent|[ée]cart|fade)",
+  "(?is)d[ée]part.{0,40}(trop )?rapide|trop vite",
 ]
+
+# `planning/Runner_Profile.md` est édité par l'athlète : les propositions du
+# script (`suggested_profile_updates`) doivent être présentées, jamais
+# écrites seules dans ce fichier (#61, revue de code).
+unchanged_files = ["planning/Runner_Profile.md"]
 
 [[expect.arc_field]]
 glob = "rapports/debrief-collines.md"
@@ -40,7 +52,10 @@ glob = "rapports/debrief-collines.md"
 path = "kind"
 equals = "report"
 
-# Le titre/la prose doivent citer explicitement le parcours débriefé.
+# Les segments cités par identifiant, dans le rapport écrit par l'agent (pas
+# n'importe quel autre fichier de rapports/, ex. un futur bilan hebdomadaire
+# indépendant qui ne parlerait pas de cette course).
 [[expect.file_contains_any]]
-glob = "rapports/*.md"
+glob = "rapports/debrief-collines.md"
 any = ["s01", "s02", "s03", "s04"]
+

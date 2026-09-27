@@ -561,7 +561,10 @@ mesures totales diffèrent — voir `scripts/arc_race_debrief.py::ASSUMPTIONS`
 pour la méthode complète. `suggested_profile_updates` (glucides/h, tendance à
 partir trop vite…) est une liste de PROPOSITIONS : présentez-les à l'athlète,
 **n'écrivez jamais** vous-même `planning/Runner_Profile.md` à partir d'un
-débrief — ce fichier reste édité par l'athlète (voir plus bas).
+débrief — ce fichier reste édité par l'athlète (voir plus bas). **`date` est
+le jour d'ÉCRITURE du rapport** (souvent J+1, le lendemain de la course),
+**`period_start`/`period_end` sont le jour de la course elle-même** — les deux
+diffèrent presque toujours, exactement comme dans l'exemple ci-dessous.
 
 ```arc
 {"arc": 1, "kind": "report", "date": "2026-09-28", "report_type": "race_debrief", "title": "Débrief Trail des Collines", "period_start": "2026-09-27", "period_end": "2026-09-27", "location": "Trail des Collines"}

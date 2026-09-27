@@ -3,7 +3,7 @@
 ```arc
 {
   "arc": 1, "kind": "race_plan", "date": "2024-06-01", "race_name": "Trail des Collines Fictives",
-  "race_date": "2024-06-08", "distance_m": 4000, "elevation_gain_m": 0,
+  "race_date": "{{TODAY}}", "distance_m": 4000, "elevation_gain_m": 0,
   "start_time": "2024-06-08T07:00:00+02:00", "target_time_s": 1200,
   "scenarios": {"ambitious": 1100, "realistic": 1200, "safe": 1320},
   "segments": [

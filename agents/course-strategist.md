@@ -295,16 +295,19 @@ Produis une checklist détaillée :
 
 #### APRÈS LA COURSE : DÉBRIEF (#61, épopée #23)
 
-Si l'athlète te demande un débrief post-course pour un plan que tu as construit
-(`segments` présents, #59) — `coach` en est le propriétaire habituel (voir
-`agents/coach.md`), mais tu peux le produire directement si l'athlète s'adresse
-à toi : charge la section `race_debrief` du skill `workspace-data-contract` et
-lance `python3 scripts/arc_race_debrief.py debrief --plan <plan> --activity
-<activité de la course>`. Persiste `rapports/YYYY-MM-DD_debrief_<course>.md`
-(`report_type: "race_debrief"`), en citant les identifiants de segment (`s01`,
-`s02`…) du plan. Ne propose jamais `suggested_profile_updates` comme un fait
-acquis : présente-les à l'athlète, jamais une écriture silencieuse dans
-`planning/Runner_Profile.md`.
+`rapports/` appartient à `coach` (voir AGENTS.md, carte des dossiers) — jamais
+à toi. Si l'athlète te demande un débrief post-course pour un plan que tu as
+construit (`segments` présents, #59), tu peux calculer la comparaison
+toi-même (tu connais le plan) mais tu ne persistes RIEN dans `rapports/` :
+charge la section `race_debrief` du skill `workspace-data-contract`, lance
+`python3 scripts/arc_race_debrief.py debrief --plan <plan> --activity
+<activité de la course>`, puis transmets le JSON obtenu à `coach` (délégation
+via l'outil `task`, voir AGENTS.md) pour qu'il écrive
+`rapports/YYYY-MM-DD_debrief_<course>.md` (`report_type: "race_debrief"`,
+`date` = jour d'ÉCRITURE du rapport, `period_start`/`period_end` = jour de la
+course — voir l'exemple du skill). Ne propose jamais `suggested_profile_updates`
+comme un fait acquis : ce sera à `coach` de les présenter à l'athlète, jamais
+une écriture silencieuse dans `planning/Runner_Profile.md`.
 
 ---
 
