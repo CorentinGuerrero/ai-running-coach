@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -526,11 +526,12 @@ class TestTrailShapeCli(Workspace):
 
     def test_objective_and_activities_flow_through_to_a_score(self):
         self.objective()
+        today = date(2026, 9, 23)
         for i in range(6):
-            day = f"2026-09-{9 - i:02d}" if i < 9 else f"2026-08-{40 - i:02d}"
+            day = (today - timedelta(days=i * 7)).isoformat()
             self.activity(day, 12000, 300)
         self.index()
-        report = I.trail_shape_report(self.conn, date(2026, 9, 23))
+        report = I.trail_shape_report(self.conn, today)
         self.assertEqual(report["status"], "ok")
         self.assertIsInstance(report["score"], float)
         self.assertEqual(report["objective"]["distance_m"], 21100.0)

@@ -1,12 +1,15 @@
 # Score « Trail Shape » (#63) : préparation à l'objectif actif.
 #
-# Fixture `trail-shape/` : objectif trail (21,1 km, 1 200 m D+, date fixe
-# lointaine — voir `tests/evals/fixtures/README.md`, ce cas n'a pas besoin
-# d'une course proche, seulement future) et 8 sorties trail relatives (#63,
-# `<N>d_trail.md`, offsets 0 à 49 jours) construites pour donner une
-# préparation SUFFISANTE mais pas parfaite :
-#   - volume hebdomadaire moyen (km-effort ITRA, #35) ≈ 15,9 km/semaine pour
-#     une cible ≈ 16,6 (ratio ≈ 0,96) ;
+# Fixture `trail-shape/` : objectif trail (21,1 km, 1 200 m D+, date
+# `{{TODAY+84}}` — TOUJOURS dans le futur, quelle que soit la date du run, #63
+# revue de code blocage 4 : une date codée en dur finit par passer, puis, avant
+# ça, par devenir un « objectif trop loin » qui ne l'était pas au moment
+# d'écrire la fixture) et 8 sorties trail relatives (`<N>d_trail.md`, offsets
+# 0 à 49 jours) construites pour donner une préparation PARTIELLE :
+#   - volume hebdomadaire moyen (km-effort ITRA, #35) ≈ 15,9 km-effort/semaine
+#     pour une cible ≈ 43,1 (courbe sous-linéaire, #63 revue de code blocage 5,
+#     `arc_trail_shape.weekly_volume_target_km`) — ratio ≈ 0,37, LOIN du
+#     plafond ;
 #   - plus longue sortie 18 km pour une cible 21,1 km (ratio ≈ 0,85) ;
 #   - D+ max d'une séance 1 000 m pour une cible 600 m (ratio à 1,0, plafonné) ;
 #   - aucune donnée de durabilité (#48) : les fichiers d'activité ne portent
@@ -15,32 +18,42 @@
 #     exactement le cas « durabilité manquante -> renormalisation » exigé par
 #     #63.
 # `python3 scripts/arc_index.py trail-shape` sur cette fixture rend un score
-# ≈ 93/100 (voir le calcul dans `arc_trail_shape.py`) — le prompt ne donne
-# AUCUN chiffre : l'agent doit lancer la CLI (ou lire `/api/trail-shape`) et
-# rapporter ce qu'elle rend, jamais une estimation de tête.
+# de 68,8/100 (recalculé après la revue de code #63 : la cible de volume
+# hebdomadaire, désormais sous-linéaire plutôt qu'une simple proportion de
+# l'effort de course, est nettement plus exigeante — voir
+# `tests/data/test_arc_trail_shape.py::TestWeeklyVolumeTargetCurve`) — le
+# prompt ne donne AUCUN chiffre : l'agent doit lancer la CLI (ou lire
+# `/api/trail-shape`) et rapporter ce qu'elle rend, jamais une estimation de
+# tête.
 #
-# `must_match` : le score doit être cité (nombre proche de 90-96, tolérance
-# large pour ne pas verrouiller l'arrondi exact), au moins deux des trois
-# composantes éligibles nommées (volume et sortie longue — les deux dont le
-# ratio n'est PAS à son plafond, donc les plus probables à être commentées),
-# et la durabilité doit être signalée comme absente/non calculée (jamais
-# passée sous silence). `must_not_match` refuse un score à deux chiffres rond
-# non lié à la fenêtre (ex. « 100/100 » ou « 50 % » inventés) et refuse que la
-# durabilité soit présentée comme un chiffre concret (l'agent ne doit pas
-# halluciner un pourcentage de fade GAP qu'aucune donnée ne permet de calculer
-# sur cette fixture).
+# `must_match` : le score doit être cité — ancré à « score »/« trail shape »
+# OU à la forme « N/100 » (#63 revue de code blocage 4 : un `\b(6[6-9]|7[0-2])\b`
+# nu aurait pu passer à tort sur n'importe quel autre nombre de la réponse
+# dans cette fourchette, ex. « 8 semaines » n'y tombe pas mais un pourcentage
+# de composante aurait pu) — au moins deux des trois composantes éligibles
+# nommées (volume et sortie longue — les deux dont le ratio n'est PAS à son
+# plafond, donc les plus probables à être commentées), et la durabilité doit
+# être signalée comme absente/non calculée (jamais passée sous silence).
+# `must_not_match` refuse un score à deux chiffres rond non lié à la fenêtre
+# (ex. « 100/100 » inventé) et refuse que la durabilité soit présentée avec un
+# pourcentage de FADE concret (l'agent ne doit pas halluciner un fade GAP
+# qu'aucune donnée ne permet de calculer sur cette fixture) — narrowé sur le
+# mot « fade » lui-même (#63 revue de code blocage 4 : l'ancien motif, ancré
+# sur « durabilité » seul, faisait échouer à tort une réponse correcte du
+# type « Durabilité (poids 15 %) non intégrée », qui cite le POIDS de la
+# composante dans la formule, pas un fade inventé).
 id = "trail-shape"
 prompt = "Où en est ma préparation « Trail Shape » pour mon objectif actif ? Détaille les composantes du score."
 fixture = "trail-shape"
 
 [expect]
 must_match = [
-  "\\b(9[0-6]|8[5-9])\\b",
+  "(score|trail shape)[^\\n]{0,40}\\b(6[6-9]|7[0-2])\\b|\\b(6[6-9]|7[0-2])(?:[.,]\\d)?\\s*/\\s*100",
   "(volume|km-effort).{0,60}(hebdo|semaine)",
   "(plus longue|sortie longue).{0,40}(18|21)",
   "(durabilit[ée]).{0,80}(pas|aucune|absen|non calcul[ée]|manqu|indisponible|non int[ée]gr[ée]e)",
 ]
 must_not_match = [
   "\\b100\\s*/\\s*100\\b",
-  "durabilit[ée].{0,40}\\d{1,2}\\s*%",
+  "fade\\s*(gap)?\\D{0,15}\\d{1,2}(,\\d)?\\s*%",
 ]

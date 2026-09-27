@@ -3,7 +3,7 @@
 ## Course visée
 
 - **Nom** : Trail des Crêtes
-- **Date** : 2028-06-15
+- **Date** : {{TODAY+84}}
 - **Distance** : 21,1 km
 - **Dénivelé positif** : 1 200 m
 - **Lieu** : Tournai

@@ -1555,6 +1555,11 @@ const TRAIL_SHAPE_EMPTY_TITLE = {
   race_too_short: "Course trop courte pour ce score",
 };
 
+// L'UI pilote son affichage sur le `code` STABLE de chaque note (#63, revue de
+// code — jamais une sous-chaine francaise du `message`, qui casse des que deux
+// notes partagent un mot comme les semaines, voir arc_trail_shape._note).
+const TRAIL_SHAPE_LOW_CONFIDENCE = "low_confidence";
+
 /** Barre de ratio composante/cible (#63) : même esprit que `rangeBar` (SVG,
  * jamais de style posé en ligne — CSP `style-src 'self'`), mais un simple
  * remplissage 0-100 % plutôt qu'une bande de référence : chaque composante a
@@ -1569,22 +1574,37 @@ function trailShapeBar(ratio) {
   </svg>`;
 }
 
+/** Formatage PAR UNITE (#63, revue de code, BLOQUANT) : `km_effort` (km-effort
+ * ITRA, #35, grandeur composite distance + D+/100, jamais passee dans
+ * `F.distance`, qui convertirait a tort en miles/km une valeur qui n'est deja
+ * plus une distance pure) ; `m_elevation` (denivele, TOUJOURS `F.elevation`,
+ * jamais `F.distance` - un D+ de 1250 m affiche via `F.distance` sortirait
+ * "1,3 km", un contresens) ; `m` (distance reelle, `F.distance`) ;
+ * `pct_fade` (fade GAP, #48, jamais convertible). */
+function trailShapeValue(v, unit) {
+  if (v === null || v === undefined) return "—";
+  if (unit === "km_effort") return `${F.num(v, 1)} km-effort`;
+  if (unit === "m_elevation") return F.elevation(v);
+  if (unit === "m") return F.distance(v, 1);
+  return `${F.num(v, 1)} %`;
+}
+
 function trailShapeComponentRow(c) {
-  const value = (v, unit) => {
-    if (v === null || v === undefined) return "—";
-    if (unit === "km") return `${F.num(v, 1)} km`;
-    if (unit === "m") return F.distance(v, 1);
-    return `${F.num(v, 1)} %`;
-  };
   if (!c.eligible) {
     return `<div class="ts-row ts-row--omitted">
       <div class="ts-row__label">${F.esc(c.label)}</div>
       <div class="ts-row__omitted muted">Non intégrée au score : ${F.esc(c.reason || "non éligible")}</div>
     </div>`;
   }
+  // Durabilite (#63, revue de code) : "moins on fade, mieux c'est" - jamais
+  // presentee comme une "cible" a atteindre par le haut (le vocabulaire des
+  // trois autres lignes), mais comme un fade observe sous un PLAFOND.
+  const valuesHtml = c.id === "durability"
+    ? `<span>fade ${trailShapeValue(c.actual, c.unit)} (plafond ${trailShapeValue(c.target, c.unit)})</span>`
+    : `<span>${trailShapeValue(c.actual, c.unit)}</span><span class="muted"> / cible ${trailShapeValue(c.target, c.unit)}</span>`;
   return `<div class="ts-row">
     <div class="ts-row__label">${F.esc(c.label)}</div>
-    <div class="ts-row__values"><span>${value(c.actual, c.unit)}</span><span class="muted"> / cible ${value(c.target, c.unit)}</span></div>
+    <div class="ts-row__values">${valuesHtml}</div>
     ${trailShapeBar(c.ratio)}
     <div class="ts-row__meta muted">${F.num(c.ratio * 100, 0)} % de la cible · poids ${F.num((c.weight_renormalized ?? c.weight) * 100, 0)} % du score</div>
   </div>`;
@@ -1592,28 +1612,28 @@ function trailShapeComponentRow(c) {
 
 async function viewTrailShape() {
   const r = await api("trail-shape");
-  const sub = "Sorties longues, volume et D+ des 6 à 8 dernières semaines, comparés aux exigences de l'objectif actif — un indicateur parmi d'autres, jamais un verdict.";
+  const sub = "Sorties longues, volume et D+ en moyenne sur les 8 dernières semaines glissantes, comparés aux exigences de l'objectif actif — un indicateur parmi d'autres, jamais un verdict.";
   if (r.status !== "ok") {
     const title = TRAIL_SHAPE_EMPTY_TITLE[r.status] || r.status;
-    main.innerHTML = `${header("Trail Shape", sub)}${empty(title, (r.notes || []).map((n) => F.esc(n)).join("<br>") || "Pas assez d'information pour calculer ce score.")}`;
+    main.innerHTML = `${header("Trail Shape", sub)}${empty(title, (r.notes || []).map((n) => F.esc(n.message)).join("<br>") || "Pas assez d'information pour calculer ce score.")}`;
     return;
   }
   const o = r.objective || {};
   const scoreClass = r.score >= 80 ? "pos" : r.score < 50 ? "neg" : "";
   const rows = (r.components || []).map(trailShapeComponentRow).join("");
   const confidenceNote = r.data_confidence === "low"
-    ? note(`Confiance réduite : ${F.esc((r.notes || []).find((n) => n.includes("semaine")) || "données éparses sur la fenêtre")}.`)
+    ? note(F.esc((r.notes || []).find((n) => n.code === TRAIL_SHAPE_LOW_CONFIDENCE)?.message || "Confiance réduite : données éparses sur la fenêtre."))
     : "";
-  const otherNotes = (r.notes || []).filter((n) => r.data_confidence !== "low" || !n.includes("semaine"));
+  const otherNotes = (r.notes || []).filter((n) => n.code !== TRAIL_SHAPE_LOW_CONFIDENCE);
   main.innerHTML = `${header("Trail Shape", sub)}
     <section class="band">
       <p class="lead-num ${scoreClass}">${F.num(r.score, 0)}<small> / 100 · ${F.esc(o.name || "objectif")}, ${F.dayLong(o.race_date)}${o.days_left >= 0 ? ` (J-${o.days_left})` : ""}</small></p>
       ${confidenceNote}
-      ${otherNotes.map((n) => note(F.esc(n))).join("")}
+      ${otherNotes.map((n) => note(F.esc(n.message))).join("")}
     </section>
     <section class="band ts-components">${rows}</section>
     <section class="band"><h2>Formule</h2><p class="muted">${F.esc(r.formula)}</p>
-      ${note("Score calculé uniquement à partir de l'historique d'entraînement (aucune donnée de santé — HRV, FC de repos, readiness — n'y entre).")}</section>`;
+      ${note("Score calculé uniquement à partir de l'historique d'entraînement (aucune donnée de santé — HRV, FC de repos, readiness — n'y entre). Aucun affûtage n'est détecté : une baisse de volume dans les dernières semaines avant la course peut simplement refléter un affûtage réussi.")}</section>`;
 }
 
 // ---------------------------------------------------------------------------

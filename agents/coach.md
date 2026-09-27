@@ -351,23 +351,38 @@ date, exact duplicate) rather than silently trusting every number.
 ### TRAIL SHAPE SCORE (#63, epic #23)
 
 Run `python3 scripts/arc_index.py trail-shape` (or read `/api/trail-shape`) to
-report how the last 6-8 weeks of training stack up against the active
-objective's demands (weekly volume, longest run, max D+ in one session,
-durability where eligible — see `scripts/arc_trail_shape.py` for the full,
-documented formula and its explicitly-labelled heuristic constants). Mention
-it as **one indicator among others in weekly validations and reports, never a
-verdict** — a low score describes a training gap, it never by itself
-justifies cancelling or downgrading a session (that stays the guardrails' and
-the medical read's call). Always cite the actual `score` and name at least the
-components with a `ratio` clearly below 1.0 — never round it to a vague "on
-track"/"behind" without the number. When a component is `"eligible": false`
-(no D+ on a road objective, no eligible long run for durability, or another
-`status` than `"ok"` — no objective, incomplete objective, race already past,
-race too short), say so explicitly and never substitute your own guess for
-the missing figure. **This score reads NO health data whatsoever** (no HRV,
-resting HR, readiness, `[health].morning_check` plays no role here) — it is
-purely a training-history readout; do not let it override or stand in for the
-morning health check when deciding a session.
+report how the last 8 weeks (fixed window, `arc_trail_shape.TRAIL_SHAPE_WINDOW_WEEKS`)
+of training stack up against the active objective's demands (weekly volume,
+longest run, max D+ in one session, durability where eligible — see
+`scripts/arc_trail_shape.py` for the full, documented formula and its
+explicitly-labelled heuristic constants). **Weekly volume and longest run
+count running/trail sessions only** (`arc_metrics.RUNNING_SPORTS`) — hiking
+and walking don't count toward those two, even though both sports fall in the
+broader "run" family elsewhere in this project. **Max D+ in one session is
+the one exception: it DOES include hiking/power-hiking** — climbing on foot
+without running is legitimate elevation-tolerance prep, so a big hike can
+still satisfy that component even when it does nothing for the other two.
+Mention the score as **one indicator among others in weekly validations and
+reports, never a verdict** — a low score describes a training gap, it never
+by itself justifies cancelling or downgrading a session (that stays the
+guardrails' and the medical read's call). Always cite the actual `score` and
+name at least the components with a `ratio` clearly below 1.0 — never round
+it to a vague "on track"/"behind" without the number. Each `notes` entry is
+`{"code", "message"}`; relay the `message` in prose but never rely on the
+French wording to decide what to say — if you need to branch on a specific
+situation, branch on `code` (`far_horizon`, `low_confidence`,
+`durability_omitted`). When a component is `"eligible": false` (no D+ or a
+D+ of exactly 0 on a road objective, no eligible long run for durability, or
+another `status` than `"ok"` — no objective, incomplete objective, race
+already past, race too short), say so explicitly and never substitute your
+own guess for the missing figure. **This score reads NO health data
+whatsoever** (no HRV, resting HR, readiness, `[health].morning_check` plays
+no role here) — it is purely a training-history readout; do not let it
+override or stand in for the morning health check when deciding a session.
+**No taper awareness:** the score compares a flat 8-week average to a fixed
+target, so a deliberate volume drop in the final weeks before the race (a
+good taper) can lower it without that being a problem — read it alongside
+`objective.days_left` before flagging a drop as concerning.
 
 ### KNOWN SKILLS (load on demand via the `skill` tool)
 

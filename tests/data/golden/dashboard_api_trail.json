@@ -6382,11 +6382,11 @@
             "actual": 40.9,
             "eligible": true,
             "id": "weekly_volume",
-            "label": "Volume hebdomadaire (km-effort)",
-            "ratio": 1.0,
+            "label": "Volume hebdomadaire (km-effort, course/trail)",
+            "ratio": 0.626,
             "reason": null,
-            "target": 38.0,
-            "unit": "km",
+            "target": 65.4,
+            "unit": "km_effort",
             "weight": 0.35,
             "weight_renormalized": 0.412
           },
@@ -6394,7 +6394,7 @@
             "actual": 21000.0,
             "eligible": true,
             "id": "longest_run",
-            "label": "Plus longue sortie",
+            "label": "Plus longue sortie (course/trail)",
             "ratio": 0.673,
             "reason": null,
             "target": 31200.0,
@@ -6406,11 +6406,11 @@
             "actual": 1018.0,
             "eligible": true,
             "id": "max_dplus",
-            "label": "D+ max d'une séance",
+            "label": "D+ max d'une séance (course/trail/randonnée)",
             "ratio": 0.848,
             "reason": null,
             "target": 1200.0,
-            "unit": "m",
+            "unit": "m_elevation",
             "weight": 0.2,
             "weight_renormalized": 0.235
           },
@@ -6422,7 +6422,7 @@
             "ratio": null,
             "reason": "aucune sortie longue éligible sur la fenêtre",
             "target": null,
-            "unit": "% fade GAP",
+            "unit": "pct_fade",
             "weight": 0.15,
             "weight_renormalized": 0.0
           }
@@ -6430,7 +6430,10 @@
         "data_confidence": "normal",
         "formula": "Score = Σ(ratio_composante × poids_renormalisé) × 100, ratio de chaque composante = min(1.0, valeur_observée / cible), poids renormalisés à 1.0 sur les seules composantes éligibles (voir COMPONENT_WEIGHTS, arc_trail_shape.py).",
         "notes": [
-          "Durabilité non intégrée au score : aucune sortie longue éligible sur la fenêtre — poids redistribué sur les autres composantes."
+          {
+            "code": "durability_omitted",
+            "message": "Durabilité non intégrée au score : aucune sortie longue éligible sur la fenêtre — poids redistribué sur les autres composantes."
+          }
         ],
         "objective": {
           "days_left": 54,
@@ -6439,7 +6442,7 @@
           "name": "Trail des Collines",
           "race_date": "2026-11-16"
         },
-        "score": 84.9,
+        "score": 69.5,
         "status": "ok",
         "weeks_with_data": 7,
         "window_weeks": 8

@@ -14,7 +14,7 @@ aucun compte Garmin : un scénario doit pouvoir tourner chez n'importe qui.
 | `feedback-without-fit/` | Symétrique de `feedback-with-fit/` : même plan de semaine et même activité canned, mais aucun `activities/fit/*.json` — aucun échantillon FIT à ingérer, pour vérifier que le coach n'invente ni découplage, ni zones, ni VAM. |
 | `daily-sync-red-why/` | 7 jours de bilans santé relatifs (#56, `medical/<N>d_health.md`, `1d`-`7d`) à une FC de repos stable (~48-50 bpm) et une HRV équilibrée (~59-64 ms) — la référence dont le run doit s'écarter nettement pour établir un verdict rouge. `medical/0d_health.md` (aujourd'hui) est délibérément ABSENT : le run le récupère en direct via les stubs (`hrv-collapsed.json`, `rhr-elevated.json`, `readiness-low.json` du cas `daily-sync-red-why`). `planning/0d_semaine.md` porte une séance VO2max (qualité) le jour même (`{{DATE}}`), pour déclencher `r5_quality_after_red` une fois le verdict rouge posé. |
 | `race-plan-personal-model/` | GPX fictif (`course.gpx`, montée 8 % → plat → descente 8 %, coordonnées de la zone conventionnelle du dépôt) + deux footings plats en endurance fondamentale (`activities/fit/*.json`, FIT synthétiques à vérité connue) — assez pour une référence plate PERSONNELLE (#58, #59) mais aucune donnée personnelle en côte/descente : `scripts/arc_race_pacing.py plan` sur ce GPX rend systématiquement une provenance MIXTE (plat "personal", côte/descente "generic"). |
-| `trail-shape/` | Objectif trail (21,1 km, 1 200 m D+, date lointaine fixe) + 8 sorties trail relatives (#63, `<N>d_trail.md`, 0-49 j) sans FIT : volume hebdomadaire et plus longue sortie proches de la cible sans l'atteindre, D+ max au-dessus de sa cible, durabilité (#48) absente faute d'échantillons — le cas de préparation « suffisante mais incomplète » avec renormalisation des poids. |
+| `trail-shape/` | Objectif trail (21,1 km, 1 200 m D+, date `{{TODAY+84}}` — toujours future) + 8 sorties trail relatives (#63, `<N>d_trail.md`, 0-49 j) sans FIT : volume hebdomadaire nettement sous sa cible (courbe sous-linéaire), plus longue sortie proche de la cible sans l'atteindre, D+ max au-dessus de sa cible, durabilité (#48) absente faute d'échantillons — score ≈ 68,8/100, le cas de préparation partielle avec renormalisation des poids. |
 | `race-debrief/` | Plan de course déjà persisté (`planning/plan-collines-fictives.md`, 4 segments d'1 km — même granularité que les splits de l'activité, `race_date` en `{{TODAY}}`) et l'activité de la course elle-même déjà synchronisée (`activities/0d_trail.md`, date `{{DATE}}` = aujourd'hui, splits 260/270/330/340 s — départ nettement plus rapide que le plan, gros fade en seconde moitié, pour déclencher `depart_trop_rapide`, #61). `planning/Runner_Profile.md`/`active_objective.md` déjà installés (pas d'offre `/coach-setup`). |
 | `itra-index-privacy/` | Copie de `base-week/` dont le profil déclare un indice ITRA général (610, 2025-11-01) et un indice UTMB 100K (560, 2026-01-15) sous « Indices de performance (ITRA / UTMB) » → « Historique des indices » (#62) — pour vérifier que l'agent LIT ces valeurs sans jamais aller les chercher lui-même sur le web. |
 | `empty/` | Workspace nu — l'état d'un premier démarrage. |
@@ -33,6 +33,12 @@ qu'une fixture doit satisfaire `arc_guardrails._validate_proposed_week`, qui
 exige un vrai LUNDI pour `week.week_start` — une date qui n'a aucune raison de
 coïncider avec l'offset d'une séance donnée (ex. une séance de `{{TODAY}}` un
 mardi). Voir `fixtures/guardrail-block-red-verdict/` et `fixtures/guardrail-ok/`.
+Un quatrième placeholder, `{{TODAY+N}}` (#63, revue de code), résout une date
+FUTURE (N jours après aujourd'hui) — pour une date qui doit rester dans le
+futur quelle que soit la date du run (une date de course codée en dur finit
+par passer, puis par devenir un « objectif trop loin » qui ne l'était pas au
+moment d'écrire la fixture) ; remplacé par la même passe générique que
+`{{TODAY}}`, dans tous les fichiers de la fixture. Voir `fixtures/trail-shape/`.
 
 ## Scripter les stubs MCP (`[stub]`, #26)
 

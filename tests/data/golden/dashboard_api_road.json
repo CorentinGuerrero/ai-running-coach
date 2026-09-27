@@ -6277,11 +6277,11 @@
             "actual": 31.3,
             "eligible": true,
             "id": "weekly_volume",
-            "label": "Volume hebdomadaire (km-effort)",
-            "ratio": 1.0,
+            "label": "Volume hebdomadaire (km-effort, course/trail)",
+            "ratio": 0.642,
             "reason": null,
-            "target": 21.1,
-            "unit": "km",
+            "target": 48.7,
+            "unit": "km_effort",
             "weight": 0.35,
             "weight_renormalized": 0.538
           },
@@ -6289,10 +6289,10 @@
             "actual": 21000.0,
             "eligible": true,
             "id": "longest_run",
-            "label": "Plus longue sortie",
-            "ratio": 0.498,
+            "label": "Plus longue sortie (course/trail)",
+            "ratio": 0.7,
             "reason": null,
-            "target": 42195.0,
+            "target": 30000.0,
             "unit": "m",
             "weight": 0.3,
             "weight_renormalized": 0.462
@@ -6301,11 +6301,11 @@
             "actual": null,
             "eligible": false,
             "id": "max_dplus",
-            "label": "D+ max d'une séance",
+            "label": "D+ max d'une séance (course/trail/randonnée)",
             "ratio": null,
-            "reason": "course sans D+ renseigné (route) : cible de D+ par séance sans objet",
+            "reason": "D+ non renseigné pour cet objectif : cible de D+ par séance sans objet",
             "target": null,
-            "unit": "m",
+            "unit": "m_elevation",
             "weight": 0.2,
             "weight_renormalized": 0.0
           },
@@ -6317,7 +6317,7 @@
             "ratio": null,
             "reason": "aucune sortie longue éligible sur la fenêtre",
             "target": null,
-            "unit": "% fade GAP",
+            "unit": "pct_fade",
             "weight": 0.15,
             "weight_renormalized": 0.0
           }
@@ -6325,7 +6325,10 @@
         "data_confidence": "normal",
         "formula": "Score = Σ(ratio_composante × poids_renormalisé) × 100, ratio de chaque composante = min(1.0, valeur_observée / cible), poids renormalisés à 1.0 sur les seules composantes éligibles (voir COMPONENT_WEIGHTS, arc_trail_shape.py).",
         "notes": [
-          "Durabilité non intégrée au score : aucune sortie longue éligible sur la fenêtre — poids redistribué sur les autres composantes."
+          {
+            "code": "durability_omitted",
+            "message": "Durabilité non intégrée au score : aucune sortie longue éligible sur la fenêtre — poids redistribué sur les autres composantes."
+          }
         ],
         "objective": {
           "days_left": 54,
@@ -6334,7 +6337,7 @@
           "name": "Marathon de Lille",
           "race_date": "2026-11-16"
         },
-        "score": 76.8,
+        "score": 66.9,
         "status": "ok",
         "weeks_with_data": 7,
         "window_weeks": 8

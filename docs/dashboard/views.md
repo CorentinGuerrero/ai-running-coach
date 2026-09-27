@@ -579,26 +579,42 @@ d'entraînement aux exigences de l'objectif actif (`planning/active_objective.md
 sans jamais utiliser de donnée de santé (aucune HRV, FC de repos ou readiness
 n'entre dans ce calcul, quel que soit `[health].morning_check`) :
 
-- **Volume hebdomadaire** : moyenne du km-effort ITRA (distance + D+/100, #35)
-  sur la fenêtre, comparée à une cible = km-effort de la course × 50 %.
-- **Plus longue sortie** : distance de la plus longue sortie de la fenêtre,
-  comparée à la distance de course (plafonnée au-delà du marathon).
+- **Volume hebdomadaire** (km-effort ITRA, distance + D+/100, #35) : moyenne
+  sur la fenêtre — **course/trail uniquement**, la randonnée et la marche ne
+  comptent pas — comparée à une cible sous-linéaire de l'effort de course
+  (une simple proportion serait triviale pour un 10 km et irréaliste pour un
+  ultra, voir `arc_trail_shape.weekly_volume_target_km`).
+- **Plus longue sortie** : distance de la plus longue sortie de la fenêtre
+  (**course/trail uniquement**), comparée à une cible continue en fonction de
+  la distance de course (`arc_trail_shape.longest_run_target_m`).
 - **D+ max d'une séance** : dénivelé positif de la sortie la plus « montante »
-  de la fenêtre, comparée à 50 % du D+ de la course — absente si la course n'a
-  pas de D+ renseigné (route).
+  de la fenêtre, comparée à 50 % du D+ de la course (plafonnée à 2 500 m) —
+  absente si la course n'a pas de D+ renseigné ou un D+ nul (route). **Seule
+  composante qui compte aussi la randonnée/power-hiking** : grimper à pied
+  sans courir reste une préparation légitime à la tolérance du dénivelé,
+  contrairement aux deux composantes ci-dessus.
 - **Durabilité** (#48) : fade GAP moyen sur les sorties longues éligibles de
-  la fenêtre — absente si aucune sortie longue n'est éligible.
+  la fenêtre, affiché comme un fade sous un plafond (« moins on fade, mieux
+  c'est » — jamais une cible à atteindre par le haut) — absente si aucune
+  sortie longue n'est éligible.
 
 Chaque composante affiche sa cible, sa valeur observée et son ratio (plafonné
-à 100 %). Le score global pondère ces ratios ; une composante absente ne
-pénalise jamais le score, son poids est redistribué sur les autres (annoncé
-dans le texte). Un bandeau signale une confiance réduite quand moins de 4 des
-8 semaines de la fenêtre ont au moins une séance de course à pied.
+à 100 %) — unités distinctes selon la composante (un dénivelé ne s'affiche
+jamais comme une distance, un km-effort n'est pas une distance brute). Le
+score global pondère ces ratios ; une composante absente ne pénalise jamais
+le score, son poids est redistribué sur les autres (annoncé dans le texte,
+piloté par un code stable — `far_horizon`, `low_confidence`,
+`durability_omitted` — jamais un mot cherché dans le texte français). Un
+bandeau signale une confiance réduite quand moins de 4 des 8 semaines de la
+fenêtre ont au moins une séance de course à pied/trail.
 
 **Aucune des cibles ci-dessus n'est une norme publiée** — ce sont des
 approximations du projet, réglables en tête de `scripts/arc_trail_shape.py`,
 documentées comme telles (jamais présentées comme un chiffre validé par la
-littérature). Un indicateur parmi d'autres pour le coach, jamais un verdict.
+littérature). Un indicateur parmi d'autres pour le coach, jamais un verdict —
+et **aucun affûtage n'est détecté** : une baisse de volume dans les dernières
+semaines avant la course, signe d'un bon affûtage, peut faire baisser le
+score sans que ce soit un problème.
 
 | Alimentée par | Calcul |
 |---|---|
