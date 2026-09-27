@@ -61,6 +61,12 @@ Entrée JSON (toutes les clés sont optionnelles)
 de ce script, `parents[1]`) ; liste vide explicite → aucun catalogue (tous les
 `nutrition_items` ressortent `unknown`, raison `no_catalogue`).
 
+Un `nutrition_items[i]` peut porter `carbs_g_per_unit` : la valeur en grammes
+que l'ATHLÈTE a donnée lui-même pour un produit absent du catalogue (l'agent
+la demande d'abord, ne l'invente jamais — voir `skills/log/SKILL.md`), après
+quoi ce script fait la multiplication par `qty` et l'ajoute au total — jamais
+une addition faite à la main côté agent, même pour ce cas déclaré.
+
 `pain_consult_threshold` explicite prime sur la configuration ; sans lui, ce
 script lit `config/workspace(.user).toml` du `--workspace` donné (ou du
 répertoire courant) via `arc_guardrails.injury_risk_settings`, avec repli sur
@@ -201,16 +207,25 @@ def _reject_negative(text: str, what: str) -> None:
         raise ArcLogError(f"{what} négatif refusé : {text!r}")
 
 
-def parse_quantity(raw) -> float:
-    """Quantité d'un item solide ("2 gels" → qty). Ancré (`fullmatch`) : un
-    texte qui ne correspond pas EXACTEMENT à une forme reconnue est refusé —
-    jamais une extraction partielle qui ignorerait le reste ("3 x 40 g" ne
-    doit jamais silencieusement devenir 3, la portion "40 g" contredirait
-    peut-être le catalogue).
+_QTY_OUT_OF_TEN_RE = re.compile(r"(?P<num>\d+(?:[.,]\d+)?)\s*/\s*10")
+# Fraction ("1 et demi", "1½") : num toujours un ENTIER nu, jamais un nombre
+# déjà décimal — "1.5½" (nit, revue de code) doit être refusé, pas donner 2.0.
+_QTY_FRACTION_RE = re.compile(r"(?P<num>\d+)\s*(?:(?P<half>½)|et\s+demie?)")
+_QTY_PLAIN_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
-    Formes reconnues : nombre (point ou virgule décimale), nombre + "½" ou
-    "et demi(e)" (fraction), mot ("un".."dix"), mot + fraction. Négatif
-    toujours refusé. Lève `ArcLogError` sinon."""
+
+def parse_quantity(raw) -> float:
+    """Quantité d'un item solide ("2 gels" → qty), un score de douleur ou un
+    RPE. Ancré (`fullmatch`) : un texte qui ne correspond pas EXACTEMENT à une
+    forme reconnue est refusé — jamais une extraction partielle qui
+    ignorerait le reste ("3 x 40 g" ne doit jamais silencieusement devenir 3,
+    la portion "40 g" contredirait peut-être le catalogue).
+
+    Formes reconnues : nombre nu (point ou virgule décimale, SANS fraction —
+    "1.5½" est refusé, jamais 2.0), "N/10" (score sur 10 : douleur "3/10",
+    RPE "7/10"), entier + "½" ou "et demi(e)" (fraction, jamais combinée à un
+    nombre déjà décimal), mot ("un".."dix"), mot + fraction. Négatif toujours
+    refusé. Lève `ArcLogError` sinon."""
     if isinstance(raw, (int, float)):
         if raw < 0:
             raise ArcLogError(f"quantité négative refusée : {raw!r}")
@@ -220,17 +235,23 @@ def parse_quantity(raw) -> float:
     text = str(raw).strip().lower()
     _reject_negative(text, "quantité")
 
-    # Nombre nu, éventuellement suivi d'une fraction ("2", "0,5", "1 et demi", "1½").
-    m = re.fullmatch(r"(?P<num>\d+(?:[.,]\d+)?)\s*(?:(?P<half>½)|et\s+demie?)?", text)
+    # "N/10" — score sur 10, douleur/RPE ("3/10", "7/10").
+    m = _QTY_OUT_OF_TEN_RE.fullmatch(text)
     if m:
-        value = float(m.group("num").replace(",", "."))
-        if m.group("half") or "et" in text:
-            value += 0.5
-        return value
+        return float(m.group("num").replace(",", "."))
+
+    # Entier + fraction ("1 et demi", "1½").
+    m = _QTY_FRACTION_RE.fullmatch(text)
+    if m:
+        return float(m.group("num")) + 0.5
 
     # "½" seul.
     if text == "½":
         return 0.5
+
+    # Nombre nu, décimal ou entier, SANS fraction accolée.
+    if _QTY_PLAIN_RE.fullmatch(text):
+        return float(text.replace(",", "."))
 
     # Mot ("un".."dix"), éventuellement + fraction.
     m = re.fullmatch(rf"(?P<word>{_WORD_NUMBER_ALT})(?:\s*(?P<half>½)|\s+et\s+demie?)?", text)
@@ -430,6 +451,36 @@ def compute_nutrition(items: list, catalogue: list) -> dict:
         if not product_name:
             unknown.append({"input": product_name, "reason": "nom de produit vide"})
             continue
+
+        # Valeur déclarée par l'ATHLÈTE lui-même pour un produit inconnu du
+        # catalogue (ou sans catalogue) — l'agent qui a posé la question
+        # ("combien de glucides dans ce produit ?") rappelle le script avec
+        # cette valeur plutôt que de faire l'addition à la main (#67, revue de
+        # code) : le calcul reste ici, jamais côté modèle, même pour une
+        # simple multiplication.
+        per_unit = item.get("carbs_g_per_unit")
+        if per_unit is not None:
+            try:
+                per_unit_val = float(per_unit)
+                if per_unit_val < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                unknown.append({
+                    "input": product_name, "qty": qty,
+                    "reason": f"carbs_g_per_unit invalide : {per_unit!r}",
+                })
+                continue
+            carbs = round(per_unit_val * qty, 2)
+            total_carbs += carbs
+            matched.append({
+                "input": product_name,
+                "matched_product": product_name,
+                "qty": qty,
+                "carbs_g": carbs,
+                "source": "athlete_declared",
+            })
+            continue
+
         if not catalogue:
             unknown.append({"input": product_name, "qty": qty, "reason": "no_catalogue"})
             continue
@@ -537,8 +588,19 @@ def merge_pain(existing_pain: Optional[list], new_entries: list) -> list:
     return list(existing_pain or []) + list(new_entries)
 
 
+_PROVENANCE_PREFIX_RE = re.compile(r"^\[/log [^\]]*\]\s*")
+
+
 def _normalize_provenance(text: str) -> str:
-    return _WHITESPACE_RE.sub(" ", text.strip().lower())
+    """Normalise une ligne de provenance OU une phrase brute pour comparaison.
+
+    Une ligne déjà écrite sous le bloc porte le préfixe `[/log <horodatage>] `
+    (voir `provenance_line`) que le `raw_text` brut, lui, ne porte jamais —
+    sans ce retrait, `check_duplicate` ne detecte JAMAIS un doublon (bug,
+    revue de code) : `existing_log_entries` vient précisément de relire ces
+    lignes déjà écrites dans le fichier, préfixe compris."""
+    stripped = _PROVENANCE_PREFIX_RE.sub("", text.strip())
+    return _WHITESPACE_RE.sub(" ", stripped.lower())
 
 
 def check_duplicate(raw_text: Optional[str], existing_log_entries) -> bool:

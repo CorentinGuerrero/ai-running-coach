@@ -31,7 +31,11 @@ All Garmin tools are exposed by the `garmin` MCP server (direct mode) or via `le
    (activity) and `pain` (health) come only from the athlete, Garmin has no such field, so
    the merge is a plain union — add the new Garmin keys, keep the declared ones byte-for-byte.
    A file that already carries the marker (a real prior sync) is fresh and final — merge
-   never applies to it, only to a not-yet-synced one.
+   never applies to it, only to a not-yet-synced one. A synced health file that genuinely has
+   no HRV/RHR that day (Garmin returned nothing, e.g. watch not worn overnight), or a manual
+   activity with no watch involved at all, will keep matching this marker and so gets
+   re-fetched on every run within `lookback_days` — harmless (an idempotent no-op merge, at
+   most a wasted API call), never a data-corruption risk, so don't special-case it.
 2. **Fetch specific dates only.** Query one date (today or yesterday) per call. Never pull multi-week ranges into the conversation.
 3. **Persist immediately.** After each fetch, write the file to `activities/` or `medical/` FIRST — ```arc block on top (see `workspace-data-contract`), prose in the document language below — then analyze from the written file.
 4. **Never paste raw JSON** into the conversation or reasoning. Extract the fields you need into the MD file; discard the rest.

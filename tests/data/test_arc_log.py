@@ -77,6 +77,21 @@ class TestParseQuantity(unittest.TestCase):
         with self.assertRaises(L.ArcLogError):
             L.parse_quantity("3 x 40 g")
 
+    def test_out_of_ten_score_form(self):
+        """"3/10" (douleur) et "7/10" (RPE) partagent ce même parseur —
+        revue de code : ne doivent JAMAIS ressortir `unknown`."""
+        self.assertEqual(L.parse_quantity("3/10"), 3.0)
+        self.assertEqual(L.parse_quantity("7/10"), 7.0)
+        self.assertEqual(L.parse_quantity("3 / 10"), 3.0)
+
+    def test_decimal_with_fraction_suffix_is_rejected(self):
+        """Nit (revue de code) : "1.5½" combine déjà une décimale ET une
+        fraction — ambigu, ne doit surtout pas silencieusement devenir 2.0."""
+        with self.assertRaises(L.ArcLogError):
+            L.parse_quantity("1.5½")
+        with self.assertRaises(L.ArcLogError):
+            L.parse_quantity("1,5 et demi")
+
 
 class TestParseVolumeMl(unittest.TestCase):
     def test_plain_ml(self):
@@ -236,6 +251,31 @@ class TestComputeNutrition(unittest.TestCase):
         self.assertIsNone(result["carbs_g"])
         self.assertEqual(len(result["unknown"]), 1)
 
+    def test_athlete_declared_carbs_per_unit_for_unknown_product(self):
+        """#67, revue de code : plus d'addition à la main côté agent — un
+        produit inconnu dont l'athlète a donné la valeur en grammes se
+        multiplie ici, jamais dans le prompt de l'agent."""
+        items = [{"product": "barre maison", "qty": "2", "carbs_g_per_unit": 25}]
+        result = L.compute_nutrition(items, self.catalogue)
+        self.assertEqual(result["carbs_g"], 50.0)
+        self.assertEqual(result["matched"][0]["source"], "athlete_declared")
+        self.assertEqual(result["unknown"], [])
+
+    def test_athlete_declared_carbs_per_unit_rejects_negative(self):
+        items = [{"product": "barre maison", "qty": "1", "carbs_g_per_unit": -5}]
+        result = L.compute_nutrition(items, self.catalogue)
+        self.assertIsNone(result["carbs_g"])
+        self.assertEqual(len(result["unknown"]), 1)
+
+    def test_athlete_declared_carbs_per_unit_takes_precedence_over_catalogue(self):
+        """Une valeur explicitement déclarée par l'athlète prime même pour un
+        produit qui existerait par ailleurs dans le catalogue (l'athlète
+        corrige une portion différente de celle du catalogue)."""
+        items = [{"product": "gel", "qty": "1", "carbs_g_per_unit": 45}]
+        result = L.compute_nutrition(items, self.catalogue)
+        self.assertEqual(result["carbs_g"], 45.0)
+        self.assertEqual(result["matched"][0]["matched_product"], "gel")
+
 
 class TestComputeFluids(unittest.TestCase):
     def test_sums_mixed_units(self):
@@ -283,6 +323,13 @@ class TestComputePain(unittest.TestCase):
         result = L.compute_pain([{"location": "genou", "score": "-1"}], threshold=7.0)
         self.assertEqual(result["entries"], [])
         self.assertEqual(len(result["unknown"]), 1)
+
+    def test_out_of_ten_form_accepted_not_unknown(self):
+        """"genou gauche 3/10" — revue de code : ne doit JAMAIS ressortir
+        `pain.unknown`."""
+        result = L.compute_pain([{"location": "genou gauche", "score": "3/10"}], threshold=7.0)
+        self.assertEqual(result["unknown"], [])
+        self.assertEqual(result["entries"][0]["score"], 3.0)
 
 
 class TestPainConsultThresholdResolution(unittest.TestCase):
@@ -347,6 +394,16 @@ class TestIdempotency(unittest.TestCase):
         self.assertIn("2 gels", line)
         self.assertIn("2026-09-24T18:00:00+02:00", line)
 
+    def test_duplicate_detected_against_a_real_provenance_line(self):
+        """BLOCKER (revue de code) : `existing_log_entries` vient de relire des
+        lignes déjà écrites par `provenance_line()` sous le bloc — donc PRÉFIXÉES
+        `[/log <horodatage>] `. Sans retirer ce préfixe, la comparaison à
+        `raw_text` (jamais préfixé) ne matche jamais, et la même déclaration se
+        recompte deux fois (64 g devient 128 g)."""
+        raw_text = "2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7"
+        written_line = L.provenance_line(raw_text, timestamp="2026-09-24T18:00:00+02:00")
+        self.assertTrue(L.check_duplicate(raw_text, [written_line]))
+
 
 class TestProcessEndToEnd(unittest.TestCase):
     def test_full_payload(self):
@@ -371,6 +428,12 @@ class TestProcessEndToEnd(unittest.TestCase):
         self.assertNotIn("rpe", result)
         self.assertIn("rpe_unknown", result)
         self.assertTrue(any("rpe" in w for w in result["warnings"]))
+
+    def test_rpe_out_of_ten_form_accepted(self):
+        """"RPE 7/10" — revue de code : ne doit JAMAIS ressortir `rpe_unknown`."""
+        result = L.process({"rpe": "7/10"})
+        self.assertEqual(result["rpe"], 7.0)
+        self.assertNotIn("rpe_unknown", result)
 
     def test_many_pain_entries_warns_like_contract(self):
         pain = [{"location": f"zone {i}", "score": "2"} for i in range(11)]

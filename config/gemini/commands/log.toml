@@ -10,8 +10,7 @@ propriétaire (`AGENTS.md`) :
 
 | Nature | Fichier | Clé(s) du contrat | Agent qui écrit |
 |---|---|---|---|
-| Ravitaillement / hydratation pendant l'effort | `activities/YYYY-MM-DD_<type>.md` (séance du jour) | `carbs_g`, `fluid_intake_ml` | `nutritionist` si activé (`[agents].enabled`, `agents/nutritionist.md` en fait déjà son ressort pour le ravitaillement en cours d'effort), sinon `coach` |
-| RPE de la séance | même fichier `activities/` | `rpe` | `coach` (charge d'entraînement, pas nutrition) |
+| Ravitaillement, hydratation **et** RPE de la séance (tout `activity_merge`, voir ci-dessous) | `activities/YYYY-MM-DD_<type>.md` (séance du jour) | `carbs_g`, `fluid_intake_ml`, `rpe` | **Un seul agent, jamais deux** : `nutritionist` si activé (`[agents].enabled`, `agents/nutritionist.md` en fait déjà son ressort pour le ravitaillement en cours d'effort), sinon `coach` — celui qui écrit applique la totalité d'`activity_merge` en une seule passe, `rpe` inclus, même si `rpe` n'a rien de nutritionnel : le séparer forcerait deux agents à éditer le même fichier dans le même `/log` |
 | Douleur | `medical/YYYY-MM-DD_health.md` | `pain` (liste `{location, score}`) | `medical` si activé, sinon `coach` dans la limite de sa compétence |
 
 **Aucune de ces trois natures ne va dans `nutrition/`** : ce dossier reste le
@@ -42,8 +41,10 @@ tout ce calcul, en pur stdlib, déterministe et idempotent :
      passé TEL QUEL : `arc_log.py` le renverra dans `fluids.unknown` plutôt
      que de deviner, à vous de demander ensuite ;
    - `pain` : une entrée `{"location": "...", "score": "..."}` par zone
-     douloureuse citée, score tel quel (« 3/10 » → `"3"`) ;
-   - `rpe` : la valeur telle que citée, si présente ;
+     douloureuse citée, score tel quel — `"3"` **ou** `"3/10"`, le script lit
+     les deux formes, ne retirez pas le `/10` vous-même ;
+   - `rpe` : la valeur telle que citée, si présente — `"7"` ou `"7/10"` sont
+     acceptées telles quelles ;
    - `position` : la position dans la séance si citée (« au km 15 », « après
      30 min ») — texte libre, aucune clé du contrat ne la porte (voir
      « Position dans la séance » ci-dessous).
@@ -87,13 +88,14 @@ tout ce calcul, en pur stdlib, déterministe et idempotent :
 - `nutrition.unknown` avec `reason: "unknown_product"` (produit absent du
   catalogue) ou `reason: "no_catalogue"` (aucun catalogue trouvé) :
   **demandez** la valeur en glucides du produit à l'athlète plutôt que
-  d'inventer. S'il la donne, ajoutez-la vous-même au total `carbs_g` écrit
-  dans le bloc (une simple addition, la valeur elle-même vient de
-  l'athlète, jamais d'une estimation générique). S'il ne la connaît pas ou ne
-  répond pas dans ce tour, **écrivez quand même le reste** (liquide, douleur,
-  RPE) et mentionnez le produit dans le texte libre sous le bloc, SANS clé
-  `carbs_g` pour cette part-là — jamais une valeur générique glissée à sa
-  place.
+  d'inventer. S'il la donne, **rappelez `scripts/arc_log.py`** avec ce même
+  item mais `{"product": "...", "qty": "...", "carbs_g_per_unit": <valeur>}`
+  — le script refait tout le calcul, total inclus, **jamais une addition
+  faite à la main** dans le prompt de l'agent (même une multiplication qui
+  semble triviale). S'il ne la connaît pas ou ne répond pas dans ce tour,
+  **écrivez quand même le reste** (liquide, douleur, RPE) et mentionnez le
+  produit dans le texte libre sous le bloc, SANS clé `carbs_g` pour cette
+  part-là — jamais une valeur générique glissée à sa place.
 - `nutrition.ambiguous` (plusieurs produits du catalogue correspondent) :
   **listez les candidats** (`ambiguous[].candidates`) et demandez lequel.
   N'écrivez le `carbs_g` correspondant qu'une fois la réponse obtenue.
@@ -110,7 +112,13 @@ tout ce calcul, en pur stdlib, déterministe et idempotent :
 
 ## Où écrire
 
-### Ravitaillement, hydratation, RPE → `activities/`
+### Ravitaillement, hydratation, RPE → `activities/` (UN SEUL agent écrit)
+
+**Un seul agent applique `activity_merge` en une seule passe** (voir le
+tableau ci-dessus : `nutritionist` si activé, sinon `coach`) — jamais un
+agent pour `carbs_g`/`fluid_intake_ml` et un autre pour `rpe` sur le même
+`/log` : deux agents qui rouvriraient le même fichier dans le même appel
+risqueraient d'écraser la fusion l'un de l'autre.
 
 1. Cherchez `activities/YYYY-MM-DD_*.md` pour la date visée (aujourd'hui, sauf
    si l'athlète en cite une autre — « la sortie de ce matin », « hier »).
