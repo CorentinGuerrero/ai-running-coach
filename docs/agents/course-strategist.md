@@ -12,7 +12,9 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 
 1. **Analyse du parcours** — à partir d'un fichier GPX ou d'une URL de course
 2. **Points d'eau et ravitaillement** — via OpenStreetMap
-3. **3 scénarios d'allure** — prudent, nominal, ambitieux
+3. **Allures par segment et 3 scénarios** — sécurité, réaliste, ambitieux, depuis
+   le modèle personnel pente → allure quand un GPX est fourni (`scripts/arc_race_pacing.py`, #59) ;
+   règles génériques en repli (URL seule, sans GPX)
 4. **Plan de nutrition** — ravitaillement en course
 5. **Plan d'hydratation** — gestion des liquides
 6. **Préparation météo** — conditions attendues
@@ -39,6 +41,22 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 | `weather-forecast` | préparation météo |
 | `garmin-workout-scheduling` | push de la séance dans Garmin |
 
+## Allures par segment (#59)
+
+Quand un GPX est fourni, l'agent délègue le calcul des allures à
+`scripts/arc_race_pacing.py plan` plutôt que d'estimer à la main : découpage du
+parcours en segments (distance cible fusionnée par pente similaire),
+prédiction du temps de chaque segment depuis le modèle personnel pente →
+allure (`scripts/arc_slope_model.py`, #58), fade de fin de course depuis la
+durabilité récente (`scripts/arc_durability.py`, #48, ou un repli générique
+signalé comme tel), ajustement chaleur/acclimatation (#38) et vérification des
+barrières horaires. Chaque segment porte sa **provenance**
+(`personal`/`generic`/`mixed`) — le plan la cite explicitement, jamais un
+scénario qui prétendrait à une précision que l'historique ne permet pas.
+Persisté dans le champ `segments` du bloc ```arc `race_plan` (voir
+[le skill `workspace-data-contract`](../skills/workspace-data-contract.md)) —
+socle du futur débrief post-course segment par segment.
+
 ## Fichier source
 
-`agents/course-strategist.md`
+`agents/course-strategist.md` · moteur : `scripts/arc_race_pacing.py`

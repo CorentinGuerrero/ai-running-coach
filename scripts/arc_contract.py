@@ -58,6 +58,11 @@ SESSION_STATUS = ("planned", "done", "missed", "moved", "cancelled")
 REPORT_TYPE = ("weekly", "monthly", "comparison", "race", "adhoc")
 COURSE_VERDICT = ("compatible", "partial", "incompatible")
 WATER_SOURCE = ("officiel", "osm_drinking_water", "osm_spring", "osm_cafe")
+# `race_plan.segments[].source` (#59) : provenance de la prédiction de vitesse du
+# segment — mêmes valeurs que `arc_slope_model.predict_speed`, jamais une
+# quatrième valeur inventée ici (voir `arc_slope_model.py` pour la sémantique de
+# "mixed" : vraie interpolation entre un panier personnel et un panier générique).
+SEGMENT_SOURCE = ("personal", "generic", "mixed")
 
 # `decision` (#54) : traçabilité d'un ajustement du coach — déclencheur, entrées
 # qui l'ont justifié, règles de garde-fous concernées (#52), avant/après de la
@@ -340,6 +345,13 @@ SCHEMA = {
             "aid_stations": "[aid_station]",
             "water_points": "[water_point]",
             "gear": "list",
+            # `segments` (#59, allures par segment depuis le modèle personnel) : socle
+            # de #61 (débrief post-course, comparaison plan vs réalisé PAR SEGMENT) —
+            # voir `scripts/arc_race_pacing.py::segment_course`/`predict_segments` pour
+            # la méthode (segmentation par distance cible + fusion de pente similaire,
+            # provenance personnelle/générique/mixte par segment). Optionnel : un plan
+            # de course écrit sans GPX (URL seule, étape 1 cas B) n'a pas de segments.
+            "segments": "[race_segment]",
         },
     },
     "decision": {
@@ -412,6 +424,27 @@ SUBSCHEMA = {
     "water_point": {
         "required": {"km": "num+", "source": _enum(WATER_SOURCE)},
         "optional": {"name": "str"},
+    },
+    # `race_plan.segments[]` (#59) : un segment de course, sa pente moyenne, son
+    # temps prédit par scénario et sa provenance — voir `arc_race_pacing.py` pour
+    # la méthode complète. `id` est stable d'un appel à l'autre pour un même GPX
+    # et un même découpage (`s01`, `s02`…) : #61 (débrief post-course) doit pouvoir
+    # aligner un segment mesuré avec le même segment du plan sans recalculer sa
+    # propre segmentation. `predicted_time_s`/`pace_s_km` portent les TROIS
+    # scénarios, avec les MÊMES clés que `race_plan.scenarios`
+    # (`ambitious`/`realistic`/`safe`) — jamais un second vocabulaire de scénario
+    # pour la même notion.
+    "race_segment": {
+        "required": {"id": "str", "km_start": "num+", "km_end": "num+"},
+        "optional": {
+            "grade_mean_pct": "num",
+            "elevation_gain_m": "num+",
+            "elevation_loss_m": "num+",
+            "source": _enum(SEGMENT_SOURCE),
+            "predicted_time_s": "obj",
+            "pace_s_km": "obj",
+            "notes": "list",
+        },
     },
     # `decision.before`/`decision.after` (#54) : instantané PARTIEL d'une séance —
     # tous les champs sont facultatifs (une annulation ne change que `status`, un
