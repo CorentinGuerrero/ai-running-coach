@@ -305,6 +305,27 @@ Comparateurs (un seul par assertion) : `equals`, `regex`, `min`, `max`. Optionne
 `tool` doit être un nom d'outil réellement exposé par le stub visé — voir
 `tests/evals/stub_garmin_mcp.py`/`stub_intervals_mcp.py` (`TOOLS`) pour la liste.
 
+**`any = true` (opt-in, #60/#107 revue de code) : AU MOINS UNE valeur suffit.**
+Le défaut (sémantique TOUT, ci-dessus) suppose que TOUTES les valeurs résolues
+par `[*]` DEVRAIENT satisfaire — vrai pour « chaque date planifiée est dans la
+bonne semaine », faux pour « la borne FC du pas visé est celle-ci » dès que le
+même appel groupé pousse aussi un pas d'échauffement sans cible, ou avec une
+cible différente : le chemin résout alors sur des pas hétérogènes, et exiger
+que TOUS portent la même borne ferait échouer un agent parfaitement correct.
+`any = true` bascule la boucle interne sur les valeurs `[*]` d'UN appel de ET
+à OU — la sélection « au moins un appel parmi tous » ne change pas. `any` doit
+être un booléen TOML (`true`/`false`), jamais une chaîne — vérifié au
+chargement (`tests/evals/test_evals.py::TestCaseFilesAreValid::test_tool_args_match_assertions_are_well_formed`).
+
+```toml
+[[expect.tool_args_match]]
+tool = "schedule_workouts"
+server = "garmin"
+any = true                                                    # un warmup sans cible ne doit pas faire échouer
+path = "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueOne"
+equals = 134                                                   # la borne FC basse du pas principal, personnelle
+```
+
 ```toml
 [[expect.tool_args_match]]
 tool = "get_scheduled_workouts"   # Outil garmin (skills/garmin-workout-scheduling)

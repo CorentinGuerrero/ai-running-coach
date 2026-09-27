@@ -444,6 +444,81 @@ class TestToolArgsMatchViaCheck(unittest.TestCase):
             failures = runner.check(case, _result(Path(tmp), tool_calls=tool_log))
             self.assertTrue(any("chemin invalide" in f for f in failures), failures)
 
+    # -- `any = true` (#107 revue de code) ---------------------------------
+    # Sans `any`, un `[*]` qui résout sur des pas hétérogènes (un échauffement
+    # sans cible FC, ou une cible FC différente, à côté du pas ciblé) fait
+    # échouer l'assertion même quand LE pas visé porte la bonne valeur — c'est
+    # exactement pourquoi `any` existe : AU MOINS une valeur résolue doit
+    # satisfaire, pas TOUTES.
+
+    def test_any_passes_when_at_least_one_wildcard_value_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            tool_log = _tool_log({"tool": "schedule_workouts", "server": "garmin", "arguments": {"schedules": [{
+                "workout_data": {"workoutSegments": [{"workoutSteps": [
+                    {"targetValueOne": None},              # échauffement sans cible FC
+                    {"targetValueOne": 134},                # pas principal : la borne visée
+                ]}]},
+            }]}})
+            case = {"id": "t", "expect": {"tool_args_match": [{
+                "tool": "schedule_workouts", "server": "garmin", "any": True,
+                "path": "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueOne",
+                "equals": 134,
+            }]}}
+            self.assertEqual(runner.check(case, _result(ws, tool_calls=tool_log)), [])
+
+    def test_any_still_fails_when_no_wildcard_value_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            tool_log = _tool_log({"tool": "schedule_workouts", "server": "garmin", "arguments": {"schedules": [{
+                "workout_data": {"workoutSegments": [{"workoutSteps": [
+                    {"targetValueOne": 100}, {"targetValueOne": 200},
+                ]}]},
+            }]}})
+            case = {"id": "t", "expect": {"tool_args_match": [{
+                "tool": "schedule_workouts", "server": "garmin", "any": True,
+                "path": "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueOne",
+                "equals": 134,
+            }]}}
+            failures = runner.check(case, _result(ws, tool_calls=tool_log))
+            self.assertTrue(failures)
+
+    def test_any_false_keeps_the_default_all_semantics(self):
+        """`any = false` explicite doit se comporter EXACTEMENT comme son
+        absence (sémantique TOUT) — non-régression du comportement par défaut."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            tool_log = _tool_log({"tool": "schedule_workouts", "server": "garmin", "arguments": {
+                "schedules": [{"calendar_date": "2026-09-21"}, {"calendar_date": "2026-10-01"}],
+            }})
+            case = {"id": "t", "expect": {"tool_args_match": [{
+                "tool": "schedule_workouts", "any": False, "path": "schedules[*].calendar_date", "regex": "^2026-09",
+            }]}}
+            failures = runner.check(case, _result(ws, tool_calls=tool_log))
+            self.assertTrue(failures)
+
+    def test_any_does_not_widen_the_at_least_one_call_semantics(self):
+        """`any` bascule seulement la boucle interne sur les valeurs `[*]` d'UN
+        appel — jamais la sélection de l'appel lui-même : un appel où AUCUNE
+        valeur ne satisfait ne doit toujours pas être retenu, même avec `any`,
+        s'il en existe un AUTRE appel plus adapté."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            tool_log = _tool_log(
+                {"tool": "schedule_workouts", "server": "garmin", "arguments": {"schedules": [
+                    {"workout_data": {"workoutSegments": [{"workoutSteps": [{"targetValueOne": 999}]}]}},
+                ]}},
+                {"tool": "schedule_workouts", "server": "garmin", "arguments": {"schedules": [
+                    {"workout_data": {"workoutSegments": [{"workoutSteps": [{"targetValueOne": 134}]}]}},
+                ]}},
+            )
+            case = {"id": "t", "expect": {"tool_args_match": [{
+                "tool": "schedule_workouts", "server": "garmin", "any": True,
+                "path": "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueOne",
+                "equals": 134,
+            }]}}
+            self.assertEqual(runner.check(case, _result(ws, tool_calls=tool_log)), [])
+
 
 class TestSqliteQueryViaCheck(unittest.TestCase):
     def _workspace_with_activity(self, tmp: Path, distance_m: int = 12000) -> Path:

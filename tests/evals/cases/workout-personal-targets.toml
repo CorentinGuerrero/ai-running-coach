@@ -1,0 +1,81 @@
+# #60 — cibles personnelles (zones FC) sur une séance poussée au calendrier
+# Garmin, épopée #23.
+#
+# Fixture `workout-personal-targets/` : profil avec FC max 190 / FC de repos
+# 50 / PAS de FC au seuil -> `arc_metrics.hr_zone_bounds` résout en Karvonen
+# (précédence LTHR -> Karvonen -> %FCmax, #43) : Z2 (endurance) =
+# [50+0,60*140, 50+0,70*140] = [134, 148] bpm — la borne vérifiée ci-dessous
+# vient de ce calcul, pas d'une valeur inventée pour le test (voir
+# `tests/data/test_arc_workout_targets.py::TestHrTargetForIntensity` pour la
+# même arithmétique côté palier D).
+#
+# La semaine comporte, COMME DEMANDÉ par #60, une séance d'endurance ET une
+# séance seuil — mais celle-ci vit dans un fichier SÉPARÉ
+# (`7d_semaine_precedente.md`, daté 7 jours avant aujourd'hui via la
+# convention `<N>d_`), jamais dans le même fichier `Semaine_courante.md` que
+# la séance d'endurance à pousser (revue de code #107, point 2, BLOQUANT) :
+# un lundi, `{{TODAY}}` et `{{WEEK_START}}` coïncident, et une séance « déjà
+# réalisée » datée `{{WEEK_START}}` aurait alors la MÊME date que la séance
+# « à pousser » datée `{{TODAY}}` — une ambiguïté que `arc_workout_targets.
+# _load_session_arg` refuse maintenant explicitement (erreur, jamais « la
+# première » silencieusement), et qui aurait de toute façon rendu ce cas
+# flaky un lundi sur sept. `7d_` (toujours strictement avant le lundi de LA
+# semaine courante, quel que soit le jour où tourne le cas — voir le
+# commentaire de ce fichier) élimine la collision structurellement, pas par
+# chance. `Semaine_courante.md` ne porte donc plus qu'UNE séance : la seule
+# qui doive être poussée.
+id = "workout-personal-targets"
+prompt = "Pousse mes séances de la semaine sur le calendrier Garmin."
+fixture = "workout-personal-targets"
+
+[config.health]
+morning_check = "off"
+
+[expect]
+tools_called = ["schedule_workouts"]
+# Guardrails non bloquants sur une semaine bénigne (une seule séance
+# d'endurance à pousser) : pas de fichier de décision de garde-fou écrit —
+# même logique que `guardrail-ok.toml` (#53).
+files_absent = ["planning/*_decision_*.md"]
+
+# Bornes FC de la séance d'endurance poussée = bornes Z2 Karvonen DU PROFIL
+# FIXTURE, jamais une zone générique ni la zone d'une autre intensité.
+#
+# `any = true` (#107 revue de code, point 1) : le même appel `schedule_workouts`
+# peut tout à fait pousser un `workoutSegments[*].workoutSteps[*]` d'échauffement
+# SANS cible FC (ou avec la cible du skill's own `zoneNumber` template plutôt
+# qu'une plage personnalisée), à côté du pas principal qui porte la borne
+# vérifiée ici — la sémantique ALL par défaut ferait alors échouer un agent
+# parfaitement correct sur « chemin introuvable » ou sur la valeur du pas
+# d'échauffement. `any` exige seulement qu'AU MOINS UN pas résolu porte la
+# bonne borne — voir `tests/README.md`, section `tool_args_match`.
+[[expect.tool_args_match]]
+tool = "schedule_workouts"
+server = "garmin"
+any = true
+path = "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueOne"
+equals = 134
+
+[[expect.tool_args_match]]
+tool = "schedule_workouts"
+server = "garmin"
+any = true
+path = "schedules[*].workout_data.workoutSegments[*].workoutSteps[*].targetValueTwo"
+equals = 148
+
+# `calendar_date` : la date RÉELLE du jour où tourne ce cas n'est PAS
+# substituable dans un `[[expect.*]]` — seuls les fichiers du workspace
+# passent par `_materialize_relative_dates` (`{{TODAY}}`/`{{WEEK_START}}`,
+# voir `tests/evals/runner.py`), jamais le TOML du cas lui-même. On ne peut
+# donc PAS écrire ici un `equals`/`regex` verrouillé sur la date exacte
+# attendue sans le recalculer à chaque exécution (ce que le harnais actuel
+# ne permet pas) — documenté plutôt que de prétendre à une précision que ce
+# cas n'a pas (revue de code #107, point 1, "sinon documenter"). Le format
+# reste vérifié ; la fraîcheur de la date est déjà couverte indirectement
+# par `tools_called`/les bornes FC ci-dessus, qui n'existent que sur la
+# séance réellement plannifiée du jour.
+[[expect.tool_args_match]]
+tool = "schedule_workouts"
+server = "garmin"
+path = "schedules[*].calendar_date"
+regex = "^\\d{4}-\\d{2}-\\d{2}$"

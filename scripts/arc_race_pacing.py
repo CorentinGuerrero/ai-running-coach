@@ -162,6 +162,7 @@ import arc_contract as C  # noqa: E402
 import arc_elevation as EL  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+from coach_setup import workspace_root  # noqa: E402 (revue de code #107 : même résolution que arc_index.py/arc_guardrails.py, jamais un simple Path(".") qui ignore ARC_WORKSPACE/le pointeur)
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -1609,7 +1610,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Allures de course par segment depuis le modèle personnel pente -> allure (#59).")
     ap.add_argument("command", choices=("plan",), help="sous-commande (seule « plan » existe pour l'instant)")
     ap.add_argument("--gpx", required=True, type=Path, help="fichier GPX de la course")
-    ap.add_argument("--workspace", help="racine du workspace (défaut : répertoire courant)")
+    ap.add_argument("--workspace", help="racine du workspace (défaut : ARC_WORKSPACE, "
+                                          "pointeur ~/.config/ai-running-coach/workspace, sinon répertoire courant)")
     ap.add_argument("--db", help="chemin de l'index SQLite (défaut : <workspace>/.arc/coach.db)")
     ap.add_argument("--memory", action="store_true", help="index en mémoire (tests)")
     ap.add_argument("--rebuild", action="store_true", help="repart de zéro pour l'index")
@@ -1654,7 +1656,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     print(f"heure de départ effective : {hh:02d}:{mm:02d}", file=sys.stderr)
 
-    workspace = Path(args.workspace) if args.workspace else Path(".")
+    workspace = workspace_root(args.workspace)
 
     # Index ouvert et reconstruit UNE SEULE FOIS (revue de code #59 : trois
     # réindexations indépendantes coûtaient ≈ 7,6 s contre ≈ 2,5 s pour une

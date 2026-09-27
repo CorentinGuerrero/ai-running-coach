@@ -94,7 +94,35 @@ A 400 error happens if you use `steps` or `conditionValue`. Use the exact struct
 ### HR targeting rules
 
 - **Named zone**: `targetType` `heart.rate.zone` + `zoneNumber` 1–5 (do NOT use `targetValueOne`).
-- **Custom bpm range**: `targetValueOne` / `targetValueTwo` (low/high bpm) with `heart.rate.zone` target.
+- **Custom bpm range**: `targetValueOne` / `targetValueTwo` (low/high bpm) with `heart.rate.zone` target. **Prefer this over a named zone whenever a personal `bounds_bpm` is available** (#60, below) — it's the athlete's own bpm from their own profile, a named `zoneNumber` is a generic 5-way split that doesn't know this athlete's LTHR/Karvonen/%max.
+
+### Pace targeting rules (`pace.zone`, id 6)
+
+- `targetValueOne` / `targetValueTwo` — **meters per second, NOT s/km or min/km.** Cross-checked against the reverse-engineered schema used by the (open, unmerged as of writing — "Add support for targeted workouts", tested live by its author against the real Garmin API) `python-garminconnect` PR #440: `PaceTarget`, "upper and lower limits in m/s". `targetValueOne` = `lower_limit` = the **slower** pace (smaller m/s), `targetValueTwo` = `upper_limit` = the **faster** pace (larger m/s) — same low-then-high convention as the HR custom range above. This project has not yet independently verified the m/s convention against a live push of its own; **the first real `pace.zone` push should be followed by `get_workout_by_id` and a manual eyeball of the resulting pace range on the Garmin Connect app/website** before trusting it unattended.
+- Never target pace on a graded step (hill repeat): a flat-equivalent pace target on a climb is physically meaningless without GAP-aware guidance, which Garmin steps don't support. Use an HR target (or no target) plus the expected D+ in the step `description` instead — see below.
+
+## Personal targets — zones, GAP pace, hill D+ (#60)
+
+Never invent a bpm bound, a pace, or a climb dénivelé: compute them from the athlete's own profile and personal slope model with `scripts/arc_workout_targets.py`, a pure helper reused by #43 (HR zones), #44/#58 (GAP / personal slope model) — never a second copy of that logic.
+
+```bash
+python3 scripts/arc_workout_targets.py targets --session planning/Semaine_2026-09-28.md#2026-09-30
+# une date qui identifie PLUSIEURS séances du même fichier : précisez, jamais "la première" :
+python3 scripts/arc_workout_targets.py targets --session planning/Semaine_2026-09-28.md#2026-09-30@1
+python3 scripts/arc_workout_targets.py targets --session "planning/Semaine_2026-09-28.md#2026-09-30:Footing endurance 45 min"
+# répétitif de côte SANS clé `structure` (le contrat `arc` n'en a pas) — parse le titre, ou --structure-text :
+python3 scripts/arc_workout_targets.py targets --session planning/Semaine.md#2026-10-02 --structure-text "6x3 min côte 8%"
+# ou une séance inline :
+python3 scripts/arc_workout_targets.py targets --session '{"date":"2026-09-30","sport":"trail","title":"Footing endurance","intensity":"endurance"}'
+```
+
+Renders `{"intensity", "sport", "hr_target", "pace_target", "hill_repeats"}`. **The drop-the-target rule keys on the VALUE being `null`, never on `reason`/`reason_code` alone** — a target can carry both a usable value and an informational `reason_code` (e.g. `"extrapolated"`, see below); only a `null` value means "leave this target out of the DTO":
+
+- **`hr_target`** — `bounds_bpm: [low, high]` (already rounded to int, DTO-ready) from the athlete's own zones (`arc_metrics.hr_zone_resolution`, method LTHR → Karvonen → %HRmax by precedence), mapped from the session's planned `intensity`: `recovery`→Z1, `endurance`→Z2, `tempo`→Z3, `threshold`→Z4, `vo2max`→Z5. `race`/`rest`/`strength` have no mapping. `reason`/`reason_code` explains a `null` bound: `unmapped_intensity`, `no_zone_data` (profile missing HRmax/rest/threshold), or — for the LTHR/%max methods only, whose Z1/Z5 are open-ended sentinels (0 bpm / 150 % of LTHR-or-FCmax, never real bounds — Karvonen's Z1/Z5 are already real) — `open_zone_floor_unknown` (Z1 needs `hr_rest_bpm` to have a real floor) / `open_zone_ceiling_unknown` (Z5 needs `hr_max_bpm` to cap the sentinel ceiling). **Never fabricate a bound when `bounds_bpm` is `null`; drop the HR target from that step (`no.target`) instead.**
+- **`pace_target`** — `speed_low_ms`/`speed_high_ms` (m/s, already DTO-ready for `pace.zone` — do NOT convert) for a flat road step, ONLY for `recovery`/`endurance` (the only band #58's personal slope model validates confidently). `tempo`/`threshold`/`vo2max`/`race` come back `null` with `reason_code: "no_personal_pace_scaling_for_intensity"` — the project has no validated way yet to scale the endurance flat reference to a harder training effort; pilot those steps by HR zone instead, never a guessed pace. `source` says `personal`/`generic`/`mixed` (same provenance semantics as #58/#59); a non-`null` `reason_code` of `"extrapolated"` (pente beyond the fitted range) is informational only — the speed is still usable, mention it in passing.
+- **`hill_repeats`** — for a session whose `structure` was recognized (`{"reps", "rep_duration_s", "grade_pct", "recovery_s"?}`, explicit or parsed from free text — see the CLI examples above): `per_rep.elevation_gain_m` is the **expected** D+ (a forecast from the slope-model speed at that grade × the rep duration, never a measurement) and `total_elevation_gain_m` is `reps ×` that. **`basis` says how to phrase it**: `"endurance_pace_lower_bound"` (the default `--band endurance`) means the underlying speed is the athlete's ENDURANCE-effort pace on that grade — a real hill repeat is usually run harder, so this D+ is a plausible **floor**, not a centered estimate: phrase the step description as "≥ X m D+", never "≈ X m D+". `"mixed_effort_estimate"` (`--band all`) mixes in harder historical efforts at that grade and is less systematically biased low, but still not guaranteed representative of THIS repeat's effort. Garmin's DTO has **no D+ target field** either way — put it in the step `description` for the athlete, never as a bogus numeric target. A non-positive `grade_pct` refuses to compute a D+ (`reason_code: "grade_not_positive"`) rather than emit a negative "gain".
+
+`scripts/arc_workout_targets.py` also exposes `dto_hr_step`/`dto_pace_step` (build a ready `ExecutableStepDTO` from a target, low bound rejected if it exceeds the high bound) and `validate_workout_step_dto` (shape-checks a step against the tables above, including HR/pace range ordering) — use them instead of hand-rolling the JSON when the step carries a personal target.
 
 ## Templates
 
@@ -180,7 +208,7 @@ Alternative helper: `create_strength_workout(name, exercises)` — simpler but e
    - **Exit 0 with `warn`/`info`:** push proceeds; mention the warning briefly.
    - **Exit 2:** invalid input — report it, do not push.
 3. Check `get_scheduled_workouts(start_date, end_date)` for the week — identify existing workout_ids per date and any stale entries (dedupe strategy per Idempotency section).
-4. For each session, build `workout_data` with the schema above. Strength sessions come from the plan's circuit detail.
+4. For each session, run `scripts/arc_workout_targets.py targets` (see "Personal targets" above) then build `workout_data` with the schema above, using its `hr_target`/`pace_target`/`hill_repeats` for the step targets. Strength sessions come from the plan's circuit detail.
 5. Push via `schedule_workouts` with one `{calendar_date, workout_data}` per NEW session (reuse `workout_id` for unchanged ones).
 6. VERIFY: `get_scheduled_workouts(start_date, end_date)` for the week → confirm each date, duration, name, and NO duplicates; `get_workout_by_id` for any structured detail (loops/reps/weight).
 7. Persist: note the pushed session (workout_id, date) in the week's `planning/` MD file.

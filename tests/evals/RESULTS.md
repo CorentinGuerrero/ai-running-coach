@@ -50,6 +50,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `sync-activity-arc-fields` | — | — |
 | `sync-declared-fuel` | — | — |
 | `sync-writes-arc-block` | — | — |
+| `workout-personal-targets` | — | — |
 
 > **Pas encore de relevé.** Le harnais est complet et validé — scénarios,
 > fixtures, serveur MCP factice, journal des appels d'outils — mais aucune
@@ -58,6 +59,6 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 > puis remplacez ce tableau par le relevé obtenu.
 
 <!-- Régénéré via `python3 tests/evals/render_results.py --results <(echo '{}')`
-     (#59) : `race-plan-personal-model` a été ajouté par cette régénération.
+     (#60) : `workout-personal-targets` a été ajouté par cette régénération.
      Date et modèle remis à `_jamais exécuté_`/« défaut » à la main après
      régénération : aucune exécution réelle n'a eu lieu. -->
