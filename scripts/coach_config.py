@@ -304,9 +304,18 @@ def cmd_remove_json_key(args) -> int:
     """Retire une clé d'un fichier JSON si elle existe — sans effet sinon.
 
     Utilisé par `install.sh` pour nettoyer l'entrée MCP de l'ancienne source
-    de données (garmin/intervals, #68) quand `--source` bascule : sans cela,
-    un IDE se retrouve avec les deux serveurs déclarés après un changement de
-    source, dont un qui ne répond plus.
+    de données (garmin/intervals, #68) quand `--source` bascule RÉELLEMENT
+    (jamais sur un simple rerun, voir `SOURCE_CHANGED` dans `install.sh`) :
+    sans cela, un IDE se retrouve avec les deux serveurs déclarés après un
+    changement de source, dont un qui ne répond plus.
+
+    `--expect-command` (optionnel, revue PR #116) : ne retire l'entrée QUE si
+    sa valeur `command` correspond exactement (chaîne, ou premier élément
+    d'une liste — format OpenCode). Sans ce garde-fou, un serveur MCP AJOUTÉ À
+    LA MAIN par l'utilisateur (ex. un athlète Garmin qui a suivi
+    `docs/faq.md` pour ajouter Intervals.icu en secondaire, avec
+    `"command": "uv"`) serait supprimé au même titre qu'une entrée écrite par
+    `install.sh` — une régression constatée en revue.
     """
     path = Path(args.file)
     if not path.exists():
@@ -325,6 +334,17 @@ def cmd_remove_json_key(args) -> int:
     if args.name not in container:
         print(f"inchangé: {path} ({args.name} absent)")
         return 0
+
+    expected = getattr(args, "expect_command", None)
+    if expected:
+        value = container[args.name]
+        actual = value.get("command") if isinstance(value, dict) else None
+        if isinstance(actual, list):
+            actual = actual[0] if actual else None
+        if actual != expected:
+            print(f"inchangé: {path} ({args.name} : « command » = {actual!r}, "
+                  f"attendu {expected!r} — conservé, probablement ajouté à la main)")
+            return 0
 
     del container[args.name]
     write_json(path, data)
@@ -404,6 +424,8 @@ def build_parser() -> argparse.ArgumentParser:
     remove_key.add_argument("--file", required=True)
     remove_key.add_argument("--section", default="", help="chemin pointé, ex. « mcpServers » ou « a.b »")
     remove_key.add_argument("--name", required=True, help="clé à retirer de la section")
+    remove_key.add_argument("--expect-command", default="",
+                             help="ne retire que si value['command'] (ou son 1er élément) correspond exactement")
     remove_key.set_defaults(func=cmd_remove_json_key)
 
     approve = sub.add_parser("approve-claude-mcp", help="pré-approuve un serveur MCP de projet")

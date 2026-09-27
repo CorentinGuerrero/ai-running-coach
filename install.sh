@@ -123,6 +123,14 @@ EXPLICIT_DAILY_SYNC=0
 EXPLICIT_REMOTE_CONTROL=0
 EXPLICIT_AGENTS=0
 EXPLICIT_SOURCE=0
+# Vrai (1) uniquement quand --source a été passé explicitement ET que la
+# valeur résolue diffère de celle DÉJÀ en config (resolve_source()) — jamais
+# sur un simple rerun sans --source. C'est ce qui protège un serveur MCP
+# `intervals` ajouté À LA MAIN par un utilisateur Garmin (docs/faq.md,
+# « configurer Intervals.icu en secondaire ») : sans cette distinction,
+# `cleanup_stale_mcp_server()` le supprimerait à CHAQUE `./install.sh`, y
+# compris ceux qui ne touchent jamais à --source (revue PR #116).
+SOURCE_CHANGED=0
 
 usage() {
     cat <<'USAGE'
@@ -348,6 +356,14 @@ xml_escape() {
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
+# Échappe une chaîne pour l'insérer dans une valeur JSON construite par
+# `printf` (revue PR #116) : un `\` ou un `"` dans $HOME (donc dans
+# $INTERVALS_ENV_DIR) produirait sinon un JSON invalide silencieusement écrit
+# tel quel dans .mcp.json/opencode.json/etc.
+json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
 # Fusionne une clé dans un fichier JSON sans toucher au reste (scripts/coach_config.py).
 merge_json_key() {
     local file="$1" section="$2" name="$3" value="$4" template="${5:-}"
@@ -362,28 +378,37 @@ merge_json_key() {
         || die "Échec de la mise à jour de $file (voir le message ci-dessus)."
 }
 
-# Retire une clé d'un fichier JSON si elle y est — sans effet sinon. Utilisé
-# pour nettoyer l'entrée MCP de l'AUTRE source de données avant d'écrire la
-# nouvelle (voir cleanup_stale_mcp_server()).
+# Retire une clé d'un fichier JSON si elle y est ET que sa valeur « command »
+# correspond exactement à $expected_command (chaîne, ou premier élément si
+# c'est une liste — format OpenCode) — sans effet sinon. `expected_command`
+# vide désactive ce garde-fou (comportement de `merge_json_key`/l'ancien
+# `remove_json_key`, conservé pour d'éventuels autres appelants).
+#
+# Ce garde-fou protège un serveur MCP AJOUTÉ À LA MAIN par l'utilisateur (ex.
+# un athlète Garmin qui a suivi docs/faq.md pour ajouter Intervals.icu en
+# secondaire, `"command": "uv", "args": ["run", "--directory", …]`) : sans
+# lui, basculer --source supprimerait aussi bien une entrée installée par
+# install.sh qu'une entrée que l'utilisateur a écrite lui-même (revue PR #116).
 remove_json_key() {
-    local file="$1" section="$2" name="$3"
+    local file="$1" section="$2" name="$3" expected_command="${4:-}"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} retrait de « $name » de $file (si présent)"
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} retrait de « $name » de $file (si présent et « command » = « $expected_command »)"
         return 0
     fi
     [[ -f "$file" ]] || return 0
     have python3 || return 0
     python3 "$PROJECT_ROOT/scripts/coach_config.py" remove-json-key \
-        --file "$file" --section "$section" --name "$name" >/dev/null \
+        --file "$file" --section "$section" --name "$name" \
+        ${expected_command:+--expect-command "$expected_command"} >/dev/null \
         || warn "Impossible de nettoyer « $name » dans $file."
 }
 
-# Noms de serveur MCP à retirer d'une config avant d'y écrire $SOURCE (#68,
-# revue PR #116) : sans ce nettoyage, basculer --source laisse l'ancien
-# serveur déclaré à côté du nouveau (l'IDE en propose un qui ne répond plus).
-# Ne couvre QUE l'axe garmin<->intervals introduit par cette story — le
-# pré-existant garmin<->leanproxy (--use-leanproxy) n'est pas traité ici,
-# hors du périmètre de #68.
+# Noms de serveur MCP à retirer d'une config quand la source a RÉELLEMENT
+# changé (#68, revue PR #116) : sans ce nettoyage, basculer --source
+# laisserait l'ancien serveur déclaré à côté du nouveau (l'IDE en propose un
+# qui ne répond plus). Ne couvre QUE l'axe garmin<->intervals introduit par
+# cette story — le pré-existant garmin<->leanproxy (--use-leanproxy) n'est
+# pas traité ici, hors du périmètre de #68.
 stale_mcp_server_names() {
     if [[ "$SOURCE" == "intervals" ]]; then
         echo "garmin"
@@ -392,10 +417,25 @@ stale_mcp_server_names() {
     fi
 }
 
+# Commande EXACTE que install.sh écrit pour un serveur donné — jamais celle
+# d'une entrée ajoutée à la main (voir remove_json_key()).
+stale_mcp_expected_command() {
+    case "$1" in
+        garmin) echo "garmin-mcp" ;;
+        intervals) echo "$INTERVALS_ENV_DIR/run.sh" ;;
+        *) echo "" ;;
+    esac
+}
+
+# N'agit QUE si `--source` a réellement fait basculer la source (voir la note
+# de SOURCE_CHANGED) — un rerun qui ne touche pas --source ne doit JAMAIS
+# passer ici, même en présence d'une clé « intervals »/« garmin » ajoutée à
+# la main par l'utilisateur.
 cleanup_stale_mcp_server() {
+    [[ "$SOURCE_CHANGED" -eq 1 ]] || return 0
     local file="$1" section="$2" stale
     for stale in $(stale_mcp_server_names); do
-        remove_json_key "$file" "$section" "$stale"
+        remove_json_key "$file" "$section" "$stale" "$(stale_mcp_expected_command "$stale")"
     done
 }
 
@@ -590,14 +630,24 @@ resolve_agents() {
 # ne voit STRICTEMENT rien changer (aucune section [data] écrite tant que
 # --source n'a jamais été demandé explicitement — voir persist_source()).
 resolve_source() {
-    if [[ "$EXPLICIT_SOURCE" -eq 0 ]] && have python3; then
-        local resolved
-        resolved="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
+    local previous="garmin"
+    if have python3; then
+        previous="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
             --workspace "$WORKSPACE_ROOT" --section data --key source --default garmin 2>/dev/null)" \
-            || resolved=""
-        [[ -n "$resolved" ]] && SOURCE="$resolved"
+            || previous="garmin"
+        [[ -n "$previous" ]] || previous="garmin"
+    fi
+    if [[ "$EXPLICIT_SOURCE" -eq 0 ]]; then
+        SOURCE="$previous"
     fi
     validate_source
+    # Un rerun sans --source (EXPLICIT_SOURCE=0) ne « change » jamais rien,
+    # même si $SOURCE finit par différer d'un défaut codé en dur : SOURCE_CHANGED
+    # ne s'allume QUE quand --source a été demandé ET que la valeur retenue
+    # diffère de celle DÉJÀ en config — voir la note près de sa déclaration.
+    if [[ "$EXPLICIT_SOURCE" -eq 1 && "$SOURCE" != "$previous" ]]; then
+        SOURCE_CHANGED=1
+    fi
     log "Source de données : $SOURCE"
 }
 
@@ -1067,11 +1117,11 @@ EOF
 # détail. Les identifiants vivent uniquement dans le `.env` du wrapper, écrit
 # par `intervals-icu-mcp-auth`, jamais dans cette config.
 mcp_server_value_intervals() {
-    printf '{"command": "%s", "args": []}' "$INTERVALS_ENV_DIR/run.sh"
+    printf '{"command": "%s", "args": []}' "$(json_escape "$INTERVALS_ENV_DIR/run.sh")"
 }
 
 mcp_server_value_intervals_opencode() {
-    printf '{"type": "local", "command": ["%s"], "enabled": true}' "$INTERVALS_ENV_DIR/run.sh"
+    printf '{"type": "local", "command": ["%s"], "enabled": true}' "$(json_escape "$INTERVALS_ENV_DIR/run.sh")"
 }
 
 # Valeur JSON du serveur, au format « mcpServers » (Claude, Copilot, Cursor,
@@ -1150,11 +1200,15 @@ write_claude_config() {
     # interactive — bloquant sur une machine coach sans écran (Remote Control, cron).
     approve_claude_project_mcp "$(mcp_server_name)"
     # Désapprouve l'ancienne source (#68) — sinon ~/.claude.json continue de
-    # lister un serveur qui n'est plus dans .mcp.json comme "approuvé".
-    local stale
-    for stale in $(stale_mcp_server_names); do
-        unapprove_claude_project_mcp "$stale"
-    done
+    # lister un serveur qui n'est plus dans .mcp.json comme "approuvé". Même
+    # garde-fou que cleanup_stale_mcp_server() : uniquement si --source a
+    # réellement fait basculer la source (jamais sur un simple rerun).
+    if [[ "$SOURCE_CHANGED" -eq 1 ]]; then
+        local stale
+        for stale in $(stale_mcp_server_names); do
+            unapprove_claude_project_mcp "$stale"
+        done
+    fi
 }
 
 write_copilot_config() {

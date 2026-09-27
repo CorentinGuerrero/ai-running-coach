@@ -85,13 +85,19 @@ CANNED = {
         },
         query_type="wellness_for_date",
     ),
+    # Forme vérifiée (`tools/wellness.py::get_wellness_data`) : `data.wellness_data`
+    # (liste) + `data.count` — PAS une liste nue à la racine de `data` comme une
+    # version antérieure non vérifiée de ce stub le rendait.
     "get_wellness_data": _envelope(
-        [{
-            "date": _day(0),
-            "sleep": {"duration_seconds": 25800, "score": 78},
-            "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
-            "subjective": {"readiness": 71},
-        }],
+        {
+            "wellness_data": [{
+                "date": _day(0),
+                "sleep": {"duration_seconds": 25800, "score": 78},
+                "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
+                "subjective": {"readiness": 71},
+            }],
+            "count": 1,
+        },
         query_type="wellness_data",
     ),
     "get_recent_activities": _envelope(

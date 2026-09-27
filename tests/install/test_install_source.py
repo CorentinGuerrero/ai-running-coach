@@ -130,3 +130,79 @@ class TestInvalidSource(InstallAsserts):
         with Sandbox() as sb:
             proc = sb.install("--source", "bogus", "--no-auth", "--dry-run")
             self.assertFailed(proc, "source inconnue aurait dû être rejetée")
+
+
+def _add_hand_written_intervals_entry(sb: Sandbox) -> None:
+    """docs/faq.md → « configurer Intervals.icu sans passer par install.sh » :
+    un athlète Garmin peut ajouter Intervals.icu en secondaire, à la main,
+    avec `uv run --directory ... intervals-icu-mcp` — jamais le wrapper que
+    `install.sh --source intervals` écrirait lui-même."""
+    cfg = sb.repo / ".mcp.json"
+    data = json.loads(cfg.read_text()) if cfg.is_file() else {"mcpServers": {}}
+    data.setdefault("mcpServers", {})["intervals"] = {
+        "command": "uv",
+        "args": ["run", "--directory", "/chemin/vers/intervals-icu-mcp", "intervals-icu-mcp"],
+    }
+    cfg.write_text(json.dumps(data))
+
+
+class TestHandAddedServerNeverClobbered(InstallAsserts):
+    """Blocker (revue PR #116) : `cleanup_stale_mcp_server()` supprimait
+    l'entrée `intervals` à CHAQUE installation, y compris un simple rerun
+    Garmin qui ne touche jamais `--source` — détruisant silencieusement le
+    serveur qu'un athlète Garmin avait ajouté à la main pour un usage
+    secondaire (docs/faq.md). Double garde-fou attendu : (1) le nettoyage ne
+    tourne que si `--source` a RÉELLEMENT fait basculer la source
+    (`SOURCE_CHANGED`), (2) même alors, il ne retire que l'entrée dont
+    `command` correspond exactement à ce qu'`install.sh` écrit lui-même."""
+
+    def test_plain_garmin_rerun_keeps_the_hand_added_intervals_entry(self):
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--no-auth", "--ide", "claude"))
+            _add_hand_written_intervals_entry(sb)
+            # Rerun SANS --source : ne doit RIEN nettoyer, quelle que soit
+            # l'entrée présente.
+            self.assertSucceeded(sb.install("--no-auth", "--ide", "claude"))
+            servers = _mcp_servers(sb)
+            self.assertIn("intervals", servers, "entrée ajoutée à la main supprimée par un simple rerun")
+            self.assertEqual(servers["intervals"]["command"], "uv")
+            self.assertIn("garmin", servers)
+
+    def test_explicit_but_unchanged_source_keeps_the_hand_added_entry(self):
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--source", "garmin", "--no-auth", "--ide", "claude"))
+            _add_hand_written_intervals_entry(sb)
+            # --source garmin explicite, mais IDENTIQUE à la source déjà en
+            # config : SOURCE_CHANGED doit rester à 0, aucun nettoyage.
+            self.assertSucceeded(sb.install("--source", "garmin", "--no-auth", "--ide", "claude"))
+            servers = _mcp_servers(sb)
+            self.assertIn("intervals", servers)
+            self.assertEqual(servers["intervals"]["command"], "uv")
+
+    def test_real_switch_still_removes_the_installer_written_entry(self):
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--source", "intervals", "--no-auth", "--ide", "claude"))
+            wrapper_command = _mcp_servers(sb)["intervals"]["command"]
+            self.assertTrue(wrapper_command.endswith("intervals-icu-mcp/run.sh"))
+            # Vrai changement de source : cette entrée-là (écrite par
+            # install.sh, command = le wrapper) doit disparaître.
+            self.assertSucceeded(sb.install("--source", "garmin", "--no-auth", "--ide", "claude"))
+            self.assertNotIn("intervals", _mcp_servers(sb))
+
+    def test_real_switch_does_not_remove_a_non_standard_stale_entry(self):
+        """La source bascule RÉELLEMENT (garmin -> intervals) — "garmin" est
+        donc bien la source « stale » ciblée par le nettoyage — mais sa
+        commande a été modifiée à la main et ne correspond plus à ce
+        qu'`install.sh` écrit lui-même (`garmin-mcp`) : le garde-fou
+        `--expect-command` doit la conserver quand même."""
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--no-auth", "--ide", "claude"))  # source garmin (défaut)
+            cfg = sb.repo / ".mcp.json"
+            data = json.loads(cfg.read_text())
+            data["mcpServers"]["garmin"] = {"command": "not-garmin-mcp-at-all", "args": []}
+            cfg.write_text(json.dumps(data))
+            self.assertSucceeded(sb.install("--source", "intervals", "--no-auth", "--ide", "claude"))
+            servers = _mcp_servers(sb)
+            self.assertIn("garmin", servers, "entrée non standard supprimée malgré la non-correspondance de commande")
+            self.assertEqual(servers["garmin"]["command"], "not-garmin-mcp-at-all")
+            self.assertIn("intervals", servers)
