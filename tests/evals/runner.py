@@ -216,20 +216,32 @@ def _materialize_relative_dates(workspace: Path) -> None:
         path.unlink()
 
     # Placeholders GÉNÉRIQUES (revue de code #101), indépendants de l'offset
-    # `<N>d_` d'un fichier donné : `{{TODAY}}` (date réelle du jour du run) et
-    # `{{WEEK_START}}` (lundi de la semaine ISO courante). `{{DATE}}` ci-dessus
-    # ne convient pas à `week.week_start` : il vaut la date propre au FICHIER
-    # (son offset `<N>d_`), alors que `arc_guardrails._validate_proposed_week`
-    # exige un vrai LUNDI, qui n'a aucune raison de coïncider avec la date
-    # d'une séance particulière (ex. une séance du jour même, `{{TODAY}}`, un
-    # mardi). Remplacés dans TOUS les fichiers de la fixture, pas seulement
-    # ceux nommés `<N>d_...` — un fichier au nom fixe peut vouloir référencer
-    # `{{WEEK_START}}` sans porter lui-même un offset de date. Sûr uniquement
-    # parce que cette passe tourne AVANT que `build_workspace` ne lie
-    # `scripts/`/`skills/`/`agents/`/`templates/` dans le workspace (sans quoi
-    # elle réécrirait des fichiers du dépôt à travers le lien symbolique).
+    # `<N>d_` d'un fichier donné : `{{TODAY}}` (date réelle du jour du run),
+    # `{{WEEK_START}}` (lundi de la semaine ISO courante) et
+    # `{{PREV_WEEK_START}}` (lundi de la semaine ISO PRÉCÉDENTE, revue de code
+    # #107 — voir `_materialize_relative_dates`, point 1, BLOQUANT : un fichier
+    # `<N>d_...` daté 7 jours avant aujourd'hui via `{{DATE}}` tombe presque
+    # toujours un jour de semaine QUELCONQUE, jamais forcément un lundi — un
+    # `week.week_start` à cette valeur n'est un vrai lundi que si le cas tourne
+    # lui-même un lundi, et `arc_guardrails.py check --week` REJETTE (exit 2,
+    # « n'est pas un lundi ») tout autre jour. `{{PREV_WEEK_START}}` =
+    # `{{WEEK_START}}` moins 7 jours EST, lui, toujours un lundi, quel que soit
+    # le jour d'exécution : la semaine PRÉCÉDENTE d'une semaine ISO qui démarre
+    # un lundi démarre elle-même toujours un lundi). `{{DATE}}` ci-dessus ne
+    # convient pas à `week.week_start` : il vaut la date propre au FICHIER (son
+    # offset `<N>d_`), qui n'a aucune raison de tomber un lundi (ex. une
+    # séance du jour même, `{{TODAY}}`, un mardi) — `{{WEEK_START}}` a le même
+    # défaut pour une semaine PASSÉE. Remplacés dans TOUS les fichiers de la
+    # fixture, pas seulement ceux nommés `<N>d_...` — un fichier au nom fixe
+    # peut vouloir référencer ces placeholders sans porter lui-même un offset
+    # de date. Sûr uniquement parce que cette passe tourne AVANT que
+    # `build_workspace` ne lie `scripts/`/`skills/`/`agents/`/`templates/` dans
+    # le workspace (sans quoi elle réécrirait des fichiers du dépôt à travers
+    # le lien symbolique).
     today_iso = today.isoformat()
-    week_start_iso = (today - timedelta(days=today.weekday())).isoformat()
+    week_start = today - timedelta(days=today.weekday())
+    week_start_iso = week_start.isoformat()
+    prev_week_start_iso = (week_start - timedelta(days=7)).isoformat()
     for path in workspace.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
@@ -237,9 +249,11 @@ def _materialize_relative_dates(workspace: Path) -> None:
             content = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "{{TODAY}}" not in content and "{{WEEK_START}}" not in content:
+        if not any(tok in content for tok in ("{{TODAY}}", "{{WEEK_START}}", "{{PREV_WEEK_START}}")):
             continue
-        content = content.replace("{{TODAY}}", today_iso).replace("{{WEEK_START}}", week_start_iso)
+        content = (content.replace("{{TODAY}}", today_iso)
+                   .replace("{{PREV_WEEK_START}}", prev_week_start_iso)
+                   .replace("{{WEEK_START}}", week_start_iso))
         path.write_text(content, encoding="utf-8")
 
 

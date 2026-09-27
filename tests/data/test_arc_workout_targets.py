@@ -394,6 +394,25 @@ class TestParseStructureTextHardening(unittest.TestCase):
         result = T.parse_structure_text("6x30 sec côte 8%")
         self.assertEqual(result["rep_duration_s"], 30.0)
 
+    def test_anchors_to_the_reps_x_duration_closest_before_cote(self):
+        # #107 revue de code, 2ᵉ tour, should-fix : deux blocs dans le même
+        # texte (un tempo plat, puis des répétitifs de côte) — le PREMIER
+        # "reps x durée" du texte (2x20 min, le tempo) ne doit PAS être
+        # confondu avec celui qui décrit réellement la côte (6x1 min).
+        result = T.parse_structure_text("2x20 min tempo, puis 6x1 min côte 8%")
+        self.assertEqual(result, {"reps": 6, "rep_duration_s": 60.0, "grade_pct": 8.0})
+
+    def test_a_reps_x_duration_group_after_the_climb_mention_is_never_used(self):
+        # Aucun "reps x durée" valide AVANT la côte -> None, jamais une
+        # structure devinée depuis un groupe qui suit la mention de la pente.
+        self.assertIsNone(T.parse_structure_text("côte 8% suivie de 6x1 min de récupération"))
+
+    def test_multiple_climb_blocks_anchor_to_the_nearest_preceding_group_each_time(self):
+        result = T.parse_structure_text("4x3 min côte 5%, puis 8x30 sec côte 12%")
+        # La pente retenue est la PREMIÈRE trouvée par le gabarit "côte" (5 %) ;
+        # le "reps x durée" retenu est le dernier AVANT cette occurrence-là (4x3 min).
+        self.assertEqual(result, {"reps": 4, "rep_duration_s": 180.0, "grade_pct": 5.0})
+
 
 class TestValidateWorkoutStepDtoHrRangeOrdering(unittest.TestCase):
     def test_inverted_hr_custom_range_is_rejected(self):

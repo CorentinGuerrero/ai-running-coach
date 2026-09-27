@@ -488,14 +488,19 @@ def parse_structure_text(text: Optional[str]) -> Optional[dict]:
     `"6x30 sec côte 8%"` — voir `_DURATION_RE`. `None` si `text` ne correspond
     pas, si la pente est accolée à un pourcentage de FC/VMA plutôt qu'une
     pente, ou si la pente dépasse `MAX_PLAUSIBLE_GRADE_PCT` — jamais une
-    structure devinée partiellement ou invraisemblable."""
+    structure devinée partiellement ou invraisemblable.
+
+    **Ancrage au groupe `reps x durée` le plus proche AVANT la côte** (revue de
+    code #107, 2ᵉ tour, should-fix) : un texte comme `"2x20 min tempo, puis
+    6x1 min côte 8%"` décrit DEUX blocs (un tempo plat, puis des répétitifs de
+    côte) — prendre le PREMIER `reps x durée` du texte (`2x20 min`) rendrait un
+    répétitif de côte de 20 minutes, une confusion silencieuse avec le bloc
+    tempo qui n'a rien à voir avec la côte. Ce module cherche donc la pente
+    D'ABORD, puis retient, parmi TOUS les `reps x durée` qui la PRÉCÈDENT, le
+    DERNIER (le plus proche de « côte ») — jamais le premier trouvé dans tout
+    le texte. Aucun `reps x durée` valide avant la pente -> `None` (jamais une
+    structure devinée depuis un texte ambigu)."""
     if not text:
-        return None
-    reps_m = _REPS_RE.search(text)
-    if not reps_m:
-        return None
-    duration_s = _parse_duration_s(text[reps_m.end():])
-    if duration_s is None:
         return None
     grade_m = _GRADE_RE.search(text)
     if not grade_m:
@@ -503,7 +508,19 @@ def parse_structure_text(text: Optional[str]) -> Optional[dict]:
     grade = float(grade_m.group("grade").replace(",", "."))
     if grade <= 0 or grade > MAX_PLAUSIBLE_GRADE_PCT:
         return None
-    return {"reps": int(reps_m.group("reps")), "rep_duration_s": duration_s, "grade_pct": grade}
+    best = None  # (position du groupe "reps x", reps, rep_duration_s)
+    for reps_m in _REPS_RE.finditer(text):
+        if reps_m.start() >= grade_m.start():
+            continue  # un "reps x" APRÈS la côte ne la décrit pas, jamais retenu
+        duration_s = _parse_duration_s(text[reps_m.end():])
+        if duration_s is None:
+            continue
+        if best is None or reps_m.start() > best[0]:
+            best = (reps_m.start(), int(reps_m.group("reps")), duration_s)
+    if best is None:
+        return None
+    _, reps, duration_s = best
+    return {"reps": reps, "rep_duration_s": duration_s, "grade_pct": grade}
 
 
 # ---------------------------------------------------------------------------
