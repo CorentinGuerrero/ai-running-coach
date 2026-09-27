@@ -42,7 +42,7 @@ Offer it, never block on it.
 ### DATA MANAGEMENT MANDATES
 - **Contextual Refresh:** Before analyzing, check `planning/`, `activities/`, `medical/`, and `resources/` folders.
 - **Persistence:** Store every race plan as a Markdown file in `planning/` and nutrition plan in `nutrition/`.
-- **Data contract (REQUIRED):** Every file you persist in `activities/`, `medical/`, `nutrition/`, `planning/` (weeks, evaluations, race plans) or `rapports/` MUST open, right under its `# Title`, with ONE fenced ```arc block of JSON conforming to the `workspace-data-contract` skill — load it before writing. Keys stay in English, values in SI units (metres, seconds, bpm) whatever `[athlete].units` says, and an unmeasured value is omitted, never 0. Your prose goes below the block, unchanged. After writing, run `python3 scripts/arc_index.py --validate <file>` and fix any error it names. `planning/Runner_Profile.md` and `planning/active_objective.md` are the exception: they keep their template bullets (fill values, never rename labels). A race plan uses `kind: race_plan` (aid stations, cut-offs, the three scenarios, water points, gear).
+- **Data contract (REQUIRED):** Every file you persist in `activities/`, `medical/`, `nutrition/`, `planning/` (weeks, evaluations, race plans) or `rapports/` MUST open, right under its `# Title`, with ONE fenced ```arc block of JSON conforming to the `workspace-data-contract` skill — load it before writing. Keys stay in English, values in SI units (metres, seconds, bpm) whatever `[athlete].units` says, and an unmeasured value is omitted, never 0. Your prose goes below the block, unchanged. After writing, run `python3 scripts/arc_index.py --validate <file>` and fix any error it names. `planning/Runner_Profile.md` and `planning/active_objective.md` are the exception: they keep their template bullets (fill values, never rename labels). A race plan uses `kind: race_plan` (aid stations, cut-offs, the three scenarios, water points, gear, and `segments` from `scripts/arc_race_pacing.py` when a GPX was analyzed — #59).
 - **MD File Language Enforcement:** ALL MD files use the configured document language (`config/workspace.toml` → `[language].documents`, default FRENCH) for all text content, headers, and labels.
 - **Reference Documents:** Use resources in `resources/` (nutrition, running, recovery, health) for evidence-based recommendations.
 
@@ -126,20 +126,85 @@ Si OSM a trouvé des points d'eau, propose-les à l'utilisateur :
 
 #### ÉTAPE 4 : SYNTHÈSE ALLURES & TEMPS DE PASSAGE
 
-Calibre les allures en utilisant :
-- L'historique Garmin dans `activities/` (récentes sorties longues, VO2max)
-- Les références dans `planning/` (zones cardiaques, objectifs)
-- Les facteurs d'ajustement : D+ total, type de terrain, distance, météo prévue
+**Si un GPX a été fourni (cas A de l'étape 1) : allures par segment depuis le
+modèle personnel (#59).** Charge le fichier via `python3
+scripts/arc_race_pacing.py plan` plutôt que d'estimer à la main — jamais les
+anciennes règles génériques ci-dessous quand un GPX est disponible :
 
-**Règles de conversion :**
+```bash
+python3 scripts/arc_race_pacing.py plan \
+  --gpx <fichier.gpx> --race-date <AAAA-MM-JJ> --start <HH:MM> \
+  --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue>
+```
+
+`--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
+(`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
+élapsé ou une date-heure ISO 8601 complète pour une barrière du surlendemain
+sur un ultra). `--official-distance-m <distance officielle>` si le GPX mesure
+une distance sensiblement différente de la distance officielle de course
+(rééchelonne les `km` de ravitaillement dessus). Sans `--temp-max-c`, lance
+d'abord le skill `weather-forecast` puis repasse la température max prévue ici
+— le script n'accède lui-même à aucun réseau. Le script résout SEUL : le
+modèle personnel pente -> allure (#58, bande « endurance »), l'intensité de
+course (Riegel — depuis un effort RÉCENT et DUR uniquement, tempo/seuil/VO2max/
+course, jamais un simple footing — ou VDOT en repli, #33 ; TOUJOURS calculée
+sur le GPX que tu analyses, jamais sur `planning/active_objective.md`, qui
+peut décrire une autre distance — un avertissement le signale si les deux
+diffèrent sensiblement), le fade de fin de course depuis la durabilité récente
+(#48, médiane, rendu NEUTRE en temps total quand une prédiction Riegel/VDOT
+existe déjà — jamais un double comptage de la dégradation d'endurance —, ou
+repli générique documenté et signalé `fade_source: "generic"`, échelonné à la
+durée réelle de la course), l'acclimatation chaleur (#38) et les barrières
+horaires — ne recalcule aucun de ces éléments toi-même.
+
+Le JSON rendu porte `segments[]` (id, bornes km, pente, temps prédit par
+scénario, **`source`** : `personal`/`generic`/`mixed`), `totals`,
+`cutoffs` (statut `ok`/`tendu`/`hors_delai` par scénario), `provenance_summary`,
+`intensity_factor`/`intensity_source` et `warnings`. **Cite la provenance par
+segment dans le plan** (critère d'acceptation #59) — au minimum la part
+personnelle/générique globale (`provenance_summary`), idéalement les segments
+génériques nommément si le parcours en compte peu (ex. « les 3 premiers km, en
+montée, sont prédits depuis ton modèle personnel ; le final en descente
+technique repose sur l'estimation générique, faute d'historique suffisant sur
+cette pente »).
+
+**Dis toujours ce que représente l'allure de base** (revue de code #59) :
+si `intensity_source` vaut `"riegel"` ou `"vdot"`, les allures reflètent
+l'intensité de COURSE visée (mise à l'échelle depuis ton allure d'endurance
+via `intensity_factor`) — dis-le en une phrase courte. Si `intensity_source`
+vaut `"none"`, dis EXPLICITEMENT à l'athlète que les allures affichées sont
+encore ton allure D'ENTRAÎNEMENT (endurance), pas une allure de course, faute
+d'objectif chiffré ou d'historique suffisant pour la prédire — ne laisse
+jamais croire à une allure de course quand ce n'en est pas une.
+
+**`warnings` non vide -> ne persiste PAS le plan tel quel** (revue de code
+#59) : un GPX sans altitude ou avec une couverture incomplète rend des
+segments à pente supposée nulle, potentiellement très éloignés du terrain
+réel. Signale le problème à l'athlète (« le GPX ne contient pas d'altitude,
+je ne peux pas distinguer une montée d'un plat ») et redemande un fichier avec
+profil d'altitude — ou confirme explicitement avec lui qu'il accepte un plan
+approximatif avant de sauvegarder, en le disant noir sur blanc dans le fichier
+persisté.
+
+Persiste le tableau `segments` du script directement dans le champ
+`segments` du bloc ```arc (voir `workspace-data-contract` skill, `race_plan`)
+— jamais une réécriture manuelle qui perdrait la provenance ou les temps
+exacts calculés.
+
+**Si seule une URL a été fournie (cas B, aucun GPX)** : pas de script
+disponible (aucun profil d'altitude exploitable) — reste sur les règles
+générales ci-dessous, et dis-le à l'athlète (« pas de GPX -> allures
+estimées, pas de modèle personnel par segment »).
+
+**Règles de conversion (repli générique, cas B uniquement) :**
 - 1000 m D+ ≈ 1.5-2 km plat supplémentaire en effort
 - Sable meuble → allure × 1.2-1.3
 - Terrain technique → allure × 1.1-1.15
 - Fatigue progressive : +2-3% par 10 km au-delà de 50 km
 
 **Production :** Tableau avec 3 colonnes (points de passage) + 3 scénarios (ambitieux, réaliste, sécurité) :
-| Point | Km | D+ cum | Scénario vert | Scénario réaliste | Scénario sécurité |
-|-------|----|--------|---------------|-------------------|-------------------|
+| Point | Km | D+ cum | Scénario ambitieux | Scénario réaliste | Scénario sécurité |
+|-------|----|--------|---------------------|--------------------|--------------------|
 
 Chaque scénario inclut : heure estimée, allure moyenne, temps ravito max, marge avant barrière.
 

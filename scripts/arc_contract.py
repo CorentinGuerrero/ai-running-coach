@@ -58,6 +58,17 @@ SESSION_STATUS = ("planned", "done", "missed", "moved", "cancelled")
 REPORT_TYPE = ("weekly", "monthly", "comparison", "race", "adhoc")
 COURSE_VERDICT = ("compatible", "partial", "incompatible")
 WATER_SOURCE = ("officiel", "osm_drinking_water", "osm_spring", "osm_cafe")
+# `race_plan.segments[].source` (#59) : provenance de la prédiction de vitesse du
+# segment — mêmes valeurs que `arc_slope_model.predict_speed`, jamais une
+# quatrième valeur inventée ici (voir `arc_slope_model.py` pour la sémantique de
+# "mixed" : vraie interpolation entre un panier personnel et un panier générique).
+SEGMENT_SOURCE = ("personal", "generic", "mixed")
+# `race_plan.segments[].reason_code` (#59) : raison informative attachée à la
+# prédiction d'un segment — mêmes valeurs que celles réellement émises par
+# `scripts/arc_race_pacing.py::predict_segments` (jamais toute la liste de
+# `arc_slope_model.predict_speed`, qui en connaît d'autres non pertinentes une
+# fois agrégées au niveau du segment).
+RACE_SEGMENT_REASON_CODE = ("extrapolated", "no_model", "missing_elevation")
 
 # `decision` (#54) : traçabilité d'un ajustement du coach — déclencheur, entrées
 # qui l'ont justifié, règles de garde-fous concernées (#52), avant/après de la
@@ -340,6 +351,13 @@ SCHEMA = {
             "aid_stations": "[aid_station]",
             "water_points": "[water_point]",
             "gear": "list",
+            # `segments` (#59, allures par segment depuis le modèle personnel) : socle
+            # de #61 (débrief post-course, comparaison plan vs réalisé PAR SEGMENT) —
+            # voir `scripts/arc_race_pacing.py::segment_course`/`predict_segments` pour
+            # la méthode (segmentation par distance cible + fusion de pente similaire,
+            # provenance personnelle/générique/mixte par segment). Optionnel : un plan
+            # de course écrit sans GPX (URL seule, étape 1 cas B) n'a pas de segments.
+            "segments": "[race_segment]",
         },
     },
     "decision": {
@@ -407,11 +425,41 @@ SUBSCHEMA = {
     },
     "aid_station": {
         "required": {"km": "num+", "name": "str"},
-        "optional": {"services": "list", "cutoff": "str"},
+        # `cutoff_day` (#59) : jour de la barrière (1 = jour du départ, 2 = lendemain…),
+        # utile UNIQUEMENT avec un `cutoff` au format `HH:MM` — sans lui, une heure de
+        # barrière antérieure à l'heure de départ est supposée le lendemain (repli
+        # historique). `cutoff` accepte aussi `+HH:MM` (élapsé depuis le départ, heures
+        # au-delà de 24 admises) et une date-heure ISO 8601 complète — voir
+        # `scripts/arc_race_pacing.py::ASSUMPTIONS["cutoffs"]` pour le détail des trois
+        # formats (barrière du surlendemain d'un ultra, #59).
+        "optional": {"services": "list", "cutoff": "str", "cutoff_day": "int+"},
     },
     "water_point": {
         "required": {"km": "num+", "source": _enum(WATER_SOURCE)},
         "optional": {"name": "str"},
+    },
+    # `race_plan.segments[]` (#59) : un segment de course, sa pente moyenne, son
+    # temps prédit par scénario et sa provenance — voir `arc_race_pacing.py` pour
+    # la méthode complète. `id` est stable d'un appel à l'autre pour un même GPX
+    # et un même découpage (`s01`, `s02`…) : #61 (débrief post-course) doit pouvoir
+    # aligner un segment mesuré avec le même segment du plan sans recalculer sa
+    # propre segmentation. `predicted_time_s`/`pace_s_km` portent les TROIS
+    # scénarios, avec les MÊMES clés que `race_plan.scenarios`
+    # (`ambitious`/`realistic`/`safe`) — jamais un second vocabulaire de scénario
+    # pour la même notion.
+    "race_segment": {
+        "required": {"id": "str", "km_start": "num+", "km_end": "num+"},
+        "optional": {
+            "distance_m": "num+",
+            "grade_mean_pct": "num",
+            "elevation_gain_m": "num+",
+            "elevation_loss_m": "num+",
+            "source": _enum(SEGMENT_SOURCE),
+            "reason_code": _enum(RACE_SEGMENT_REASON_CODE),
+            "predicted_time_s": "obj",
+            "pace_s_km": "obj",
+            "notes": "list",
+        },
     },
     # `decision.before`/`decision.after` (#54) : instantané PARTIEL d'une séance —
     # tous les champs sont facultatifs (une annulation ne change que `status`, un

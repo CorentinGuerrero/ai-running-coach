@@ -570,9 +570,29 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | `distance_m`, `elevation_gain_m`, `target_time_s` | nombre | |
 | `start_time` | date-heure | départ |
 | `scenarios` | objet | `{"ambitious": s, "realistic": s, "safe": s}` en secondes |
-| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`) |
+| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
 | `gear` | liste | matériel obligatoire et conseillé |
+| `segments` | liste d'objets | allures par segment depuis le modèle personnel (#59) — voir ci-dessous |
+
+**`segments` (#59, `scripts/arc_race_pacing.py`).** Un segment par pièce de course
+(découpage par distance cible + fusion des pentes similaires, voir la docstring
+du module), pour que le stratège cite la **provenance par segment** (critère
+d'acceptation #59) et que #61 (débrief post-course) puisse comparer plan vs
+réalisé segment par segment sans recalculer sa propre segmentation.
+
+| Clé | Type | Notes |
+|---|---|---|
+| **`id`** | texte | stable pour un même GPX et un même découpage (`s01`, `s02`…) |
+| **`km_start`**, **`km_end`** | nombre | bornes kilométriques du segment |
+| `distance_m` | nombre | longueur du segment, en mètres |
+| `grade_mean_pct` | nombre (signe libre) | pente moyenne, en % — repère d'AFFICHAGE seulement, le temps prédit intègre la pente point par point (terrain vallonné) |
+| `elevation_gain_m`, `elevation_loss_m` | nombre | D+ / D- du segment |
+| `source` | `personal` `generic` `mixed` | provenance de la prédiction (`arc_slope_model.predict_speed`) |
+| `reason_code` | `extrapolated` `no_model` `missing_elevation` | raison informative attachée à la prédiction, voir `notes` |
+| `predicted_time_s` | objet | temps prédit par scénario, secondes — **mêmes clés que `scenarios` ci-dessus** (`ambitious`/`realistic`/`safe`) |
+| `pace_s_km` | objet | allure prédite par scénario, s/km, mêmes clés |
+| `notes` | liste | avertissements courts (ex. extrapolation hors plage du modèle, altitude GPX manquante) |
 
 ```arc
 {
@@ -582,7 +602,13 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
   "scenarios": {"ambitious": 23400, "realistic": 25200, "safe": 27900},
   "aid_stations": [{"km": 14.5, "name": "Mont-Saint-Aubert", "services": ["eau", "solide"], "cutoff": "10:30"}],
   "water_points": [{"km": 22.0, "source": "osm_drinking_water", "name": "Fontaine du village"}],
-  "gear": ["frontale", "couverture de survie", "gobelet"]
+  "gear": ["frontale", "couverture de survie", "gobelet"],
+  "segments": [
+    {"id": "s01", "km_start": 0.0, "km_end": 0.75, "distance_m": 750.0, "grade_mean_pct": 5.2,
+     "elevation_gain_m": 39.0, "elevation_loss_m": 0.0, "source": "personal",
+     "predicted_time_s": {"safe": 320, "realistic": 300, "ambitious": 280},
+     "pace_s_km": {"safe": 426, "realistic": 400, "ambitious": 373}, "notes": []}
+  ]
 }
 ```
 
