@@ -80,7 +80,7 @@ inattendu pour le dossier) se corrigent aussi.
 | `weather` | `medical/YYYY-MM-DD_meteo.md` | coach (skill `weather-forecast`) |
 | `week` | `planning/Semaine_YYYY-MM-DD.md` (lundi de la semaine) | coach |
 | `nutrition` | `nutrition/YYYY-MM-DD_nutrition.md` | nutritionist |
-| `report` | `rapports/YYYY-MM-DD_rapport.md`, `rapports/YYYY-MM-DD_comparaison_<lieu>.md` | coach |
+| `report` | `rapports/YYYY-MM-DD_rapport.md`, `rapports/YYYY-MM-DD_comparaison_<lieu>.md`, `rapports/YYYY-MM-DD_debrief_<course>.md` | coach |
 | `course_eval` | `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` | skill `gpx-analysis` |
 | `race_plan` | plan de course dans `planning/` | course-strategist |
 | `decision` | `planning/YYYY-MM-DD_decision_<slug>.md` | coach, medical (garde-fous, bilan matinal, blessure) |
@@ -531,15 +531,40 @@ Tenez `status` à jour quand une séance est réalisée, manquée ou déplacée.
 | Clé | Type |
 |---|---|
 | **`date`** | date |
-| **`report_type`** | `weekly` `monthly` `comparison` `race` `adhoc` |
+| **`report_type`** | `weekly` `monthly` `comparison` `race` `race_debrief` `adhoc` |
 | **`title`** | texte |
 | `period_start`, `period_end` | date |
-| `location` | texte (comparaison de parcours) |
+| `location` | texte (comparaison de parcours, nom de la course pour `race_debrief`) |
 
 Le rapport lui-même est le texte sous le bloc : le tableau de bord l'affiche tel quel.
 
 ```arc
 {"arc": 1, "kind": "report", "date": "2026-09-21", "report_type": "weekly", "title": "Bilan de la semaine 38", "period_start": "2026-09-15", "period_end": "2026-09-21"}
+```
+
+**`race_debrief` (#61, épopée #23) : plan de course vs réalisé, PAR SEGMENT.**
+Fichier `rapports/YYYY-MM-DD_debrief_<course>.md`, comme `comparison`
+(`course-comparison`) : le bloc ```arc reste le schéma `report` générique
+ci-dessus (`period_start`/`period_end` = date de la course, `location` = nom
+de la course) — la comparaison chiffrée elle-même n'est PAS un nouveau champ
+du contrat, c'est la sortie JSON de `python3 scripts/arc_race_debrief.py
+debrief --plan <plan> --activity <activité de la course>` (mêmes conventions
+que `compare_course.py`/`analyze_gpx.py` : script combine deux fichiers déjà
+persistés, jamais une seconde implémentation dans l'agent). Le coach recopie
+dans le texte libre, sous le bloc, au minimum : l'écart de temps total,
+l'écart par segment (citer les identifiants `s01`, `s02`… du plan — stables
+d'un appel à l'autre, #59), le fade mesuré vs prévu, et les `findings` du
+script (ex. `depart_trop_rapide`, `glucides_sous_objectif`). Aligne les
+splits kilométriques de l'activité sur les bornes du plan par mise à l'échelle
+PROPORTIONNELLE de la distance cumulée (jamais du temps) quand les deux
+mesures totales diffèrent — voir `scripts/arc_race_debrief.py::ASSUMPTIONS`
+pour la méthode complète. `suggested_profile_updates` (glucides/h, tendance à
+partir trop vite…) est une liste de PROPOSITIONS : présentez-les à l'athlète,
+**n'écrivez jamais** vous-même `planning/Runner_Profile.md` à partir d'un
+débrief — ce fichier reste édité par l'athlète (voir plus bas).
+
+```arc
+{"arc": 1, "kind": "report", "date": "2026-09-28", "report_type": "race_debrief", "title": "Débrief Trail des Collines", "period_start": "2026-09-27", "period_end": "2026-09-27", "location": "Trail des Collines"}
 ```
 
 ### `course_eval`

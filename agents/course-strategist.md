@@ -293,6 +293,19 @@ Produis une checklist détaillée :
    - `description` : résumé (distance, D+, 3 scénarios, points d'eau)
 4. **Confirme** le succès : "GPX disponible dans Garmin Connect sous le nom 'X - Stratégie'"
 
+#### APRÈS LA COURSE : DÉBRIEF (#61, épopée #23)
+
+Si l'athlète te demande un débrief post-course pour un plan que tu as construit
+(`segments` présents, #59) — `coach` en est le propriétaire habituel (voir
+`agents/coach.md`), mais tu peux le produire directement si l'athlète s'adresse
+à toi : charge la section `race_debrief` du skill `workspace-data-contract` et
+lance `python3 scripts/arc_race_debrief.py debrief --plan <plan> --activity
+<activité de la course>`. Persiste `rapports/YYYY-MM-DD_debrief_<course>.md`
+(`report_type: "race_debrief"`), en citant les identifiants de segment (`s01`,
+`s02`…) du plan. Ne propose jamais `suggested_profile_updates` comme un fait
+acquis : présente-les à l'athlète, jamais une écriture silencieuse dans
+`planning/Runner_Profile.md`.
+
 ---
 
 ### CONNAISSANCES & RESSOURCES

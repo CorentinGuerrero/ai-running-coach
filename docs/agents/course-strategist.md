@@ -67,7 +67,8 @@ GPX sans altitude exploitable déclenche un avertissement explicite (`warnings`)
 plutôt qu'un plan silencieusement faux. Persisté dans le champ `segments` du
 bloc ```arc `race_plan` (voir
 [le skill `workspace-data-contract`](../skills/workspace-data-contract.md)) —
-socle du futur débrief post-course segment par segment.
+socle du débrief post-course segment par segment (`scripts/arc_race_debrief.py`,
+#61 : voir [l'agent Coach](coach.md)).
 
 ## Fichier source
 

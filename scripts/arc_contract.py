@@ -55,7 +55,7 @@ INTENSITY = (
     "rest", "recovery", "endurance", "tempo", "threshold", "vo2max", "race", "strength",
 )
 SESSION_STATUS = ("planned", "done", "missed", "moved", "cancelled")
-REPORT_TYPE = ("weekly", "monthly", "comparison", "race", "adhoc")
+REPORT_TYPE = ("weekly", "monthly", "comparison", "race", "race_debrief", "adhoc")
 COURSE_VERDICT = ("compatible", "partial", "incompatible")
 WATER_SOURCE = ("officiel", "osm_drinking_water", "osm_spring", "osm_cafe")
 # `race_plan.segments[].source` (#59) : provenance de la prédiction de vitesse du
