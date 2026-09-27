@@ -83,7 +83,10 @@ def main() -> int:
         suite = unittest.TestSuite(keep(suite))
 
     print(f"Paliers : {', '.join(f'{t} ({TIERS[t][1]})' for t in tiers)}\n")
-    result = unittest.TextTestRunner(verbosity=args.verbose).run(suite)
+    # Les tests les plus lents en fin de sortie : la seule façon de savoir où part
+    # le temps sur un runner CI (le palier A est ~15× plus lent sur macOS).
+    runner_opts = {"durations": 25} if sys.version_info >= (3, 12) else {}
+    result = unittest.TextTestRunner(verbosity=args.verbose, **runner_opts).run(suite)
     return 0 if result.wasSuccessful() else 1
 
 
