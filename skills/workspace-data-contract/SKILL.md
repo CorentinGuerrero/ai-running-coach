@@ -80,7 +80,7 @@ inattendu pour le dossier) se corrigent aussi.
 | `weather` | `medical/YYYY-MM-DD_meteo.md` | coach (skill `weather-forecast`) |
 | `week` | `planning/Semaine_YYYY-MM-DD.md` (lundi de la semaine) | coach |
 | `nutrition` | `nutrition/YYYY-MM-DD_nutrition.md` | nutritionist |
-| `report` | `rapports/YYYY-MM-DD_rapport.md`, `rapports/YYYY-MM-DD_comparaison_<lieu>.md` | coach |
+| `report` | `rapports/YYYY-MM-DD_rapport.md`, `rapports/YYYY-MM-DD_comparaison_<lieu>.md`, `rapports/YYYY-MM-DD_debrief_<course>.md` | coach |
 | `course_eval` | `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` | skill `gpx-analysis` |
 | `race_plan` | plan de course dans `planning/` | course-strategist |
 | `decision` | `planning/YYYY-MM-DD_decision_<slug>.md` | coach, medical (garde-fous, bilan matinal, blessure) |
@@ -531,15 +531,49 @@ Tenez `status` à jour quand une séance est réalisée, manquée ou déplacée.
 | Clé | Type |
 |---|---|
 | **`date`** | date |
-| **`report_type`** | `weekly` `monthly` `comparison` `race` `adhoc` |
+| **`report_type`** | `weekly` `monthly` `comparison` `race` `race_debrief` `adhoc` |
 | **`title`** | texte |
 | `period_start`, `period_end` | date |
-| `location` | texte (comparaison de parcours) |
+| `location` | texte (comparaison de parcours, nom de la course pour `race_debrief`) |
 
 Le rapport lui-même est le texte sous le bloc : le tableau de bord l'affiche tel quel.
 
 ```arc
 {"arc": 1, "kind": "report", "date": "2026-09-21", "report_type": "weekly", "title": "Bilan de la semaine 38", "period_start": "2026-09-15", "period_end": "2026-09-21"}
+```
+
+**`race_debrief` (#61, épopée #23) : plan de course vs réalisé, PAR SEGMENT.**
+Fichier `rapports/YYYY-MM-DD_debrief_<course>.md`, comme `comparison`
+(`course-comparison`) : le bloc ```arc reste le schéma `report` générique
+ci-dessus (`period_start`/`period_end` = date de la course, `location` = nom
+de la course) — la comparaison chiffrée elle-même n'est PAS un nouveau champ
+du contrat, c'est la sortie JSON de `python3 scripts/arc_race_debrief.py
+debrief --plan <plan> --activity <activité de la course>` (mêmes conventions
+que `compare_course.py`/`analyze_gpx.py` : script combine deux fichiers déjà
+persistés, jamais une seconde implémentation dans l'agent). Le coach recopie
+dans le texte libre, sous le bloc, au minimum : l'écart de temps total,
+l'écart par segment (citer les identifiants `s01`, `s02`… du plan — stables
+d'un appel à l'autre, #59), le fade mesuré vs prévu, et les `findings` du
+script (ex. `depart_trop_rapide`, `glucides_sous_objectif`). **Un segment (ou
+le bloc `fade`) marqué `resolution: "low"` n'est PAS un fait** : son delta
+individuel est une interpolation, pas une mesure — ne le citez jamais tel
+quel, regroupez ces segments (« résolution insuffisante sur s03-s06, non
+exploitables individuellement ») ou omettez-les, et appuyez-vous sur les
+totaux et les `findings` (qui n'utilisent déjà que les segments
+`resolution: "high"`). Aligne les
+splits kilométriques de l'activité sur les bornes du plan par mise à l'échelle
+PROPORTIONNELLE de la distance cumulée (jamais du temps) quand les deux
+mesures totales diffèrent — voir `scripts/arc_race_debrief.py::ASSUMPTIONS`
+pour la méthode complète. `suggested_profile_updates` (glucides/h, tendance à
+partir trop vite…) est une liste de PROPOSITIONS : présentez-les à l'athlète,
+**n'écrivez jamais** vous-même `planning/Runner_Profile.md` à partir d'un
+débrief — ce fichier reste édité par l'athlète (voir plus bas). **`date` est
+le jour d'ÉCRITURE du rapport** (souvent J+1, le lendemain de la course),
+**`period_start`/`period_end` sont le jour de la course elle-même** — les deux
+diffèrent presque toujours, exactement comme dans l'exemple ci-dessous.
+
+```arc
+{"arc": 1, "kind": "report", "date": "2026-09-28", "report_type": "race_debrief", "title": "Débrief Trail des Collines", "period_start": "2026-09-27", "period_end": "2026-09-27", "location": "Trail des Collines"}
 ```
 
 ### `course_eval`
@@ -570,7 +604,7 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | `distance_m`, `elevation_gain_m`, `target_time_s` | nombre | |
 | `start_time` | date-heure | départ |
 | `scenarios` | objet | `{"ambitious": s, "realistic": s, "safe": s}` en secondes |
-| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement) |
+| `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement), `stop_s` (nombre, secondes — temps d'arrêt PRÉVU à ce ravito, #61 : repris par `arc_race_pacing.py`/`arc_race_debrief.py` au lieu du défaut générique (90 s) dès qu'il est renseigné ; à ne persister que pour un ravito dont l'arrêt attendu diffère vraiment du défaut, ex. repas chaud ou drop bag) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
 | `gear` | liste | matériel obligatoire et conseillé |
 | `segments` | liste d'objets | allures par segment depuis le modèle personnel (#59) — voir ci-dessous |

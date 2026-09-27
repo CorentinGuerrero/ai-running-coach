@@ -13,6 +13,8 @@ assertion sur un fichier, pas une devinette sur du texte.
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -463,23 +465,45 @@ FIXTURE_SNAPSHOT_NAME = ".fixture-snapshot.json"
 
 def _write_fixture_snapshot(root: Path, workspace: Path) -> None:
     """Chemins relatifs présents juste après la copie de la fixture (et le
-    renommage des dates relatives, #34) — l'état de référence pour distinguer
-    « apporté par la fixture » de « écrit par l'agent pendant le run ».
+    renommage des dates relatives, #34), avec le SHA-256 de leur contenu à cet
+    instant — l'état de référence pour distinguer « apporté par la fixture »
+    de « écrit par l'agent pendant le run » (`_new_files`), et pour détecter
+    qu'un fichier apporté par la fixture a été MODIFIÉ pendant le run
+    (`_changed_known_files`, #61 revue de code : un fichier édité par
+    l'athlète, comme `planning/Runner_Profile.md`, ne doit jamais être
+    réécrit silencieusement par un agent).
 
     Nécessaire depuis la convention `<N>d_...` (`_materialize_relative_dates`) :
     un fichier renommé avec la date réelle du jour n'a plus le même nom que dans
     `tests/evals/fixtures/<fixture>/`, donc une comparaison directe à ce dossier
     le prendrait à tort pour un fichier écrit par l'agent.
     """
-    paths = sorted(str(p.relative_to(workspace).as_posix()) for p in workspace.rglob("*") if p.is_file())
-    (root / FIXTURE_SNAPSHOT_NAME).write_text(json.dumps(paths), encoding="utf-8")
+    snapshot = {
+        str(p.relative_to(workspace).as_posix()): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in workspace.rglob("*") if p.is_file()
+    }
+    (root / FIXTURE_SNAPSHOT_NAME).write_text(json.dumps(snapshot), encoding="utf-8")
+
+
+def _load_snapshot(result: dict):
+    """`{chemin_relatif: sha256}` au moment de la construction du workspace, ou
+    `None` si aucun snapshot n'existe (repli, voir `_new_files`)."""
+    snapshot_path = result["workspace"].parent / FIXTURE_SNAPSHOT_NAME
+    if not snapshot_path.exists():
+        return None
+    raw = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    # Repli de compatibilité : un ANCIEN snapshot (avant #61) est une simple
+    # LISTE de chemins, sans hash — traité comme "hash inconnu" (`None`),
+    # jamais une fausse absence de changement.
+    if isinstance(raw, list):
+        return {path: None for path in raw}
+    return raw
 
 
 def _new_files(case: dict, result: dict, pattern: str) -> list:
     """Fichiers du workspace correspondant au motif, hors ceux apportés par la fixture."""
-    snapshot_path = result["workspace"].parent / FIXTURE_SNAPSHOT_NAME
-    if snapshot_path.exists():
-        known = set(json.loads(snapshot_path.read_text(encoding="utf-8")))
+    known = _load_snapshot(result)
+    if known is not None:
         return sorted(p for p in result["workspace"].glob(pattern)
                       if p.is_file() and p.relative_to(result["workspace"]).as_posix() not in known)
     # Repli (snapshot absent, ex. workspace construit hors de `build_workspace`) :
@@ -487,6 +511,40 @@ def _new_files(case: dict, result: dict, pattern: str) -> list:
     fixture = FIXTURES_DIR / case.get("fixture", "base-week")
     return sorted(p for p in result["workspace"].glob(pattern)
                   if p.is_file() and not (fixture / p.relative_to(result["workspace"])).exists())
+
+
+def _changed_known_files(result: dict, pattern: str) -> list:
+    """Fichiers correspondant au motif, DÉJÀ présents dans la fixture (donc
+    exclus de `_new_files`), dont le contenu a changé pendant le run — voir
+    `_write_fixture_snapshot`. Un fichier dont le hash de snapshot est `None`
+    (ancien format sans hash, ou snapshot absent) n'est jamais rapporté comme
+    changé : mieux vaut ne rien affirmer que rapporter un faux positif.
+
+    Itère sur les entrées du SNAPSHOT (l'état AVANT le run) qui correspondent
+    au motif — jamais sur les fichiers actuellement présents dans le
+    workspace (revue de code #61, 3ᵉ tour, should-fix) : un fichier
+    SUPPRIMÉ ou DÉPLACÉ par l'agent ne serait alors plus jamais vu par
+    `workspace.glob(pattern)` et échapperait entièrement à la détection,
+    alors qu'un déplacement ou une suppression est exactement le genre de
+    changement silencieux que cette assertion doit attraper. Un fichier connu
+    du snapshot mais absent du workspace après le run compte donc lui aussi
+    comme « changé »."""
+    known = _load_snapshot(result)
+    if not known:
+        return []
+    workspace = result["workspace"]
+    changed = []
+    for rel, old_hash in known.items():
+        if old_hash is None or not fnmatch.fnmatch(rel, pattern):
+            continue
+        p = workspace / rel
+        if not p.is_file():
+            changed.append(p)  # supprimé, ou déplacé ailleurs
+            continue
+        new_hash = hashlib.sha256(p.read_bytes()).hexdigest()
+        if new_hash != old_hash:
+            changed.append(p)
+    return sorted(changed)
 
 
 def _load_arc_block(path: Path):
@@ -1065,6 +1123,16 @@ def check(case: dict, result: dict) -> list:
         if new:
             failures.append(f"fichier(s) écrit(s) alors qu'attendu(s) absent(s) : "
                             + ", ".join(str(p.relative_to(result["workspace"])) for p in new))
+
+    # Fichiers APPORTÉS par la fixture (édités par l'athlète, ex.
+    # `planning/Runner_Profile.md`) qu'un agent ne doit jamais réécrire
+    # silencieusement (#61, revue de code) — distinct de `files_absent`, qui
+    # ne voit que les fichiers NOUVEAUX.
+    for pattern in _as_list(expect.get("unchanged_files")):
+        changed = _changed_known_files(result, pattern)
+        if changed:
+            failures.append(f"fichier(s) de la fixture modifié(s) alors qu'attendu(s) inchangé(s) : "
+                            + ", ".join(str(p.relative_to(result["workspace"])) for p in changed))
 
     limit = expect.get("max_words")
     if limit and len(haystack.split()) > int(limit):

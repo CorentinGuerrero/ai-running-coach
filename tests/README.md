@@ -388,6 +388,22 @@ glob = "rapports/*.md"
 any = ["bilan hebdomadaire", "résumé", "synthèse"]
 ```
 
+#### `unchanged_files` — vérifier qu'un fichier de la fixture n'a PAS été réécrit (#61)
+
+Le pendant « fichier déjà présent » de `files_absent` (qui, lui, ne voit que
+les fichiers NOUVEAUX) : une liste de chemins/globs qui doivent garder
+EXACTEMENT le contenu qu'ils avaient dans la fixture, octet pour octet
+(comparaison par SHA-256, capturée par un instantané pris juste après la
+copie de la fixture) — utile pour un fichier que l'athlète édite lui-même
+(`planning/Runner_Profile.md`, `planning/active_objective.md`) et qu'un agent
+ne doit jamais réécrire silencieusement, même pour y ajouter une proposition
+légitime.
+
+```toml
+[expect]
+unchanged_files = ["planning/Runner_Profile.md"]
+```
+
 ## Palier D — données
 
 Tests unitaires purs, sans sous-processus : le contrat ```` ```arc ````

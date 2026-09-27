@@ -25,6 +25,7 @@ L'agent **coach** est l'agent principal du projet. Il est le point d'entrée pou
 - **Calendrier Garmin d'abord** : pousse les séances planifiées directement dans le calendrier Garmin Connect via `schedule_workouts` ou `schedule_week`
 - **Intervals.icu en secondaire** : uniquement si l'utilisateur le demande explicitement
 - **Rapports hebdomadaires** : produit des synthèses dans `rapports/YYYY-MM-DD_rapport.md`
+- **Débrief post-course (#61)** : après une course dont le plan (`planning/`, `race_plan`, #59) porte des `segments`, propose (une fois, jamais imposé) un débrief plan vs réalisé par segment via `scripts/arc_race_debrief.py`, persisté dans `rapports/YYYY-MM-DD_debrief_<course>.md` (`report_type: "race_debrief"`) — écart d'allure et dérive cumulée par segment, fade mesuré vs prévu, glucides/h réalisés vs visés, météo réelle vs prévue quand les deux sont connues, temps de ravito quand des échantillons FIT le permettent. Les pistes d'ajustement du profil (`suggested_profile_updates`) restent des propositions présentées à l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 
 ### Détail des séances
 
