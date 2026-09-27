@@ -115,12 +115,13 @@ Sur le portable : `git pull` avant de travailler, `git push` après.
 ## Suivre les mises à jour du moteur
 
 ```bash
-cd ~/ai-running-coach && git pull
-./install.sh --ide claude --workspace ~/mon-workspace --no-auth   # si un skill a été ajouté/supprimé
+cd ~/ai-running-coach && git pull --ff-only
+./install.sh --ide claude --workspace ~/mon-workspace --no-auth   # catalogue de skills, .mcp.json, .gitignore
 ```
 
-Sur la machine coach, le service Remote Control et le cron n'ont pas besoin d'être
-redémarrés : ils lisent les skills à chaque session.
+Le cron relit les skills à chaque run. Sur la machine coach, relancez Remote Control
+(`scripts/coach-remote.sh restart`) si `.mcp.json` a changé. Procédure complète, retour
+arrière compris : [Mettre à jour](update.md).
 
 ## Ce qui reste hors des deux dépôts
 

@@ -171,6 +171,7 @@ La documentation complète est disponible sur [GitHub Pages](https://mmornati.gi
 - [Configuration Garmin](docs/garmin-setup.md)
 - [Votre workspace privé (données versionnées, moteur lié)](docs/workspace.md)
 - [Le coach dans la poche (mobile + sync automatique)](docs/mobile.md)
+- [Mettre à jour (moteur, workspace, machine coach)](docs/update.md)
 - [Tableau de bord](docs/dashboard/index.md) · [Les vues](docs/dashboard/views.md) · [Migrer vos fichiers](docs/dashboard/migration.md) · [Mode headless](docs/dashboard/headless.md) · [Docker](docs/dashboard/docker.md)
 - [Les agents](docs/agents.md)
 - [Les skills](docs/skills.md)

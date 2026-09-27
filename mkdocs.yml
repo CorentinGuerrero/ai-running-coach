@@ -79,6 +79,7 @@ nav:
       - IDE supportés: ides.md
       - Votre workspace privé: workspace.md
       - Le coach dans la poche: mobile.md
+      - Mettre à jour: update.md
   - Tableau de bord:
       - Prise en main: dashboard/index.md
       - Les vues: dashboard/views.md
