@@ -32,7 +32,12 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   `intervals`, pas `garmin` ; l'activité persistée porte `intervals_activity_id`
   (chaîne) au lieu de `garmin_activity_id` (entier), et omet HRR/`splits`
   (aucun équivalent). Aucun échantillon FIT téléchargé (étape 2 ci-dessous
-  sautée entièrement — Garmin uniquement).
+  sautée entièrement — Garmin uniquement). **Marqueur « pas encore
+  synchronisé » (`garmin-sync-efficiency`, règle 1a) : c'est l'absence de
+  `intervals_activity_id`, pas de `garmin_activity_id`, qui compte ici** — un
+  fichier `/log` déjà présent pour une date, sans cet identifiant, reste « pas
+  encore synchronisé » et doit être fusionné à l'étape 1 ci-dessous, jamais
+  pris pour une séance déjà traitée.
 - **Pas de contrôle de premier démarrage** : le coach propose `/coach-setup` quand aucune
   configuration n'existe. **Ici, ne jamais le proposer** : personne ne peut répondre, et la
   proposition finirait dans la notification push. Travailler avec les défauts et le signaler

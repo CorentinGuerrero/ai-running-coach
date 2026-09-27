@@ -28,6 +28,8 @@ AGENTS_MD = (REPO / "AGENTS.md").read_text(encoding="utf-8")
 DAILY_SYNC_SKILL = (REPO / "skills/garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
 DAILY_SYNC_SH = (REPO / "scripts/daily-sync.sh").read_text(encoding="utf-8")
 INSTALL_SH = (REPO / "install.sh").read_text(encoding="utf-8")
+GARMIN_SYNC_EFFICIENCY_SKILL = (REPO / "skills/garmin-sync-efficiency/SKILL.md").read_text(encoding="utf-8")
+LOG_SKILL = (REPO / "skills/log/SKILL.md").read_text(encoding="utf-8")
 
 # Phrases Garmin-mode telles qu'écrites avant #68 — copiées verbatim depuis
 # `agents/coach.md`/`agents/medical.md` (git blame antérieur à cette story).
@@ -51,8 +53,8 @@ MEDICAL_GARMIN_SENTENCES = [
 
 # Idem pour skills/garmin-daily-sync/SKILL.md.
 DAILY_SYNC_GARMIN_SENTENCES = [
-    "fetch from the `garmin` MCP\n   > server: activities (with splits and `recovery_hr_bpm`), "
-    "sleep, HRV, training readiness,",
+    "fetch from the `garmin`\n   > MCP server: activities (with splits and `recovery_hr_bpm`), "
+    "sleep, HRV, training\n   > readiness,",
 ]
 
 # Idem pour AGENTS.md — la règle "secondaire sinon" doit rester la règle par
@@ -170,6 +172,30 @@ class TestDataSourceDocumented(unittest.TestCase):
     def test_install_sh_pins_the_intervals_server_commit(self):
         self.assertIn("INTERVALS_MCP_REF=", INSTALL_SH)
         self.assertIn("@cb91d4a", INSTALL_SH)
+
+    def test_not_yet_synced_marker_is_source_aware(self):
+        """#67 (\"/log\", merged after #68) introduced a "not yet synced"
+        marker keyed on `garmin_activity_id`. #68's source-awareness pass must
+        cover it everywhere it's restated: `garmin-sync-efficiency` rule 1a
+        (the marker's own definition), `skills/log/SKILL.md` (the interactive
+        fetch-before-create step), and `garmin-daily-sync` (which restates the
+        rule for the headless prompt) — never left Garmin-only by accident."""
+        for label, text in (
+            ("garmin-sync-efficiency", GARMIN_SYNC_EFFICIENCY_SKILL),
+            ("log", LOG_SKILL),
+            ("garmin-daily-sync", DAILY_SYNC_SKILL),
+        ):
+            with self.subTest(skill=label):
+                self.assertIn("intervals_activity_id", text)
+                self.assertIn("garmin_activity_id", text)
+        # Le skill /log doit utiliser l'outil de la source configurée, pas
+        # `get_activities` en dur, pour le sync ciblé avant création.
+        self.assertIn("get_recent_activities", LOG_SKILL)
+        self.assertIn("get_activities", LOG_SKILL)
+        # Les clés santé restent IDENTIQUES quelle que soit la source (aucun
+        # champ santé propre à intervals.icu n'existe) — la story ne doit pas
+        # en avoir inventé un.
+        self.assertIn("hrv_overnight_ms", GARMIN_SYNC_EFFICIENCY_SKILL)
 
     def test_daily_sync_skips_garmin_token_checks_in_intervals_mode(self):
         """check_token_alert() ne doit jamais tourner sous source=intervals —

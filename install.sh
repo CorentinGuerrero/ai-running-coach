@@ -439,6 +439,26 @@ cleanup_stale_mcp_server() {
     done
 }
 
+# Vrai si `name` est encore présent dans `section` de `file` — utilisé pour ne
+# désapprouver dans ~/.claude.json (voir unapprove_claude_project_mcp()) QUE
+# les entrées effectivement retirées de .mcp.json par cleanup_stale_mcp_server()
+# ci-dessus, jamais une entrée ajoutée à la main qui a survécu au garde-fou
+# --expect-command (revue PR #116).
+mcp_server_key_exists() {
+    local file="$1" section="$2" name="$3"
+    [[ -f "$file" ]] || return 1
+    have python3 || return 1
+    python3 -c '
+import json, sys
+file, section, name = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    data = json.load(open(file, encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if name in (data.get(section) or {}) else 1)
+' "$file" "$section" "$name"
+}
+
 have() { command -v "$1" >/dev/null 2>&1; }
 
 require_cmd() {
@@ -1201,12 +1221,15 @@ write_claude_config() {
     approve_claude_project_mcp "$(mcp_server_name)"
     # Désapprouve l'ancienne source (#68) — sinon ~/.claude.json continue de
     # lister un serveur qui n'est plus dans .mcp.json comme "approuvé". Même
-    # garde-fou que cleanup_stale_mcp_server() : uniquement si --source a
-    # réellement fait basculer la source (jamais sur un simple rerun).
+    # garde-fou que cleanup_stale_mcp_server() (--source a réellement basculé),
+    # PLUS un second garde-fou (revue PR #116) : ne désapprouver que l'entrée
+    # RÉELLEMENT retirée de .mcp.json ci-dessus (write_project_mcp_json a déjà
+    # tourné) — jamais une entrée ajoutée à la main qui a survécu au
+    # garde-fou --expect-command et reste présente/fonctionnelle.
     if [[ "$SOURCE_CHANGED" -eq 1 ]]; then
-        local stale
+        local stale cfg="$WORKSPACE_ROOT/.mcp.json"
         for stale in $(stale_mcp_server_names); do
-            unapprove_claude_project_mcp "$stale"
+            mcp_server_key_exists "$cfg" mcpServers "$stale" || unapprove_claude_project_mcp "$stale"
         done
     fi
 }

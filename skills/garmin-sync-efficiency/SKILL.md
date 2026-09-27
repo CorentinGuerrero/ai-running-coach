@@ -29,18 +29,24 @@ or `upload_workout` — see the correspondence table in `AGENTS.md`.
    the file — do NOT re-fetch. If it exists but does NOT carry that marker, it is **not yet
    synced** — go fetch it like a missing date, then MERGE (rule 1a) rather than skip.
 1a. **"Not yet synced" marker (#67).** The `/log` skill may create a minimal `activities/`
-   or `medical/` file, before any Garmin sync ran that day, holding only athlete-declared
-   fields. That file is "not yet synced": an `activities/*.md` file with **no
-   `garmin_activity_id`**, or a `medical/*.md` file with **none of** `hrv_overnight_ms`,
-   `resting_hr_bpm`, `readiness_score`, `sleep_total_s`. Its presence must never suppress
-   that day's fetch. Once fetched, MERGE the Garmin fields into that SAME file — never write
+   or `medical/` file, before any sync ran that day, holding only athlete-declared
+   fields. That file is "not yet synced": an `activities/*.md` file with **no activity id
+   for the configured source** — `garmin_activity_id` at `[data].source = "garmin"` (default),
+   `intervals_activity_id` at `"intervals"` (#68 — check the field matching the CONFIGURED
+   source, never both, never the wrong one: an intervals-mode file with no
+   `intervals_activity_id` is not yet synced even if it happens to carry an unrelated
+   `garmin_activity_id` from before a source switch) — or a `medical/*.md` file with **none of**
+   `hrv_overnight_ms`, `resting_hr_bpm`, `readiness_score`, `sleep_total_s` (health keys are
+   the SAME regardless of source — see the correspondence table in `AGENTS.md`; no
+   source-specific health marker exists). Its presence must never suppress
+   that day's fetch. Once fetched, MERGE the fetched fields into that SAME file — never write
    a second file for the same date/session — and **never overwrite an athlete-declared key**:
    `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg`
-   (activity) and `pain` (health) come only from the athlete, Garmin has no such field, so
-   the merge is a plain union — add the new Garmin keys, keep the declared ones byte-for-byte.
+   (activity) and `pain` (health) come only from the athlete, neither source has such a field, so
+   the merge is a plain union — add the new keys, keep the declared ones byte-for-byte.
    A file that already carries the marker (a real prior sync) is fresh and final — merge
    never applies to it, only to a not-yet-synced one. A synced health file that genuinely has
-   no HRV/RHR that day (Garmin returned nothing, e.g. watch not worn overnight), or a manual
+   no HRV/RHR that day (the source returned nothing, e.g. watch not worn overnight), or a manual
    activity with no watch involved at all, will keep matching this marker and so gets
    re-fetched on every run within `lookback_days` — harmless (an idempotent no-op merge, at
    most a wasted API call), never a data-corruption risk, so don't special-case it.

@@ -189,6 +189,22 @@ class TestHandAddedServerNeverClobbered(InstallAsserts):
             self.assertSucceeded(sb.install("--source", "garmin", "--no-auth", "--ide", "claude"))
             self.assertNotIn("intervals", _mcp_servers(sb))
 
+    def test_real_switch_does_not_unapprove_a_preserved_non_standard_entry(self):
+        """Nit (revue PR #116) : la désapprobation dans ~/.claude.json doit
+        suivre le MÊME sort que .mcp.json — une entrée préservée par le
+        garde-fou --expect-command ne doit pas non plus être désapprouvée."""
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--no-auth", "--ide", "claude"))  # source garmin (défaut)
+            self.assertIn("garmin", sb.claude_json()["projects"][str(sb.repo)]["enabledMcpjsonServers"])
+            cfg = sb.repo / ".mcp.json"
+            data = json.loads(cfg.read_text())
+            data["mcpServers"]["garmin"] = {"command": "not-garmin-mcp-at-all", "args": []}
+            cfg.write_text(json.dumps(data))
+            self.assertSucceeded(sb.install("--source", "intervals", "--no-auth", "--ide", "claude"))
+            enabled = sb.claude_json()["projects"][str(sb.repo)]["enabledMcpjsonServers"]
+            self.assertIn("garmin", enabled, "entrée non standard désapprouvée alors qu'elle est conservée dans .mcp.json")
+            self.assertIn("intervals", enabled)
+
     def test_real_switch_does_not_remove_a_non_standard_stale_entry(self):
         """La source bascule RÉELLEMENT (garmin -> intervals) — "garmin" est
         donc bien la source « stale » ciblée par le nettoyage — mais sa
