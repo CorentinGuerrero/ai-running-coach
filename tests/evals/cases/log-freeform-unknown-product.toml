@@ -1,0 +1,39 @@
+# `/log` (#67), symétrique de `log-freeform` : produit ABSENT du catalogue
+# fixture (qui ne contient que « Gel Fixture Test ») → l'agent doit DEMANDER
+# la valeur en glucides plutôt que d'en inventer une générique, sans pour
+# autant bloquer le reste de la déclaration (liquide, RPE). Prompt donnant
+# sport + durée dans le même message, même raison que `log-freeform` (aucune
+# activité pré-existante à fusionner : `arc_field`/`files_with_arc_block` ne
+# voient que les fichiers ÉCRITS pendant le run).
+id = "log-freeform-unknown-product"
+prompt = "/log Sortie de ce matin, trail, 1h : 1 barre mystère maison + 300 ml, RPE 5"
+fixture = "log-freeform-unknown-product"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+files_absent = ["nutrition/*.md"]
+# Le catalogue de l'athlète n'est jamais modifié par l'agent — la valeur d'un
+# produit inconnu se demande, elle ne s'ajoute pas au catalogue de sa propre
+# initiative.
+unchanged_files = ["resources/nutrition/catalogue-produits-fixture.md"]
+
+# Une vraie question sur la valeur du produit, pas une affirmation déguisée :
+# soit une demande de la valeur en glucides, soit un aveu explicite que le
+# produit n'est pas reconnu/dans le catalogue.
+must_match = [
+  "(quels?|quelle) (sont )?les? glucides|combien de glucides|valeur (nutritionnelle|en glucides)|je ne (trouve|connais) pas ce produit|(absent|inconnu) du catalogue|n['’]est pas dans (le|ton|votre) catalogue|(peux|peux-tu|pourrais-tu).{0,30}(indiquer|donner|préciser)",
+]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "fluid_intake_ml"
+equals = 300
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "rpe"
+equals = 5
+
+[[expect.arc_field_absent]]
+glob = "activities/*.md"
+paths = ["carbs_g"]

@@ -1,0 +1,59 @@
+# `/log` (#67) : saisie libre → blocs arc, arithmétique déterministe.
+#
+# Aucune activité du jour dans la fixture (aucun sync Garmin déjà fait) : le
+# prompt donne sport + durée dans le même message ("trail, 1h30") pour que
+# l'agent puisse créer le fichier minimal sans jamais inventer `duration_s`
+# (voir `skills/log/SKILL.md`, "Où écrire" — un fichier PRÉ-EXISTANT à fusionner
+# échapperait de toute façon à `arc_field`, qui ne voit que les fichiers
+# ÉCRITS pendant le run, `tests/evals/runner.py::_new_files`).
+#
+# Le catalogue fixture (1 « Gel Fixture Test » = 32 g de glucides) sert à
+# vérifier que 2 gels donnent 64 g, jamais une valeur générique — une petite
+# marge de tolérance absorbe un arrondi ou une reformulation de quantité par
+# le modèle, jamais une conversion différente. `fluid_intake_ml` (500 ml,
+# déclaré directement en millilitres) et `rpe` ne demandent aucune conversion :
+# vérifiés au chiffre près. La douleur va dans `medical/`, jamais dans le
+# fichier d'activité ni dans `nutrition/` (#57).
+id = "log-freeform"
+prompt = "/log Sortie de ce matin, trail, 1h30 : 2 Gel Fixture Test + 500 ml au km 15, genou gauche 3/10, RPE 7"
+fixture = "log-freeform"
+
+[expect]
+files_with_arc_block = ["activities/*.md", "medical/*.md"]
+files_absent = ["nutrition/*.md"]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "carbs_g"
+min = 54
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "carbs_g"
+max = 74
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "fluid_intake_ml"
+equals = 500
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "rpe"
+equals = 7
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "sport"
+equals = "trail"
+
+[[expect.arc_field]]
+glob = "medical/*.md"
+path = "pain[0].score"
+equals = 3
+
+# Le narratif de la douleur (localisation en texte libre) reste vérifié par
+# la présence du mot, jamais par une égalité exacte de formulation.
+[[expect.file_contains_any]]
+glob = "medical/*.md"
+any = ["genou"]

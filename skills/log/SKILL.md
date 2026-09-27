@@ -1,0 +1,153 @@
+---
+name: log
+description: Saisie libre en une phrase (ravitaillement, douleur, RPE) invoquée comme /log — « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Extrait les entités, délègue l'arithmétique et la correspondance catalogue à scripts/arc_log.py (jamais de calcul ni de conversion à la main), puis écrit dans les bons fichiers au contrat (activities/, medical/) sans jamais inventer une valeur nutritionnelle absente du catalogue. Charger dès que l'utilisateur tape /log ou décrit en une phrase ce qu'il a mangé/bu/ressenti pendant ou après une séance.
+---
+
+# `/log` — saisie libre (#67)
+
+Une phrase du type « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 »
+contient jusqu'à trois natures de données, chacune avec son fichier et son
+propriétaire (`AGENTS.md`) :
+
+| Nature | Fichier | Clé(s) du contrat | Agent qui écrit |
+|---|---|---|---|
+| Ravitaillement / hydratation pendant l'effort | `activities/YYYY-MM-DD_<type>.md` (séance du jour) | `carbs_g`, `fluid_intake_ml` | `coach` |
+| RPE de la séance | même fichier `activities/` | `rpe` | `coach` |
+| Douleur | `medical/YYYY-MM-DD_health.md` | `pain` (liste `{location, score}`) | `medical` si activé (`[agents].enabled`), sinon `coach` dans la limite de sa compétence |
+
+**Aucune de ces trois natures ne va dans `nutrition/`** : ce dossier reste le
+journal d'apport quotidien déclaré séparément (`agents/nutritionist.md`) —
+l'apport EN COURS D'EFFORT vit sur l'activité elle-même
+(`skills/workspace-data-contract/SKILL.md`, section « Matériel, sudation,
+glucides »).
+
+## Rôle du modèle vs rôle du script
+
+**Vous (le modèle) faites l'extraction d'entités, jamais l'arithmétique.** Un
+LLM qui calcule une somme de glucides ou convertit un produit peut inventer un
+chiffre plausible mais faux. `scripts/arc_log.py` fait tout le calcul, en pur
+stdlib, déterministe :
+
+1. Lisez la phrase et extrayez, sans convertir ni sommer :
+   - `nutrition_items` : une entrée `{"product": "...", "qty": "..."}` par
+     produit SOLIDE cité (« 2 gels » → `{"product": "gel", "qty": "2"}`) —
+     laissez `product` dans les mots de l'athlète, ne le reformulez pas vers un
+     nom de catalogue, `arc_log.py` fait la correspondance ;
+   - `fluid_entries` : une chaîne par quantité de liquide citée (« 500 ml »,
+     « 0,5 l ») — jamais convertie ici ;
+   - `pain` : une entrée `{"location": "...", "score": "..."}` par zone
+     douloureuse citée, score tel quel (« 3/10 » → `"3"`) ;
+   - `rpe` : la valeur telle que citée, si présente ;
+   - `position` : la position dans la séance si citée (« au km 15 », « après
+     30 min ») — texte libre, aucune clé du contrat ne la porte (voir
+     « Position dans la séance » ci-dessous).
+2. Résolvez `catalogue_paths` : listez `resources/nutrition/catalogue-produits-*.md`.
+   Absent du dépôt de l'athlète → passez `"catalogue_paths": []` explicitement
+   (jamais omis : omis veut dire « je n'ai pas cherché », `[]` veut dire
+   « cherché, aucun trouvé »).
+3. Appelez le script :
+
+   ```bash
+   echo '{"catalogue_paths": ["resources/nutrition/catalogue-produits-famille.md"],
+          "nutrition_items": [{"product": "gel", "qty": "2"}],
+          "fluid_entries": ["500 ml"],
+          "pain": [{"location": "genou gauche", "score": "3"}],
+          "rpe": "7"}' | python3 scripts/arc_log.py
+   ```
+
+   Rend un JSON : `nutrition.matched`/`unknown`/`ambiguous`/`carbs_g`,
+   `fluid_intake_ml`, `pain` (avec `consult: true/false` par entrée), `rpe`,
+   `warnings`. **Recopiez ces valeurs telles quelles** dans les blocs ```arc —
+   ne recalculez rien à la main, même une addition qui semble triviale.
+
+## Produit inconnu ou ambigu → toujours demander
+
+- `nutrition.unknown` avec `reason: "unknown_product"` (produit absent du
+  catalogue) ou `reason: "no_catalogue"` (aucun catalogue trouvé) :
+  **demandez** la valeur en glucides du produit à l'athlète plutôt que
+  d'inventer. S'il la donne, ajoutez-la vous-même au total `carbs_g` écrit
+  dans le bloc (une simple addition, la valeur elle-même vient de
+  l'athlète, jamais d'une estimation générique). S'il ne la connaît pas ou ne
+  répond pas dans ce tour, **écrivez quand même le reste** (liquide, douleur,
+  RPE) et mentionnez le produit dans le texte libre sous le bloc, SANS clé
+  `carbs_g` pour cette part-là — jamais une valeur générique glissée à sa
+  place.
+- `nutrition.ambiguous` (plusieurs produits du catalogue correspondent) :
+  **listez les candidats** (`ambiguous[].candidates`) et demandez lequel.
+  N'écrivez le `carbs_g` correspondant qu'une fois la réponse obtenue.
+- Dans les deux cas, ne bloquez jamais les AUTRES parties de la phrase
+  (liquide déclaré au gramme près, douleur, RPE) en attendant la réponse sur
+  le produit ambigu/inconnu.
+
+## Où écrire
+
+### Ravitaillement, hydratation, RPE → `activities/`
+
+1. Cherchez `activities/YYYY-MM-DD_*.md` pour la date visée (aujourd'hui, sauf
+   si l'athlète en cite une autre — « la sortie de ce matin », « hier »).
+   - **Un seul fichier** ce jour-là → c'est lui.
+   - **Aucun fichier, mais le sport et la durée (ou l'heure de début et de
+     fin) sont donnés dans le même message** (« sortie de ce matin, trail,
+     1h30 ») → créez le fichier minimal (`sport`, `duration_s`, `date`) plutôt
+     que de faire attendre l'athlète pour une information qu'il vient de
+     donner — `duration_s` vient alors de sa propre déclaration, ce n'est pas
+     une valeur inventée.
+   - **Aucun fichier, et rien pour identifier au moins le sport et la durée**
+     → demandez à quelle séance (sport, heure) cela se rapporte plutôt que de
+     créer un fichier `activity` avec une `duration_s` inventée (obligatoire
+     au contrat) : `carbs_g`/`fluid_intake_ml`/`rpe` n'existent que sur une
+     activité, jamais seuls.
+   - **Plusieurs fichiers** (deux séances le même jour) → demandez laquelle.
+2. Ouvrez le fichier, lisez son bloc ```arc existant (peut déjà porter
+   d'autres clés du sync Garmin), et **fusionnez** — n'écrasez jamais une clé
+   déjà présente pour une raison différente (`garmin_activity_id`,
+   `distance_m`...). Si `carbs_g`/`fluid_intake_ml`/`rpe` existent déjà pour
+   ce fichier (un `/log` précédent le même jour), **additionnez** les
+   nouvelles valeurs de ravitaillement/liquide aux anciennes (un athlète peut
+   logger deux fois pendant le même effort) ; un nouveau `rpe` **remplace**
+   l'ancien (un seul RPE par séance a un sens, le dernier déclaré prime).
+3. Ajoutez sous le bloc, dans la langue des documents, une ligne courte qui
+   cite la position déclarée si présente (voir ci-dessous).
+4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
+
+### Douleur → `medical/`
+
+1. `medical/YYYY-MM-DD_health.md` du jour visé (même règle de date que
+   ci-dessus). Si `medical` figure dans `[agents].enabled`, déléguez-lui
+   l'écriture (outil `task`, prompt en anglais + « Respond in <langue des
+   documents> ») ; sinon écrivez-le vous-même, dans la limite de votre
+   compétence (`AGENTS.md`).
+2. Fusionnez `pain` dans le bloc existant si le fichier existe déjà (bilan
+   matinal du jour, par exemple) — **ajoutez** les nouvelles entrées à la
+   liste, ne remplacez jamais celles déjà présentes. Si le fichier n'existe
+   pas encore, créez-le avec `"morning_check": "off"` **seulement** si aucun
+   bilan matinal n'a eu lieu ce jour (une déclaration de douleur en cours de
+   journée n'est pas un bilan matinal manqué) — sinon reprenez le
+   `morning_check` déjà en vigueur.
+3. **Score ≥ `pain_consult_threshold`** (le script le signale par
+   `consult: true`, seuil par défaut 7/10, `[injury_risk].pain_consult_threshold`,
+   voir `agents/medical.md`) : recommandez explicitement une consultation dans
+   votre réponse, en plus de l'avoir écrit dans `pain`.
+4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
+
+### Position dans la séance (km, temps écoulé)
+
+Aucune clé du contrat `activity` ne porte une position ponctuelle de
+ravitaillement/douleur dans la séance (`splits` existe mais décrit un km
+entier, pas un événement instantané) — inventer une clé serait une clé hors
+contrat (`workspace-data-contract`, règle 4). Une position déclarée
+(« au km 15 ») reste donc du texte libre, sous le bloc ```arc du fichier
+`activities/` concerné : « Ravitaillement au km 15 : 2 gels, 500 ml. »
+
+## Confirmation
+
+Une seule ligne, dans la langue des documents, citant chaque fichier écrit et
+ce qui y a été ajouté — jamais un JSON brut, jamais le dump de
+`scripts/arc_log.py` :
+
+> Noté : 96 g de glucides + 750 ml dans `activities/2026-09-24_trail.md`,
+> douleur genou gauche 3/10 dans `medical/2026-09-24_health.md`.
+
+Si une question reste en attente (produit inconnu/ambigu, séance introuvable),
+posez-la **après** cette ligne de confirmation, jamais à sa place — le reste
+de la phrase ne doit pas rester bloqué par une seule zone d'incertitude.
