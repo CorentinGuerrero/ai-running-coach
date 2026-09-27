@@ -34,6 +34,39 @@
 - **Zones fragiles à surveiller** :
 - **Arrêts récents** : <!-- maladie, coupure, reprise -->
 
+## Indices de performance (ITRA / UTMB)
+
+> Facultatif. Ces indices ne sont **jamais** récupérés automatiquement par un
+> agent ou un script : seul vous pouvez les écrire ici, ou demander
+> explicitement à l'agent `coach` de les chercher sur le web pour vous — il
+> vous montrera alors la valeur trouvée et sa source, et vous demandera
+> confirmation avant de l'écrire. Nomenclature UTMB (`20k`/`50k`/`100k`/`100m`)
+> vérifiée ; celle de l'ITRA par catégorie n'a pas pu être vérifiée à
+> l'écriture de ce modèle — la catégorie reste donc du texte libre.
+>
+> Une seule source de vérité : l'**historique** ci-dessous. La valeur
+> « actuelle » d'un indice est simplement sa ligne la plus récente — inutile de
+> la dupliquer ailleurs dans ce fichier.
+
+### Historique des indices
+
+<!--
+  Une puce de PREMIER NIVEAU par relevé daté, au format :
+    - AAAA-MM-JJ — itra [catégorie] : <valeur>
+    - AAAA-MM-JJ — utmb [20k|50k|100k|100m] : <valeur>
+
+  La catégorie est facultative (indice général si omise). Pour l'UTMB, seules
+  les quatre catégories ci-dessus sont reconnues ; toute autre valeur, comme
+  une ligne qui ne respecte pas ce format, est ignorée (avec un avertissement
+  au tableau de bord/CLI) plutôt que de fausser silencieusement le calcul.
+
+  Exemples (à adapter, effacer les lignes que vous ne remplissez pas) :
+  - 2025-11-01 — itra : 610
+  - 2025-11-01 — itra L : 600
+  - 2026-02-15 — utmb 100k : 560
+-->
+
+
 ## Matériel & lieux
 
 - **Lieu par défaut** : <!-- ville utilisée pour la météo, ex. « Tournai » -->

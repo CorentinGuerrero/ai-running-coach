@@ -311,6 +311,33 @@ in one sentence and let them decide.
 - **User habit:** Use the "Créneau habituel" field of the athlete profile. If it is empty, ask once and write the answer into the profile rather than assuming. Only override the athlete's usual slot when weather thresholds justify it; always explain WHY in the report.
 - **Heat acclimation, 14-day (#38).** Before validating a hot-weather session (🟠/🔴, or a race forecast ≥ threshold), run `python3 scripts/arc_index.py heat-acclimation` (headless, NOT gated by `[health].morning_check` — it joins outdoor activities to same-day weather files, unrelated to the morning check) for `hot_sessions`/`hot_duration_s` over the last 14 days at `≥ [health].heat_threshold_c` (default 25 °C, boundary inclusive). Few or no recent hot sessions means little heat acclimation: bias toward a more conservative adjustment (shorter, earlier slot, more hydration) than the general 🟠/🔴 rules above would suggest on their own — never assume acclimation just because the season is warm. `sessions_without_weather` in the same JSON means the count is incomplete, not zero. Full method in `scripts/arc_metrics.py::ASSUMPTIONS["heat_acclimation"]`.
 
+### PERFORMANCE INDEX MANDATE (ITRA / UTMB, #62 — privacy)
+
+The athlete profile may declare ITRA and/or UTMB Index values, with a dated
+history, under "Indices de performance (ITRA / UTMB)" → "Historique des
+indices". Read them with `python3 scripts/arc_index.py performance-index`
+(or `/api/summary.performance_index` / `/api/performance-index` on the
+dashboard) — never re-derive them yourself.
+
+- **No automatic fetch, ever.** No script in this repository queries
+  `itra.run`, `utmb.world`, or any third-party site for the athlete's index —
+  a locked test suite enforces this. You must not either: never call a web
+  tool for this on your own initiative, at startup, during a morning check,
+  or while calibrating an objective.
+- **Only on the athlete's explicit request.** If, and only if, the athlete
+  explicitly asks you to look their current index up on the web, you may use
+  your own web tool once, show them the value and its source, and ask before
+  writing anything to the profile. Never persist a value you found without
+  that confirmation — writing to the profile without it would violate the
+  athlete-edited contract of `templates/Runner_Profile.template.md` just as
+  much as the privacy rule.
+- **Use it, don't invent a formula.** You may cite the index as one input
+  among others when calibrating a race goal, or note that a higher index
+  generally reflects a stronger level — never invent a numeric conversion
+  from an index value to a pace or a finish time. If you want to relate the
+  two for THIS athlete, say it is an "approximation du projet" (derived from
+  their own logged paces/times), or omit the claim entirely.
+
 ### KNOWN SKILLS (load on demand via the `skill` tool)
 
 | Skill | When to load it |

@@ -373,6 +373,15 @@ CREATE TABLE gear (
     source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL,
     is_default INTEGER, retired INTEGER, collision_base TEXT
 );
+-- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
+-- sous-section « Historique des indices » du profil (`arc_legacy.
+-- parse_performance_index`). `category` est NULL pour un indice général
+-- (ITRA global, UTMB « général ») ; sinon texte libre pour l'ITRA, une des
+-- quatre valeurs `arc_legacy.UTMB_INDEX_CATEGORIES` pour l'UTMB. Purement
+-- déclaratif — jamais alimentée par une requête réseau (voir AGENTS.md).
+CREATE TABLE performance_index (
+    source_path TEXT, date TEXT, kind TEXT, category TEXT, value REAL
+);
 CREATE TABLE objective (
     source_path TEXT, name TEXT, race_date TEXT, distance_m REAL, elevation_gain_m REAL,
     location TEXT, goal TEXT, target_time_s REAL, weekly_start_s REAL, weekly_start_m REAL,
@@ -661,7 +670,7 @@ CREATE TABLE slope_model_meta (
 PER_FILE_TABLES = (
     "athlete", "objective", "health_day", "weather_day", "week", "planned_session",
     "nutrition_day", "report", "course_eval", "race_plan", "aid_station", "gear",
-    "decision", "decision_rule",
+    "performance_index", "decision", "decision_rule",
 )
 
 
@@ -903,6 +912,13 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "start_date": shoe.get("start_date"), "threshold_m": shoe.get("threshold_m"),
                 "is_default": int(bool(shoe.get("default"))), "retired": int(bool(shoe.get("retired"))),
                 "collision_base": shoe.get("collision_base"),
+            })
+        for entry in g("performance_index") or []:
+            if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
+                continue
+            _insert(conn, "performance_index", {
+                "source_path": rel, "date": entry["date"], "kind": entry["kind"],
+                "category": entry.get("category"), "value": entry.get("value"),
             })
     elif kind == "objective":
         row = {k: g(k) for k in (
@@ -2083,6 +2099,27 @@ def gear_mileage(conn) -> dict:
     return M.gear_mileage(activities, gear_defs)
 
 
+def performance_index(conn) -> dict:
+    """Indices de performance ITRA/UTMB (#62) — pour la CLI (`arc_index.py
+    performance-index`) et le tableau de bord (`/api/performance-index`,
+    `/api/summary.performance_index`). N'est pas soumis à `[health].
+    morning_check` : ne dépend d'aucune donnée de santé, seulement de ce que
+    l'athlète a écrit dans son profil (voir `arc_legacy.parse_performance_index`
+    — aucune récupération réseau, ici ni ailleurs).
+
+    `history` : tous les relevés, triés par date croissante (comme stockés).
+    `current` : le relevé le plus RÉCENT pour chaque couple (kind, category) —
+    `category` vaut `None` pour un indice général. Liste vide des deux côtés
+    si l'athlète n'a rien déclaré : c'est l'appelant (dashboard) qui affiche
+    alors l'état vide, jamais une valeur inventée."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT date, kind, category, value FROM performance_index ORDER BY date, kind, category")]
+    current: Dict[Tuple[str, Optional[str]], dict] = {}
+    for row in rows:
+        current[(row["kind"], row.get("category"))] = row
+    return {"history": rows, "current": list(current.values())}
+
+
 def fueling_trend(conn, today: date) -> dict:
     """Glucides/h et taux de sudation sur les sorties longues (#41) — pour la CLI
     (`arc_index.py fueling`) et pour `course-strategist` en headless (plafond
@@ -2640,9 +2677,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
-                                 "heat-acclimation", "gear", "fueling", "samples", "zones", "gap",
-                                 "decoupling", "vam", "descent", "durability", "climb-history",
-                                 "decisions", "slope-model"))
+                                 "heat-acclimation", "gear", "performance-index", "fueling", "samples",
+                                 "zones", "gap", "decoupling", "vam", "descent", "durability",
+                                 "climb-history", "decisions", "slope-model"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -2727,6 +2764,9 @@ def main(argv=None) -> int:
         return 0
     if args.command == "gear":
         print(json.dumps(gear_mileage(conn), ensure_ascii=False))
+        return 0
+    if args.command == "performance-index":
+        print(json.dumps(performance_index(conn), ensure_ascii=False))
         return 0
     if args.command == "fueling":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

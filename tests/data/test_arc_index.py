@@ -852,6 +852,99 @@ class TestParseGear(unittest.TestCase):
         self.assertEqual(g["start_date"], "2026-03-01")
 
 
+class TestParsePerformanceIndex(unittest.TestCase):
+    """#62 — `arc_legacy.parse_performance_index` : sous-section « Historique des
+    indices » du profil, une puce datée par relevé."""
+
+    def _history(self, *lines: str):
+        body = "\n".join(f"- {line}" for line in lines)
+        text = f"# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n### Historique des indices\n\n{body}\n"
+        return L.parse_performance_index(text)
+
+    def test_present_general_itra_and_utmb(self):
+        entries = self._history("2025-11-01 — itra : 610", "2026-02-15 — utmb : 580")
+        self.assertEqual(entries, [
+            {"date": "2025-11-01", "kind": "itra", "value": 610.0},
+            {"date": "2026-02-15", "kind": "utmb", "value": 580.0},
+        ])
+
+    def test_absent_when_no_section(self):
+        text = "# Profil\n\n## Physiologie\n\n- **FC max** : 188\n"
+        self.assertEqual(L.parse_performance_index(text), [])
+        self.assertNotIn("performance_index", L.parse_profile(text))
+
+    def test_partial_only_one_kind_declared(self):
+        entries = self._history("2025-11-01 — itra : 610")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["kind"], "itra")
+
+    def test_category_is_kept_for_itra_free_form(self):
+        entries = self._history("2025-11-01 — itra L : 600")
+        self.assertEqual(entries[0]["category"], "l")
+
+    def test_utmb_category_must_be_known(self):
+        """Catégorie UTMB hors nomenclature (`20k`/`50k`/`100k`/`100m`) : la ligne
+        est ignorée avec un avertissement, jamais acceptée telle quelle — la
+        nomenclature ITRA par catégorie, elle, reste libre (non vérifiée)."""
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            entries = self._history("2025-11-01 — utmb 200k : 500")
+        self.assertEqual(entries, [])
+        self.assertIn("avertissement", buf.getvalue())
+
+    def test_malformed_value_ignored_with_warning(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            entries = self._history("2025-11-01 — itra : beaucoup")
+        self.assertEqual(entries, [])
+        self.assertIn("avertissement", buf.getvalue())
+
+    def test_missing_date_ignored_with_warning(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            entries = self._history("itra : 610")
+        self.assertEqual(entries, [])
+        self.assertIn("avertissement", buf.getvalue())
+
+    def test_history_is_ordered_by_date_ascending_regardless_of_file_order(self):
+        entries = self._history("2026-02-15 — itra : 620", "2025-11-01 — itra : 610", "2026-01-01 — itra : 615")
+        self.assertEqual([e["date"] for e in entries], ["2025-11-01", "2026-01-01", "2026-02-15"])
+
+    def test_commented_out_example_is_ignored(self):
+        text = ("# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n### Historique des indices\n\n"
+                "<!--\n- 2025-11-01 — itra : 610\n-->\n")
+        self.assertEqual(L.parse_performance_index(text), [])
+
+
+class TestPerformanceIndexQuery(Workspace):
+    """#62 — `arc_index.performance_index` : historique complet + valeur courante
+    (la plus récente) par (kind, category), lue depuis le workspace indexé."""
+
+    def test_current_is_latest_per_kind_and_category(self):
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Indices de performance (ITRA / UTMB)
+
+### Historique des indices
+
+- 2025-11-01 — itra : 600
+- 2026-02-15 — itra : 620
+- 2026-01-15 — utmb 100k : 560
+""")
+        self.index()
+        result = I.performance_index(self.conn)
+        self.assertEqual(len(result["history"]), 3)
+        self.assertEqual([h["date"] for h in result["history"]], ["2025-11-01", "2026-01-15", "2026-02-15"])
+        current_by_key = {(c["kind"], c.get("category")): c["value"] for c in result["current"]}
+        self.assertEqual(current_by_key[("itra", None)], 620.0)
+        self.assertEqual(current_by_key[("utmb", "100k")], 560.0)
+
+    def test_empty_when_no_history_declared(self):
+        self.write("planning/Runner_Profile.md", "# Profil\n\n- **FC max** : 188\n")
+        self.index()
+        self.assertEqual(I.performance_index(self.conn), {"history": [], "current": []})
+
+
 class TestParseSleepNeed(unittest.TestCase):
     """#37, revue de code PR #82 — `_parse_sleep_need_s` est un parseur DÉDIÉ, distinct
     de `parse_fr_duration` : ce dernier lit silencieusement « 7.5 h » comme 5 h (le « h »

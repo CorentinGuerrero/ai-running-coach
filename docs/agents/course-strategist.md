@@ -31,6 +31,7 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 - **Rafraîchissement contextuel** : vérifie `planning/`, `activities/`, `medical/` et `resources/` avant d'analyser
 - **Persistance** : stocke chaque plan de course dans `planning/` et le plan nutritionnel dans `nutrition/`
 - **Langue** : les fichiers MD utilisent la langue configurée dans `config/workspace.toml` (`[language].documents`, défaut : français)
+- **Indice de performance (#62)** : peut citer l'indice ITRA/UTMB déclaré dans le profil comme un repère qualitatif parmi d'autres pour choisir un scénario d'allure — jamais de conversion inventée indice → allure, et jamais de recherche automatique sur `itra.run`/`utmb.world` (uniquement sur demande explicite, voir l'agent `coach`)
 
 ## Skills utilisés
 

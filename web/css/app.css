@@ -43,6 +43,8 @@
   --s-slope: #3d7a5c;
   --s-slope-band: rgba(61, 122, 92, 0.16);
   --s-slope-generic: #9aa89f;
+  --s-itra: #6a4c93;
+  --s-utmb: #9a4a38;
 
   /* sémantique : verdicts, météo, statuts */
   --ok: #2f7a4f;
@@ -77,6 +79,7 @@
     --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
     --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
     --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
+    --s-itra: #b39ddb; --s-utmb: #e0826b;
     --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
     --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
     --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -92,6 +95,7 @@
   --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
   --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
   --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
+  --s-itra: #b39ddb; --s-utmb: #e0826b;
   --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
   --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
   --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -303,6 +307,8 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
    distincte, comme les autres paires personnel/générique du tableau de bord. */
 .chart .line--slope { stroke: var(--s-slope); stroke-width: 2.2; }
 .chart .line--slope-generic { stroke: var(--s-slope-generic); stroke-width: 1.4; stroke-dasharray: 4 3; }
+.chart .line--itra { stroke: var(--s-itra); stroke-width: 2.2; }
+.chart .line--utmb { stroke: var(--s-utmb); stroke-width: 2.2; }
 .chart .band--slope-ci { fill: var(--s-slope-band); }
 /* Panier personnel ISOLÉ (aucun voisin personnel adjacent) : `line--slope` ne le
    relie à rien (revue de code #58, nit) — ce point le rend visible quand même. */

@@ -5817,6 +5817,39 @@
       },
       "status": 200
     },
+    "/api/performance-index": {
+      "body": {
+        "current": [
+          {
+            "category": null,
+            "date": "2025-11-01",
+            "kind": "itra",
+            "value": 610.0
+          },
+          {
+            "category": "100k",
+            "date": "2026-01-15",
+            "kind": "utmb",
+            "value": 560.0
+          }
+        ],
+        "history": [
+          {
+            "category": null,
+            "date": "2025-11-01",
+            "kind": "itra",
+            "value": 610.0
+          },
+          {
+            "category": "100k",
+            "date": "2026-01-15",
+            "kind": "utmb",
+            "value": 560.0
+          }
+        ]
+      },
+      "status": 200
+    },
     "/api/report": {
       "body": {
         "error": "introuvable"
@@ -6177,6 +6210,36 @@
           "weekly_target_m": null,
           "weekly_target_s": 28800.0,
           "weeks_left": 7.7
+        },
+        "performance_index": {
+          "current": [
+            {
+              "category": null,
+              "date": "2025-11-01",
+              "kind": "itra",
+              "value": 610.0
+            },
+            {
+              "category": "100k",
+              "date": "2026-01-15",
+              "kind": "utmb",
+              "value": 560.0
+            }
+          ],
+          "history": [
+            {
+              "category": null,
+              "date": "2025-11-01",
+              "kind": "itra",
+              "value": 610.0
+            },
+            {
+              "category": "100k",
+              "date": "2026-01-15",
+              "kind": "utmb",
+              "value": 560.0
+            }
+          ]
         },
         "settings": {
           "agents": [

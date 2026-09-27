@@ -198,6 +198,42 @@ méthode complète. En résumé :
   `-2`, `-3`… et une collision signalée dans `gear_mileage().warnings` — pour
   l'éviter, donnez un `id:` explicite à chaque paire du même modèle.
 
+**Indices de performance ITRA/UTMB (#62).** La sous-section `### Historique
+des indices` sous `## Indices de performance (ITRA / UTMB)` du profil (voir
+`templates/Runner_Profile.template.md`) déclare des relevés datés, un par
+puce de premier niveau, en langage libre — même principe que `### Chaussures`
+ci-dessus :
+
+```markdown
+### Historique des indices
+
+- 2025-11-01 — itra : 610
+- 2025-11-01 — itra L : 600
+- 2026-02-15 — utmb 100k : 560
+```
+
+Format d'une puce : `AAAA-MM-JJ — itra|utmb [catégorie] : valeur`. La
+catégorie est facultative (indice général si omise) ; pour l'UTMB, seules
+`20k`/`50k`/`100k`/`100m` sont reconnues (nomenclature vérifiée), toute autre
+valeur — comme une ligne qui ne respecte pas ce format — est **ignorée avec un
+avertissement**, jamais silencieusement ni acceptée telle quelle. La
+nomenclature des catégories ITRA (ex. `L`, `M`) n'a **pas** pu être vérifiée
+depuis cet environnement : la catégorie ITRA reste donc du texte libre, non
+validée contre une liste fermée. `arc_legacy.parse_performance_index` lit
+cette sous-section ; `scripts/arc_index.py` l'indexe dans la table dérivée
+`performance_index` (une ligne par relevé) ; `arc_index.performance_index`
+(CLI `performance-index`, JSON) rend `history` (tous les relevés, triés par
+date croissante) et `current` (le relevé le plus RÉCENT pour chaque couple
+type/catégorie — c'est la seule notion de « valeur actuelle », il n'y a pas de
+champ dupliqué ailleurs dans le profil).
+
+**Vie privée (critère d'acceptation #62) : aucune récupération automatique.**
+Ces valeurs ne viennent QUE de ce que l'athlète a écrit lui-même. Aucun script
+de ce dépôt ne fait de requête vers `itra.run`/`utmb.world` (verrouillé par un
+test de palier B dédié), et un agent ne peut les chercher sur le web que sur
+demande EXPLICITE de l'athlète — voir le mandat de vie privée d'`agents/
+coach.md` (« PERFORMANCE INDEX MANDATE »).
+
 `carbs_g` et `fluid_intake_ml` viennent d'une déclaration de l'athlète (gels,
 barres, boisson…) pendant ou juste après la séance — jamais une valeur
 inventée : sans déclaration, la clé est omise. Convertissez un produit du

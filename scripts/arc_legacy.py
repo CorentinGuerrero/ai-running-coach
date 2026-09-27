@@ -24,6 +24,7 @@ Bibliothèque standard uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -839,6 +840,101 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Indices de performance (#62) : ITRA / UTMB — sous-section « Historique des
+# indices » du profil, une puce datée par relevé, sur le même principe que
+# `parse_gear` (langage libre, pas des puces « Libellé : valeur »).
+#
+# Nomenclature UTMB (20K/50K/100K/100M) vérifiée ; celle des catégories ITRA
+# n'a pas pu être confirmée depuis cet environnement — la catégorie ITRA reste
+# donc du texte libre, jamais validée contre une liste fermée (voir
+# `templates/Runner_Profile.template.md` et le PR #62).
+# ---------------------------------------------------------------------------
+
+_INDEX_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*historique des indices\s*$", re.I | re.M)
+_INDEX_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
+# Séparateur date / reste de la ligne : cadratin/demi-cadratin entouré d'espaces,
+# ou un simple tiret ENTOURÉ D'ESPACES (même discipline que `_GEAR_SEGMENT_SPLIT_RE` :
+# jamais un tiret sans espaces, qui ferait partie de la date ISO elle-même).
+_INDEX_DATE_SPLIT_RE = re.compile(r"\s+[—–-]\s+")
+UTMB_INDEX_CATEGORIES = ("20k", "50k", "100k", "100m")
+
+
+def _index_section(text: str) -> Optional[str]:
+    """Texte de la sous-section « Historique des indices » (n'importe quel
+    niveau de titre entre `##` et `####`), jusqu'au prochain titre ou la fin
+    du fichier. `None` si absente. Les commentaires HTML sont retirés avant la
+    recherche du titre, comme `_gear_section` — l'exemple commenté du modèle
+    ne doit jamais être lu comme un relevé réellement déclaré."""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    m = _INDEX_HEADING_RE.search(text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    nxt = _GEAR_NEXT_HEADING_RE.search(rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def _parse_index_entry(raw: str) -> Optional[Dict[str, Any]]:
+    """Une ligne « AAAA-MM-JJ — itra|utmb [catégorie] : valeur » → dict, ou
+    `None` si la ligne ne respecte pas ce format (date absente, type ni
+    « itra » ni « utmb », catégorie UTMB hors nomenclature, valeur non
+    numérique) — l'appelant journalise alors un avertissement plutôt que de
+    faire disparaître silencieusement un relevé mal saisi."""
+    raw = raw.replace("**", "").strip()
+    parts = _INDEX_DATE_SPLIT_RE.split(raw, maxsplit=1)
+    if len(parts) != 2:
+        return None
+    date_part, rest = parts
+    entry_date = parse_fr_date(date_part)
+    if not entry_date or ":" not in rest:
+        return None
+    head, value_raw = rest.split(":", 1)
+    tokens = head.strip().lower().split()
+    if not tokens or tokens[0] not in ("itra", "utmb"):
+        return None
+    kind = tokens[0]
+    category = tokens[1] if len(tokens) > 1 else None
+    if kind == "utmb" and category and category not in UTMB_INDEX_CATEGORIES:
+        return None
+    value = parse_fr_number(value_raw)
+    if value is None:
+        return None
+    entry = {"date": entry_date, "kind": kind, "value": value}
+    if category:
+        entry["category"] = category
+    return entry
+
+
+def parse_performance_index(text: str) -> List[Dict[str, Any]]:
+    """Sous-section « Historique des indices » du profil → liste de dicts
+    `{date, kind, value, category?}` triée par date CROISSANTE (la valeur
+    « actuelle » d'un (kind, category) est donc sa dernière entrée — voir
+    `arc_index.performance_index`). Liste vide si la section est absente.
+
+    AUCUNE récupération réseau ici, ni nulle part dans ce module : ces valeurs
+    ne viennent QUE de ce que l'athlète a écrit lui-même (voir AGENTS.md,
+    règle de vie privée #62 — un agent peut proposer une recherche web, mais
+    seulement sur demande explicite, et jamais l'écrire sans confirmation)."""
+    section = _index_section(text)
+    if not section:
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in section.splitlines():
+        m = _INDEX_TOP_BULLET_RE.match(line)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        entry = _parse_index_entry(raw)
+        if entry is None:
+            print(f"avertissement : entrée « Historique des indices » illisible, ignorée : « {raw} »",
+                  file=sys.stderr)
+            continue
+        out.append(entry)
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Fichiers édités par l'humain : profil et objectif (libellés du modèle)
 # ---------------------------------------------------------------------------
 
@@ -861,6 +957,9 @@ def parse_profile(text: str) -> Dict[str, Any]:
     gear = parse_gear(text)
     if gear:
         out["gear"] = gear
+    performance_index = parse_performance_index(text)
+    if performance_index:
+        out["performance_index"] = performance_index
     return _drop_none(out)
 
 

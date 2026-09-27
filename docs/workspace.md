@@ -135,7 +135,7 @@ redémarrés : ils lisent les skills à chaque session.
 
 | Fichier | Contenu |
 |---|---|
-| `Runner_Profile.md` | Physiologie, historique de blessures, matériel, lieu par défaut, créneau habituel, préférences de coaching |
+| `Runner_Profile.md` | Physiologie, historique de blessures, indices de performance ITRA/UTMB (facultatif, jamais récupérés automatiquement), matériel, lieu par défaut, créneau habituel, préférences de coaching |
 | `active_objective.md` | La course visée, l'objectif de performance, les contraintes connues |
 
 Les deux vivent dans `planning/`, gitignoré dans le dépôt public et **versionné

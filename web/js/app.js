@@ -267,6 +267,60 @@ function gearSection(gear) {
       ${warnings.map((w) => note(F.esc(w))).join("")}</section>`;
 }
 
+// Indices de performance ITRA/UTMB (#62, vue Performance) : valeur courante par
+// (type, catégorie) — la plus récente déclarée dans le profil, jamais récupérée
+// automatiquement (voir `agents/coach.md`, mandat vie privée) — plus un mini
+// graphique d'historique pour l'indice GÉNÉRAL de chaque type (sans catégorie),
+// quand au moins deux relevés existent. Les catégories (ITRA libre, UTMB
+// 20K/50K/100K/100M) n'ont chacune, en pratique, que trop peu de relevés pour
+// justifier un graphique par catégorie : leur valeur courante reste visible
+// dans le tableau, sans historique tracé.
+function indexLabel(kind, category) {
+  const name = kind === "itra" ? "ITRA" : "UTMB";
+  return category ? `${name} ${category.toUpperCase()}` : `${name} (général)`;
+}
+
+function indexMiniChart(entries, kind, cls) {
+  if (entries.length < 2) return null;
+  const dates = entries.map((e) => e.date);
+  const values = entries.map((e) => e.value);
+  const label = `Historique ${indexLabel(kind, null)}`;
+  const chart = timeChart(dates, [{ type: "line", values, cls }], [], {
+    height: 160, label, yFormat: (v) => F.num(v, 0),
+  });
+  return { chart, entries, label };
+}
+
+function performanceIndexSection(idx) {
+  const current = idx?.current || [];
+  const history = idx?.history || [];
+  if (!current.length && !history.length) {
+    return { html: empty("Pas d'indice de performance déclaré",
+      "Renseignez « Indices de performance (ITRA / UTMB) » dans votre profil pour les voir ici — jamais récupéré automatiquement."), charts: [] };
+  }
+  const rows = [...current]
+    .sort((a, b) => (a.kind === b.kind ? (a.category || "").localeCompare(b.category || "") : a.kind.localeCompare(b.kind)))
+    .map((c) => `<tr><th scope="row">${F.esc(indexLabel(c.kind, c.category))}</th>
+        <td class="num">${F.num(c.value, 0)}</td><td>${F.dayShort(c.date)} ${c.date.slice(0, 4)}</td></tr>`)
+    .join("");
+  const charts = [];
+  for (const kind of ["itra", "utmb"]) {
+    const general = history.filter((h) => h.kind === kind && !h.category);
+    const built = indexMiniChart(general, kind, `line line--${kind}`);
+    if (built) charts.push({ id: `c-idx-${kind}`, readoutId: `r-idx-${kind}`, ...built });
+  }
+  const chartsHtml = charts.map((c) => `<div><h3>${F.esc(c.label)}</h3>
+      <div class="chart-host" id="${c.id}">${c.chart.svg}</div><p class="readout" id="${c.readoutId}"></p></div>`).join("");
+  const html = `<section class="band"><h2>Indices de performance (ITRA / UTMB)</h2>
+      <table class="data data--compact">
+        <thead><tr><th scope="col">Indice</th><th scope="col" class="num">Valeur</th><th scope="col">Date</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      ${chartsHtml ? `<div class="band--split">${chartsHtml}</div>` : ""}
+      ${note("Valeurs déclarées par vous dans le profil, jamais récupérées automatiquement — voir la règle de vie privée du coach.")}
+    </section>`;
+  return { html, charts };
+}
+
 // ---------------------------------------------------------------------------
 // Cadre : objectif, navigation, thème
 // ---------------------------------------------------------------------------
@@ -1428,6 +1482,7 @@ async function viewPerformance(params) {
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
   const assumptions = SUMMARY.assumptions || {};
   const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
+  const { html: indexHtml, charts: indexCharts } = performanceIndexSection(SUMMARY.performance_index);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}
     <section class="band"><h2>VO2max effective</h2>${p.vo2max_current ? `<p class="lead-num">${F.num(p.vo2max_current, 1)} <small>ml/kg/min, tendance 30 j${p.vo2max_date !== SUMMARY.today ? ` au ${F.dayShort(p.vo2max_date)}` : ""}</small></p>` : ""}${chartHtml}</section>
     <section class="band band--split"><div><h2>Prédictions</h2><table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">VDOT</th><th scope="col" class="num">Riegel</th></tr></thead><tbody>${pred}</tbody></table>
@@ -1435,6 +1490,7 @@ async function viewPerformance(params) {
       <div><h2>Records</h2>${rec}</div></section>
     ${slopeHtml}
     ${gearSection(SUMMARY.gear)}
+    ${indexHtml}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
   if (slopeChart) attachCursor($("#c-slope"), slopeChart, (i) => {
@@ -1443,6 +1499,10 @@ async function viewPerformance(params) {
     const runTxt = b.run_share != null && b.run_share < 0.95 ? ` · couru ${F.num(b.run_share * 100, 0)} %` : "";
     readout($("#r-slope"), `<strong>${slopeGradeLabel(b)}</strong> · ${F.paceFromSecPerKm(b.pace_s_km)} · ${b.source === "personal" ? `personnel (${b.n_activities} séance${b.n_activities > 1 ? "s" : ""})` : "générique"}${hrTxt}${runTxt}`);
   });
+  for (const c2 of indexCharts) {
+    attachCursor($(`#${c2.id}`), c2.chart, (i) => readout($(`#${c2.readoutId}`),
+      `<strong>${F.dayLong(c2.entries[i].date)}</strong> · ${F.num(c2.entries[i].value, 0)}`));
+  }
 }
 
 // ---------------------------------------------------------------------------

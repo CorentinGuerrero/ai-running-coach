@@ -38,6 +38,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `health-own-baseline` | — | — |
 | `health-token-expired` | — | — |
 | `injury-risk-pain` | — | — |
+| `itra-index-privacy` | — | — |
 | `no-medical-no-delegation` | — | — |
 | `race-debrief` | — | — |
 | `race-plan-personal-model` | — | — |
