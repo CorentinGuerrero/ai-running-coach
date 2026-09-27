@@ -100,7 +100,11 @@ d'appels, mécanique `[stub.intervals.<outil>]` — avec le stub `garmin` via
 `tests/evals/mcp_stub_common.py`. Le runner ne le câble dans `.mcp.json` que
 si le cas déclare au moins une entrée `[stub.intervals.*]` : un scénario qui
 ne teste pas la source intervals.icu n'expose pas ce serveur. Sa liste
-d'outils (`get-wellness-for-date`, `get-recent-activities`,
-`get-calendar-events`, ...) est une hypothèse documentée dans le module,
-reprise de `eddmann/intervals-icu-mcp` — à ajuster si #68 retient un autre
-serveur MCP intervals.icu.
+d'outils (`get_wellness_for_date`, `get_recent_activities`,
+`get_calendar_events`, ...) est désormais **vérifiée (#68)** contre le code
+source du serveur retenu par le projet,
+[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp)
+(`src/intervals_icu_mcp/tools/*.py`, branche `main`) — snake_case, pas le
+kebab-case d'une hypothèse antérieure (#26) que cette story corrige. Table de
+correspondance complète avec les outils Garmin équivalents : `AGENTS.md` →
+« Backends MCP ».

@@ -11,6 +11,14 @@ Garmin MCP responses are verbose JSON. Pulling wide date ranges or raw payloads 
 
 All Garmin tools are exposed by the `garmin` MCP server (direct mode) or via `leanproxy_invoke_tool(server="garmin", ...)` (power-user mode). Useful tools include `get_sleep_data`, `get_hrv_data`, `get_rhr_day`, `get_training_readiness`, `get_activities`, `upload_course`, `upload_workout`, `get_courses`.
 
+**`[data].source = "intervals"` (#68):** this whole skill still applies (check
+local files first, one date per call, persist immediately, no raw JSON) —
+against the `intervals` MCP server instead, whose tools cover the same needs
+with fewer calls: `get_wellness_for_date` alone returns sleep + HRV + resting
+HR (rules 3 above still apply, one call is still "one fetch"), `get_recent_activities`
+replaces `get_activities`. No equivalent for `get_training_readiness`, `upload_course`
+or `upload_workout` — see the correspondence table in `AGENTS.md`.
+
 > **Resting HR:** use `get_rhr_day(date)`. It returns the value directly. `get_sleep_data` also contains it, but that payload can exceed 400 KB — never pull it just to read resting HR.
 
 ## Rules

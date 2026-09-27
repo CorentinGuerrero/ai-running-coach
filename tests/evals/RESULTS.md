@@ -58,6 +58,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `style-factuel-quiet` | — | — |
 | `sync-activity-arc-fields` | — | — |
 | `sync-declared-fuel` | — | — |
+| `sync-intervals-source` | — | — |
 | `sync-writes-arc-block` | — | — |
 | `today-morning-check-minimal` | — | — |
 | `today-morning-check-off` | — | — |

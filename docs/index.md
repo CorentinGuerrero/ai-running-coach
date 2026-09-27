@@ -115,7 +115,7 @@ Cinq d'entre eux sont aussi des commandes courtes pour un usage quotidien depuis
 <div class="arc-skill"><span class="arc-skill__name">Analyse de séances</span><span class="arc-skill__desc">strides, montées, intervalles, sprints au niveau segment</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Téléchargement FIT</span><span class="arc-skill__desc">fichiers Garmin bruts pour une précision sub-kilomètre</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Synchronisation Garmin</span><span class="arc-skill__desc">récupération efficace des données, sans explosion du contexte</span></div>
-<div class="arc-skill"><span class="arc-skill__name">Intervals.icu</span><span class="arc-skill__desc">événements et wellness en destination secondaire</span></div>
+<div class="arc-skill"><span class="arc-skill__name">Intervals.icu</span><span class="arc-skill__desc">événements et wellness — primaire avec `--source intervals`, secondaire sinon</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Sync quotidienne</span><span class="arc-skill__desc">synchronisation automatique sur votre machine coach, résumé envoyé sur le téléphone</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Premier démarrage</span><span class="arc-skill__desc">entretien de configuration : staff d'agents, discipline, style de coaching, profil d'athlète</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Contrat de données</span><span class="arc-skill__desc">schéma structuré des fichiers Markdown pour l'index et le tableau de bord</span></div>

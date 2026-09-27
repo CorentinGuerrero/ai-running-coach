@@ -16,7 +16,7 @@ Oui, le projet est **en français par défaut** : les agents, les skills et la d
 
 ### Quels appareils sont supportés ?
 
-**Garmin Connect** (montres et capteurs Garmin) est la destination primaire, installée automatiquement par `./install.sh`. **Intervals.icu** est supporté en secondaire, uniquement si vous le demandez explicitement à l'agent `coach` — son serveur MCP n'est pas installé par le script, voir [configurer Intervals.icu](#comment-configurer-intervalsicu-optionnel) ci-dessous.
+**Garmin Connect** (montres et capteurs Garmin) est la destination primaire par défaut, installée automatiquement par `./install.sh`. **Intervals.icu** (#68) peut aussi devenir la source primaire avec `./install.sh --source intervals` — voir [Configuration Intervals.icu](intervals-setup.md) — ou rester en secondaire, uniquement sur demande explicite à l'agent `coach`, voir [configurer Intervals.icu sans passer par `install.sh`](#comment-configurer-intervalsicu-sans-passer-par-installsh) ci-dessous.
 
 ## Installation
 
@@ -58,34 +58,35 @@ Non, l'accès à Garmin Connect est requis pour la synchronisation des données.
 
 ### Intervals.icu est-il installé automatiquement ?
 
-Non. `install.sh` n'installe et ne configure **que** `garmin-mcp` (et, en option,
-la passerelle `leanproxy-mcp`) : aucune commande du script ne touche à
-Intervals.icu. Le skill `intervals-icu-best-practices` suppose l'existence
-d'outils MCP nommés `add_or_update_event`, `get_events` et `delete_event`, mais
-ne prescrit ni n'installe de paquet précis.
+Depuis #68 : **oui, si vous le demandez** — `./install.sh --source intervals`
+installe et configure `intervals-icu-mcp` (serveur communautaire
+[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp)),
+**à la place** de `garmin-mcp`, et écrit `[data].source = "intervals"`. Voir
+[Configuration Intervals.icu](intervals-setup.md) pour le détail. Sans cette
+option, `install.sh` continue de n'installer que `garmin-mcp` (et, en option,
+la passerelle `leanproxy-mcp`), comme avant #68.
 
-### Comment configurer Intervals.icu (optionnel) ?
+### Comment configurer Intervals.icu sans passer par `install.sh` ?
 
-1. Choisissez un serveur MCP Intervals.icu communautaire. Les tests du projet
-   (`tests/evals/fixtures/README.md`) documentent leur hypothèse de travail
-   autour du serveur communautaire [`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp)
-   — **suivez son README** pour l'installation exacte (à la date de rédaction :
-   clone + `uv run --directory …`, ou Docker ; pas de paquet PyPI officiel).
-   Adaptez selon le serveur que vous retenez réellement.
-2. Ajoutez-le manuellement à la configuration MCP de votre IDE. Exemple
-   **illustratif et non vérifié** — remplacez `command`/`args` par ceux
-   documentés par le serveur choisi, et ne committez jamais votre clé API :
-   fournissez-la via une variable d'environnement de votre shell ou le
-   mécanisme de secrets de votre IDE, puis référencez-la (`env` supporte les
-   références `${VAR}` selon l'IDE) plutôt que de l'écrire en clair dans
-   `.mcp.json` :
+Utile si vous voulez Intervals.icu en **secondaire** (Garmin reste la source
+primaire, vous demandez explicitement un événement Intervals.icu de temps en
+temps) plutôt qu'en remplacement complet de Garmin :
+
+1. Suivez le README du serveur retenu par le projet
+   ([`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp))
+   pour l'installation exacte (clone + `uv sync`, ou `uv tool install`
+   directement — voir [Configuration Intervals.icu](intervals-setup.md)).
+2. Ajoutez-le manuellement à la configuration MCP de votre IDE. Ne committez
+   jamais votre clé API : fournissez-la via une variable d'environnement de
+   votre shell (`env` supporte les références `${VAR}` selon l'IDE) plutôt que
+   de l'écrire en clair dans `.mcp.json` :
 
    ```json
    {
      "mcpServers": {
        "intervals": {
-         "command": "uv",
-         "args": ["run", "--directory", "/chemin/vers/intervals-icu-mcp", "intervals-icu-mcp"],
+         "command": "intervals-icu-mcp",
+         "args": [],
          "env": {
            "INTERVALS_ICU_API_KEY": "${INTERVALS_ICU_API_KEY}",
            "INTERVALS_ICU_ATHLETE_ID": "${INTERVALS_ICU_ATHLETE_ID}"
@@ -97,8 +98,9 @@ ne prescrit ni n'installe de paquet précis.
 
 3. Demandez explicitement à l'agent `coach` de créer ou mettre à jour un
    événement sur Intervals.icu — il charge alors le skill
-   `intervals-icu-best-practices`. Garmin reste la destination **primaire** :
-   Intervals.icu n'est jamais utilisé sans demande explicite.
+   `intervals-icu-best-practices`. Avec `[data].source = "garmin"` (défaut),
+   Garmin reste la destination **primaire** : Intervals.icu n'est utilisé que
+   sur demande explicite.
 
 ## Agents
 

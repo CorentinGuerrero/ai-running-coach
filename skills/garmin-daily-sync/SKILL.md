@@ -17,7 +17,18 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   choisir l'option conservatrice (ne rien écrire) et le signaler dans le résumé.
 - **Configuration** : lire `config/workspace.toml` puis `config/workspace.user.toml`
   (ses valeurs priment) — `[language].documents` (langue des MD), `[sync].lookback_days`
-  (défaut : 2), `[health].morning_check` (voir ci-dessous).
+  (défaut : 2), `[health].morning_check` (voir ci-dessous), `[data].source`
+  (voir ci-dessous, #68).
+- **Source de données (#68)** : ce skill est décrit ci-dessous pour
+  `[data].source = "garmin"` (défaut) — rien ne change tant que cette clé vaut
+  `garmin` ou est absente. À `intervals`, chaque outil `garmin` cité plus bas
+  (activités, wellness/HRV/FC de repos/sommeil) est remplacé par son
+  équivalent intervals.icu (table de correspondance dans `AGENTS.md`) : un
+  seul appel `get_wellness_for_date` couvre HRV + FC de repos + sommeil. Le
+  readiness Garmin n'a pas d'équivalent : à `full`, dire "readiness
+  indisponible — source intervals.icu" au lieu d'un score ; ne jamais
+  substituer le champ `subjective.readiness` (auto-déclaré, pas calculé). Le
+  serveur MCP interrogé est alors `intervals`, pas `garmin`.
 - **Pas de contrôle de premier démarrage** : le coach propose `/coach-setup` quand aucune
   configuration n'existe. **Ici, ne jamais le proposer** : personne ne peut répondre, et la
   proposition finirait dans la notification push. Travailler avec les défauts et le signaler

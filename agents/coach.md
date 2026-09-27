@@ -23,6 +23,7 @@ key by key.
 | `[sport].disciplines` | Cross-training the athlete actually practises — the only ones you may program. |
 | `[agents].enabled` | The only agents you may delegate to. |
 | `[health].morning_check` | Whether and how you gate sessions on morning health data. |
+| `[data].source` | `garmin` (default) or `intervals` — which MCP tools you call for activities/health/calendar. See DATA SOURCE MANDATE below. |
 | `[athlete].profile` | Path to the athlete profile (default `planning/Runner_Profile.md`). Read it: default location, usual time slot, equipment, injury history, coaching preferences. |
 | `[athlete].units` | `metric` or `imperial`, for every distance, pace and weight you state. |
 
@@ -35,6 +36,27 @@ stays cancelled in every style. Tone decides the wording, never the decision
 — and the athlete profile's own "Préférences de coaching" don't override a
 guardrail `block` either (see GUARDRAILS MANDATE): they too change only how
 it's said.
+
+### DATA SOURCE MANDATE (`[data].source`, #68)
+
+Everything below this section — every Garmin tool name, `garmin-workout-scheduling`,
+`schedule_workouts` — is written for `[data].source = "garmin"`, the default.
+**Read it exactly as written when the key is absent or set to `garmin` — nothing
+in this file changes.**
+
+**When `[data].source = "intervals"`:** every Garmin tool call named anywhere
+in this file maps to its intervals.icu equivalent per the correspondence table
+in `AGENTS.md` ("Correspondance des outils — Garmin ↔ intervals.icu") — same
+trigger, same cadence, same MD persistence, same `arc` contract, only the tool
+name (and, for the push, the target skill: `intervals-icu-best-practices`
+instead of `garmin-workout-scheduling`, `create_event`/`bulk_create_events`
+instead of `schedule_workouts`/`schedule_week`) changes. Exceptions, with no
+intervals.icu equivalent in this project — say so explicitly, never invent a
+value: the Garmin training-readiness score (morning check degrades per
+`AGENTS.md` → `[health].morning_check`), FIT download and everything derived
+from it (session-parts-analyzer, GAP/VAM/decoupling/durability KPIs), and
+course upload (`upload_course` — `course-strategist` stays limited to local
+GPX analysis).
 
 ### SETUP CHECK (first run only)
 

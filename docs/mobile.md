@@ -5,6 +5,14 @@ le coach **toujours avec vous** — synchronisation Garmin automatique avec noti
 dialogue avec le coach depuis le téléphone — **sans renoncer à votre abonnement**
 Claude (Pro/Max) ou ChatGPT (Codex).
 
+!!! note "Écrite pour `[data].source = "garmin"` (défaut)"
+    Cette page (et `/garmin-daily-sync`) suppose la source Garmin par défaut —
+    rien n'y change avec `[data].source = "intervals"` (#68) sinon les outils
+    MCP appelés en coulisses (voir [Configuration Intervals.icu](intervals-setup.md)
+    et la table de correspondance dans `AGENTS.md`) : machine « coach »,
+    cron/launchd, notification push et Remote Control fonctionnent à
+    l'identique.
+
 ## Ce qui n'est pas possible (et pourquoi)
 
 !!! warning "Pas de « front » mobile maison"

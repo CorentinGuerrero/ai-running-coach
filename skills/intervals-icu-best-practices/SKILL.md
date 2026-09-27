@@ -1,9 +1,27 @@
 ---
 name: intervals-icu-best-practices
-description: Use when creating, updating, or troubleshooting Intervals.icu events or workouts via the Intervals.icu MCP tools (add_or_update_event, get_events, delete_event). Covers the description-vs-workout_doc pitfall, start_date preservation, post-update verification, and tested JSON payload patterns.
+description: Use when creating, updating, or troubleshooting Intervals.icu events or workouts via the Intervals.icu MCP tools (create_event/update_event/delete_event/bulk_create_events on eddmann/intervals-icu-mcp, installed by `./install.sh --source intervals` — #68; older examples below say add_or_update_event/get_events, see the note at the top). Covers the description-vs-workout_doc pitfall, start_date preservation, post-update verification, and tested JSON payload patterns. Primary push target when `[data].source = "intervals"`, secondary (on explicit request) otherwise.
 ---
 
 # Intervals.icu MCP Tool — Best Practices
+
+## Server & tool names (#68 — read first)
+
+This skill's examples below (`add_or_update_event`, `get_events`, `delete_event`)
+predate the project settling on a specific server. `./install.sh --source
+intervals` (and the manual setup in `docs/faq.md`) install the community
+server eddmann/intervals-icu-mcp (<https://github.com/eddmann/intervals-icu-mcp>),
+whose actual tool names are `create_event` (new event), `update_event`
+(existing `event_id`), `delete_event`, `bulk_create_events`, `get_calendar_events`
+/ `get_upcoming_workouts` (post-update verification), and `get_event` (single
+event detail) — see the correspondence table in `AGENTS.md`. **The workflow
+below still applies unchanged** — `workout_doc` for structured content,
+mandatory `start_date`, verify-after-write — only substitute the tool name:
+`add_or_update_event` → `create_event` (no `event_id`) or `update_event` (with
+one), `get_events` → `get_calendar_events`. Used as the SECONDARY push target
+when `[data].source = "garmin"` (default, only on explicit request), or as the
+PRIMARY one — via `create_event`/`bulk_create_events`, same idempotency
+discipline as `garmin-workout-scheduling` — when `[data].source = "intervals"`.
 
 ## Problem Identified
 

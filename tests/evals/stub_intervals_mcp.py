@@ -7,16 +7,20 @@ d'éval que `stub_garmin_mcp.py` (partagés via `mcp_stub_common.py`) — seuls 
 liste d'outils et les données canned changent, pour coller à une source de
 données alternative.
 
-**Liste d'outils : hypothèse documentée.** Le serveur MCP intervals.icu n'est
-pas encore choisi par le projet (#68 est encore ouvert). Cette liste reprend
-les noms et la casse (kebab-case, contrairement au snake_case de garmin_mcp)
-de `eddmann/intervals-icu-mcp` (README à la racine du dépôt, catégories
-« Activities », « Wellness », « Events/Calendar », « Athlete » — 48 outils au
-total dans l'original ; on n'en reprend ici qu'un sous-ensemble plausible pour
-ce que les agents `coach`/`medical` consomment aujourd'hui côté Garmin :
-activités récentes, wellness/HRV du jour, calendrier). Si le projet retient un
-autre serveur pour #68, seule cette liste (et le nom des champs canned) doit
-changer — le protocole et le scripting restent les mêmes.
+**Liste d'outils : VÉRIFIÉE (#68), plus une hypothèse.** Le serveur retenu par
+le projet (`./install.sh --source intervals`, voir `AGENTS.md` → « Backends
+MCP ») est le serveur communautaire
+[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp).
+Les noms ci-dessous viennent directement de son code source
+(`src/intervals_icu_mcp/tools/*.py`, branche `main` au moment de cette story) —
+snake_case, PAS le kebab-case d'une version antérieure de ce stub (héritée
+d'une hypothèse non vérifiée avant #68) : `get_wellness_for_date`,
+`get_wellness_data`, `get_recent_activities`, `get_activity_details`,
+`get_calendar_events`, `get_upcoming_workouts`, `get_athlete_profile`,
+`get_fitness_summary`, `create_event`, `update_event`, `delete_event`,
+`bulk_create_events`. On n'en reprend ici qu'un sous-ensemble plausible pour ce
+que les agents `coach`/`medical` consomment aujourd'hui côté Garmin (table de
+correspondance complète : `AGENTS.md`).
 
 **Scriptable par cas d'éval (#26)**, identique à `stub_garmin_mcp.py` :
 `[stub.intervals.<outil>] file = "…json"` ou `error = "401" | "timeout" | "empty"`.
@@ -44,49 +48,68 @@ def _day(offset: int) -> str:
 
 # Données synthétiques : un athlète reposé, sans signal d'alerte — même
 # posture que le stub garmin, pour que basculer `[data].source` entre les
-# deux ne change rien au comportement par défaut d'un scénario.
+# deux ne change rien au comportement par défaut d'un scénario. Forme
+# imbriquée fidèle à `ResponseBuilder`/`get_wellness_for_date` du serveur réel
+# (sleep/heart/subjective groupés) — PAS le get_hrv_data/get_rhr_day plats de
+# garmin_mcp : c'est précisément ce qui matérialise, dans le stub, qu'un seul
+# appel intervals.icu couvre ce que trois appels Garmin couvrent (AGENTS.md).
 CANNED = {
-    "get-wellness-for-date": {
-        "id": _day(0), "restingHR": 49, "hrv": 62, "hrvSDNN": 62,
-        "sleepSecs": 25800, "sleepScore": 78, "readiness": 71,
+    "get_wellness_for_date": {
+        "date": _day(0),
+        "sleep": {"duration_seconds": 25800, "score": 78},
+        "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
+        # Auto-déclaré par l'athlète — PAS un score de readiness calculé
+        # (aucun outil de ce serveur n'en produit un, voir AGENTS.md).
+        "subjective": {"readiness": 71},
     },
-    "get-wellness-data": [{
-        "id": _day(0), "restingHR": 49, "hrv": 62, "sleepSecs": 25800, "readiness": 71,
+    "get_wellness_data": [{
+        "date": _day(0),
+        "sleep": {"duration_seconds": 25800, "score": 78},
+        "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
+        "subjective": {"readiness": 71},
     }],
-    "get-recent-activities": [{
-        "id": "i99000001", "name": "Sortie longue",
-        "start_date_local": f"{_day(2)}T12:05:00",
-        "type": "Run",
-        "distance": 24800.0, "moving_time": 9660.0, "total_elevation_gain": 890.0,
-        "average_heartrate": 141, "max_heartrate": 168,
-    }],
-    "get-activity-details": {"status": "ok", "stub": True},
-    "get-calendar-events": [],
-    "get-upcoming-workouts": [],
-    "get-athlete-profile": {"id": "0", "name": "Athlete", "sportSettings": []},
-    "get-fitness-summary": {"ctl": 42.0, "atl": 38.0, "form": 4.0},
+    "get_recent_activities": {
+        "activities": [{
+            "id": "i99000001",
+            "name": "Sortie longue",
+            "start_date": f"{_day(2)}T12:05:00",
+            "type": "Run",
+            "distance_meters": 24800.0,
+            "moving_time_seconds": 9660.0,
+            "elevation_gain_meters": 890.0,
+            "average_heartrate": 141,
+        }],
+        "count": 1,
+    },
+    "get_activity_details": {"id": "i99000001", "stub": True},
+    "get_calendar_events": [],
+    "get_upcoming_workouts": [],
+    "get_event": {"stub": True},
+    "get_athlete_profile": {"id": "i0", "name": "Athlete"},
+    "get_fitness_summary": {"ctl": 42.0, "atl": 38.0, "form": 4.0},
 }
 
 TOOLS = [
-    ("get-wellness-for-date", "Wellness (HRV, FC repos, sommeil, readiness) pour une date."),
-    ("get-wellness-data", "Wellness entre deux dates."),
-    ("get-recent-activities", "Dernières activités enregistrées."),
-    ("get-activity-details", "Détail d'une activité."),
-    ("get-calendar-events", "Événements planifiés entre deux dates."),
-    ("get-upcoming-workouts", "Séances planifiées à venir."),
-    ("get-athlete-profile", "Profil de l'athlète."),
-    ("get-fitness-summary", "CTL/ATL/forme courants."),
-    ("create-event", "Planifie une séance dans le calendrier intervals.icu."),
-    ("update-event", "Modifie un événement planifié."),
-    ("delete-event", "Supprime un événement planifié."),
-    ("bulk-create-events", "Planifie plusieurs séances en un appel."),
+    ("get_wellness_for_date", "Wellness (HRV, FC repos, sommeil, ressenti auto-déclaré) pour une date."),
+    ("get_wellness_data", "Wellness entre deux dates."),
+    ("get_recent_activities", "Dernières activités enregistrées."),
+    ("get_activity_details", "Détail d'une activité."),
+    ("get_calendar_events", "Événements planifiés entre deux dates."),
+    ("get_upcoming_workouts", "Séances planifiées à venir."),
+    ("get_event", "Détail d'un événement planifié."),
+    ("get_athlete_profile", "Profil de l'athlète."),
+    ("get_fitness_summary", "CTL/ATL/forme courants."),
+    ("create_event", "Planifie une séance dans le calendrier intervals.icu."),
+    ("update_event", "Modifie un événement planifié."),
+    ("delete_event", "Supprime un événement planifié."),
+    ("bulk_create_events", "Planifie plusieurs séances en un appel."),
 ]
 
 
 def result_for(name: str, arguments: dict):
     if name in CANNED:
         return CANNED[name]
-    if name.startswith(("create-", "update-", "delete-", "bulk-")):
+    if name.startswith(("create_", "update_", "delete_", "bulk_")):
         return {"status": "ok", "stub": True, "tool": name, "received": arguments}
     return {"status": "ok", "stub": True, "tool": name, "data": []}
 
