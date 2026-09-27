@@ -29,6 +29,23 @@ flowchart LR
 
 ## Mise en route
 
+!!! tip "Préréglage `--preset docker` — prépare l'hôte, pas le conteneur"
+    Cette page suppose que la machine coach existe déjà (c'est **sur elle**
+    que se lance `docker compose`, pas sur une machine à part) :
+    `./install.sh --preset docker` prépare cet hôte en configurant Claude
+    Code (`--ide claude`, dont le runner de synchronisation a besoin) et en
+    activant `--daily-sync` pour que le workspace monté par le conteneur
+    reste à jour. L'authentification Garmin **reste active** (le conteneur,
+    lui, ne parle jamais à Garmin — workspace monté en lecture seule — mais la
+    synchronisation qui tourne sur l'hôte, oui) ; sans elle, la sync
+    échouerait deux fois par jour faute de tokens. Pas de Remote Control,
+    l'interface de cette machine étant le tableau de bord web. Voir
+    [Préréglages](../quickstart.md#prereglages). Une option explicite reste
+    prioritaire : ajoutez `--workspace DIR` si vos données vivent hors du
+    dépôt du moteur. Le conteneur lui-même se lance toujours séparément,
+    comme décrit plus bas (`docker compose up -d --build`) : le préréglage ne
+    s'y substitue pas.
+
 Sur la machine coach, dans le dépôt du moteur :
 
 ```bash
