@@ -1,9 +1,7 @@
----
-name: log
-description: Saisie libre en une phrase (ravitaillement, douleur, RPE) invoquée comme /log — « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Extrait les entités, délègue l'arithmétique et la correspondance catalogue à scripts/arc_log.py (jamais de calcul ni de conversion à la main), puis écrit dans les bons fichiers au contrat (activities/, medical/) sans jamais inventer une valeur nutritionnelle absente du catalogue. Charger dès que l'utilisateur tape /log ou décrit en une phrase ce qu'il a mangé/bu/ressenti pendant ou après une séance.
-gemini_command: "true"
----
-
+# Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.
+# Source : skills/log/SKILL.md
+description = "Saisie libre en une phrase (ravitaillement, douleur, RPE) invoquée comme /log — « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Extrait les entités, délègue l'arithmétique et la correspondance catalogue à scripts/arc_log.py (jamais de calcul ni de conversion à la main), puis écrit dans les bons fichiers au contrat (activities/, medical/) sans jamais inventer une valeur nutritionnelle absente du catalogue. Charger dès que l'utilisateur tape /log ou décrit en une phrase ce qu'il a mangé/bu/ressenti pendant ou après une séance."
+prompt = '''
 # `/log` — saisie libre (#67)
 
 Une phrase du type « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 »
@@ -152,3 +150,7 @@ ce qui y a été ajouté — jamais un JSON brut, jamais le dump de
 Si une question reste en attente (produit inconnu/ambigu, séance introuvable),
 posez-la **après** cette ligne de confirmation, jamais à sa place — le reste
 de la phrase ne doit pas rester bloqué par une seule zone d'incertitude.
+
+---
+Demande de l'utilisateur : {{args}}
+'''
