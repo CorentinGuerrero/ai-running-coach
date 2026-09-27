@@ -51,21 +51,54 @@ pilotent par zone FC ou par ressenti, jamais par une allure GAP inventée.
 Documenté honnêtement comme une limite du projet, pas un oubli — à lever si
 une future story ajuste un modèle personnel effort par effort.
 
-## Répétitions de côte — méthode
+## Répétitions de côte — méthode, et pourquoi c'est une BORNE BASSE
 
-`hill_repeat_targets(structure, bins)` : `structure` = `{"reps", "rep_duration_s",
-"grade_pct", "recovery_s"?}`. Pour chaque répétition : vitesse prédite à cette
-pente (`arc_slope_model.predict_speed(grade_pct/100, bins)`, bande fournie par
-l'appelant — `"endurance"` par défaut, seule bande dont la provenance
-personnelle est understood/documentée par #58) x durée du répétitif = distance
-parcourue ; D+ attendu = distance x pente (seulement si `grade_pct > 0` — un
-« répétitif de côte » suppose une montée ; une pente nulle ou négative rend
-`reason_code="grade_not_positive"`, jamais un D+ négatif présenté comme un D+
-de montée). Le D+ est une PRÉVISION à effort constant (personnel ou générique
-selon la pente, voir `arc_slope_model.ASSUMPTIONS['fallback']`), pas une
-promesse — les paniers de forte pente sont souvent en repli générique faute
-d'historique suffisant : `source`/`reason_code` par répétitif le disent
-explicitement.
+`hill_repeat_targets(structure, bins, band=...)` : `structure` = `{"reps",
+"rep_duration_s", "grade_pct", "recovery_s"?}`. Pour chaque répétition :
+vitesse prédite à cette pente (`arc_slope_model.predict_speed(grade_pct/100,
+bins)`, `bins` déjà résolus par l'appelant pour `band`) x durée du répétitif
+= distance parcourue ; D+ attendu = distance x pente (seulement si
+`grade_pct > 0` — un « répétitif de côte » suppose une montée ; une pente
+nulle ou négative rend `reason_code="grade_not_positive"`, jamais un D+
+négatif présenté comme un D+ de montée). Le D+ est une PRÉVISION à effort
+constant (personnel ou générique selon la pente, voir
+`arc_slope_model.ASSUMPTIONS['fallback']`), pas une promesse — les paniers de
+forte pente sont souvent en repli générique faute d'historique suffisant :
+`source`/`reason_code` par répétitif le disent explicitement.
+
+**`basis` (`HILL_BAND_BASIS`) — cette prévision est une BORNE BASSE, pas une
+prévision centrée** (revue de code #107, point 6) : avec `band="endurance"`
+(le défaut), la vitesse prédite est celle de l'athlète à effort D'ENDURANCE
+sur cette pente — or un répétitif de côte se court quasi-systématiquement
+PLUS DUR qu'une sortie d'endurance à pente égale, donc plus vite. Le D+
+attendu ici est donc probablement SOUS-estimé, jamais surestimé :
+`basis="endurance_pace_lower_bound"` le documente explicitement, pour que
+l'appelant phrase le D+ en « ≥ X m », jamais « ≈ X m ». `band="all"` (mélange
+tous les efforts déjà observés à cette pente, y compris les plus durs) réduit
+ce biais systématique sans le supprimer : `basis="mixed_effort_estimate"`.
+Aucun modèle « effort de répétitif dédié » n'existe (#58 n'ajuste que
+`"endurance"`/`"all"`, voir `arc_slope_model.BANDS`) — documenté honnêtement
+plutôt que fabriqué.
+
+**`reason`/`reason_code` racine reflètent TOUJOURS ceux du calcul de vitesse
+sous-jacent, y compris en cas de succès** (revue de code #107, point 5) : un
+`reason_code="extrapolated"` (pente au-delà du panier extrême fitté) est
+INFORMATIF, pas un échec — `per_rep`/`total_elevation_gain_m` restent
+renseignés. Seule une valeur `None` (pas de vitesse prédite du tout) signifie
+« pas de cible ». Ne jamais confondre les deux : un appelant qui abandonnerait
+la cible dès que `reason_code` est non `None` jetterait aussi les cibles
+extrapolées, pourtant valides.
+
+## Répétitif de côte sans clé `structure` — repli sur le titre de la séance
+
+`arc_contract.SUBSCHEMA["session"]` n'a PAS de clé `structure` (l'ajouter à un
+VRAI bloc ```arc ne ferait que produire un avertissement « clé inconnue »,
+`arc_contract.py::_check_object`) : une séance lue depuis un fichier réel
+(`--session Semaine.md#date`) n'en porte donc jamais. `build_session_targets`
+retombe alors sur `parse_structure_text` appliqué à `structure_text` (passé
+explicitement, ex. `--structure-text`) ou, à défaut, au `title` de la séance
+— sans quoi un répétitif de côte planifié dans une semaine réelle serait
+tout simplement INATTEIGNABLE par ce module (revue de code #107, point 7).
 
 ## Unités du DTO Garmin (skills/garmin-workout-scheduling/SKILL.md)
 
@@ -104,6 +137,7 @@ from typing import Dict, List, Optional, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+from coach_setup import workspace_root  # noqa: E402 (même résolution que arc_index.py/arc_guardrails.py)
 
 # Intensité planifiée (`arc_contract.INTENSITY`) -> numéro de zone FC (1..5).
 # `race`/`rest`/`strength` volontairement ABSENTS (voir docstring du module).
@@ -123,6 +157,45 @@ FLAT_PACE_INTENSITIES = ("recovery", "endurance")
 # seule bande dont #58 documente la provenance personnelle/générique par
 # panier (voir `arc_slope_model.BANDS`).
 DEFAULT_BAND = "endurance"
+
+# Méthodes de zones dont les bornes Z1/Z5 sont des SENTINELLES ouvertes plutôt
+# que de vraies bornes physiologiques (revue de code #107, point 3) :
+# `arc_metrics.HR_ZONE_LTHR_PCT` = (0.0, ..., 1.5) et `HR_ZONE_PCT_MAX` =
+# (0.0, ..., 1.5) — Z1 démarre à 0 % de LTHR/FCmax (= 0 bpm littéralement) et
+# Z5 monte jusqu'à 150 % de LTHR/FCmax (largement au-dessus de la FC max
+# physiologique) : ces deux multiplicateurs signifient « zone ouverte vers le
+# bas/le haut », jamais une vraie limite à pousser telle quelle dans un DTO
+# Garmin. Karvonen (`HR_ZONE_KARVONEN_HRR_PCT`, 0,50..1,00 de la réserve) n'a
+# PAS ce problème : ses deux bornes extrêmes sont déjà des valeurs réelles.
+OPEN_ENDED_HR_METHODS = ("lthr", "percent_max")
+
+
+def _clamp_open_ended_zone(zone: int, method: Optional[str], low: float, high: float,
+                            athlete: dict) -> tuple:
+    """Remplace une borne SENTINELLE (voir `OPEN_ENDED_HR_METHODS`) par une
+    borne physiologique réelle avant de la pousser comme plage FC
+    personnalisée sur Garmin : Z1 démarre à la FC de repos (le vrai plancher
+    « récupération »), Z5 est plafonnée à la FC max. Rend `(low, high,
+    reason, reason_code)` — `reason_code` non `None` signifie qu'AUCUNE borne
+    fiable n'existe (profil sans la donnée nécessaire) : l'appelant abandonne
+    alors la cible plutôt que de pousser la sentinelle brute (0 bpm, ou
+    150 % de LTHR/FCmax, jamais vus sur un athlète réel)."""
+    if method not in OPEN_ENDED_HR_METHODS:
+        return low, high, None, None
+    if zone == 1:
+        hr_rest = athlete.get("hr_rest_bpm")
+        if hr_rest is None:
+            return None, None, ("zone 1 ouverte à 0 bpm par la méthode « " + method + " » : la FC de repos, "
+                                 "seul plancher physiologique disponible, manque au profil"), "open_zone_floor_unknown"
+        low = round(hr_rest)
+    if zone == 5:
+        hr_max = athlete.get("hr_max_bpm")
+        if hr_max is None:
+            return None, None, ("zone 5 ouverte au-delà de la FC max par la méthode « " + method + " » : la FC "
+                                 "max, seul plafond physiologique disponible, manque au profil"), "open_zone_ceiling_unknown"
+        high = min(high, round(hr_max))
+    return low, high, None, None
+
 
 # Tolérance appliquée de part et d'autre de la référence plate personnelle
 # pour construire une PLAGE d'allure (le DTO Garmin `pace.zone` attend deux
@@ -175,6 +248,10 @@ def hr_target_for_intensity(intensity: Optional[str], athlete: dict,
     zone = INTENSITY_TO_ZONE[intensity]
     bounds = resolution["bounds_bpm"]
     low, high = bounds[zone - 1], bounds[zone]
+    low, high, reason, reason_code = _clamp_open_ended_zone(zone, resolution["method"], low, high, athlete)
+    if reason_code:
+        return {"bounds_bpm": None, "zone": zone, "method": resolution["method"],
+                "reason": reason, "reason_code": reason_code}
     return {
         "bounds_bpm": [round(low), round(high)], "zone": zone, "method": resolution["method"],
         "reason": None, "reason_code": None,
@@ -226,16 +303,39 @@ def _validate_hill_structure(structure: dict) -> Optional[str]:
     return None
 
 
+# `hill_repeat_targets.basis` (revue de code #107, point 6) : la vitesse
+# prédite vient TOUJOURS du modèle pente -> allure de la bande `band`, jamais
+# d'un modèle « effort de répétitif de côte » dédié (qui n'existe pas — #58
+# n'ajuste que `"endurance"`/`"all"`, voir `arc_slope_model.BANDS`). Un
+# répétitif de côte se court quasi-systématiquement PLUS DUR qu'une sortie
+# d'endurance sur la même pente : la bande `"endurance"` (le défaut) sous-estime
+# donc plutôt qu'elle ne surestime la vitesse réelle, ce qui fait du D+
+# attendu une BORNE BASSE plausible, jamais une prévision centrée — documenté
+# explicitement pour que l'appelant phrase le D+ en "≥ X m", jamais "≈ X m".
+# `band="all"` (mélange tous les efforts, y compris les plus durs déjà
+# observés à cette pente) est une estimation moins systématiquement biaisée
+# mais toujours pas garantie représentative d'un effort de répétitif.
+HILL_BAND_BASIS = {
+    "endurance": "endurance_pace_lower_bound",
+    "all": "mixed_effort_estimate",
+}
+
+
 def hill_repeat_targets(structure: dict, bins: Sequence[dict], *, band: str = DEFAULT_BAND) -> dict:
     """Cibles durée/D+ d'un répétitif de côte — voir docstring du module.
 
     `structure` : `{"reps": int, "rep_duration_s": num, "grade_pct": num,
     "recovery_s": num?}`. Rend TOUJOURS un dict avec `reps`, `rep_duration_s`,
-    `grade_pct`, `recovery_s`, `per_rep` (`speed_ms`, `distance_m`,
-    `elevation_gain_m`, `source`, `reason`, `reason_code`),
-    `total_elevation_gain_m`, `total_work_duration_s` — jamais d'exception ;
-    `per_rep`/`total_elevation_gain_m` restent `None` quand le D+ n'est pas
-    calculable (raison explicite dans `per_rep`)."""
+    `grade_pct`, `recovery_s`, `basis` (voir `HILL_BAND_BASIS` — une borne
+    basse par défaut, jamais une prévision centrée), `per_rep` (`speed_ms`,
+    `distance_m`, `elevation_gain_m`, `source`, `reason`, `reason_code`),
+    `total_elevation_gain_m`, `total_work_duration_s`, `reason`, `reason_code`
+    — jamais d'exception. `reason`/`reason_code` au niveau racine reflètent
+    TOUJOURS ceux de `per_rep` (y compris quand `per_rep` est calculé avec
+    succès : `reason_code="extrapolated"` est INFORMATIF, pas un échec — voir
+    `arc_slope_model.predict_speed` — et doit rester visible sans avoir à
+    creuser dans `per_rep`). `per_rep`/`total_elevation_gain_m` restent `None`
+    UNIQUEMENT quand le D+ n'est pas calculable du tout."""
     error = _validate_hill_structure(structure)
     reps = structure.get("reps")
     rep_duration_s = structure.get("rep_duration_s")
@@ -245,6 +345,7 @@ def hill_repeat_targets(structure: dict, bins: Sequence[dict], *, band: str = DE
         "reps": reps, "rep_duration_s": rep_duration_s, "grade_pct": grade_pct, "recovery_s": recovery_s,
         "total_work_duration_s": (reps * rep_duration_s) if isinstance(reps, int) and
                                    isinstance(rep_duration_s, (int, float)) else None,
+        "basis": HILL_BAND_BASIS.get(band),
     }
     if error:
         return {**base, "per_rep": None, "total_elevation_gain_m": None,
@@ -269,22 +370,35 @@ def hill_repeat_targets(structure: dict, bins: Sequence[dict], *, band: str = DE
         "speed_ms": speed, "distance_m": distance_m, "elevation_gain_m": elevation_gain_m,
         "source": prediction["source"], "reason": prediction["reason"], "reason_code": prediction["reason_code"],
     }
+    # `reason`/`reason_code` racine reflètent ceux de `per_rep` même en succès
+    # (ex. "extrapolated") — voir docstring, point 5 de la revue de code #107 :
+    # jamais forcés à `None` alors qu'une information existe.
     return {**base, "per_rep": per_rep, "total_elevation_gain_m": elevation_gain_m * reps,
-            "reason": None, "reason_code": None, "band": band}
+            "reason": prediction["reason"], "reason_code": prediction["reason_code"]}
 
 
 def build_session_targets(session: dict, *, athlete: dict, bins: Sequence[dict],
-                           hr_zones_method: Optional[str] = None, band: str = DEFAULT_BAND) -> dict:
+                           hr_zones_method: Optional[str] = None, band: str = DEFAULT_BAND,
+                           structure_text: Optional[str] = None) -> dict:
     """Point d'entrée unique : `session` (voir `arc_contract.SUBSCHEMA["session"]`,
-    plus une clé `structure` optionnelle, HORS contrat `arc`, pour un répétitif
-    de côte — voir CLI `targets` et `parse_structure_text`).
+    plus une clé `structure` optionnelle, HORS contrat `arc` — `arc_contract`
+    n'a pas de clé dédiée pour un répétitif de côte, l'ajouter au bloc ```arc
+    d'une VRAIE semaine ne ferait que produire un avertissement « clé inconnue »
+    sans utilité, voir `scripts/arc_contract.py::_check_object`).
+
+    Une séance lue depuis un fichier réel (`--session Semaine.md#date`, voir
+    `_load_session_arg`) n'a donc JAMAIS de clé `structure` : à défaut, ce
+    point d'entrée essaie `parse_structure_text` sur `structure_text` (passé
+    explicitement, ex. `--structure-text`) OU, à défaut, sur le `title` de la
+    séance (revue de code #107, point 7 — sans quoi un répétitif de côte
+    planifié dans une semaine réelle serait tout simplement INATTEIGNABLE par
+    ce module, faute de champ `structure` dans le contrat).
 
     Rend `{"intensity", "sport", "hr_target", "pace_target", "hill_repeats"}` —
-    `pace_target` est `None` quand `structure` est fournie (une séance de
-    répétitifs de côte n'a pas de pas plat à cibler par ce module) ;
-    `hill_repeats` est `None` sinon."""
+    `pace_target` est `None` quand une structure de côte a été reconnue
+    (explicite ou depuis le texte) ; `hill_repeats` est `None` sinon."""
     intensity = session.get("intensity")
-    structure = session.get("structure")
+    structure = session.get("structure") or parse_structure_text(structure_text or session.get("title"))
     hr_target = hr_target_for_intensity(intensity, athlete, hr_zones_method)
     if structure:
         return {
@@ -305,31 +419,91 @@ def build_session_targets(session: dict, *, athlete: dict, bins: Sequence[dict],
 
 import re  # noqa: E402
 
-# `6x3min côte 8%`, `6 × 3 min à 8%`, `6x3 min de côte à 8,5 %`… — reps,
-# durée du répétitif (minutes), pente (%). Volontairement ÉTROIT : un texte
-# qui ne correspond pas exactement à ce gabarit rend `None` plutôt qu'un
-# résultat partiel deviné (jamais de structure inventée depuis une formulation
-# ambiguë) — l'appelant doit alors fournir `structure` explicitement (JSON).
-_HILL_STRUCTURE_RE = re.compile(
-    r"(?P<reps>\d+)\s*[x×]\s*(?P<minutes>\d+(?:[.,]\d+)?)\s*min(?:ute)?s?"
-    r".{0,20}?c[oô]te.{0,10}?(?P<grade>\d+(?:[.,]\d+)?)\s*%",
+# `6x3min côte 8%`. Volontairement ÉTROIT : un texte qui ne correspond pas à
+# ce gabarit (reps x durée ... côte ... grade %) rend `None` plutôt qu'un
+# résultat partiel deviné — l'appelant fournit alors `structure` explicitement
+# (JSON), ou `--structure-text` (revue de code #107, point 7).
+_REPS_RE = re.compile(r"(?P<reps>\d+)\s*[x×]\s*")
+
+# Formats de DURÉE d'un répétitif reconnus, dans cet ordre (le premier qui
+# matche au tout début du texte restant, immédiatement après `reps x`,
+# l'emporte) — revue de code #107, point 4 :
+#   "3 min", "3min", "3 minutes"  -> 180 s
+#   "1min30"                       -> 90 s (minutes ET secondes concaténées —
+#                                     PAS juste "1 min" en ignorant le "30" :
+#                                     bug corrigé ici, silencieusement faux
+#                                     avant cette revue)
+#   "3'"                            -> 180 s (apostrophe = minutes, notation chrono)
+#   "90s", "90\""                   -> 90 s (secondes)
+#   "30 sec", "30 secondes"         -> 30 s
+_DURATION_RE = re.compile(
+    r"""^(?:
+        (?P<min>\d+(?:[.,]\d+)?)\s*min(?:ute)?s?\s*(?P<min_sec>\d{1,2})?
+      | (?P<apos_min>\d+(?:[.,]\d+)?)\s*'
+      | (?P<sec>\d+(?:[.,]\d+)?)\s*(?:sec(?:onde)?s?|s|")
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Pente cible d'un répétitif de côte : nombre suivi de `%`, immédiatement (au
+# plus 10 caractères) après le mot « côte »/« cote ». Exclusion explicite
+# (revue de code #107, point 4, BLOQUANT) : un pourcentage suivi de FC/FCmax/
+# FCM/VMA est une intensité de FRÉQUENCE CARDIAQUE ou de VITESSE MAXIMALE
+# AÉROBIE, jamais une pente — "6x3min côte à 85% FCmax" ne doit PAS rendre un
+# grade de 85 %, même quand ce pourcentage suit littéralement le mot « côte ».
+_GRADE_RE = re.compile(
+    r"c[oô]te.{0,10}?(?P<grade>\d+(?:[.,]\d+)?)\s*%(?!\s*(?:FC(?:max)?|FCM|VMA)\b)",
     re.IGNORECASE,
 )
+
+# Pente maximale plausible pour un répétitif de côte routier/trail (revue de
+# code #107, point 4) : au-delà, un nombre suivi de `%` accolé à « côte » est
+# plus probablement une faute de saisie, une confusion d'unité, ou un
+# pourcentage d'intensité non reconnu par `_GRADE_RE` (ex. un gabarit de FC/VMA
+# non encore listé) qu'une vraie pente — jamais une structure inventée sur une
+# valeur invraisemblable.
+MAX_PLAUSIBLE_GRADE_PCT = 40.0
+
+
+def _parse_duration_s(text: str) -> Optional[float]:
+    """Durée (secondes) au tout début de `text` (déjà dépouillé des espaces de
+    tête) — voir `_DURATION_RE` pour les gabarits reconnus. `None` si aucun ne
+    matche (jamais une durée devinée)."""
+    m = _DURATION_RE.match(text.strip())
+    if not m:
+        return None
+    if m.group("min") is not None:
+        minutes = float(m.group("min").replace(",", "."))
+        seconds = float(m.group("min_sec")) if m.group("min_sec") else 0.0
+        return minutes * 60.0 + seconds
+    if m.group("apos_min") is not None:
+        return float(m.group("apos_min").replace(",", ".")) * 60.0
+    return float(m.group("sec").replace(",", "."))
 
 
 def parse_structure_text(text: Optional[str]) -> Optional[dict]:
     """Best-effort : `"6×3 min côte 8 %"` -> `{"reps": 6, "rep_duration_s": 180,
-    "grade_pct": 8.0}` (jamais de `recovery_s`, pas dans ce gabarit). `None` si
-    `text` ne correspond pas — jamais une structure devinée partiellement."""
+    "grade_pct": 8.0}` (jamais de `recovery_s`, pas dans ce gabarit). Accepte
+    aussi `"6x1min30 côte 8%"` (90 s), `"6x3' côte 8%"`, `"6x90s côte 8%"`,
+    `"6x30 sec côte 8%"` — voir `_DURATION_RE`. `None` si `text` ne correspond
+    pas, si la pente est accolée à un pourcentage de FC/VMA plutôt qu'une
+    pente, ou si la pente dépasse `MAX_PLAUSIBLE_GRADE_PCT` — jamais une
+    structure devinée partiellement ou invraisemblable."""
     if not text:
         return None
-    m = _HILL_STRUCTURE_RE.search(text)
-    if not m:
+    reps_m = _REPS_RE.search(text)
+    if not reps_m:
         return None
-    reps = int(m.group("reps"))
-    minutes = float(m.group("minutes").replace(",", "."))
-    grade = float(m.group("grade").replace(",", "."))
-    return {"reps": reps, "rep_duration_s": minutes * 60.0, "grade_pct": grade}
+    duration_s = _parse_duration_s(text[reps_m.end():])
+    if duration_s is None:
+        return None
+    grade_m = _GRADE_RE.search(text)
+    if not grade_m:
+        return None
+    grade = float(grade_m.group("grade").replace(",", "."))
+    if grade <= 0 or grade > MAX_PLAUSIBLE_GRADE_PCT:
+        return None
+    return {"reps": int(reps_m.group("reps")), "rep_duration_s": duration_s, "grade_pct": grade}
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +550,9 @@ def validate_workout_step_dto(step: dict) -> List[str]:
         if has_zone == has_range:
             errors.append("cible heart.rate.zone : soit zoneNumber SEUL, soit targetValueOne+targetValueTwo, "
                            "jamais les deux ni aucun")
+        elif has_range and step["targetValueOne"] > step["targetValueTwo"]:
+            errors.append("heart.rate.zone : targetValueOne (borne basse) doit être <= targetValueTwo "
+                           "(borne haute) — jamais une plage FC inversée")
     elif target_id == 6:  # pace.zone
         if "targetValueOne" not in step or "targetValueTwo" not in step:
             errors.append("cible pace.zone : targetValueOne ET targetValueTwo (m/s) attendus")
@@ -425,14 +602,41 @@ def dto_pace_step(step_order: int, *, description: str, duration_s: float, speed
 # ---------------------------------------------------------------------------
 
 
+_SESSION_SELECTOR_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})(?:@(?P<index>\d+)|:(?P<title>.+))?$"
+)
+
+
 def _load_session_arg(value: str, workspace: Path) -> dict:
     """`--session` : soit un JSON inline (`{"intensity": "endurance", ...}`),
-    soit `chemin/vers/Semaine.md#AAAA-MM-JJ` (une session du bloc ```arc
-    `week.sessions[]` de ce fichier, sélectionnée par sa `date`)."""
+    soit `chemin/vers/Semaine.md#SÉLECTEUR` (une séance du bloc ```arc
+    `week.sessions[]` de ce fichier). Un JSON inline commençant par `{` est
+    reconnu comme tel MÊME s'il contient un `#` (ex. dans un `title` ou une
+    `description` — revue de code #107, nit) : seule une valeur qui ne
+    commence PAS par `{` est traitée comme `chemin#sélecteur`.
+
+    `SÉLECTEUR` = `AAAA-MM-JJ` (la date seule, valable seulement si UNE SEULE
+    séance porte cette date dans le fichier), `AAAA-MM-JJ@INDEX` (index 0-based
+    parmi les séances de cette date, dans l'ORDRE du fichier) ou
+    `AAAA-MM-JJ:TITRE` (titre exact). Plusieurs séances à la même date sans
+    qualifiant lève une erreur explicite plutôt que de silencieusement
+    retourner la première (revue de code #107, point 2, BLOQUANT — un lundi où
+    `{{TODAY}} == {{WEEK_START}}`, une séance déjà réalisée ce jour-là et une
+    séance encore planifiée ce même jour partagent la même date : prendre « la
+    première » aurait pu rendre la MAUVAISE séance, silencieusement, aussi bien
+    dans un test que dans un usage réel)."""
     import json
+    if value.lstrip().startswith("{"):
+        return json.loads(value)
     if "#" not in value:
         return json.loads(value)
-    file_part, _, date_part = value.rpartition("#")
+    file_part, _, selector = value.rpartition("#")
+    m = _SESSION_SELECTOR_RE.match(selector)
+    if not m:
+        raise ValueError(
+            f"--session : sélecteur invalide après '#' : {selector!r} "
+            "(attendu AAAA-MM-JJ, AAAA-MM-JJ@index ou AAAA-MM-JJ:titre)")
+    date_part, index_part, title_part = m.group("date"), m.group("index"), m.group("title")
     path = Path(file_part)
     if not path.is_absolute():
         path = workspace / path
@@ -443,10 +647,29 @@ def _load_session_arg(value: str, workspace: Path) -> dict:
     start = text.find("\n", start) + 1
     end = text.find("```", start)
     block = json.loads(text[start:end])
-    for sess in block.get("sessions", []):
-        if sess.get("date") == date_part:
-            return sess
-    raise ValueError(f"{path} : aucune séance datée {date_part} dans sessions[]")
+    candidates = [sess for sess in block.get("sessions", []) if sess.get("date") == date_part]
+    if not candidates:
+        raise ValueError(f"{path} : aucune séance datée {date_part} dans sessions[]")
+    if index_part is not None:
+        idx = int(index_part)
+        if idx >= len(candidates):
+            raise ValueError(
+                f"{path} : index @{idx} hors limites pour {date_part} ({len(candidates)} séance(s) à cette date)")
+        return candidates[idx]
+    if title_part is not None:
+        matches = [sess for sess in candidates if sess.get("title") == title_part]
+        if not matches:
+            raise ValueError(f"{path} : aucune séance datée {date_part} de titre {title_part!r}")
+        if len(matches) > 1:
+            raise ValueError(
+                f"{path} : plusieurs séances datées {date_part} de titre {title_part!r} : ambigu, précisez @index")
+        return matches[0]
+    if len(candidates) > 1:
+        titles = ", ".join(repr(sess.get("title")) for sess in candidates)
+        raise ValueError(
+            f"{path} : {len(candidates)} séances datées {date_part} ({titles}) : ambigu, précisez "
+            f"#{date_part}@index ou #{date_part}:titre")
+    return candidates[0]
 
 
 def build_arg_parser():
@@ -454,8 +677,14 @@ def build_arg_parser():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("command", choices=("targets",))
     ap.add_argument("--session", required=True,
-                     help="séance en JSON inline, ou chemin/Semaine.md#AAAA-MM-JJ")
-    ap.add_argument("--workspace", default=".", help="racine du workspace (défaut : répertoire courant)")
+                     help="séance en JSON inline, ou chemin/Semaine.md#SÉLECTEUR "
+                          "(AAAA-MM-JJ, AAAA-MM-JJ@index ou AAAA-MM-JJ:titre)")
+    ap.add_argument("--structure-text", dest="structure_text",
+                     help="texte libre décrivant un répétitif de côte (ex. « 6x3 min côte 8%% »), "
+                          "utilisé quand la séance sélectionnée n'a pas de clé structure explicite — "
+                          "voir parse_structure_text")
+    ap.add_argument("--workspace", help="racine du workspace (défaut : ARC_WORKSPACE, "
+                                          "pointeur ~/.config/ai-running-coach/workspace, sinon répertoire courant)")
     ap.add_argument("--db", help="chemin de l'index SQLite (défaut : <workspace>/.arc/coach.db)")
     ap.add_argument("--memory", action="store_true", help="index en mémoire (tests)")
     ap.add_argument("--band", choices=SL.BANDS, default=DEFAULT_BAND,
@@ -467,7 +696,7 @@ def build_arg_parser():
 def main(argv: Optional[Sequence[str]] = None) -> int:
     import json
     args = build_arg_parser().parse_args(argv)
-    workspace = Path(args.workspace)
+    workspace = workspace_root(args.workspace)
     try:
         session = _load_session_arg(args.session, workspace)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
@@ -484,7 +713,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bins = report.get("bins") or []
 
     result = build_session_targets(session, athlete=athlete, bins=bins,
-                                    hr_zones_method=conf.get("hr_zones"), band=args.band)
+                                    hr_zones_method=conf.get("hr_zones"), band=args.band,
+                                    structure_text=args.structure_text)
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

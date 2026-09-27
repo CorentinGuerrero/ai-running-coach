@@ -808,16 +808,31 @@ def _check_arc_field_absent(case: dict, result: dict, assertions: list) -> list:
 
 
 def _check_tool_args_match(tool_calls: list, assertions: list) -> list:
-    """`tool_args_match` : au moins UN appel doit satisfaire — mais, DANS cet
-    appel, TOUTES les valeurs résolues par un `[*]` doivent satisfaire (#27,
-    revue PR #72). « L'outil n'a jamais été appelé » et « appelé, mais chemin
-    introuvable dans les arguments » sont deux messages distincts."""
+    """`tool_args_match` : au moins UN appel doit satisfaire.
+
+    Par défaut (`any` absent ou `false`), sémantique TOUT (#27, revue PR #72) :
+    DANS un appel donné, TOUTES les valeurs résolues par un `[*]` doivent
+    satisfaire — un appel qui planifie cinq séances dont une hors gabarit ne
+    « passe » pas parce que les quatre autres sont bonnes.
+
+    `any = true` (opt-in, #107 revue de code) inverse cette exigence à
+    l'intérieur d'un même `[*]` : AU MOINS UNE valeur résolue doit satisfaire —
+    utile pour une propriété vraie de LA séance ciblée mais pas forcément de
+    ses voisines dans le même appel groupé (ex. une plage FC personnalisée sur
+    le pas principal, quand un pas d'échauffement du même `schedule_workouts`
+    porte sa propre cible, ou aucune : le chemin résout alors sur plusieurs
+    pas hétérogènes, dont un seul doit porter la borne vérifiée). `any` ne
+    change RIEN à la sémantique « au moins un appel parmi tous » : c'est
+    seulement la boucle interne sur les valeurs `[*]` d'UN appel qui bascule
+    de ET à OU. « L'outil n'a jamais été appelé » et « appelé, mais chemin
+    introuvable dans les arguments » restent deux messages distincts."""
     failures = []
     for assertion in assertions:
         if not isinstance(assertion, dict):
             failures.append(f"tool_args_match : entrée mal formée : {assertion!r}")
             continue
         tool_name, path_expr, server = assertion.get("tool"), assertion.get("path"), assertion.get("server")
+        any_mode = bool(assertion.get("any"))
         if not tool_name or not path_expr:
             failures.append("tool_args_match : 'tool' et 'path' sont obligatoires")
             continue
@@ -844,22 +859,34 @@ def _check_tool_args_match(tool_calls: list, assertions: list) -> list:
             if not resolved:
                 call_reports.append(f"chemin introuvable : arguments.{path_expr}")
                 continue
-            call_failures = []
+            per_value_failures = []
+            call_satisfied = not any_mode  # ET : vrai tant qu'aucune valeur n'échoue ; OU : faux tant qu'aucune ne réussit
             for concrete_path, value in resolved:
+                value_failures = []
                 for cmp_kind, cmp_expected in comparators.items():
                     try:
                         ok = _compare_value(value, cmp_expected, cmp_kind)
                     except ValueError as exc:
-                        call_failures.append(f"arguments.{concrete_path} : {exc}")
+                        value_failures.append(f"arguments.{concrete_path} : {exc}")
                         continue
                     if not ok:
-                        call_failures.append(
+                        value_failures.append(
                             f"arguments.{concrete_path} = {value!r} {_describe_expected(cmp_kind, cmp_expected)}"
                         )
-            if not call_failures:
+                if any_mode:
+                    if not value_failures:
+                        call_satisfied = True
+                        break
+                    per_value_failures.extend(value_failures)
+                else:
+                    if value_failures:
+                        call_satisfied = False
+                        per_value_failures.extend(value_failures)
+            if call_satisfied:
                 satisfied = True
                 break
-            call_reports.append("; ".join(call_failures))
+            call_reports.append("; ".join(per_value_failures) if per_value_failures
+                                else "aucune valeur résolue ne satisfait (any)")
 
         if path_error:
             failures.append(path_error)

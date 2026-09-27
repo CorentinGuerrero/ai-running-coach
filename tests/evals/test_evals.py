@@ -175,16 +175,21 @@ class TestCaseFilesAreValid(unittest.TestCase):
         """`tool_args_match` (#27) : `tool`/`path` obligatoires, chemin valide,
         `server` connu, `tool` dans les outils réellement exposés par ce stub
         (ou par n'importe lequel si `server` est omis), exactement un
-        comparateur, min/max numériques, regex qui compile."""
+        comparateur, min/max numériques, regex qui compile. `any` (#107 revue
+        de code) est une clé optionnelle en plus des comparateurs — un
+        booléen TOML explicite, jamais une chaîne qui passerait `bool()` sans
+        le vouloir dire."""
         all_known_tools = set()
         for names in self.STUB_TOOL_NAMES.values():
             all_known_tools |= names
-        allowed_keys = {"tool", "path", "server"} | set(runner.TOOL_ARGS_COMPARATORS)
+        allowed_keys = {"tool", "path", "server", "any"} | set(runner.TOOL_ARGS_COMPARATORS)
         for case in self.cases:
             for assertion in runner._as_list(case["expect"].get("tool_args_match")):
                 with self.subTest(case=case["id"], assertion=assertion):
                     self.assertIn("tool", assertion, "tool_args_match : 'tool' manquant")
                     self.assertIn("path", assertion, "tool_args_match : 'path' manquant")
+                    if "any" in assertion:
+                        self.assertIsInstance(assertion["any"], bool, "tool_args_match.any doit être un booléen TOML")
                     try:
                         runner._parse_json_path(assertion["path"])
                     except ValueError as exc:

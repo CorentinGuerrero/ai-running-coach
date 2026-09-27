@@ -38,10 +38,21 @@ python3 scripts/arc_workout_targets.py targets --session planning/Semaine.md#202
 | Allure plate | `pace_target.speed_low_ms`/`speed_high_ms` | Référence plate GAP personnelle/générique (#44/#58), UNIQUEMENT pour `recovery`/`endurance` | **mètres/seconde** (`targetValueOne`/`targetValueTwo`, `pace.zone`) |
 | D+ de côte | `hill_repeats.per_rep.elevation_gain_m` | Vitesse personnelle/générique prédite à la pente demandée (#58) × durée du répétitif | mètres (informatif, dans la description du pas — Garmin n'a pas de champ D+) |
 
-Chaque cible non calculable rend `reason`/`reason_code` explicite (profil sans
-zones FC, pente sans modèle, intensité sans mise à l'échelle d'allure
-validée) : l'agent retire alors la cible correspondante du DTO plutôt que
-d'en inventer une. Voir `skills/garmin-workout-scheduling/SKILL.md`, section
+Une date qui identifie plusieurs séances du même fichier exige un
+qualifiant (`#AAAA-MM-JJ@index` ou `#AAAA-MM-JJ:titre`) — jamais « la
+première » silencieusement. Un répétitif de côte planifié dans une vraie
+semaine n'a pas de clé `structure` (absente du contrat `arc`) : le titre de
+la séance est analysé automatiquement (`--structure-text` en repli explicite).
+
+Chaque cible non calculable (`bounds_bpm`/`speed_low_ms`/`elevation_gain_m` à
+`null`) rend `reason`/`reason_code` explicite (profil sans zones FC, pente
+sans modèle, intensité sans mise à l'échelle d'allure validée) : l'agent
+retire alors la cible correspondante du DTO plutôt que d'en inventer une —
+un `reason_code` comme `"extrapolated"` SANS valeur `null` reste, lui,
+purement informatif (la valeur est utilisable). Le D+ de côte est calculé à
+l'allure d'ENDURANCE (`hill_repeats.basis: "endurance_pace_lower_bound"`) :
+c'est une borne basse plausible, pas une prévision centrée — à formuler
+« ≥ X m D+ ». Voir `skills/garmin-workout-scheduling/SKILL.md`, section
 « Personal targets », pour le détail complet (mapping, provenance,
 conversions d'unités, D+ attendu vs mesuré).
 

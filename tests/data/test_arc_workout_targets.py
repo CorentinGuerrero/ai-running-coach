@@ -23,7 +23,9 @@ Familles de tests :
 
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -249,6 +251,274 @@ class TestBuildSessionTargets(unittest.TestCase):
         self.assertIsNone(result["pace_target"])
         self.assertIsNotNone(result["hill_repeats"]["total_elevation_gain_m"])
         self.assertEqual(result["hr_target"]["bounds_bpm"], [176, 190])  # Z5
+
+    def test_hill_structure_recognized_from_title_when_no_structure_key(self):
+        # #107 revue de code, point 7 : le contrat `arc` n'a pas de clé
+        # `structure` — une séance lue depuis une vraie semaine ne l'a jamais.
+        session = {"date": "2026-10-02", "sport": "trail", "title": "Côtes 6x3 min côte 8%",
+                   "intensity": "vo2max"}
+        result = T.build_session_targets(session, athlete=ATHLETE_KARVONEN, bins=FLAT_BINS)
+        self.assertIsNone(result["pace_target"])
+        self.assertIsNotNone(result["hill_repeats"])
+        self.assertEqual(result["hill_repeats"]["reps"], 6)
+        self.assertEqual(result["hill_repeats"]["grade_pct"], 8.0)
+
+    def test_hill_structure_from_explicit_structure_text_overrides_title(self):
+        session = {"date": "2026-10-02", "sport": "trail", "title": "Séance du jour", "intensity": "vo2max"}
+        result = T.build_session_targets(session, athlete=ATHLETE_KARVONEN, bins=FLAT_BINS,
+                                          structure_text="4x2 min côte 10%")
+        self.assertIsNotNone(result["hill_repeats"])
+        self.assertEqual(result["hill_repeats"]["reps"], 4)
+        self.assertEqual(result["hill_repeats"]["grade_pct"], 10.0)
+
+    def test_flat_session_title_never_misparsed_as_hill(self):
+        session = {"date": "2026-10-02", "sport": "trail", "title": "Footing endurance 45 min",
+                   "intensity": "endurance"}
+        result = T.build_session_targets(session, athlete=ATHLETE_KARVONEN, bins=FLAT_BINS)
+        self.assertIsNone(result["hill_repeats"])
+        self.assertIsNotNone(result["pace_target"])
+
+
+class TestOpenEndedZoneClamping(unittest.TestCase):
+    """#107 revue de code, point 3 : les zones Z1/Z5 des méthodes LTHR et
+    %FCmax sont des SENTINELLES ouvertes (0 bpm / 150 % de LTHR-ou-FCmax),
+    jamais une vraie borne physiologique — Karvonen n'a pas ce problème."""
+
+    ATHLETE_LTHR_ONLY = {"hr_threshold_bpm": 170}  # ni hr_rest_bpm ni hr_max_bpm
+    ATHLETE_LTHR_FULL = {"hr_threshold_bpm": 170, "hr_rest_bpm": 45, "hr_max_bpm": 195}
+    ATHLETE_PCTMAX_ONLY = {"hr_max_bpm": 190}  # pas de hr_rest_bpm
+
+    def test_lthr_zone1_without_hr_rest_gives_reason_not_a_zero_bpm_floor(self):
+        result = T.hr_target_for_intensity("recovery", self.ATHLETE_LTHR_ONLY)
+        self.assertIsNone(result["bounds_bpm"])
+        self.assertEqual(result["reason_code"], "open_zone_floor_unknown")
+        self.assertEqual(result["method"], "lthr")
+
+    def test_lthr_zone5_without_hr_max_gives_reason_not_a_150pct_ceiling(self):
+        result = T.hr_target_for_intensity("vo2max", self.ATHLETE_LTHR_ONLY)
+        self.assertIsNone(result["bounds_bpm"])
+        self.assertEqual(result["reason_code"], "open_zone_ceiling_unknown")
+
+    def test_lthr_zone1_floor_uses_hr_rest_bpm_when_known(self):
+        result = T.hr_target_for_intensity("recovery", self.ATHLETE_LTHR_FULL)
+        self.assertEqual(result["bounds_bpm"][0], 45)  # hr_rest_bpm, jamais 0
+        self.assertIsNone(result["reason_code"])
+
+    def test_lthr_zone5_high_clamped_to_hr_max_bpm(self):
+        result = T.hr_target_for_intensity("vo2max", self.ATHLETE_LTHR_FULL)
+        # Sans clamp : 170 * 1.5 = 255 bpm (implausible) ; avec clamp : 195 (hr_max_bpm).
+        self.assertEqual(result["bounds_bpm"][1], 195)
+        self.assertIsNone(result["reason_code"])
+
+    def test_percent_max_zone1_without_hr_rest_gives_reason(self):
+        result = T.hr_target_for_intensity("recovery", self.ATHLETE_PCTMAX_ONLY)
+        self.assertIsNone(result["bounds_bpm"])
+        self.assertEqual(result["reason_code"], "open_zone_floor_unknown")
+
+    def test_percent_max_zone5_clamped_to_hr_max_bpm(self):
+        result = T.hr_target_for_intensity("vo2max", self.ATHLETE_PCTMAX_ONLY)
+        # Sans clamp : 190 * 1.5 = 285 bpm (implausible) ; avec clamp : 190.
+        self.assertEqual(result["bounds_bpm"][1], 190)
+
+    def test_karvonen_zone1_and_zone5_are_never_clamped(self):
+        athlete = {"hr_max_bpm": 190, "hr_rest_bpm": 50}
+        z1 = T.hr_target_for_intensity("recovery", athlete)
+        z5 = T.hr_target_for_intensity("vo2max", athlete)
+        # Bornes Karvonen réelles (0,50/0,60 et 0,90/1,00 de la réserve) : ni 0 ni 285.
+        self.assertEqual(z1["bounds_bpm"], [120, 134])
+        self.assertEqual(z5["bounds_bpm"], [176, 190])
+
+    def test_middle_zones_are_never_open_ended_even_with_lthr(self):
+        # Z2/Z3/Z4 n'ont jamais de sentinelle à clamper, quelle que soit la méthode.
+        result = T.hr_target_for_intensity("tempo", self.ATHLETE_LTHR_ONLY)
+        self.assertIsNotNone(result["bounds_bpm"])
+        self.assertIsNone(result["reason_code"])
+
+
+class TestHillRepeatBasis(unittest.TestCase):
+    def test_endurance_band_basis_is_a_lower_bound(self):
+        result = T.hill_repeat_targets({"reps": 6, "rep_duration_s": 180, "grade_pct": 8}, FLAT_BINS,
+                                        band="endurance")
+        self.assertEqual(result["basis"], "endurance_pace_lower_bound")
+
+    def test_all_band_basis_is_mixed_effort(self):
+        result = T.hill_repeat_targets({"reps": 6, "rep_duration_s": 180, "grade_pct": 8}, FLAT_BINS, band="all")
+        self.assertEqual(result["basis"], "mixed_effort_estimate")
+
+    def test_basis_present_even_on_invalid_structure(self):
+        result = T.hill_repeat_targets({"reps": 0, "rep_duration_s": 180, "grade_pct": 8}, FLAT_BINS)
+        self.assertEqual(result["basis"], "endurance_pace_lower_bound")
+
+    def test_extrapolated_is_surfaced_at_top_level_and_is_not_a_failure(self):
+        # Pente bien au-delà du panier extrême le plus proche -> extrapolation
+        # informative (#107 revue de code, point 5) : la valeur reste utilisable.
+        result = T.hill_repeat_targets({"reps": 4, "rep_duration_s": 120, "grade_pct": 20}, FLAT_BINS)
+        self.assertEqual(result["reason_code"], "extrapolated")
+        self.assertIsNotNone(result["per_rep"])
+        self.assertIsNotNone(result["total_elevation_gain_m"])
+        self.assertEqual(result["per_rep"]["reason_code"], "extrapolated")
+
+
+class TestParseStructureTextHardening(unittest.TestCase):
+    """#107 revue de code, point 4."""
+
+    def test_hr_percentage_is_never_mistaken_for_a_grade(self):
+        for text in ("6x3 min à 85 % FCmax", "6x3min côte a 85% FCmax", "6x3min côte a 85%FCM"):
+            self.assertIsNone(T.parse_structure_text(text), text)
+
+    def test_vma_percentage_is_never_mistaken_for_a_grade(self):
+        for text in ("a 90% VMA", "6x3min côte a 90% VMA"):
+            self.assertIsNone(T.parse_structure_text(text), text)
+
+    def test_implausibly_steep_grade_is_rejected(self):
+        self.assertIsNone(T.parse_structure_text("6x3min côte 45%"))
+        self.assertIsNone(T.parse_structure_text("6x3min côte 100%"))
+
+    def test_plausible_grade_at_the_cap_is_accepted(self):
+        result = T.parse_structure_text("6x3min côte 40%")
+        self.assertEqual(result["grade_pct"], 40.0)
+
+    def test_minutes_seconds_concatenated_notation(self):
+        result = T.parse_structure_text("6x1min30 côte 8%")
+        self.assertEqual(result["rep_duration_s"], 90.0)  # PAS 60.0 (bug corrigé)
+
+    def test_apostrophe_minutes_notation(self):
+        result = T.parse_structure_text("6x3' côte 8%")
+        self.assertEqual(result["rep_duration_s"], 180.0)
+
+    def test_bare_seconds_notation(self):
+        result = T.parse_structure_text("6x90s côte 8%")
+        self.assertEqual(result["rep_duration_s"], 90.0)
+
+    def test_seconde_word_notation(self):
+        result = T.parse_structure_text("6x30 sec côte 8%")
+        self.assertEqual(result["rep_duration_s"], 30.0)
+
+
+class TestValidateWorkoutStepDtoHrRangeOrdering(unittest.TestCase):
+    def test_inverted_hr_custom_range_is_rejected(self):
+        step = T.dto_hr_step(1, description="Z2", duration_s=2700, bounds_bpm=[134, 148])
+        step["targetValueOne"], step["targetValueTwo"] = step["targetValueTwo"], step["targetValueOne"]
+        errors = T.validate_workout_step_dto(step)
+        self.assertTrue(any("targetValueOne" in e for e in errors), errors)
+
+
+class TestLoadSessionArg(unittest.TestCase):
+    """`arc_workout_targets._load_session_arg` — #107 revue de code, points 2 et nit."""
+
+    def _week_file(self, tmp: Path, sessions: list) -> Path:
+        path = Path(tmp) / "Semaine.md"
+        block = {"arc": 1, "kind": "week", "week_start": "2026-09-28", "location": "Tournai",
+                 "sessions": sessions}
+        path.write_text("# Semaine\n\n```arc\n" + json.dumps(block, ensure_ascii=False) + "\n```\n",
+                         encoding="utf-8")
+        return path
+
+    def test_json_inline_parsed_directly(self):
+        session = T._load_session_arg('{"date": "2026-09-30", "intensity": "endurance"}', Path("."))
+        self.assertEqual(session["intensity"], "endurance")
+
+    def test_json_inline_with_hash_in_a_field_is_still_json(self):
+        # Nit de la revue #107 : une valeur qui COMMENCE par '{' est du JSON,
+        # même si elle contient un '#' ailleurs (ex. dans un titre).
+        session = T._load_session_arg(
+            '{"date": "2026-09-30", "title": "Séance #3", "intensity": "endurance"}', Path("."))
+        self.assertEqual(session["title"], "Séance #3")
+
+    def test_single_session_at_date_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [{"date": "2026-09-30", "sport": "trail", "title": "Footing"}])
+            session = T._load_session_arg(f"{path}#2026-09-30", Path(tmp))
+            self.assertEqual(session["title"], "Footing")
+
+    def test_missing_date_raises_with_explicit_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [{"date": "2026-09-30", "sport": "trail", "title": "Footing"}])
+            with self.assertRaises(ValueError):
+                T._load_session_arg(f"{path}#2026-10-05", Path(tmp))
+
+    def test_ambiguous_date_without_qualifier_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [
+                {"date": "2026-09-30", "sport": "trail", "title": "Seuil", "status": "done"},
+                {"date": "2026-09-30", "sport": "trail", "title": "Endurance", "status": "planned"},
+            ])
+            with self.assertRaises(ValueError):
+                T._load_session_arg(f"{path}#2026-09-30", Path(tmp))
+
+    def test_ambiguous_date_resolved_by_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [
+                {"date": "2026-09-30", "sport": "trail", "title": "Seuil", "status": "done"},
+                {"date": "2026-09-30", "sport": "trail", "title": "Endurance", "status": "planned"},
+            ])
+            session = T._load_session_arg(f"{path}#2026-09-30@1", Path(tmp))
+            self.assertEqual(session["title"], "Endurance")
+
+    def test_ambiguous_date_resolved_by_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [
+                {"date": "2026-09-30", "sport": "trail", "title": "Seuil", "status": "done"},
+                {"date": "2026-09-30", "sport": "trail", "title": "Endurance", "status": "planned"},
+            ])
+            session = T._load_session_arg(f"{path}#2026-09-30:Endurance", Path(tmp))
+            self.assertEqual(session["status"], "planned")
+
+    def test_index_out_of_range_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [{"date": "2026-09-30", "sport": "trail", "title": "Footing"}])
+            with self.assertRaises(ValueError):
+                T._load_session_arg(f"{path}#2026-09-30@5", Path(tmp))
+
+    def test_invalid_selector_syntax_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._week_file(tmp, [{"date": "2026-09-30", "sport": "trail", "title": "Footing"}])
+            with self.assertRaises(ValueError):
+                T._load_session_arg(f"{path}#not-a-date", Path(tmp))
+
+
+class TestMainCli(unittest.TestCase):
+    """`arc_workout_targets.main` bout en bout, workspace jetable (#107 revue
+    de code : couverture explicite demandée pour `main`/`_load_session_arg`)."""
+
+    def _workspace(self, tmp: Path) -> Path:
+        ws = Path(tmp)
+        (ws / "planning").mkdir(parents=True)
+        (ws / "planning" / "Runner_Profile.md").write_text(
+            "# Profil de l'athlète\n\n## Physiologie\n\n"
+            "- **FC max** : 190\n- **FC de repos de référence** : 50\n", encoding="utf-8")
+        return ws
+
+    def test_main_with_json_session_prints_targets(self):
+        import io
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._workspace(tmp)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = T.main(["targets", "--session",
+                                '{"date": "2026-09-30", "sport": "trail", "title": "Footing", '
+                                '"intensity": "endurance"}',
+                                "--workspace", str(ws), "--memory"])
+            self.assertEqual(code, 0)
+            result = json.loads(out.getvalue())
+            self.assertEqual(result["hr_target"]["bounds_bpm"], [134, 148])
+
+    def test_main_reports_error_on_missing_session_date(self):
+        import io
+        from contextlib import redirect_stderr
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._workspace(tmp)
+            (ws / "planning" / "Semaine.md").write_text(
+                '# Semaine\n\n```arc\n{"arc": 1, "kind": "week", "week_start": "2026-09-28", '
+                '"location": "Tournai", "sessions": [{"date": "2026-09-30", "sport": "trail", '
+                '"title": "Footing"}]}\n```\n', encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err):
+                code = T.main(["targets", "--session", "planning/Semaine.md#2026-10-05",
+                                "--workspace", str(ws), "--memory"])
+            self.assertEqual(code, 1)
+            self.assertIn("aucune séance datée", err.getvalue())
 
 
 if __name__ == "__main__":
