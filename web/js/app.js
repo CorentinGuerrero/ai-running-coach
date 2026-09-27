@@ -280,13 +280,27 @@ function indexLabel(kind, category) {
   return category ? `${name} ${category.toUpperCase()}` : `${name} (général)`;
 }
 
+// Empêche une année en un seul chiffre (`d.slice(0,4)` sur une date déjà ISO
+// donne toujours 4 chiffres, mais mieux vaut le nom explicite qu'un slice nu
+// répété à chaque appel).
+const isoYear = (iso) => iso.slice(0, 4);
+
 function indexMiniChart(entries, kind, cls) {
   if (entries.length < 2) return null;
   const dates = entries.map((e) => e.date);
   const values = entries.map((e) => e.value);
   const label = `Historique ${indexLabel(kind, null)}`;
-  const chart = timeChart(dates, [{ type: "line", values, cls }], [], {
-    height: 160, label, yFormat: (v) => F.num(v, 0),
+  // Échelle temporelle VRAIE (`timeScale`, revue de code #62) : deux relevés
+  // espacés de dix mois ne doivent pas occuper la même distance à l'écran que
+  // deux relevés consécutifs — chaque point est positionné proportionnellement
+  // à sa date réelle, pas à son simple rang. `xLabels` porte l'année
+  // explicitement sur CHAQUE repère (`F.dayShort` + année) plutôt que de
+  // s'en remettre à l'heuristique « premiers jours du mois » de `timeChart`
+  // (pensée pour une série quotidienne dense, pas pour des relevés occasionnels
+  // qui peuvent s'étaler sur plusieurs années).
+  const xLabels = dates.map((d) => `${F.dayShort(d)} ${isoYear(d)}`);
+  const chart = timeChart(dates, [{ type: "line", values, cls }, { type: "dots", values, cls }], [], {
+    height: 160, label, yFormat: (v) => F.num(v, 0), timeScale: true, xLabels,
   });
   return { chart, entries, label };
 }
@@ -294,14 +308,18 @@ function indexMiniChart(entries, kind, cls) {
 function performanceIndexSection(idx) {
   const current = idx?.current || [];
   const history = idx?.history || [];
+  const warnings = idx?.warnings || [];
   if (!current.length && !history.length) {
     return { html: empty("Pas d'indice de performance déclaré",
-      "Renseignez « Indices de performance (ITRA / UTMB) » dans votre profil pour les voir ici — jamais récupéré automatiquement."), charts: [] };
+      `Ajoutez, dans votre profil (« Indices de performance (ITRA / UTMB) »), `
+      + `une ligne par relevé au format : AAAA-MM-JJ — itra|utmb [catégorie] : valeur `
+      + `(ex. 2025-11-01 — itra : 610) — jamais récupéré automatiquement.`)
+      + (warnings.length ? warnings.map((w) => note(F.esc(w))).join("") : ""), charts: [] };
   }
   const rows = [...current]
     .sort((a, b) => (a.kind === b.kind ? (a.category || "").localeCompare(b.category || "") : a.kind.localeCompare(b.kind)))
     .map((c) => `<tr><th scope="row">${F.esc(indexLabel(c.kind, c.category))}</th>
-        <td class="num">${F.num(c.value, 0)}</td><td>${F.dayShort(c.date)} ${c.date.slice(0, 4)}</td></tr>`)
+        <td class="num">${F.num(c.value, 0)}</td><td>${F.dayShort(c.date)} ${isoYear(c.date)}</td></tr>`)
     .join("");
   const charts = [];
   for (const kind of ["itra", "utmb"]) {
@@ -309,14 +327,21 @@ function performanceIndexSection(idx) {
     const built = indexMiniChart(general, kind, `line line--${kind}`);
     if (built) charts.push({ id: `c-idx-${kind}`, readoutId: `r-idx-${kind}`, ...built });
   }
-  const chartsHtml = charts.map((c) => `<div><h3>${F.esc(c.label)}</h3>
-      <div class="chart-host" id="${c.id}">${c.chart.svg}</div><p class="readout" id="${c.readoutId}"></p></div>`).join("");
+  const chartHost = (c) => `<div><h3>${F.esc(c.label)}</h3>
+      <div class="chart-host" id="${c.id}">${c.chart.svg}</div><p class="readout" id="${c.readoutId}"></p></div>`;
+  // Un seul graphique ne doit jamais se retrouver à moitié de largeur dans une
+  // grille à deux colonnes prévue pour DEUX (revue de code #62, nit) : la
+  // grille `band--split` n'est posée que si les deux séries générales existent.
+  const chartsHtml = charts.length === 2
+    ? `<div class="band--split">${charts.map(chartHost).join("")}</div>`
+    : charts.map(chartHost).join("");
   const html = `<section class="band"><h2>Indices de performance (ITRA / UTMB)</h2>
       <table class="data data--compact">
         <thead><tr><th scope="col">Indice</th><th scope="col" class="num">Valeur</th><th scope="col">Date</th></tr></thead>
         <tbody>${rows}</tbody></table>
-      ${chartsHtml ? `<div class="band--split">${chartsHtml}</div>` : ""}
+      ${chartsHtml}
       ${note("Valeurs déclarées par vous dans le profil, jamais récupérées automatiquement — voir la règle de vie privée du coach.")}
+      ${warnings.map((w) => note(F.esc(w))).join("")}
     </section>`;
   return { html, charts };
 }
@@ -1501,7 +1526,7 @@ async function viewPerformance(params) {
   });
   for (const c2 of indexCharts) {
     attachCursor($(`#${c2.id}`), c2.chart, (i) => readout($(`#${c2.readoutId}`),
-      `<strong>${F.dayLong(c2.entries[i].date)}</strong> · ${F.num(c2.entries[i].value, 0)}`));
+      `<strong>${F.dateLong(c2.entries[i].date)}</strong> · ${F.num(c2.entries[i].value, 0)}`));
   }
 }
 

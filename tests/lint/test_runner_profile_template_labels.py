@@ -6,12 +6,26 @@ lecture de tout profil déjà rempli par un athlète — c'est exactement la cla
 de bug que le palier B existe pour attraper (voir l'en-tête de
 `test_prompt_lint.py`).
 
-`PRE_EXISTING_LABELS` est un instantané, normalisé comme `arc_legacy.
-normalize_label` le ferait, des libellés de premier niveau présents dans le
-modèle AVANT #62 (indices de performance ITRA/UTMB). Ce test n'interdit pas
-d'AJOUTER un libellé — seulement d'en renommer, réordonner au point de le
-faire disparaître, ou en supprimer un : #62 n'a ajouté QUE de nouvelles puces
-sous une nouvelle section « Indices de performance ».
+**Le vrai garde-fou est `TestParseProfileLabelsExistInTemplate`, pas
+`PRE_EXISTING_LABELS`** (revue de code #62). Un instantané hardcodé dans CE
+fichier de test n'offre aucune protection réelle contre un renommage : un
+contributeur qui renomme un libellé du modèle ET met à jour la liste dans la
+même PR ferait passer le test sans que rien n'ait réellement été vérifié
+d'indépendant. `TestParseProfileLabelsExistInTemplate` évite ce défaut en ne
+comparant le modèle à AUCUNE copie figée : elle extrait, par lecture directe du
+code source, les libellés que `arc_legacy.parse_profile` lit réellement via
+`_pick(b, ...)`, et vérifie que CHACUN résout contre le modèle ACTUEL (via
+`arc_legacy._pick` lui-même — même règle d'égalité/préfixe qu'à l'exécution).
+Renommer un libellé sans mettre le parseur à jour (ou l'inverse) échoue
+immédiatement ; les deux ensemble ne peuvent pas passer « par accident »
+puisqu'aucune valeur n'est recopiée nulle part.
+
+`PRE_EXISTING_LABELS` reste en complément (pas un instantané de sécurité, un
+répertoire de non-régression VISIBLE dans un diff) : elle fige la liste et
+l'ordre relatif des libellés connus avant #62, pour qu'une revue de code voie
+immédiatement dans le diff de PR si l'un d'eux disparaît ou change de place —
+un signal humain utile en plus du vrai garde-fou ci-dessus, jamais un
+remplacement.
 """
 
 from __future__ import annotations
@@ -26,6 +40,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import arc_legacy as L  # noqa: E402
 
 TEMPLATE = REPO / "templates" / "Runner_Profile.template.md"
+ARC_LEGACY = REPO / "scripts" / "arc_legacy.py"
 
 # Libellé de premier niveau, gras, suivi de « : » — que la valeur qui suit soit
 # vide (modèle) ou remplie (profil réel d'un athlète) : c'est délibérément plus
@@ -58,7 +73,62 @@ def extract_labels(text: str) -> list:
     return out
 
 
+# Un appel `_pick(b, "...", "...")` (arguments littéraux uniquement — le seul
+# style utilisé par `parse_profile`, jamais une variable).
+_PICK_CALL_RE = re.compile(r"_pick\(\s*b\s*,\s*((?:\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"
+                            r"(?:\s*,\s*(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'))*)\)")
+_STRING_LITERAL_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
+
+
+def _parse_profile_source() -> str:
+    """Corps de `def parse_profile(...)` dans `arc_legacy.py`, jusqu'à la
+    prochaine définition de fonction de premier niveau (ou la fin du fichier)."""
+    text = ARC_LEGACY.read_text(encoding="utf-8")
+    start = text.index("\ndef parse_profile(")
+    rest = text[start + 1:]
+    next_def = re.search(r"\ndef ", rest[1:])
+    return rest[: next_def.start() + 1] if next_def else rest
+
+
+def pick_literals_in_parse_profile() -> list:
+    """Le PREMIER libellé littéral de chaque appel `_pick(b, ...)` dans
+    `parse_profile` — lu directement dans le CODE SOURCE, jamais recopié à la
+    main ici. Seul le premier argument est le libellé CANONIQUE, celui que le
+    modèle actuel doit porter (`_pick` le préfère avant tout repli) : les
+    arguments suivants sont des alias de secours pour un LIBELLÉ PLUS ANCIEN
+    (ex. « fc seuil » pour d'anciens profils écrits avant que le modèle ne dise
+    « FC au seuil ») — par construction absents du modèle actuel, ils feraient
+    échouer le test à tort s'ils étaient exigés eux aussi."""
+    literals = []
+    for call in _PICK_CALL_RE.finditer(_parse_profile_source()):
+        first = next(_STRING_LITERAL_RE.finditer(call.group(1)), None)
+        if first:
+            literals.append(first.group(1) if first.group(1) is not None else first.group(2))
+    return literals
+
+
+class TestParseProfileLabelsExistInTemplate(unittest.TestCase):
+    """Le garde-fou réel (voir docstring du module) : aucun instantané, une
+    lecture directe de `arc_legacy.parse_profile` comparée au modèle actuel via
+    `arc_legacy._pick` lui-même."""
+
+    def test_every_pick_literal_resolves_against_the_template(self):
+        template_labels = extract_labels(TEMPLATE.read_text(encoding="utf-8"))
+        # Valeur non vide arbitraire : `_pick` ne regarde que les CLÉS du dict,
+        # jamais leur valeur — voir `arc_legacy._pick`.
+        bullets = {label: "x" for label in template_labels}
+        literals = pick_literals_in_parse_profile()
+        self.assertTrue(literals, "aucun appel _pick trouvé dans parse_profile — "
+                                   "ce test ne vérifierait alors plus rien")
+        missing = [lit for lit in literals if L._pick(bullets, lit) is None]
+        self.assertEqual(missing, [],
+                          f"libellé(s) attendu(s) par parse_profile absent(s) du modèle actuel : {missing}")
+
+
 class TestRunnerProfileTemplateLabelsUnchanged(unittest.TestCase):
+    """Répertoire de non-régression complémentaire — voir docstring du module :
+    utile en revue de code, mais PAS le garde-fou principal."""
+
     def setUp(self):
         self.current = extract_labels(TEMPLATE.read_text(encoding="utf-8"))
 
@@ -86,8 +156,8 @@ class TestRunnerProfileTemplateLabelsUnchanged(unittest.TestCase):
 
 
 class TestExtractLabelsHelper(unittest.TestCase):
-    """Le test lui-même doit détecter une régression injectée — sans quoi il
-    passerait toujours, quel que soit le contenu du modèle."""
+    """Les helpers eux-mêmes doivent détecter une régression injectée — sans
+    quoi ils passeraient toujours, quel que soit le contenu du modèle/du code."""
 
     def test_detects_a_renamed_label(self):
         text = "# Profil\n\n## Physiologie\n\n- **FC maximale** :\n"
@@ -96,6 +166,17 @@ class TestExtractLabelsHelper(unittest.TestCase):
     def test_detects_a_removed_label(self):
         text = "# Profil\n\n## Physiologie\n\n- **Sexe** :\n"
         self.assertNotIn(L.normalize_label("FC max"), extract_labels(text))
+
+    def test_pick_literals_are_found(self):
+        literals = pick_literals_in_parse_profile()
+        self.assertIn("fc max", literals)
+        self.assertIn("lieu par defaut", literals)
+
+    def test_pick_literal_check_detects_a_missing_template_label(self):
+        """Le garde-fou détecte bien un désaccord parseur/modèle : un libellé que
+        `_pick` chercherait mais qu'aucun modèle ne fournit."""
+        bullets = {"fc max": "x"}  # « fc de repos de reference » absent
+        self.assertIsNone(L._pick(bullets, "fc de repos de reference"))
 
 
 if __name__ == "__main__":

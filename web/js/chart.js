@@ -51,13 +51,39 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
   const ih = H - PAD.top - PAD.bottom;
   const n = dates.length;
   const band = opts.band ?? layers.some((l) => l.type === "bars");
+  // Échelle temporelle vraie (`opts.timeScale`, #62) : chaque point à une
+  // abscisse proportionnelle à sa date RÉELLE, pas à son rang dans le tableau —
+  // indispensable pour une série aux relevés espacés irrégulièrement (mois,
+  // parfois années), où un axe par simple rang écraserait les écarts réels.
+  // Par défaut (`false`, comportement inchangé pour tous les appelants
+  // existants) : un rang régulier, adapté aux séries à pas fixe (jour/semaine).
+  const dateMs = opts.timeScale ? dates.map((d) => Date.parse(`${d}T00:00:00Z`)) : null;
+  const span = dateMs && n > 1 ? (dateMs[n - 1] - dateMs[0] || 1) : 1;
   const x = band
     ? (i) => PAD.left + ((i + 0.5) / Math.max(n, 1)) * iw
-    : (i) => PAD.left + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-  // Inverse de x : l'indice le plus proche d'une abscisse (curseur).
+    : dateMs
+      ? (i) => PAD.left + (n <= 1 ? iw / 2 : ((dateMs[i] - dateMs[0]) / span) * iw)
+      : (i) => PAD.left + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
+  // Inverse de x : l'indice le plus proche d'une abscisse (curseur). En échelle
+  // temporelle, les points ne sont pas régulièrement espacés : recherche du
+  // plus proche par balayage (séries courtes en pratique — relevés d'indice,
+  // pas des séries quotidiennes), plutôt qu'un calcul de rang qui supposerait
+  // un espacement régulier.
   const index = band
     ? (px) => Math.floor(((px - PAD.left) / iw) * n)
-    : (px) => Math.round(((px - PAD.left) / iw) * (n - 1));
+    : dateMs
+      ? (px) => {
+          if (n <= 1) return 0;
+          const targetMs = dateMs[0] + ((px - PAD.left) / iw) * span;
+          let best = 0;
+          let bestDiff = Infinity;
+          dateMs.forEach((ms, i) => {
+            const diff = Math.abs(ms - targetMs);
+            if (diff < bestDiff) { bestDiff = diff; best = i; }
+          });
+          return best;
+        }
+      : (px) => Math.round(((px - PAD.left) / iw) * (n - 1));
   const anchor = (i) => (i === 0 && !band ? "start" : "middle");
 
   const scale = (axis) => {

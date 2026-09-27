@@ -964,9 +964,11 @@ def api_performance_index(store: Store, q: dict) -> dict:
 
     Duplique volontairement `store.performance_index()` déjà exposée sous
     `/api/summary.performance_index` (comme `gear`/`/api/summary.gear` n'a pas
-    besoin d'une route dédiée aujourd'hui) : une route dédiée sert ici surtout
-    à isoler le coût de lecture pour la vue Performance sans recharger tout le
-    résumé, et documente la forme de la donnée pour un appelant headless."""
+    besoin d'une route dédiée aujourd'hui) : la vue Performance de `web/js/
+    app.js` lit `SUMMARY.performance_index` (un seul `/api/summary` déjà
+    récupéré au chargement, pas d'aller-retour supplémentaire) — cette route
+    dédiée sert un appelant headless (agent, CLI externe) qui veut CETTE seule
+    donnée sans tout le résumé, et documente sa forme indépendamment."""
     return store.performance_index()
 
 

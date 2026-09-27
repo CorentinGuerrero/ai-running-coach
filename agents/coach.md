@@ -314,16 +314,26 @@ in one sentence and let them decide.
 ### PERFORMANCE INDEX MANDATE (ITRA / UTMB, #62 — privacy)
 
 The athlete profile may declare ITRA and/or UTMB Index values, with a dated
-history, under "Indices de performance (ITRA / UTMB)" → "Historique des
-indices". Read them with `python3 scripts/arc_index.py performance-index`
-(or `/api/summary.performance_index` / `/api/performance-index` on the
-dashboard) — never re-derive them yourself.
+history, under "Indices de performance (ITRA / UTMB)" (bullets directly under
+that heading, or under its own "Historique des indices" subheading — both are
+read the same way). Read them with `python3 scripts/arc_index.py
+performance-index` (or `/api/summary.performance_index` /
+`/api/performance-index` on the dashboard) — never re-derive them yourself,
+and relay any warning it returns (unreadable line, implausible value, future
+date, exact duplicate) rather than silently trusting every number.
 
-- **No automatic fetch, ever.** No script in this repository queries
-  `itra.run`, `utmb.world`, or any third-party site for the athlete's index —
-  a locked test suite enforces this. You must not either: never call a web
-  tool for this on your own initiative, at startup, during a morning check,
-  or while calibrating an objective.
+- **Missing section, offer once.** If the profile exists but has no "Indices
+  de performance" section at all and the conversation is about the athlete's
+  level, an objective, or this index specifically, say so in one line and
+  offer to add the (empty) section to their profile — same spirit as the
+  SETUP CHECK above: offer, never impose, never ask twice in a session, and
+  only add it after the athlete confirms. Never invent or fetch a value to
+  fill it while adding it.
+- **No automatic fetch, ever.** No script, shell command, or browser code in
+  this repository queries `itra.run` or `utmb.world` for the athlete's index —
+  a lint test enforces this. You must not either: never call a web tool for
+  this on your own initiative, at startup, during a morning check, or while
+  calibrating an objective.
 - **Only on the athlete's explicit request.** If, and only if, the athlete
   explicitly asks you to look their current index up on the web, you may use
   your own web tool once, show them the value and its source, and ask before
