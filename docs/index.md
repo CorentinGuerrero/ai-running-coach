@@ -97,10 +97,10 @@ Chaque séance est poussée dans votre calendrier Garmin Connect. Après l'effor
 <div class="arc-section" markdown>
   <div class="arc-section__inner" markdown>
 
-## Dix-sept skills, prêts à l'emploi
+## Dix-huit skills, prêts à l'emploi
 
 Chaque agent s'appuie sur des skills spécialisés — des protocoles précis que l'IA suit à la lettre.
-Quatre d'entre eux sont aussi des commandes courtes pour un usage quotidien depuis le téléphone.
+Cinq d'entre eux sont aussi des commandes courtes pour un usage quotidien depuis le téléphone.
 
 <div class="arc-skills">
 
@@ -121,6 +121,7 @@ Quatre d'entre eux sont aussi des commandes courtes pour un usage quotidien depu
 <div class="arc-skill"><span class="arc-skill__name">Contrat de données</span><span class="arc-skill__desc">schéma structuré des fichiers Markdown pour l'index et le tableau de bord</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Backfill du contrat</span><span class="arc-skill__desc">mise à niveau des fichiers existants vers le contrat de données</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Diagnostic d'installation</span><span class="arc-skill__desc">tokens Garmin, MCP, configuration, daily-sync — en une commande</span></div>
+<div class="arc-skill"><span class="arc-skill__name">Saisie libre (/log)</span><span class="arc-skill__desc">ravitaillement, douleur, RPE en une phrase, jamais de valeur nutritionnelle inventée</span></div>
 
 </div>
 

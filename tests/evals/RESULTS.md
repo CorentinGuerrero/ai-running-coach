@@ -40,6 +40,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `injury-risk-pain` | — | — |
 | `itra-index-lookup-confirm` | — | — |
 | `itra-index-privacy` | — | — |
+| `log-freeform` | — | — |
+| `log-freeform-unknown-product` | — | — |
 | `no-medical-no-delegation` | — | — |
 | `race-countdown-trail-shape` | — | — |
 | `race-debrief` | — | — |

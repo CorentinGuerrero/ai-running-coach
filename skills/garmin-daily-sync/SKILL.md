@@ -40,21 +40,29 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    documents> ») la tâche suivante :
    > Load the `garmin-sync-efficiency` skill. For each of the last `lookback_days` days
    > (today included), check whether `activities/YYYY-MM-DD_<type>.md` and
-   > `medical/YYYY-MM-DD_health.md` exist. For missing dates only, fetch from the `garmin` MCP
-   > server: activities (with splits and `recovery_hr_bpm`), sleep, HRV, training readiness,
-   > resting HR / body battery. Persist each file immediately using the workspace conventions
-   > (`AGENTS.md`: file names; load the `workspace-data-contract` skill and open every file
-   > with its ```arc JSON block — `kind: activity` with `garmin_activity_id`, `location` and
-   > `splits`, `kind: health` with `morning_check` set to the configured mode. For TODAY's
-   > `medical/YYYY-MM-DD_health.md`, when `morning_check` is `full` or `minimal`, record the
-   > gatekeeper `verdict` (`green`/`amber`/`red`) and `verdict_reason` per the morning-check
-   > rules (`agents/medical.md`) — never leave it to chance, step 4 below depends on it; document
-   > language from `config/workspace.toml` for the prose below the block). Validate each file
-   > with `python3 scripts/arc_index.py --validate <file>` and fix what it reports. Never dump
-   > raw JSON into the conversation. Do not ask questions. Do not push anything
-   > to the Garmin calendar. Reply with: the list of files created, and a 5-line maximum
-   > summary (new activities: type/distance/D+/HR avg/HRR; sleep score; HRV status vs
-   > baseline; readiness score; any alert such as low HRV, poor sleep, HRR missing).
+   > `medical/YYYY-MM-DD_health.md` exist AND are already synced — **not just present**
+   > (`/log`, #67, may have created either file earlier the same day with only
+   > athlete-declared fields, before any sync ran: see `garmin-sync-efficiency`'s "not yet
+   > synced" marker). For each date that is missing OR not yet synced, fetch from the `garmin`
+   > MCP server: activities (with splits and `recovery_hr_bpm`), sleep, HRV, training
+   > readiness, resting HR / body battery. If a not-yet-synced file already exists for that
+   > date, MERGE the fetched Garmin fields into it — same file, never a second one for the
+   > same session — preserving every athlete-declared key it already carries (`carbs_g`,
+   > `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg` on an activity;
+   > `pain` on a health file) exactly as declared. Persist each file immediately using the
+   > workspace conventions (`AGENTS.md`: file names; load the `workspace-data-contract` skill
+   > and open every file with its ```arc JSON block — `kind: activity` with
+   > `garmin_activity_id`, `location` and `splits`, `kind: health` with `morning_check` set to
+   > the configured mode. For TODAY's `medical/YYYY-MM-DD_health.md`, when `morning_check` is
+   > `full` or `minimal`, record the gatekeeper `verdict` (`green`/`amber`/`red`) and
+   > `verdict_reason` per the morning-check rules (`agents/medical.md`) — never leave it to
+   > chance, step 4 below depends on it; document language from `config/workspace.toml` for
+   > the prose below the block). Validate each file with `python3 scripts/arc_index.py
+   > --validate <file>` and fix what it reports. Never dump raw JSON into the conversation.
+   > Do not ask questions. Do not push anything to the Garmin calendar. Reply with: the list
+   > of files created or merged, and a 5-line maximum summary (new activities:
+   > type/distance/D+/HR avg/HRR; sleep score; HRV status vs baseline; readiness score; any
+   > alert such as low HRV, poor sleep, HRR missing).
 2. **Échantillons FIT (#42, best-effort)** : pour chaque activité running/trail dont un
    fichier a été créé à l'étape 1, télécharger son FIT : `python3
    skills/fit-download/scripts/download_fit.py <garmin_activity_id> --json` (sans

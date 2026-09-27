@@ -219,8 +219,9 @@ scripts/coach-remote.sh uninstall
 ```
 
 Exemples depuis le téléphone : *« Résume ma semaine »*, *« Analyse ma sortie de ce midi »*,
-*« Décale la séance de jeudi à vendredi et mets-la dans Garmin »*, ou `/garmin-daily-sync`
-pour forcer une synchronisation.
+*« Décale la séance de jeudi à vendredi et mets-la dans Garmin »*, `/garmin-daily-sync`
+pour forcer une synchronisation, ou `/log 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7`
+juste après une sortie ([saisie libre](skills/log.md), #67).
 
 !!! tip "Mode de permission"
     Le service démarre en `acceptEdits` : l'écriture des fichiers MD est automatique, mais

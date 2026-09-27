@@ -1,0 +1,234 @@
+# Généré par scripts/build-gemini-commands.py — NE PAS ÉDITER À LA MAIN.
+# Source : skills/log/SKILL.md
+description = "Saisie libre en une phrase (ravitaillement, douleur, RPE) invoquée comme /log — « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Extrait les entités, délègue l'arithmétique, la correspondance catalogue et la fusion idempotente à scripts/arc_log.py (jamais de calcul ni de conversion à la main), puis écrit dans les bons fichiers au contrat (activities/, medical/) sans jamais inventer une valeur nutritionnelle absente du catalogue ni bloquer/dupliquer une synchronisation Garmin ultérieure. Charger dès que l'utilisateur tape /log ou décrit en une phrase ce qu'il a mangé/bu/ressenti pendant ou après une séance."
+prompt = '''
+# `/log` — saisie libre (#67)
+
+Une phrase du type « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 »
+contient jusqu'à trois natures de données, chacune avec son fichier et son
+propriétaire (`AGENTS.md`) :
+
+| Nature | Fichier | Clé(s) du contrat | Agent qui écrit |
+|---|---|---|---|
+| Ravitaillement, hydratation **et** RPE de la séance (tout `activity_merge`, voir ci-dessous) | `activities/YYYY-MM-DD_<type>.md` (séance du jour) | `carbs_g`, `fluid_intake_ml`, `rpe` | **Un seul agent, jamais deux** : `nutritionist` si activé (`[agents].enabled`, `agents/nutritionist.md` en fait déjà son ressort pour le ravitaillement en cours d'effort), sinon `coach` — celui qui écrit applique la totalité d'`activity_merge` en une seule passe, `rpe` inclus, même si `rpe` n'a rien de nutritionnel : le séparer forcerait deux agents à éditer le même fichier dans le même `/log` |
+| Douleur | `medical/YYYY-MM-DD_health.md` | `pain` (liste `{location, score}`) | `medical` si activé, sinon `coach` dans la limite de sa compétence |
+
+**Aucune de ces trois natures ne va dans `nutrition/`** : ce dossier reste le
+journal d'apport quotidien déclaré séparément (`agents/nutritionist.md`) —
+l'apport EN COURS D'EFFORT vit sur l'activité elle-même
+(`skills/workspace-data-contract/SKILL.md`, section « Matériel, sudation,
+glucides »).
+
+## Rôle du modèle vs rôle du script
+
+**Vous (le modèle) faites l'extraction d'entités, jamais l'arithmétique ni la
+fusion.** Un LLM qui calcule une somme de glucides, convertit un produit ou
+fusionne à la main avec un fichier existant peut inventer un chiffre plausible
+mais faux, ou compter deux fois la même déclaration. `scripts/arc_log.py` fait
+tout ce calcul, en pur stdlib, déterministe et idempotent :
+
+1. Lisez la phrase et extrayez, sans convertir ni sommer :
+   - `nutrition_items` : une entrée `{"product": "...", "qty": "..."}` par
+     produit SOLIDE cité (« 2 gels » → `{"product": "gel", "qty": "2"}`) —
+     laissez `product` dans les mots de l'athlète, ne le reformulez pas vers un
+     nom de catalogue, `arc_log.py` fait la correspondance ; `qty` reste le
+     texte tel que dit (« 2 », « un et demi », « deux ») — le script sait lire
+     les nombres en lettres et les fractions, ne les convertissez pas ici ;
+   - `fluid_entries` : une chaîne par quantité de liquide citée, **avec son
+     unité telle que dite** (« 500 ml », « 50 cl », « 2 bidons de 500 ml » →
+     `"2 x 500 ml"`) — un nombre SANS unité (« j'ai bu 500 ») ou une unité que
+     vous ne reconnaissez pas (« un bidon » sans quantité précisée) doit être
+     passé TEL QUEL : `arc_log.py` le renverra dans `fluids.unknown` plutôt
+     que de deviner, à vous de demander ensuite ;
+   - `pain` : une entrée `{"location": "...", "score": "..."}` par zone
+     douloureuse citée, score tel quel — `"3"` **ou** `"3/10"`, le script lit
+     les deux formes, ne retirez pas le `/10` vous-même ;
+   - `rpe` : la valeur telle que citée, si présente — `"7"` ou `"7/10"` sont
+     acceptées telles quelles ;
+   - `position` : la position dans la séance si citée (« au km 15 », « après
+     30 min ») — texte libre, aucune clé du contrat ne la porte (voir
+     « Position dans la séance » ci-dessous).
+2. Résolvez `catalogue_paths` : listez `resources/nutrition/catalogue-produits-*.md`.
+   Absent du dépôt de l'athlète → passez `"catalogue_paths": []` explicitement
+   (jamais omis : omis veut dire « je n'ai pas cherché », `[]` veut dire
+   « cherché, aucun trouvé »).
+3. Lisez le fichier cible s'il existe déjà (voir « Où écrire » ci-dessous) et
+   passez son bloc ```arc en `existing_activity_arc`/`existing_pain`, le texte
+   libre déjà présent en `existing_log_entries` (liste des lignes de
+   provenance `[/log ...]` déjà trouvées sous son bloc, voir « Idempotence »),
+   et la phrase brute de l'athlète en `raw_text`. Appelez le script :
+
+   ```bash
+   echo '{"catalogue_paths": ["resources/nutrition/catalogue-produits-famille.md"],
+          "nutrition_items": [{"product": "gel", "qty": "2"}],
+          "fluid_entries": ["500 ml"],
+          "pain": [{"location": "genou gauche", "score": "3"}],
+          "rpe": "7",
+          "raw_text": "2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7",
+          "existing_activity_arc": {"garmin_activity_id": 90000001},
+          "existing_pain": [],
+          "existing_log_entries": []}' | python3 scripts/arc_log.py
+   ```
+
+   Rend un JSON : `nutrition.matched`/`unknown`/`ambiguous`/`carbs_g`,
+   `fluids.matched`/`unknown`/`fluid_intake_ml`, `pain.entries`/`unknown`
+   (chaque entrée valide avec `consult: true/false`), `rpe` (absent + une clé
+   `rpe_unknown` si hors de 0-10 ou illisible — ne l'écrivez alors PAS,
+   demandez plutôt), `duplicate` (voir « Idempotence »), `provenance_line`,
+   `activity_merge` (valeurs déjà fusionnées avec `existing_activity_arc` —
+   glucides/liquide additionnés, RPE remplacé), `pain_merge` (liste déjà
+   fusionnée avec `existing_pain`), `warnings`. **Recopiez ces valeurs telles
+   quelles** dans les blocs ```arc — ne recalculez rien à la main, même une
+   addition ou une fusion qui semble triviale : c'est exactement le genre de
+   calcul que ce script existe pour vous éviter de refaire, et refaire signifie
+   parfois recompter deux fois la même déclaration.
+
+## Produit inconnu ou ambigu → toujours demander
+
+- `nutrition.unknown` avec `reason: "unknown_product"` (produit absent du
+  catalogue) ou `reason: "no_catalogue"` (aucun catalogue trouvé) :
+  **demandez** la valeur en glucides du produit à l'athlète plutôt que
+  d'inventer. S'il la donne, **rappelez `scripts/arc_log.py`** avec ce même
+  item mais `{"product": "...", "qty": "...", "carbs_g_per_unit": <valeur>}`
+  — le script refait tout le calcul, total inclus, **jamais une addition
+  faite à la main** dans le prompt de l'agent (même une multiplication qui
+  semble triviale). S'il ne la connaît pas ou ne répond pas dans ce tour,
+  **écrivez quand même le reste** (liquide, douleur, RPE) et mentionnez le
+  produit dans le texte libre sous le bloc, SANS clé `carbs_g` pour cette
+  part-là — jamais une valeur générique glissée à sa place.
+- `nutrition.ambiguous` (plusieurs produits du catalogue correspondent) :
+  **listez les candidats** (`ambiguous[].candidates`) et demandez lequel.
+  N'écrivez le `carbs_g` correspondant qu'une fois la réponse obtenue.
+- `fluids.unknown` (unité non reconnue, ou nombre sans unité) : **demandez**
+  l'unité/la quantité exacte plutôt que de supposer des millilitres.
+- `pain.unknown` (score illisible ou hors de 0-10) : **demandez** une
+  reformulation (« sur une échelle de 0 à 10, ça donne quoi ? ») plutôt que
+  d'écrire un score inventé ou hors contrat.
+- `rpe_unknown` (RPE illisible ou hors de 0-10) : même chose, **demandez**
+  plutôt que d'écrire une valeur hors contrat ou de l'omettre en silence.
+- Dans tous les cas, ne bloquez jamais les AUTRES parties de la phrase
+  (liquide déclaré au gramme près, douleur, RPE valide) en attendant la
+  réponse sur la seule partie ambiguë/inconnue.
+
+## Où écrire
+
+### Ravitaillement, hydratation, RPE → `activities/` (UN SEUL agent écrit)
+
+**Un seul agent applique `activity_merge` en une seule passe** (voir le
+tableau ci-dessus : `nutritionist` si activé, sinon `coach`) — jamais un
+agent pour `carbs_g`/`fluid_intake_ml` et un autre pour `rpe` sur le même
+`/log` : deux agents qui rouvriraient le même fichier dans le même appel
+risqueraient d'écraser la fusion l'un de l'autre.
+
+1. Cherchez `activities/YYYY-MM-DD_*.md` pour la date visée (aujourd'hui, sauf
+   si l'athlète en cite une autre — « la sortie de ce matin », « hier »).
+   - **Un seul fichier** ce jour-là → c'est lui.
+   - **Aucun fichier, en session INTERACTIVE** → essayez d'abord un sync
+     Garmin ciblé sur cette date (`garmin-sync-efficiency`, `get_activities`)
+     avant de créer quoi que ce soit : la séance existe peut-être déjà côté
+     Garmin sans avoir encore de fichier local. Un sync réussi crée le fichier
+     complet (avec `garmin_activity_id`) — reprenez alors l'étape 2 dessus.
+   - **Toujours aucun fichier après ce sync, mais le sport et la durée (ou
+     l'heure de début et de fin) sont donnés dans le même message** (« sortie
+     de ce matin, trail, 1h30 ») → créez le fichier minimal (`sport`,
+     `duration_s`, `date`, **sans** `garmin_activity_id`) plutôt que de faire
+     attendre l'athlète pour une information qu'il vient de donner —
+     `duration_s` vient alors de sa propre déclaration, ce n'est pas une
+     valeur inventée. **L'absence de `garmin_activity_id` est le marqueur
+     « pas encore synchronisé »** (voir `garmin-sync-efficiency`, règle 1a) :
+     une synchronisation Garmin ultérieure (`/garmin-daily-sync` ou une
+     session interactive) doit fusionner ses champs dans CE fichier plutôt que
+     de le prendre pour une séance déjà traitée ou d'en créer un second.
+   - **Rien pour identifier au moins le sport et la durée** → demandez à
+     quelle séance (sport, heure) cela se rapporte plutôt que de créer un
+     fichier `activity` avec une `duration_s` inventée (obligatoire au
+     contrat) : `carbs_g`/`fluid_intake_ml`/`rpe` n'existent que sur une
+     activité, jamais seuls.
+   - **Plusieurs fichiers** (deux séances le même jour) → demandez laquelle.
+2. Passez le bloc ```arc déjà présent (le cas échéant) en
+   `existing_activity_arc` à `scripts/arc_log.py` (étape 3 ci-dessus) et
+   recopiez tel quel son `activity_merge` dans le bloc — n'écrasez jamais une
+   clé hors de son ressort (`garmin_activity_id`, `distance_m`...), et ne
+   recalculez pas vous-même l'addition glucides/liquide ni le remplacement du
+   RPE : c'est déjà fait.
+3. Ajoutez sous le bloc, dans la langue des documents, la `provenance_line`
+   rendue par le script (voir « Idempotence » ci-dessous), suivie d'une phrase
+   courte citant la position déclarée si présente (voir ci-dessous).
+4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
+
+### Douleur → `medical/`
+
+1. `medical/YYYY-MM-DD_health.md` du jour visé (même règle de date que
+   ci-dessus). Si `medical` figure dans `[agents].enabled`, déléguez-lui
+   l'écriture (outil `task`, prompt en anglais + « Respond in <langue des
+   documents> ») ; sinon écrivez-le vous-même, dans la limite de votre
+   compétence (`AGENTS.md`).
+2. Passez son bloc ```arc déjà présent en `existing_pain` (juste la liste
+   `pain`, le cas échéant) et recopiez `pain_merge` tel quel — jamais de
+   remplacement à la main des entrées déjà présentes. Si le fichier n'existe
+   pas encore, créez-le en reprenant le `morning_check` **déjà en vigueur**
+   pour l'athlète (`config/workspace.toml` → `[health].morning_check` ;
+   **jamais `"off"` en dur** — un fichier `pain`-seul ne doit ni prétendre à
+   un bilan qui n'a pas eu lieu, ni afficher un mode santé désactivé alors que
+   l'athlète a `full`/`minimal` configuré : voir `garmin-sync-efficiency`,
+   règle 1a, « marqueur pas encore synchronisé » — c'est justement l'absence
+   de `hrv_overnight_ms`/`resting_hr_bpm`/`readiness_score`/`sleep_total_s`,
+   pas une valeur `morning_check` particulière, qui signale à la synchronisation
+   que ce fichier n'a pas encore reçu son bilan matinal).
+3. **Score ≥ `pain.consult_threshold`** (le script le signale par
+   `consult: true` sur l'entrée concernée — résolu depuis
+   `[injury_risk].pain_consult_threshold` de la configuration vivante de
+   l'athlète, jamais une valeur 7/10 supposée en dur, voir `agents/medical.md`) :
+   recommandez explicitement une consultation dans votre réponse, en plus de
+   l'avoir écrit dans `pain`.
+4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
+
+### Position dans la séance (km, temps écoulé)
+
+Aucune clé du contrat `activity` ne porte une position ponctuelle de
+ravitaillement/douleur dans la séance (`splits` existe mais décrit un km
+entier, pas un événement instantané) — inventer une clé serait une clé hors
+contrat (`workspace-data-contract`, règle 4). Une position déclarée
+(« au km 15 ») reste donc du texte libre, sous le bloc ```arc du fichier
+`activities/` concerné : « Ravitaillement au km 15 : 2 gels, 500 ml. »
+
+## Idempotence : une déclaration ne se compte jamais deux fois
+
+`scripts/arc_log.py` ne modifie rien sur disque lui-même (il rend les valeurs
+déjà fusionnées, à vous de les écrire dans le Markdown complet, narratif
+compris) — mais il détecte le DOUBLON : passez `raw_text` (la phrase brute de
+l'athlète) et `existing_log_entries` (les lignes `[/log AAAA-MM-JJTHH:MM:SS+HH:MM]
+<texte>` déjà présentes sous le bloc du fichier visé, une par appel `/log`
+précédent) et lisez `duplicate` en retour.
+
+- **`duplicate: false`** (cas normal) : `activity_merge`/`pain_merge` sont
+  calculés normalement. Ajoutez la `provenance_line` rendue sous le bloc, à la
+  suite des précédentes — c'est cette ligne qui permet la détection au
+  prochain appel.
+- **`duplicate: true`** : la phrase est déjà présente mot pour mot (espaces et
+  casse ignorés) parmi `existing_log_entries` — `arc_log.py` n'a alors PAS
+  recalculé de fusion (`activity_merge`/`pain_merge` absents), pour ne jamais
+  additionner deux fois le même ravitaillement. **Demandez** à l'athlète s'il
+  veut vraiment logger ceci une seconde fois (une resucée légitime : « encore
+  un gel ») plutôt que de rejouer la fusion en silence — si oui, reformulez
+  l'appel avec un `raw_text` légèrement différent (ex. horodaté) pour que le
+  script la traite comme une nouvelle entrée distincte.
+
+## Confirmation
+
+Une seule ligne, dans la langue des documents, **nommant le produit
+catalogue apparié** (jamais juste un total anonyme) et citant chaque fichier
+écrit — jamais un JSON brut, jamais le dump de `scripts/arc_log.py` :
+
+> Noté : 2 gels → Gel Fixture Test = 64 g + 750 ml dans
+> `activities/2026-09-24_trail.md`, douleur genou gauche 3/10 dans
+> `medical/2026-09-24_health.md`.
+
+Si une question reste en attente (produit inconnu/ambigu, séance introuvable,
+douleur/RPE hors plage, doublon détecté), posez-la **après** cette ligne de
+confirmation, jamais à sa place — le reste de la phrase ne doit pas rester
+bloqué par une seule zone d'incertitude.
+
+---
+Demande de l'utilisateur : {{args}}
+'''
