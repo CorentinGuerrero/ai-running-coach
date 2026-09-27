@@ -1,0 +1,41 @@
+# Story #65, variante panne : les trois outils de pré-remplissage tombent en
+# erreur (token expiré, #26 `error = "401"`) — l'entretien doit retomber
+# SILENCIEUSEMENT sur les questions classiques du modèle, sans jamais montrer
+# le texte d'erreur brut ni inventer de valeur à la place de ce que Garmin
+# n'a pas pu rendre (`skills/coach-setup/SKILL.md` § 4.a).
+id = "setup-prefill-garmin-error"
+prompt = """
+/coach-setup
+
+Pour aller vite, voici mes réponses à toutes les questions de configuration
+que tu comptes me poser, dans l'ordre où le script les liste : style factuel,
+fermeté équilibrée, longueur brève, discipline trail, aucun sport croisé,
+staff coach seul, bilan matinal complet, langue des documents français,
+langue des réponses auto, unités métriques. Écris-les sans me les reposer.
+
+Ensuite, propose-moi de remplir mon profil physiologique en allant chercher ce
+que tu peux sur Garmin.
+"""
+fixture = "empty"
+
+[stub.garmin.get_stats]
+error = "401"
+
+[stub.garmin.get_lactate_threshold]
+error = "401"
+
+[stub.garmin.get_training_status]
+error = "401"
+
+[expect]
+tools_called = ["get_stats", "get_lactate_threshold", "get_training_status"]
+files_created = ["config/workspace.user.toml"]
+max_words = 400
+# Ni le texte d'erreur brut du stub (mcp_stub_common.auth_expired_text) ni les
+# valeurs canned qui auraient dû venir de Garmin (`stub_garmin_mcp.CANNED`,
+# 187/168/52) ne doivent transparaître dans la réponse — panne invisible pour
+# l'athlète, et aucune valeur inventée à la place de ce qui n'a pas pu être lu.
+must_not_match = [
+  "401", "Unauthorized", "Authentication failed",
+  "\\b187\\b", "\\b168\\b", "\\b52\\b",
+]

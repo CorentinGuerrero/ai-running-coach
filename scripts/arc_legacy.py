@@ -1069,6 +1069,10 @@ def parse_profile(text: str) -> Dict[str, Any]:
         "hr_max_bpm": _int(parse_fr_number(_pick(b, "fc max"))),
         "hr_rest_bpm": _int(parse_fr_number(_pick(b, "fc de repos de reference", "fc de repos"))),
         "hr_threshold_bpm": _int(parse_fr_number(_pick(b, "fc au seuil", "fc seuil"))),
+        # Snapshot Garmin informatif (story #65) : le tableau de bord calcule sa
+        # propre estimation (`arc_metrics.vo2max_effective`/`vo2max_trend`) depuis
+        # les séances réelles — ce champ n'alimente aucun calcul, juste un repère.
+        "vo2max_reference": parse_fr_number(_pick(b, "vo2max (garmin)", "vo2max")),
         "sex": "female" if re.match(r"^(f|femme|female)\b", sex) else ("male" if re.match(r"^(h|m|homme|male)\b", sex) else None),
         "weight_kg": parse_fr_number(_pick(b, "poids de forme", "poids")),
         "birth_year": _int(parse_fr_number(_pick(b, "annee de naissance"))),

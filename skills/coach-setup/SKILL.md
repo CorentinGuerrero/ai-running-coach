@@ -71,6 +71,59 @@ fichier vous-même.
 fichier-là, c'est **vous** qui l'éditez, avec l'athlète, en conversation — il est
 libre par nature et ne rentre pas dans une clé de configuration.
 
+### 4.a Pré-remplissage Garmin (story #65, si le serveur MCP est disponible)
+
+Avant de poser les questions physiologiques classiques, essayez de récupérer
+ce que Garmin sait déjà — uniquement si `garmin` fait partie de
+`[agents].enabled` (ou plus précisément si le serveur MCP `garmin` répond) :
+
+| Champ du profil | Outil MCP | Champ de la réponse |
+|---|---|---|
+| FC max | `get_stats(date=aujourd'hui)` | `max_heart_rate_bpm` |
+| FC de repos de référence | `get_stats(date=aujourd'hui)` (ou `get_rhr_day`) | `resting_heart_rate_bpm` (`restingHeartRate`) |
+| FC au seuil | `get_lactate_threshold()` (sans dates → dernier relevé) | `lactate_threshold_heart_rate_bpm` |
+| VO2max (Garmin) | `get_training_status(date=aujourd'hui)` | `vo2_max` |
+
+**Ne devinez jamais un nom de champ non vérifié** : ceux ci-dessus viennent du
+paquet `garmin_mcp` réellement installé, pas d'une supposition.
+
+- **Hors ligne, outil absent de la liste blanche, erreur (401/timeout/etc.),
+  ou champ manquant dans la réponse** : ignorez silencieusement ce point et
+  repli sur la question classique du modèle — jamais d'échec visible, jamais
+  de valeur inventée à sa place.
+- Un appel qui réussit ne s'écrit **jamais** directement : proposez la valeur
+  trouvée avec sa source et la date (« Ta montre Garmin indique une FC max de
+  182 aujourd'hui — je le note ? »), et n'écrivez que ce que l'athlète
+  confirme ou corrige. Une valeur corrigée par l'athlète prime toujours sur
+  celle de Garmin.
+- Écrivez les valeurs confirmées avec :
+
+  ```bash
+  python3 scripts/coach_setup.py --apply-profile /tmp/profil-garmin.json
+  ```
+
+  où le fichier JSON associe le libellé EXACT du modèle à la valeur
+  confirmée, avec la provenance en `source` (affichée en commentaire HTML dans
+  le fichier, invisible pour le parseur) :
+
+  ```json
+  {
+    "FC max": {"value": "182", "source": "Garmin (get_stats), 2026-09-27"},
+    "FC de repos de référence": {"value": "47", "source": "Garmin (get_stats), 2026-09-27"}
+  }
+  ```
+
+  Comme `--apply`, cette commande **n'écrase jamais** un champ déjà rempli
+  (rendu dans `skipped`) et refuse tout libellé qui n'existe pas déjà dans le
+  modèle — un champ qui manque au modèle s'ajoute à `templates/Runner_Profile.template.md`,
+  jamais improvisé à la volée.
+- Si le champ est déjà rempli (athlète qui relance `/coach-setup`, ou qui
+  vient de le renseigner à la main), ne proposez rien pour ce champ : la
+  valeur existante prime, sans exception.
+
+Une fois ce pré-remplissage traité (ou ignoré si Garmin n'est pas disponible),
+enchaînez normalement sur les champs restants en conversation libre.
+
 Proposez-le, n'imposez pas : « on remplit votre profil maintenant, ou plus
 tard ? ». Si c'est maintenant, suivez l'ordre du modèle et laissez vide tout ce
 qu'il ne sait pas — un champ vide est ignoré, une valeur inventée fausse tout

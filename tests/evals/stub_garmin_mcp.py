@@ -57,6 +57,23 @@ CANNED = {
         "status": "BALANCED", "baseline": {"lowUpper": 48, "balancedLow": 52, "balancedUpper": 74},
     },
     "get_rhr_day": {"date": _day(0), "restingHeartRate": 49},
+    # Story #65 (`/coach-setup` pré-rempli) : noms de champs vérifiés contre le
+    # paquet `garmin_mcp` réellement installé (0.1.0) — `get_stats` curate déjà
+    # `stats.get('maxHeartRate')`/`stats.get('restingHeartRate')` en
+    # `max_heart_rate_bpm`/`resting_heart_rate_bpm` (health_wellness.py), et
+    # `get_training_status` curate `vo2_max`/`vo2_max_precise` depuis
+    # `mostRecentVO2Max.generic` (training.py) — jamais les noms bruts Garmin.
+    "get_stats": {
+        "date": _day(0), "max_heart_rate_bpm": 187, "resting_heart_rate_bpm": 47,
+        "last_7_days_avg_resting_hr": 48,
+    },
+    "get_lactate_threshold": {
+        "lactate_threshold_speed_mps": 3.42, "lactate_threshold_heart_rate_bpm": 168,
+        "speed_hr_date": _day(5),
+    },
+    "get_training_status": {
+        "date": _day(0), "training_status": "PRODUCTIVE", "vo2_max": 52.0, "vo2_max_precise": 52.3,
+    },
     "get_training_readiness": [{
         "date": _day(0), "score": 71, "level": "READY",
         "sleepScore": 78, "sleepScoreFactorFeedback": "GOOD",
@@ -83,6 +100,9 @@ CANNED = {
 TOOLS = [
     ("get_hrv_data", "Variabilité de fréquence cardiaque nocturne pour une date."),
     ("get_rhr_day", "Fréquence cardiaque de repos pour une date."),
+    ("get_stats", "Statistiques quotidiennes (dont FC max/repos du jour) pour une date."),
+    ("get_lactate_threshold", "Dernier seuil lactique (FC, vitesse, puissance)."),
+    ("get_training_status", "Statut d'entraînement (dont VO2max) pour une date."),
     ("get_training_readiness", "Score de readiness et ses facteurs pour une date."),
     ("get_sleep_data", "Données de sommeil détaillées pour une date."),
     ("get_activities", "Dernières activités enregistrées."),

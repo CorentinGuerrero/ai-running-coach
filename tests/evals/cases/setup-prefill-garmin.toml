@@ -1,0 +1,44 @@
+# Story #65 : `/coach-setup` récupère FC max/repos, FC au seuil (LTHR) et
+# VO2max via le MCP `garmin` quand il est disponible, propose les valeurs avec
+# leur source et leur date, et n'écrit que ce que l'athlète confirme. Prompt
+# volontairement directif : le runner (`claude -p`) tourne en un seul tour, il
+# n'y a personne pour répondre à une vraie question de suivi — le prompt SIMULE
+# donc un athlète qui répond à tout et confirme le pré-remplissage d'un coup.
+id = "setup-prefill-garmin"
+prompt = """
+/coach-setup
+
+Pour aller vite, voici mes réponses à toutes les questions de configuration
+que tu comptes me poser, dans l'ordre où le script les liste : style factuel,
+fermeté équilibrée, longueur brève, discipline trail, aucun sport croisé,
+staff coach seul, bilan matinal complet, langue des documents français,
+langue des réponses auto, unités métriques. Écris-les sans me les reposer.
+
+Ensuite, propose-moi de remplir mon profil physiologique : va chercher sur
+Garmin tout ce que tu peux (FC max, FC de repos, FC au seuil, VO2max),
+montre-moi les valeurs trouvées avec leur source et leur date, et considère
+que je confirme CHACUNE d'elles telle quelle, sans correction.
+"""
+fixture = "empty"
+
+[expect]
+tools_called = ["get_stats", "get_lactate_threshold", "get_training_status"]
+files_created = ["planning/Runner_Profile.md", "config/workspace.user.toml"]
+max_words = 400
+
+# Valeurs canned du stub (`stub_garmin_mcp.CANNED`) — présentes dans le profil
+# écrit UNIQUEMENT si l'agent les a bien proposées puis écrites via
+# `coach_setup.py --apply-profile` après confirmation, jamais inventées.
+# Ancrées sur le libellé du modèle pour éviter un faux positif sur un nombre
+# qui apparaîtrait ailleurs par coïncidence (ex. un mot de compte).
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc max** : 187"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc au seuil** : 168"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["vo2max (garmin)** : 52"]

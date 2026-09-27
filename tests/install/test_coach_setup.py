@@ -134,6 +134,80 @@ class TestApply(SetupCase):
                 self.assertTrue((sb.repo / name).is_dir(), f"{name}/ manquant")
 
 
+class TestApplyProfile(SetupCase):
+    """Story #65 — pré-remplissage Garmin confirmé, fusionné dans
+    `planning/Runner_Profile.md` sans jamais écraser un champ déjà rempli."""
+
+    def test_requires_the_profile_to_already_exist(self):
+        with Sandbox() as sb:
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "182"}))
+            self.assertFailed(proc, "profil pas encore installé")
+            self.assertOutputContains(proc, "--apply")
+
+    def test_writes_confirmed_values_with_provenance(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182", "source": "Garmin (get_stats), 2026-09-27"},
+                "FC de repos de référence": "47",
+            })))
+            self.assertEqual(sorted(data["written"]), ["FC de repos de référence", "FC max"])
+            profile = (sb.repo / "planning/Runner_Profile.md").read_text()
+            self.assertIn("**FC max** : 182 <!-- source : Garmin (get_stats), 2026-09-27 -->", profile)
+            self.assertIn("**FC de repos de référence** : 47", profile)
+
+    def test_never_overwrites_an_existing_profile_field(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "182"}))
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "999"})))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(data["skipped"], ["FC max"])
+            self.assertFileContains(sb.repo / "planning/Runner_Profile.md", "**FC max** : 182")
+
+    def test_fills_only_empty_fields_alongside_an_athlete_edited_one(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            profile = sb.repo / "planning/Runner_Profile.md"
+            profile.write_text(profile.read_text().replace(
+                "- **FC max** :", "- **FC max** : 175  <!-- valeur perso, mesurée en labo -->"
+            ))
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": "182", "FC de repos de référence": "47",
+            })))
+            self.assertEqual(data["written"], ["FC de repos de référence"])
+            self.assertEqual(data["skipped"], ["FC max"])
+            content = profile.read_text()
+            self.assertIn("175", content)
+            self.assertNotIn("182", content)
+
+    def test_rerun_is_idempotent(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            answers = self.answers(sb, {"FC max": "182", "VO2max (Garmin)": "52"})
+            self.setup(sb, "--apply-profile", answers)
+            before = (sb.repo / "planning/Runner_Profile.md").read_text()
+
+            data = self.json_out(self.setup(sb, "--apply-profile", answers))
+
+            self.assertEqual(data["written"], [], "une relance a réécrit des valeurs")
+            self.assertEqual((sb.repo / "planning/Runner_Profile.md").read_text(), before)
+
+    def test_rejects_an_unknown_profile_label(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {"FC de croisière": "150"}))
+            self.assertFailed(proc, "libellé inconnu")
+            self.assertOutputContains(proc, "jamais inventé")
+
+    def test_blank_value_is_skipped_never_invented(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "  "})))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(data["skipped"], ["FC max"])
+
+
 class TestStatus(SetupCase):
     def test_reports_a_fresh_workspace(self):
         with Sandbox() as sb:

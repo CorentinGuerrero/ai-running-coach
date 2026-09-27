@@ -18,16 +18,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from coach_config import ConfigError, read_toml, set_toml_key  # noqa: E402
+import arc_legacy  # noqa: E402 — uniquement pour normalize_label (#65)
 
 ENGINE = Path(__file__).resolve().parent.parent
 QUESTIONS_FILE = ENGINE / "config/setup-questions.toml"
 TEMPLATES = ENGINE / "templates"
+PROFILE_FILE = "planning/Runner_Profile.md"
+
+# Puce de premier niveau, en gras, suivie de « : » — même forme que
+# `tests/lint/test_runner_profile_template_labels.py::_TOP_LABEL_RE`. Capture le
+# préfixe exact (jamais reconstruit : on ne renomme jamais un libellé) et le
+# reste de la ligne (valeur déjà écrite, ou vide/commentaire dans le modèle).
+_PROFILE_BULLET_RE = re.compile(r"^(?P<prefix>[-*]\s+\*\*(?P<label>[^*]+)\*\*\s*:)(?P<rest>.*)$")
 
 # Modèles déposés dans le workspace au premier démarrage : un fichier cité comme
 # source de vérité par les agents doit exister pour de bon.
@@ -141,6 +150,86 @@ def scaffold(workspace: Path) -> list:
     return created
 
 
+def _strip_html_comments(text: str) -> str:
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+
+def apply_profile_answers(workspace: Path, answers: dict) -> dict:
+    """Fusionne des réponses CONFIRMÉES dans `planning/Runner_Profile.md`, sans
+    jamais réécrire un champ déjà rempli (story #65 — pré-remplissage Garmin).
+
+    `answers` : `{"<Libellé exact du modèle>": "<valeur>"}`, ou
+    `{"<Libellé>": {"value": "<valeur>", "source": "<provenance>"}}` pour
+    tracer la provenance en commentaire HTML (retiré par `arc_legacy.parse_bullets`,
+    donc invisible du parseur — uniquement pour un humain qui relit le fichier).
+
+    Un libellé absent du fichier actuel est une erreur : les libellés du modèle
+    ne sont jamais inventés ni renommés (cf. AGENTS.md). Un champ déjà rempli
+    est simplement ignoré (`skipped`), jamais écrasé.
+    """
+    path = workspace / PROFILE_FILE
+    if not path.is_file():
+        raise ConfigError(
+            f"{path} n'existe pas encore — lancez d'abord `--apply` (ou `--scaffold`) "
+            "pour installer le modèle avant d'y écrire des valeurs."
+        )
+    lines = path.read_text(encoding="utf-8").splitlines()
+
+    written, skipped = [], []
+    for raw_label, raw_answer in answers.items():
+        if isinstance(raw_answer, dict):
+            value = str(raw_answer.get("value", "")).strip()
+            source = raw_answer.get("source")
+        else:
+            value, source = str(raw_answer).strip(), None
+        if not value:
+            skipped.append(raw_label)
+            continue
+
+        target = arc_legacy.normalize_label(raw_label)
+        match_index = None
+        for index, line in enumerate(lines):
+            match = _PROFILE_BULLET_RE.match(line)
+            if match and arc_legacy.normalize_label(match.group("label")) == target:
+                match_index = index
+                break
+        if match_index is None:
+            raise ConfigError(
+                f"« {raw_label} » : aucun champ de ce nom dans {PROFILE_FILE} "
+                "(un libellé n'est jamais inventé)."
+            )
+
+        match = _PROFILE_BULLET_RE.match(lines[match_index])
+        current = _strip_html_comments(match.group("rest")).replace("**", "").strip()
+        if current:
+            skipped.append(raw_label)          # jamais de réécriture d'un champ déjà rempli
+            continue
+
+        suffix = f" <!-- source : {source} -->" if source else ""
+        lines[match_index] = f"{match.group('prefix')} {value}{suffix}"
+        written.append(raw_label)
+
+    if written:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"written": written, "skipped": skipped}
+
+
+def cmd_apply_profile(args) -> int:
+    workspace = workspace_root(args.workspace)
+    try:
+        answers = json.loads(Path(args.apply_profile).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"{args.apply_profile} : JSON invalide — {exc}") from exc
+    if not isinstance(answers, dict):
+        raise ConfigError(
+            f"{args.apply_profile} : objet JSON attendu "
+            '{"FC max": "182", "FC de repos de référence": {"value": "47", "source": "Garmin (get_stats), 2026-09-27"}}.'
+        )
+    result = apply_profile_answers(workspace, answers)
+    print(json.dumps({"workspace": str(workspace), **result}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_apply(args) -> int:
     workspace = workspace_root(args.workspace)
     try:
@@ -210,6 +299,11 @@ def main(argv: list | None = None) -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--list-questions", action="store_true")
     group.add_argument("--apply", metavar="FICHIER.json")
+    group.add_argument(
+        "--apply-profile", metavar="FICHIER.json",
+        help="fusionne des réponses CONFIRMÉES (ex. pré-remplissage Garmin) dans planning/Runner_Profile.md, "
+             "sans jamais écraser un champ déjà rempli",
+    )
     group.add_argument("--status", action="store_true")
     group.add_argument("--scaffold", action="store_true", help="installe les modèles sans rien demander")
     args = parser.parse_args(argv)
@@ -219,6 +313,8 @@ def main(argv: list | None = None) -> int:
             return cmd_list_questions(args)
         if args.apply:
             return cmd_apply(args)
+        if args.apply_profile:
+            return cmd_apply_profile(args)
         if args.scaffold:
             created = scaffold(workspace_root(args.workspace))
             print(json.dumps({"scaffolded": created}, ensure_ascii=False))
