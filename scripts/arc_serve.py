@@ -35,6 +35,7 @@ import html
 import json
 import os
 import re
+import socketserver
 import sqlite3
 import statistics
 import sys
@@ -1344,12 +1345,28 @@ class Handler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, target.read_bytes(), ctype)
 
 
-def bind(port: int, tries: int = 10, listen: str = LOOPBACK) -> ThreadingHTTPServer:
+class Server(ThreadingHTTPServer):
+    """`ThreadingHTTPServer` sans résolution DNS inverse au démarrage.
+
+    `HTTPServer.server_bind` appelle `socket.getfqdn(host)` pour remplir
+    `server_name` (que nous n'utilisons jamais). Sur une machine dont le
+    résolveur traîne — les runners macOS de GitHub, mais aussi un Mac sans
+    réseau — cet appel bloque ~35 s avant que le serveur n'écoute.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
+
+
+def bind(port: int, tries: int = 10, listen: str = LOOPBACK) -> Server:
     last = None
     candidates = [0] if port == 0 else range(port, port + tries)
     for candidate in candidates:
         try:
-            return ThreadingHTTPServer((listen, candidate), Handler)
+            return Server((listen, candidate), Handler)
         except OSError as exc:
             last = exc
     raise ConfigError(f"aucun port libre entre {port} et {port + tries - 1} sur {listen} ({last}). Essayez --port.")
