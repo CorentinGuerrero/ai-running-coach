@@ -569,6 +569,19 @@ class TestWeek(unittest.TestCase):
         errors, _ = C.validate(self.multi([]))
         self.assertTrue(any("week.weeks" in e for e in errors), errors)
 
+    def test_weeks_null_is_a_clear_error_not_an_unknown_key_warning(self):
+        """Revue de code #69, nit : `{"weeks": null}` doit nommer `weeks`
+        explicitement — jamais tomber dans le repli semaine unique où elle
+        ressortirait comme une simple clé inconnue."""
+        errors, warnings = C.validate({"arc": 1, "kind": "week", "weeks": None})
+        self.assertTrue(any("week.weeks" in e for e in errors), errors)
+        self.assertFalse(any("clé inconnue" in w for w in warnings), warnings)
+
+    def test_weeks_wrong_type_is_a_clear_error(self):
+        errors, warnings = C.validate({"arc": 1, "kind": "week", "weeks": "oops"})
+        self.assertTrue(any("week.weeks" in e for e in errors), errors)
+        self.assertFalse(any("clé inconnue" in w for w in warnings), warnings)
+
     def test_multi_week_non_monday_is_rejected(self):
         errors, _ = C.validate(self.multi([
             {"week_start": "2026-09-22", "location": "Tournai", "sessions": []},

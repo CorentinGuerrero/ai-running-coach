@@ -1574,8 +1574,31 @@ class TestMultiWeekIndex(Workspace):
         items = {item["path"]: item for item in I.backfill_items(self.conn)}
         self.assertIn("planning/Semaine_2026-09-14.md", items)
         self.assertEqual(items["planning/Semaine_2026-09-14.md"]["status"], "ok")
+        self.assertTrue(items["planning/Semaine_2026-09-14.md"]["collision"])
         self.assertTrue(any("en collision avec" in i for i in items["planning/Semaine_2026-09-14.md"]["issues"]))
         self.assertNotIn("planning/Semaine_2026-09-21.md", items)
+
+    def test_write_backfill_lists_collisions_separately_from_contract_debt(self):
+        """#69, revue de code should-fix 2 : un item de collision (fichier VALIDE
+        au contrat) ne doit jamais apparaître dans la section « à réécrire », qui
+        enverrait `arc-backfill` (ou l'athlète) réécrire un bloc déjà correct.
+        Un vrai fichier hors contrat (santé sans bloc) reste dans sa propre
+        section, inchangée."""
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"), self.week_block("2026-09-21"),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.write("medical/2026-09-20_health.md", "# Santé\n\nPas de bloc.\n")
+        self.index()
+        out = I.write_backfill(self.conn, self.ws)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("## Fichiers hors contrat", text)
+        self.assertIn("## Collisions de semaine", text)
+        contract_section, collision_section = text.split("## Collisions de semaine")
+        self.assertIn("medical/2026-09-20_health.md", contract_section)
+        self.assertNotIn("planning/Semaine_2026-09-14.md", contract_section)
+        self.assertIn("planning/Semaine_2026-09-14.md", collision_section)
+        self.assertNotIn("medical/2026-09-20_health.md", collision_section)
 
     def test_week_collisions_helper_reports_winner_and_losers(self):
         self.write_multi("planning/Semaine_2026-09-14.md", [

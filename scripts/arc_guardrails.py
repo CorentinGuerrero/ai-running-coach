@@ -1949,30 +1949,54 @@ def _read_week_argument(value: str) -> dict:
     return data
 
 
-def _select_week_entry(block: dict, today: date) -> dict:
+def _select_week_entry(block: dict, today: date, week_start_arg: Optional[str] = None) -> dict:
     """#69 : `--week` peut désigner un fichier PLAN MULTI-SEMAINES (`weeks[]`)
-    plutôt qu'une semaine unique — sélectionne alors la semaine dont le
-    `week_start` (lundi) contient `today` (`--today`, ou la date du jour). Rend
-    `block` tel quel quand il n'a pas de `weeks` (format historique, une seule
-    semaine — comportement INCHANGÉ). Lève `ConfigError` si aucune semaine du
-    fichier ne couvre `today` : `check` porte toujours sur LA semaine en cours,
-    jamais sur « la première du fichier » choisie au hasard."""
+    plutôt qu'une semaine unique. Rend `block` tel quel quand il n'a pas de
+    `weeks` (format historique, une seule semaine — comportement INCHANGÉ,
+    `week_start_arg` sert alors seulement à vérifier qu'il correspond bien à LA
+    semaine du fichier, s'il est fourni).
+
+    Sinon, sélectionne une semaine du tableau :
+    - `week_start_arg` (`--week-start`, explicite) si fourni — erreur claire si
+      aucune semaine de `weeks[]` ne porte ce lundi ;
+    - sinon, la PREMIÈRE semaine dont le `week_start` tombe le lundi de `today`
+      OU APRÈS (revue de code #69, blocker : une semaine à venir doit pouvoir
+      être vérifiée AVANT qu'elle ne commence — ex. `check --week
+      Semaine_multi.md` un dimanche pour la semaine qui débute le lendemain —
+      sans que faux-dater `--today` ne fausse par ailleurs la projection ACWR,
+      qui dépend elle aussi de `today`). Erreur claire si aucune semaine du
+      fichier ne tombe le lundi de `today` ou après (toutes sont déjà passées) —
+      préciser `--week-start` pour vérifier une semaine passée délibérément."""
     weeks = block.get("weeks")
     if weeks is None:
+        if week_start_arg and block.get("week_start") != week_start_arg:
+            raise ConfigError(
+                f"--week-start : {week_start_arg} demandé, mais ce fichier ne porte que la "
+                f"semaine du {block.get('week_start')} (format historique, une seule semaine)."
+            )
         return block
     if not isinstance(weeks, list) or not weeks:
         raise ConfigError("--week : « weeks » doit être une liste non vide de semaines.")
+    valid = [e for e in weeks if isinstance(e, dict) and isinstance(e.get("week_start"), str)]
+    available = ", ".join(sorted(e["week_start"] for e in valid)) or "aucune"
+    if week_start_arg:
+        for entry in valid:
+            if entry["week_start"] == week_start_arg:
+                return entry
+        raise ConfigError(
+            f"--week-start : aucune semaine du {week_start_arg} dans ce fichier multi-semaines — "
+            f"semaines présentes : {available}."
+        )
     target = (today - timedelta(days=today.weekday())).isoformat()
-    for entry in weeks:
-        if isinstance(entry, dict) and entry.get("week_start") == target:
-            return entry
-    available = ", ".join(sorted(
-        str(e.get("week_start")) for e in weeks if isinstance(e, dict)
-    ))
-    raise ConfigError(
-        f"--week : fichier multi-semaines sans semaine du {target} (lundi de --today) — "
-        f"semaines présentes : {available or 'aucune'}."
-    )
+    upcoming = sorted(e["week_start"] for e in valid if e["week_start"] >= target)
+    if not upcoming:
+        raise ConfigError(
+            f"--week : fichier multi-semaines sans semaine à partir du {target} (lundi de "
+            f"--today) — semaines présentes : {available}. Précisez --week-start pour vérifier "
+            "une semaine déjà passée."
+        )
+    chosen = upcoming[0]
+    return next(e for e in valid if e["week_start"] == chosen)
 
 
 # Codes de sortie (revue de code #98, should-fix 11) — documentés ici ET dans
@@ -1998,6 +2022,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="(sous-commande « check », obligatoire) semaine proposée : chemin "
                              "d'un fichier (Markdown ```arc ou JSON brut) ou « - » pour lire le "
                              "JSON/Markdown depuis stdin.")
+    parser.add_argument("--week-start", metavar="AAAA-MM-JJ",
+                        help="(#69, fichier multi-semaines uniquement) lundi de la semaine à "
+                             "vérifier — sinon la première semaine dont le lundi tombe le jour de "
+                             "--today ou après. Sans effet sur un fichier à une seule semaine, "
+                             "sauf s'il désigne une AUTRE semaine que celle du fichier (erreur).")
     parser.add_argument("--workspace")
     parser.add_argument("--db")
     parser.add_argument("--memory", action="store_true")
@@ -2031,11 +2060,18 @@ def main(argv=None) -> int:
             date.fromisoformat(args.today)
         except ValueError:
             raise ConfigError(f"--today : date AAAA-MM-JJ attendue, « {args.today} » reçue.")
+    if args.week_start:
+        try:
+            date.fromisoformat(args.week_start)
+        except ValueError:
+            raise ConfigError(f"--week-start : date AAAA-MM-JJ attendue, « {args.week_start} » reçue.")
 
     if args.command == "injury-risk":
         if args.week:
             raise ConfigError("--week : sans effet pour la sous-commande « injury-risk » (aucune "
                                "semaine proposée n'y entre — voir --help).")
+        if args.week_start:
+            raise ConfigError("--week-start : sans effet pour la sous-commande « injury-risk ».")
         workspace = workspace_root(args.workspace)
         conn = I.open_db(workspace, args.db, args.memory)
         today = date.fromisoformat(args.today) if args.today else date.today()
@@ -2052,9 +2088,10 @@ def main(argv=None) -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
     raw_block = _read_week_argument(args.week)
     # #69 : un fichier PLAN MULTI-SEMAINES (`weeks[]`) porte plusieurs semaines —
-    # sélectionne celle de `today` avant de continuer exactement comme pour une
+    # sélectionne celle demandée (`--week-start`) ou, par défaut, la première à
+    # partir du lundi de `today` avant de continuer exactement comme pour une
     # semaine unique (format historique, `_select_week_entry` la rend telle quelle).
-    proposed_week = _select_week_entry(raw_block, today)
+    proposed_week = _select_week_entry(raw_block, today, args.week_start)
     week_start_raw = proposed_week.get("week_start")
     if not week_start_raw:
         raise ConfigError("--week : « week_start » (AAAA-MM-JJ) obligatoire dans la semaine proposée.")
@@ -2073,8 +2110,38 @@ def main(argv=None) -> int:
     gconf = guardrail_settings(config)
     context = build_context(conn, config, gconf, week_start, today)
     result = evaluate(proposed_week, context, gconf)
+    # #69, revue de code should-fix 5 : la semaine vérifiée peut être celle d'un
+    # fichier ÉCLIPSÉ par une collision de `week_start` (fichier dédié vs plan
+    # multi-semaines) — le contrôle porte quand même sur son propre contenu,
+    # mais avertir évite de pousser un plan que le tableau de bord/les autres
+    # CLI ignorent déjà (voir `arc_index.week_collisions`).
+    warning = _shadow_warning(conn, workspace, args.week, week_start_raw)
+    if warning:
+        result["shadowed_warning"] = warning
+        print(f"avertissement : {warning}", file=sys.stderr)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["ok"] else 1
+
+
+def _shadow_warning(conn, workspace: Path, week_arg: str, week_start: str) -> Optional[str]:
+    """`None` si `week_arg` n'est pas un chemin réel (`-`, JSON stdin — jamais de
+    fichier à vérifier) ou si la semaine vérifiée n'est pas éclipsée. Sinon, une
+    phrase nommant le fichier qui fait foi à sa place (#69, `I.week_collisions`)."""
+    if week_arg == "-":
+        return None
+    try:
+        rel = Path(week_arg).resolve().relative_to(workspace.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+    row = conn.execute(
+        "SELECT shadowed FROM week WHERE source_path = ? AND week_start = ?",
+        (rel, week_start)).fetchone()
+    if not row or not row["shadowed"]:
+        return None
+    winner = next((c["winner"] for c in I.week_collisions(conn) if c["week_start"] == week_start), None)
+    return (f"la semaine {week_start} de {rel} est éclipsée par {winner} dans le tableau de bord "
+            "et les autres CLI (#69, collision de week_start) — ce contrôle porte quand même sur "
+            "son propre contenu ; corrigez la collision avant de pousser ce plan.")
 
 
 if __name__ == "__main__":

@@ -21,7 +21,12 @@ Alternative gratuite et sans clé : Open-Meteo (`https://api.open-meteo.com/v1/f
 
 ```
 1. planning/Semaine_*.md → clé "location" du bloc ```arc du fichier semaine actif
-   (fichiers anciens sans bloc : champ "Lieu d'entraînement :")
+   (fichiers anciens sans bloc : champ "Lieu d'entraînement :"). Fichier PLAN
+   MULTI-SEMAINES (#69, clé "weeks" au lieu de "location" au premier niveau) :
+   prendre le "location" de l'entrée weeks[] dont le week_start (lundi à
+   dimanche) couvre la date visée — jamais le "location" d'une AUTRE semaine du
+   même fichier, deux semaines consécutives pouvant avoir des lieux différents
+   (semaine de voyage, stage en altitude…).
 2. planning/active_objective.md → "Lieu d'entraînement par défaut"
 3. planning/Runner_Profile.md → "Lieu par défaut"
 4. Si aucun des trois → question() à l'utilisateur (ne JAMAIS inventer)

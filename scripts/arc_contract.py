@@ -888,10 +888,20 @@ def _validate_week(data: dict, errors: list, warnings: list) -> None:
     lui-même sur un lundi (les blocs de 7 jours alignés sur le lundi sont soit
     identiques, soit disjoints) : le contrôle de lundi ci-dessous couvre donc
     aussi le chevauchement, le doublon de `week_start` restant le seul autre cas
-    à vérifier explicitement."""
+    à vérifier explicitement.
+
+    `"weeks" in data` (revue de code #69, nit) — pas `data.get("weeks") is not
+    None` — pour distinguer la clé ABSENTE (format historique légitime) de la
+    clé PRÉSENTE mais `null` ou mal typée (`{"weeks": null}`, une chaîne...) :
+    cette dernière doit rendre une erreur nommant `weeks` explicitement, jamais
+    tomber dans le repli « semaine unique » où elle ressortirait comme une
+    simple clé inconnue (`_check_object` ne connaît `weeks` que dans
+    `SCHEMA["week"]`, pas dans `SUBSCHEMA["week_entry"]` utilisé pour ce
+    repli)."""
+    has_weeks_key = "weeks" in data
     weeks = data.get("weeks")
     has_single = any(data.get(k) is not None for k in WEEK_SINGLE_KEYS)
-    if weeks is not None:
+    if has_weeks_key:
         if has_single:
             errors.append(
                 "week : ne mélangez pas `weeks` (plan multi-semaines) et les champs de "

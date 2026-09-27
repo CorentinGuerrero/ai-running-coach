@@ -1879,8 +1879,25 @@ def week_collisions(conn) -> List[dict]:
     recouvrent. Rend une entrée par collision : `week_start`, `winner` (le
     `source_path` qui l'emporte), `losers` (les autres, écartés des tables
     dérivées). Priorité au fichier DÉDIÉ de cette semaine (son nom porte
-    exactement ce lundi) ; à défaut, au chemin le plus petit par ordre
-    alphabétique — déterministe, ne dépend d'aucun ordre de traitement.
+    exactement ce lundi) ; à défaut (deux plans multi-semaines qui se
+    recouvrent sans qu'aucun ne soit le fichier dédié), au chemin le plus petit
+    par ordre alphabétique.
+
+    **Alphabétique, jamais la date de dernière modification du fichier**
+    (revue de code #69, should-fix 6) — choix délibéré : `mtime` n'est pas
+    reconstituée par un `git clone`/`checkout` (tous les fichiers prennent la
+    date du checkout, dans un ordre qui ne reflète plus du tout l'historique
+    réel des écritures), donc un départage par mtime redeviendrait ARBITRAIRE
+    et NON REPRODUCTIBLE dès qu'un workspace versionné change de machine —
+    exactement ce que ce module s'interdit ailleurs (voir par ex. `gear_slug`,
+    `week_collisions` lui-même). L'ordre alphabétique, lui, ne dépend que du
+    CONTENU du dépôt (les chemins), jamais de son historique d'exécution : deux
+    passages sur le même jeu de fichiers, sur deux machines différentes,
+    rendent toujours le même gagnant. Ce départage reste un FILET DE SÉCURITÉ,
+    pas une politique à invoquer sciemment : un plan qui en remplace un autre
+    doit retirer ou réécrire les semaines qui se chevauchent dans l'ANCIEN
+    fichier plutôt que de compter sur lui pour trancher (voir `agents/
+    coach.md`, section « Multi-week plans »).
 
     Pure lecture (aucune écriture) : calculée à la demande à partir du contenu
     ACTUEL de la table `week`, jamais d'un état mémorisé qui pourrait rester
@@ -2082,26 +2099,68 @@ def backfill_items(conn) -> List[dict]:
         # Une clé facultative absente d'un bloc valide (pas de verdict ce jour-là, pas de
         # splits sur une séance de renfo) reste visible dans `issues`, sans être à reprendre.
         issues = json.loads(row["issues"] or "[]")
-        items.append({"path": row["path"], "kind": row["kind"], "status": row["parsed_ok"], "issues": issues})
+        # `collision` (#69, revue de code should-fix 2) : distingue un fichier
+        # RÉELLEMENT hors contrat (`status != "ok"`, à réécrire) d'un fichier
+        # par ailleurs valide, seulement éclipsé par une collision de
+        # `week_start` — l'action attendue n'est pas la même (trim/suppression
+        # de l'entrée en trop, jamais une réécriture du bloc ```arc) ; voir
+        # `write_backfill`, qui les liste dans deux sections séparées.
+        items.append({
+            "path": row["path"], "kind": row["kind"], "status": row["parsed_ok"], "issues": issues,
+            "collision": any(_WEEK_COLLISION_MARKER in i for i in issues),
+        })
     return items
 
 
 def write_backfill(conn, workspace: Path) -> Path:
     items = backfill_items(conn)
+    # #69, revue de code should-fix 2 : un item de collision (fichier VALIDE au
+    # contrat, seulement éclipsé par un autre pour une semaine) n'est pas une
+    # dette de contrat — le mélanger à la liste « à réécrire » ferait suivre au
+    # skill `arc-backfill` (ou à l'athlète lisant ce fichier) ses étapes de
+    # réécriture d'un bloc ```arc sur un fichier qui en a déjà un parfaitement
+    # valide. Deux sections séparées, avec l'action qui convient à chacune.
+    contract_items = [i for i in items if i["status"] != "ok"]
+    collision_items = [i for i in items if i["status"] == "ok" and i["collision"]]
     lines = [
         "# Backfill — fichiers à réécrire au contrat ```arc",
         "",
         "> Généré par `scripts/arc_index.py backfill-plan`. Ne pas éditer : relancer la commande.",
+        "",
+    ]
+    lines += [
+        "## Fichiers hors contrat",
+        "",
         "> Chaque fichier doit être réécrit avec un bloc ```arc conforme au skill",
         "> `workspace-data-contract`, en conservant le texte existant sous le bloc.",
         "",
-        f"**{len(items)} fichier(s)** à traiter.",
+        f"**{len(contract_items)} fichier(s)** à traiter.",
         "",
     ]
-    for item in items:
+    for item in contract_items:
         lines.append(f"- [ ] `{item['path']}` — {item['kind']} ({item['status']})")
         for issue in item["issues"]:
             lines.append(f"    - {issue}")
+    lines += [
+        "",
+        "## Collisions de semaine (#69)",
+        "",
+        "> Ces fichiers sont déjà VALIDES au contrat — n'y ajoutez ni ne réécrivez",
+        "> aucun bloc ```arc. Une autre entrée décrit déjà la même semaine et fait",
+        "> foi (le fichier DÉDIÉ de cette semaine, sinon le chemin le plus petit —",
+        "> voir `skills/workspace-data-contract/SKILL.md`, section « week »).",
+        "> Corrigez en RETIRANT ou en SUPPRIMANT l'entrée `weeks[]` en trop (ou le",
+        "> fichier entier s'il ne porte plus que des semaines déjà couvertes",
+        "> ailleurs) — jamais en réécrivant un bloc qui est déjà correct.",
+        "",
+        f"**{len(collision_items)} fichier(s)** concerné(s).",
+        "",
+    ]
+    for item in collision_items:
+        lines.append(f"- [ ] `{item['path']}`")
+        for issue in item["issues"]:
+            if _WEEK_COLLISION_MARKER in issue:
+                lines.append(f"    - {issue}")
     out = workspace / ".arc/backfill.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")

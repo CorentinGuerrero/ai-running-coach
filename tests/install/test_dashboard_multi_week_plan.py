@@ -89,6 +89,10 @@ class TestMultiWeekPlanView(InstallAsserts):
         # Les deux semaines apparaissent dans la liste des semaines connues.
         self.assertIn(week1, payload["known_weeks"])
         self.assertIn(week2, payload["known_weeks"])
+        # `shadowed` (#69, revue de code, nit) : toujours 0 ici (déjà filtré côté
+        # SQL) — ne doit jamais être sérialisé dans la réponse HTTP.
+        self.assertNotIn("shadowed", payload["week"])
+        self.assertTrue(all("shadowed" not in s for s in payload["sessions"]))
 
     def test_dedicated_file_wins_over_colliding_multi_week_entry(self):
         """`build()` a déjà écrit `planning/Semaine_<CURRENT_MONDAY>.md` (fichier
