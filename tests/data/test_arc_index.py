@@ -501,6 +501,49 @@ class TestSleepDebtCli(Workspace):
         self.assertEqual(point["morning_check"], "off")
 
 
+class TestTrailShapeCli(Workspace):
+    """#63 — `arc_index.py trail-shape` : la formule elle-même (constantes, cas
+    limites, renormalisation des poids) est verrouillée par
+    `tests/data/test_arc_trail_shape.py` sur des dicts nus — ici, seulement le
+    câblage SQL (lecture de `planning/active_objective.md` et des activités
+    indexées, jamais un second calcul, voir `I.trail_shape_report`)."""
+
+    def objective(self, race_date="2026-12-06", distance_km="21,1 km", dplus="1 200 m"):
+        self.write("planning/active_objective.md", (
+            "# Objectif actif\n\n## Course visée\n\n"
+            f"- **Nom** : Trail des Crêtes\n- **Date** : {race_date}\n"
+            f"- **Distance** : {distance_km}\n- **Dénivelé positif** : {dplus}\n"))
+
+    def activity(self, day: str, distance_m: float, elevation_gain_m: float = 0, duration_s: float = 3600) -> None:
+        self.write(f"activities/{day}_trail.md", arc(
+            f'{{"arc": 1, "kind": "activity", "date": "{day}", "sport": "trail", '
+            f'"duration_s": {duration_s}, "distance_m": {distance_m}, "elevation_gain_m": {elevation_gain_m}}}'))
+
+    def test_no_objective_reads_as_no_objective_status(self):
+        self.index()
+        report = I.trail_shape_report(self.conn, date(2026, 9, 23))
+        self.assertEqual(report["status"], "no_objective")
+
+    def test_objective_and_activities_flow_through_to_a_score(self):
+        self.objective()
+        for i in range(6):
+            day = f"2026-09-{9 - i:02d}" if i < 9 else f"2026-08-{40 - i:02d}"
+            self.activity(day, 12000, 300)
+        self.index()
+        report = I.trail_shape_report(self.conn, date(2026, 9, 23))
+        self.assertEqual(report["status"], "ok")
+        self.assertIsInstance(report["score"], float)
+        self.assertEqual(report["objective"]["distance_m"], 21100.0)
+
+    def test_no_d_plus_omits_the_max_dplus_component(self):
+        self.objective(dplus="")
+        self.activity("2026-09-20", 12000)
+        self.index()
+        report = I.trail_shape_report(self.conn, date(2026, 9, 23))
+        by_id = {c["id"]: c for c in report["components"]}
+        self.assertFalse(by_id["max_dplus"]["eligible"])
+
+
 class TestHeatAcclimationCli(Workspace):
     """#38 — `arc_index.py heat-acclimation` : jointure activité outdoor / météo réelle
     (fichiers indexés, pas des dicts à la main comme `test_arc_metrics.py`), et

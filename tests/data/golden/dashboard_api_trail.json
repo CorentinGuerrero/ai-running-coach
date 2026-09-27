@@ -6375,6 +6375,77 @@
       },
       "status": 200
     },
+    "/api/trail-shape": {
+      "body": {
+        "components": [
+          {
+            "actual": 40.9,
+            "eligible": true,
+            "id": "weekly_volume",
+            "label": "Volume hebdomadaire (km-effort)",
+            "ratio": 1.0,
+            "reason": null,
+            "target": 38.0,
+            "unit": "km",
+            "weight": 0.35,
+            "weight_renormalized": 0.412
+          },
+          {
+            "actual": 21000.0,
+            "eligible": true,
+            "id": "longest_run",
+            "label": "Plus longue sortie",
+            "ratio": 0.673,
+            "reason": null,
+            "target": 31200.0,
+            "unit": "m",
+            "weight": 0.3,
+            "weight_renormalized": 0.353
+          },
+          {
+            "actual": 1018.0,
+            "eligible": true,
+            "id": "max_dplus",
+            "label": "D+ max d'une séance",
+            "ratio": 0.848,
+            "reason": null,
+            "target": 1200.0,
+            "unit": "m",
+            "weight": 0.2,
+            "weight_renormalized": 0.235
+          },
+          {
+            "actual": null,
+            "eligible": false,
+            "id": "durability",
+            "label": "Durabilité (fade GAP, sorties longues)",
+            "ratio": null,
+            "reason": "aucune sortie longue éligible sur la fenêtre",
+            "target": null,
+            "unit": "% fade GAP",
+            "weight": 0.15,
+            "weight_renormalized": 0.0
+          }
+        ],
+        "data_confidence": "normal",
+        "formula": "Score = Σ(ratio_composante × poids_renormalisé) × 100, ratio de chaque composante = min(1.0, valeur_observée / cible), poids renormalisés à 1.0 sur les seules composantes éligibles (voir COMPONENT_WEIGHTS, arc_trail_shape.py).",
+        "notes": [
+          "Durabilité non intégrée au score : aucune sortie longue éligible sur la fenêtre — poids redistribué sur les autres composantes."
+        ],
+        "objective": {
+          "days_left": 54,
+          "distance_m": 52000.0,
+          "elevation_gain_m": 2400.0,
+          "name": "Trail des Collines",
+          "race_date": "2026-11-16"
+        },
+        "score": 84.9,
+        "status": "ok",
+        "weeks_with_data": 7,
+        "window_weeks": 8
+      },
+      "status": 200
+    },
     "/api/vam": {
       "body": {
         "activities_n": 23,

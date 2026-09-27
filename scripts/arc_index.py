@@ -185,6 +185,7 @@ import arc_legacy as L  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_samples as S  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+import arc_trail_shape as TS  # noqa: E402
 from coach_config import ConfigError, read_toml  # noqa: E402
 from coach_setup import ENGINE, workspace_root  # noqa: E402
 
@@ -2727,13 +2728,29 @@ def durability_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
     return M.durability_trend(rows, today, window_weeks)
 
 
+def trail_shape_report(conn, today: date) -> dict:
+    """Rapport « Trail Shape » (#63) — pour la CLI (`arc_index.py trail-shape`)
+    et pour `coach`/le tableau de bord. Délègue ENTIÈREMENT à
+    `arc_trail_shape.trail_shape_report` (formule, constantes, gestion des cas
+    limites — objectif absent/incomplet, course passée/trop courte, D+ absent,
+    durabilité inéligible, données éparses) : ici, seulement la lecture de
+    l'objectif actif et des activités depuis l'index SQLite, jamais un second
+    calcul. Aucune colonne de santé lue (le score n'en utilise aucune)."""
+    objective_row = conn.execute("SELECT * FROM objective LIMIT 1").fetchone()
+    objective = dict(objective_row) if objective_row else None
+    rows = [dict(r) for r in conn.execute(
+        "SELECT date, sport, name, distance_m, elevation_gain_m, duration_s, moving_duration_s, "
+        "durability_gap_fade_pct, durability_reason, durability_reason_code FROM activity").fetchall()]
+    return TS.trail_shape_report(objective, rows, today)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
                                  "heat-acclimation", "gear", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
-                                 "climb-history", "decisions", "slope-model"))
+                                 "climb-history", "decisions", "slope-model", "trail-shape"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -2959,6 +2976,10 @@ def main(argv=None) -> int:
                               ensure_ascii=False))
             return 0
         print(json.dumps(slope_model_report(conn, args.band), ensure_ascii=False))
+        return 0
+    if args.command == "trail-shape":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(trail_shape_report(conn, today_date), ensure_ascii=False))
         return 0
     if args.command == "status":
         by_status = {row[0]: row[1] for row in conn.execute(

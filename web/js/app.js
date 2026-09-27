@@ -379,7 +379,7 @@ function renderNav(s) {
   const nutrition = s.settings.agents?.includes("nutritionist");
   const items = [
     ["", "Aujourd'hui"], ["forme", "Forme & charge"], ["analyse", "Analyse"], ["sante", "Santé"], ["semaine", "Semaine"],
-    ["seances", "Séances"], ["performance", "Performance"], ["calendrier", "Calendrier"],
+    ["seances", "Séances"], ["performance", "Performance"], ["trail-shape", "Trail Shape"], ["calendrier", "Calendrier"],
     ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
   ];
   $("#nav").innerHTML = items.map(([h, l]) => `<a href="#/${h}" data-route="${h}">${l}</a>`).join("")
@@ -1541,6 +1541,82 @@ async function viewPerformance(params) {
 }
 
 // ---------------------------------------------------------------------------
+// Vue : Trail Shape (#63)
+// ---------------------------------------------------------------------------
+
+// Libellés des statuts renvoyés par `/api/trail-shape` quand aucun score n'est
+// calculable — jamais un statut inconnu affiché tel quel (repli sur son libellé
+// brut, prudence, mais toujours accompagné des `notes` du serveur, en français,
+// qui expliquent le POURQUOI précis).
+const TRAIL_SHAPE_EMPTY_TITLE = {
+  no_objective: "Aucun objectif actif",
+  incomplete_objective: "Objectif incomplet",
+  race_past: "Course déjà passée",
+  race_too_short: "Course trop courte pour ce score",
+};
+
+/** Barre de ratio composante/cible (#63) : même esprit que `rangeBar` (SVG,
+ * jamais de style posé en ligne — CSP `style-src 'self'`), mais un simple
+ * remplissage 0-100 % plutôt qu'une bande de référence : chaque composante a
+ * SA PROPRE cible (déjà résumée par le ratio), pas de plage à visualiser. */
+function trailShapeBar(ratio) {
+  if (ratio === null || ratio === undefined) return "";
+  const pct = Math.max(0, Math.min(1, ratio)) * 100;
+  const cls = ratio >= 0.9 ? "ts-bar__fill--pos" : ratio < 0.5 ? "ts-bar__fill--neg" : "ts-bar__fill--mid";
+  return `<svg class="ts-bar" viewBox="0 0 200 10" aria-hidden="true">
+    <rect class="ts-bar__track" x="0" y="0" width="200" height="10" rx="5"/>
+    <rect class="ts-bar__fill ${cls}" x="0" y="0" width="${pct * 2}" height="10" rx="5"/>
+  </svg>`;
+}
+
+function trailShapeComponentRow(c) {
+  const value = (v, unit) => {
+    if (v === null || v === undefined) return "—";
+    if (unit === "km") return `${F.num(v, 1)} km`;
+    if (unit === "m") return F.distance(v, 1);
+    return `${F.num(v, 1)} %`;
+  };
+  if (!c.eligible) {
+    return `<div class="ts-row ts-row--omitted">
+      <div class="ts-row__label">${F.esc(c.label)}</div>
+      <div class="ts-row__omitted muted">Non intégrée au score : ${F.esc(c.reason || "non éligible")}</div>
+    </div>`;
+  }
+  return `<div class="ts-row">
+    <div class="ts-row__label">${F.esc(c.label)}</div>
+    <div class="ts-row__values"><span>${value(c.actual, c.unit)}</span><span class="muted"> / cible ${value(c.target, c.unit)}</span></div>
+    ${trailShapeBar(c.ratio)}
+    <div class="ts-row__meta muted">${F.num(c.ratio * 100, 0)} % de la cible · poids ${F.num((c.weight_renormalized ?? c.weight) * 100, 0)} % du score</div>
+  </div>`;
+}
+
+async function viewTrailShape() {
+  const r = await api("trail-shape");
+  const sub = "Sorties longues, volume et D+ des 6 à 8 dernières semaines, comparés aux exigences de l'objectif actif — un indicateur parmi d'autres, jamais un verdict.";
+  if (r.status !== "ok") {
+    const title = TRAIL_SHAPE_EMPTY_TITLE[r.status] || r.status;
+    main.innerHTML = `${header("Trail Shape", sub)}${empty(title, (r.notes || []).map((n) => F.esc(n)).join("<br>") || "Pas assez d'information pour calculer ce score.")}`;
+    return;
+  }
+  const o = r.objective || {};
+  const scoreClass = r.score >= 80 ? "pos" : r.score < 50 ? "neg" : "";
+  const rows = (r.components || []).map(trailShapeComponentRow).join("");
+  const confidenceNote = r.data_confidence === "low"
+    ? note(`Confiance réduite : ${F.esc((r.notes || []).find((n) => n.includes("semaine")) || "données éparses sur la fenêtre")}.`)
+    : "";
+  const otherNotes = (r.notes || []).filter((n) => r.data_confidence !== "low" || !n.includes("semaine"));
+  main.innerHTML = `${header("Trail Shape", sub)}
+    <section class="band">
+      <p class="lead-num ${scoreClass}">${F.num(r.score, 0)}<small> / 100 · ${F.esc(o.name || "objectif")}, ${F.dayLong(o.race_date)}${o.days_left >= 0 ? ` (J-${o.days_left})` : ""}</small></p>
+      ${confidenceNote}
+      ${otherNotes.map((n) => note(F.esc(n))).join("")}
+    </section>
+    <section class="band ts-components">${rows}</section>
+    <section class="band"><h2>Formule</h2><p class="muted">${F.esc(r.formula)}</p>
+      ${note("Score calculé uniquement à partir de l'historique d'entraînement (aucune donnée de santé — HRV, FC de repos, readiness — n'y entre).")}</section>`;
+}
+
+// ---------------------------------------------------------------------------
 // Vue : Calendrier
 // ---------------------------------------------------------------------------
 
@@ -2053,7 +2129,7 @@ function daysToWeeksPeriod(days) {
 
 const ROUTES = {
   "": viewToday, forme: viewForm, analyse: viewAnalyse, sante: viewHealth, semaine: viewWeek, seances: viewSessions,
-  performance: viewPerformance, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
+  performance: viewPerformance, "trail-shape": viewTrailShape, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
   nutrition: viewNutrition, fichiers: viewFiles, decisions: viewDecisions, decision: viewDecision,
 };
 
