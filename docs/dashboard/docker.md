@@ -29,6 +29,17 @@ flowchart LR
 
 ## Mise en route
 
+!!! tip "Préréglage `--preset docker`"
+    Le conteneur ne parle jamais à Garmin (workspace monté en lecture seule) :
+    `./install.sh --preset docker` prépare la machine sans authentification
+    Garmin interactive (`--no-auth`), configure Claude Code (`--ide claude`,
+    dont le runner de synchronisation a besoin) et active `--daily-sync` pour
+    que le workspace monté reste à jour — sans Remote Control, l'interface de
+    cette machine étant le tableau de bord web. Voir
+    [Préréglages](../quickstart.md#prereglages---preset). Une option explicite
+    reste prioritaire : ajoutez `--workspace DIR` si vos données vivent hors
+    du dépôt du moteur.
+
 Sur la machine coach, dans le dépôt du moteur :
 
 ```bash

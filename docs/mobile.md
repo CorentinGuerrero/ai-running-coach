@@ -93,6 +93,19 @@ cd ai-running-coach
 ./install.sh --ide claude --workspace ~/mon-workspace
 ```
 
+!!! tip "Raccourci : `--preset coach-server`"
+    Les étapes 2, 4 et 5 de cette page (`--ide claude`, `--daily-sync`,
+    `--remote-control`) sont exactement ce que compose le préréglage
+    `--preset coach-server` (voir [Préréglages](quickstart.md#prereglages---preset)) :
+
+    ```bash
+    ./install.sh --preset coach-server                        # ou --workspace ~/mon-workspace
+    ```
+
+    Une option explicite reste toujours prioritaire, par exemple pour sauter
+    l'authentification interactive si vos tokens Garmin sont déjà copiés
+    (voir plus bas) : `./install.sh --preset coach-server --no-auth`.
+
 L'authentification Garmin (`garmin-mcp-auth`, MFA compris) fonctionne en SSH. Si vos tokens
 existent déjà sur le portable, copiez simplement le dossier (permissions 600) :
 

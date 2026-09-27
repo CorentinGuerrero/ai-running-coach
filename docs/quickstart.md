@@ -43,6 +43,7 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 
 | Option | Description |
 |---|---|
+| `--preset NOM` | Préréglage qui compose les options ci-dessous : `laptop`, `coach-server` ou `docker` — voir [Préréglages](#prereglages---preset) |
 | `--ide claude` | Installe pour un IDE précis (`claude`, `copilot`, `opencode`, `gemini`, `cursor`, `windsurf`) |
 | `--agents LISTE` | Staff à installer, ex. `coach,nutritionist` — voir [Configuration](configuration.md#le-staff-agents) |
 | `--no-medical` | Tous les agents sauf le médecin |
@@ -53,6 +54,42 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 | `--remote-control` | Service Claude Code Remote Control : le coach depuis le téléphone — voir [Le coach dans la poche](mobile.md) |
 | `--dry-run` | Affiche les actions sans rien exécuter |
 | `--help` | Affiche l'aide |
+
+## Préréglages (`--preset`)
+
+Un préréglage ne fait que **composer les options ci-dessus** — jamais de
+comportement qui ne serait pas atteignable avec les options existantes. Une
+option passée explicitement l'emporte toujours sur le préréglage, quel que
+soit son ordre sur la ligne de commande (`--preset laptop --daily-sync`
+revient exactement à `--daily-sync --preset laptop`).
+
+| Préréglage | Équivaut à | Pour qui |
+|---|---|---|
+| `laptop` | `--ide all` (le reste aux valeurs par défaut) | Le parcours de cette page : votre propre machine, en interactif, tous les IDE supportés. |
+| `coach-server` | `--ide claude --daily-sync --remote-control` | La machine « coach » toujours allumée de [Le coach dans la poche](mobile.md) : synchronisation automatique + dialogue depuis le téléphone. |
+| `docker` | `--ide claude --daily-sync --no-auth` | La machine qui sert le [tableau de bord en conteneur](dashboard/docker.md) derrière un reverse proxy : le conteneur ne parle jamais à Garmin (workspace monté en lecture seule), donc pas d'authentification interactive à l'installation ; `--daily-sync` garde les données du workspace monté à jour ; pas de Remote Control, l'interface de cette machine est le tableau de bord web. |
+
+Avant d'agir, le script affiche un récapitulatif de la configuration
+effective, en indiquant pour chaque option si sa valeur vient du préréglage
+ou d'une option explicite :
+
+```bash
+./install.sh --preset coach-server --no-auth --dry-run
+```
+
+```
+==> Récapitulatif de la configuration effective :
+  Préréglage             coach-server
+  IDE                    claude       (préréglage coach-server)
+  Auth Garmin            sautée       (explicite)
+  Sync auto (cron)       oui          (préréglage coach-server)
+  Remote Control         oui          (préréglage coach-server)
+  ...
+```
+
+`--dry-run` fonctionne avec chaque préréglage (aucune écriture sur le
+disque) ; un nom de préréglage inconnu est une erreur claire (`Préréglage
+inconnu : « … ». Valides : laptop coach-server docker`), pas un plantage.
 
 ## Premiers pas
 
