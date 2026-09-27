@@ -228,7 +228,7 @@ mode = "watch"
 | Garmin répond 429 / réseau coupé | Passages espacés : 15, 30, 60… jusqu'à 240 min. |
 | Tokens refusés | Pas de LLM ; le run de repli s'en charge et relaie l'alerte de renouvellement. |
 | Séance que l'agent n'arrive pas à persister | Abandonnée après 2 runs sans effet (journalisé), jamais de boucle. |
-| Watcher muet (cron arrêté, python introuvable) | `fallback_times` (`21:30`) : un run complet si aucun n'a eu lieu dans la journée ; `coach_doctor.py` passe en ⚠ après 3 intervalles sans passage. |
+| Watcher muet (cron arrêté, python introuvable) | `fallback_times` (`21:30`) : un run complet si aucun daily-sync n'a eu lieu dans la journée (watcher, session mobile ou lancement manuel : `logs/sync-<jour>.log`) ; `coach_doctor.py` passe en ⚠ après 3 intervalles sans passage. |
 
 ```bash
 scripts/garmin_watch.py --dry-run   # décide et affiche, ne lance rien

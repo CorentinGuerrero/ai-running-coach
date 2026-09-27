@@ -25,7 +25,7 @@ pour eux. Relancer `install.sh` reste nécessaire pour tout ce qui est **génér
 | Catalogue `agents/` et `skills/` du workspace | Un nouveau skill (ex. `/today`, `/log`, `coach-doctor`) n'apparaît qu'une fois son lien créé. |
 | `.mcp.json` | La liste blanche d'outils Garmin (`GARMIN_ENABLED_TOOLS`) évolue avec les skills ; l'ancienne reste figée dans le fichier. |
 | Bloc `.gitignore` du workspace | De nouveaux fichiers générés peuvent y être ajoutés. |
-| Crontab / launchd du daily-sync | Heures relues depuis `[sync].times` ; les lignes marquées sont remplacées, le reste de la crontab est conservé (sauvegarde dans `~/.config/ai-running-coach/`). |
+| Crontab / launchd du daily-sync | Relus depuis `[sync].mode` (`schedule` : heures de `[sync].times` ; `watch` : sondage `scripts/garmin_watch.py`, voir [Le coach dans la poche](mobile.md#mode-watch-ne-payer-le-llm-que-quand-garmin-a-du-neuf)) ; les lignes marquées sont remplacées, le reste de la crontab est conservé (sauvegarde dans `~/.config/ai-running-coach/`). |
 | Unité Remote Control | Réécrite si son modèle a changé. |
 
 Les tokens Garmin sont **vérifiés**, pas redemandés : l'authentification interactive ne

@@ -267,6 +267,20 @@ class TestFallback(WatchCase):
         self.assertEqual(self.tick(FakeProbe(upload=None), now=evening)["action"], "none")
         self.assertEqual(self.runs, [])
 
+    def test_no_fallback_if_daily_sync_ran_outside_the_watcher(self):
+        # Session mobile, lancement manuel, ou ancien cron le jour de la bascule.
+        self.config('fallback_times = ["21:30"]\n')
+        (self.ws / "logs/sync-2026-09-27.log").write_text("===== 2026-09-27 07:15:02 — runner=claude lookback=2 =====\n")
+        evening = NOW.replace(hour=21, minute=45)
+        self.assertEqual(self.tick(FakeProbe(upload=None), now=evening)["action"], "none")
+        self.assertEqual(self.runs, [])
+
+    def test_yesterdays_sync_log_does_not_count(self):
+        self.config('fallback_times = ["21:30"]\n')
+        (self.ws / "logs/sync-2026-09-26.log").write_text("===== 2026-09-26 21:30:00 — runner=claude =====\n")
+        evening = NOW.replace(hour=21, minute=45)
+        self.assertEqual(self.tick(FakeProbe(upload=None), now=evening)["action"], "sync")
+
     def test_no_fallback_before_its_time(self):
         self.config('fallback_times = ["21:30"]\n')
         self.assertEqual(self.tick(FakeProbe(upload=None))["action"], "none")

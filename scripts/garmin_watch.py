@@ -328,9 +328,24 @@ def _prune_attempts(state: dict, today: date) -> None:
     state.pop("given_up_logged", None)
 
 
-def fallback_due(settings: dict, state: dict, now: datetime) -> bool:
-    """Aucun run aujourd'hui et une heure de repli est passée."""
+def synced_today_elsewhere(workspace: Path, today: date) -> bool:
+    """Un daily-sync a déjà tourné aujourd'hui hors du watcher (session mobile,
+    lancement manuel, ancien cron à heures fixes le jour de la bascule) :
+    `daily-sync.sh` ouvre chaque run par un en-tête « ===== » dans
+    `logs/sync-<jour>.log`."""
+    path = workspace / "logs" / f"sync-{today.isoformat()}.log"
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            return any(line.startswith("===== ") for line in fh)
+    except OSError:
+        return False
+
+
+def fallback_due(settings: dict, state: dict, now: datetime, workspace: Path) -> bool:
+    """Aucun run aujourd'hui (du watcher ou d'ailleurs) et une heure de repli est passée."""
     if runs_today(state, now.date()) > 0 or state.get("fallback_date") == now.date().isoformat():
+        return False
+    if synced_today_elsewhere(workspace, now.date()):
         return False
     for t in settings["fallback_times"]:
         hour, minute = (int(x) for x in t.split(":"))
@@ -402,7 +417,7 @@ def tick(workspace: Path, now: datetime, probe_factory, run_sync, dry_run: bool 
             state["auth_error_date"] = today.isoformat()
             log(f"tokens Garmin refusés — {exc}")
         # Le run de repli relaiera l'alerte (daily-sync → notification tokens).
-        if fallback_due(settings, state, now):
+        if fallback_due(settings, state, now, workspace):
             state["fallback_date"] = today.isoformat()
             return launch([], "repli (tokens refusés)")
         return finish("error", "tokens Garmin refusés — uv run garmin-mcp-auth")
@@ -441,7 +456,7 @@ def tick(workspace: Path, now: datetime, probe_factory, run_sync, dry_run: bool 
 
     state.pop("pending", None)
     _prune_attempts(state, today)
-    if fallback_due(settings, state, now):
+    if fallback_due(settings, state, now, workspace):
         state["fallback_date"] = today.isoformat()
         return launch([], "repli : aucun run aujourd'hui")
     return finish("none", "rien de neuf")
