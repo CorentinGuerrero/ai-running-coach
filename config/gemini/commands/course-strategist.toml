@@ -144,11 +144,16 @@ une distance sensiblement différente de la distance officielle de course
 d'abord le skill `weather-forecast` puis repasse la température max prévue ici
 — le script n'accède lui-même à aucun réseau. Le script résout SEUL : le
 modèle personnel pente -> allure (#58, bande « endurance »), l'intensité de
-course (Riegel/VDOT depuis `planning/active_objective.md`, #33), le fade de
-fin de course depuis la durabilité récente (#48, médiane, ou repli générique
-documenté et signalé `fade_source: "generic"`, échelonné à la durée réelle de
-la course), l'acclimatation chaleur (#38) et les barrières horaires — ne
-recalcule aucun de ces éléments toi-même.
+course (Riegel — depuis un effort RÉCENT et DUR uniquement, tempo/seuil/VO2max/
+course, jamais un simple footing — ou VDOT en repli, #33 ; TOUJOURS calculée
+sur le GPX que tu analyses, jamais sur `planning/active_objective.md`, qui
+peut décrire une autre distance — un avertissement le signale si les deux
+diffèrent sensiblement), le fade de fin de course depuis la durabilité récente
+(#48, médiane, rendu NEUTRE en temps total quand une prédiction Riegel/VDOT
+existe déjà — jamais un double comptage de la dégradation d'endurance —, ou
+repli générique documenté et signalé `fade_source: "generic"`, échelonné à la
+durée réelle de la course), l'acclimatation chaleur (#38) et les barrières
+horaires — ne recalcule aucun de ces éléments toi-même.
 
 Le JSON rendu porte `segments[]` (id, bornes km, pente, temps prédit par
 scénario, **`source`** : `personal`/`generic`/`mixed`), `totals`,

@@ -24,7 +24,7 @@ import math
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -32,6 +32,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO))
 
 import arc_index as IDX  # noqa: E402
+import arc_metrics as M  # noqa: E402
 import arc_race_pacing as RP  # noqa: E402
 
 # Zone fictive conventionnelle du dépôt pour toute coordonnée de test (#49,
@@ -404,6 +405,38 @@ class TestBuildRacePlan(unittest.TestCase):
         self.assertGreater(plan["fade_pct_applied"], 0.0)
         self.assertTrue(plan["fade_notes"])
 
+    def test_fade_is_time_neutral_when_an_intensity_prediction_exists(self):
+        # #59, 2ᵉ revue de code, should-fix : Riegel/VDOT intègrent déjà une
+        # dégradation d'endurance sur la distance — le fade ne doit alors PAS
+        # ajouter de temps NET, seulement redistribuer (plus rapide en début,
+        # plus lent en fin).
+        pts = _straight_course(_LongClimbFlatDescentProfile(), step_m=20.0)
+        no_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=0.0, fade_source="generic",
+                                      intensity_factor=1.3, intensity_source="riegel",
+                                      start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        with_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
+                                        intensity_factor=1.3, intensity_source="riegel",
+                                        start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        # Même total (à l'arrondi minute près) malgré un fade non nul...
+        self.assertEqual(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
+        # ... mais une répartition différente : le premier segment est plus
+        # RAPIDE avec fade (le temps économisé en début compense le
+        # ralentissement de fin), preuve que le fade a bien un effet local.
+        first_no_fade = no_fade["segments"][0]["predicted_time_s"]["realistic"]
+        first_with_fade = with_fade["segments"][0]["predicted_time_s"]["realistic"]
+        self.assertLess(first_with_fade, first_no_fade)
+        self.assertTrue(any("neutre" in n.lower() for n in with_fade["fade_notes"]))
+
+    def test_fade_still_nets_extra_time_without_an_intensity_prediction(self):
+        # Sans Riegel/VDOT (intensity_source == "none"), le fade reste un vrai
+        # ralentissement NET, comme avant #59 (2ᵉ revue) : rien à double-compter.
+        pts = _straight_course(_LongClimbFlatDescentProfile(), step_m=20.0)
+        no_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=0.0, fade_source="generic",
+                                      start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        with_fade = RP.build_race_plan(pts, GENERIC_BINS, fade_pct=8.0, fade_source="generic",
+                                        start_time="07:00", race_date="2026-11-15", segment_m=750.0)
+        self.assertGreater(with_fade["totals"]["time_s"]["realistic"], no_fade["totals"]["time_s"]["realistic"])
+
 
 # ---------------------------------------------------------------------------
 # Terrain vallonné : intégration point par point (revue de code #59, blocant)
@@ -464,23 +497,26 @@ class TestRollingTerrainIntegration(unittest.TestCase):
 # Panier central snapé sur 0 % (revue de code #59, should-fix)
 # ---------------------------------------------------------------------------
 
-class TestSnapFlatGrade(unittest.TestCase):
-    def test_tiny_grade_inside_the_center_bin_is_snapped_to_zero(self):
+class TestSnapGradeToBin(unittest.TestCase):
+    def test_tiny_grade_inside_the_center_bin_is_snapped_to_zero_without_lo_hi_info(self):
+        # Aucun panier ne porte `grade_lo`/`grade_hi` (fixtures de test à un
+        # seul point) : repli sur le panier CENTRAL canonique du modèle.
         tiny = RP._CENTER_BIN_HI / 2.0
-        self.assertEqual(RP._snap_flat_grade(tiny), 0.0)
-        self.assertEqual(RP._snap_flat_grade(-tiny), 0.0)
+        self.assertEqual(RP._snap_grade_to_bin(tiny, []), 0.0)
+        self.assertEqual(RP._snap_grade_to_bin(-tiny, []), 0.0)
 
-    def test_grade_outside_the_center_bin_is_left_unchanged(self):
+    def test_grade_outside_the_center_bin_is_left_unchanged_without_lo_hi_info(self):
         outside = RP._CENTER_BIN_HI + 0.05
-        self.assertEqual(RP._snap_flat_grade(outside), outside)
+        self.assertEqual(RP._snap_grade_to_bin(outside, []), outside)
 
     def test_none_grade_is_left_unchanged(self):
-        self.assertIsNone(RP._snap_flat_grade(None))
+        self.assertIsNone(RP._snap_grade_to_bin(None, []))
 
     def test_gps_noise_near_flat_does_not_spuriously_produce_mixed_source(self):
-        # Panier plat personnel voisin d'un panier générique : sans le snap, une
-        # pente de bruit GPS de quelques dixièmes de point interpolerait entre
-        # les deux et étiquetterait à tort le segment "mixed".
+        # Panier plat personnel voisin d'un panier générique (SANS grade_lo/hi,
+        # cas test) : sans le snap, une pente de bruit GPS de quelques dixièmes
+        # de point interpolerait entre les deux et étiquetterait à tort le
+        # segment "mixed".
         bins = [
             {"grade_mid": 0.0, "speed_ms": 3.0, "source": "personal",
              "ci_low_speed_ms": 2.8, "ci_high_speed_ms": 3.2, "hr_bpm": 145},
@@ -492,6 +528,40 @@ class TestSnapFlatGrade(unittest.TestCase):
                 "grade_mean_pct": noisy_grade_pct, "elevation_gain_m": 3.0, "elevation_loss_m": 0.0}]
         out = RP.predict_segments(seg, bins, fade_pct=0.0, heat_factor=1.0)
         self.assertEqual(out[0]["source"], "personal")
+
+    def test_grade_inside_a_real_personal_bin_range_snaps_to_that_bin_even_off_center(self):
+        # Reproduit le rapport de revue #59 (58 % de "mixed" sur un profil
+        # trail synthétique) : une pente de 1,8 % tombe dans le panier
+        # PERSONNEL [1.25 %, 3.75 %) mais son point milieu (2.5 %) n'est pas
+        # exactement 1,8 % — sans ce snap, `predict_speed` interpolerait entre
+        # ce panier et son voisin plat (générique ici) et rendrait "mixed".
+        bins_with_range = [
+            {"grade_lo": -0.0125, "grade_hi": 0.0125, "grade_mid": 0.0, "speed_ms": 3.0,
+             "source": "generic", "ci_low_speed_ms": None, "ci_high_speed_ms": None, "hr_bpm": None},
+            {"grade_lo": 0.0125, "grade_hi": 0.0375, "grade_mid": 0.025, "speed_ms": 2.0,
+             "source": "personal", "ci_low_speed_ms": 1.9, "ci_high_speed_ms": 2.1, "hr_bpm": 150},
+        ]
+        seg = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                "grade_mean_pct": 1.8, "elevation_gain_m": 18.0, "elevation_loss_m": 0.0}]
+        out = RP.predict_segments(seg, bins_with_range, fade_pct=0.0, heat_factor=1.0)
+        self.assertEqual(out[0]["source"], "personal")
+        # Vitesse EXACTEMENT celle du panier personnel (aucune interpolation) :
+        # 1000 m / 2.0 m/s = 500 s.
+        self.assertEqual(out[0]["predicted_time_s"]["realistic"], 500)
+
+    def test_open_tail_bin_with_none_bounds_is_treated_as_infinite(self):
+        # Panier ouvert (queue) réel : `grade_lo`/`grade_hi` valent `None` pour
+        # une borne infinie (voir `arc_slope_model.slope_model_bins`), jamais
+        # « information absente ».
+        bins_with_open_tail = [
+            {"grade_lo": None, "grade_hi": -0.0125, "grade_mid": -0.05, "speed_ms": 4.0,
+             "source": "personal", "ci_low_speed_ms": 3.8, "ci_high_speed_ms": 4.2, "hr_bpm": 130},
+        ]
+        seg = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                "grade_mean_pct": -20.0, "elevation_gain_m": 0.0, "elevation_loss_m": 200.0}]
+        out = RP.predict_segments(seg, bins_with_open_tail, fade_pct=0.0, heat_factor=1.0)
+        self.assertEqual(out[0]["source"], "personal")
+        self.assertEqual(out[0]["predicted_time_s"]["realistic"], 250)  # 1000 / 4.0
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +604,17 @@ class TestMissingElevation(unittest.TestCase):
         self.assertEqual(out[0]["reason_code"], "missing_elevation")
         self.assertIsNotNone(out[0]["predicted_time_s"]["realistic"])
         self.assertTrue(any("altitude manquante" in n for n in out[0]["notes"]))
+
+    def test_missing_elevation_source_is_never_personal(self):
+        # Nit (revue de code #59) : une pente SUPPOSÉE plate (altitude manquante)
+        # ne doit jamais s'afficher "personal", même si le modèle a un panier
+        # personnel exactement au plat — ce n'est jamais une mesure de terrain.
+        seg = [{"id": "s01", "km_start": 0.0, "km_end": 1.0, "distance_m": 1000.0,
+                "grade_mean_pct": None, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+                "_profile": [(1000.0, None)]}]
+        out = RP.predict_segments(seg, PERSONAL_BINS, fade_pct=0.0, heat_factor=1.0)
+        self.assertEqual(out[0]["source"], "generic")
+        self.assertNotEqual(out[0]["source"], "personal")
 
 
 # ---------------------------------------------------------------------------
@@ -651,34 +732,126 @@ class TestResolvers(unittest.TestCase):
         self.assertIsNone(acclimated)
         self.assertIsNone(note)
 
-    def test_resolve_intensity_factor_without_objective_stays_at_one(self):
+    def test_resolve_intensity_factor_without_gpx_distance_stays_at_one(self):
         conn = self._conn()
-        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 3.0)
-        self.assertEqual((factor, source, race_speed), (1.0, "none", None))
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 3.0, None, None)
+        self.assertEqual((factor, source, race_speed, notes), (1.0, "none", None, []))
 
     def test_resolve_intensity_factor_without_flat_reference_stays_at_one(self):
         conn = self._conn()
-        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, 0)")
-        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "trail"}, None)
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, None, 10000, 0)
+        self.assertEqual((factor, source, race_speed, notes), (1.0, "none", None, []))
+
+    def _insert_activity(self, conn, *, sport, distance_m, duration_s, elevation_gain_m=None, avg_hr_bpm=None,
+                          days_ago=10, intensity=None):
+        day = (date.today() - timedelta(days=days_ago)).isoformat()
+        conn.execute(
+            "INSERT INTO activity (source_path, date, sport, distance_m, duration_s, elevation_gain_m, "
+            "avg_hr_bpm) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (f"{day}-{sport}.md", day, sport, distance_m, duration_s, elevation_gain_m, avg_hr_bpm))
+        if intensity is not None:
+            conn.execute("INSERT INTO planned_session (date, sport, intensity) VALUES (?, ?, ?)",
+                         (day, sport, intensity))
+        conn.commit()
+        return day
+
+    def test_easy_long_run_is_rejected_as_a_reference_falls_back_to_none(self):
+        # #59, 2ᵉ revue de code, BLOQUANT : un footing facile, même long, n'est
+        # PAS une référence d'allure de course — ni plan dur, ni FC élevée ici.
+        conn = self._conn()
+        conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")
+        self._insert_activity(conn, sport="trail", distance_m=22000, duration_s=8000, elevation_gain_m=774,
+                               avg_hr_bpm=143, intensity="endurance")
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 10000, 0)
         self.assertEqual((factor, source, race_speed), (1.0, "none", None))
 
-    def test_resolve_intensity_factor_uses_riegel_from_a_recent_five_km_effort(self):
+    def test_hard_effort_via_planned_intensity_is_accepted(self):
         conn = self._conn()
-        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, NULL)")
-        conn.execute("INSERT INTO activity (source_path, date, sport, distance_m) VALUES (?, ?, ?, ?)",
-                     ("x.md", date.today().isoformat(), "running", 5000.0))
-        activity_id = conn.execute("SELECT id FROM activity").fetchone()[0]
-        for km in range(1, 6):
-            conn.execute(
-                "INSERT INTO activity_split (activity_id, km, distance_m, duration_s) VALUES (?, ?, ?, ?)",
-                (activity_id, km, 1000.0, 300.0))
-        conn.commit()
-        # Référence plate personnelle (endurance, footing) : 2.9 m/s, bien plus
-        # lente qu'un effort récent de 5 km en 25 min (~3.33 m/s) -> facteur > 1.
-        factor, source, race_speed = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9)
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
         self.assertEqual(source, "riegel")
         self.assertGreater(factor, 1.0)
         self.assertIsNotNone(race_speed)
+
+    def test_hard_effort_via_high_heart_rate_is_accepted_without_a_plan(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")  # Z3/Z4 (%FCmax repli) = 152 bpm
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, avg_hr_bpm=165)
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
+        self.assertEqual(source, "riegel")
+        self.assertGreater(factor, 1.0)
+
+    def test_low_heart_rate_without_a_plan_is_rejected(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO athlete (hr_max_bpm) VALUES (190)")
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, avg_hr_bpm=140)
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10000, 0)
+        self.assertEqual((factor, source, race_speed), (1.0, "none", None))
+
+    def test_longest_qualifying_hard_effort_is_preferred(self):
+        conn = self._conn()
+        self._insert_activity(conn, sport="running", distance_m=5000, duration_s=1100, intensity="race",
+                               days_ago=20)
+        self._insert_activity(conn, sport="running", distance_m=15000, duration_s=3600, intensity="tempo",
+                               days_ago=5)
+        reference = RP._select_hard_reference(conn, {"sport": "road"})
+        self.assertEqual(reference["distance_m"], 15000)
+
+    def test_reference_and_target_elevation_are_both_converted_to_flat_equivalent(self):
+        # #59, 2ᵉ revue de code, BLOQUANT : la référence a son PROPRE D+ (200 m
+        # sur 10 km) qui doit être converti EXACTEMENT comme la cible, avant
+        # d'appeler `arc_metrics.riegel` — jamais un mélange brut/converti qui
+        # compterait le relief une seconde fois côté modèle pente -> allure.
+        conn = self._conn()
+        self._insert_activity(conn, sport="trail", distance_m=10000, duration_s=3000, elevation_gain_m=200,
+                               intensity="race")
+        flat_reference_speed_ms = 2.9
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(
+            conn, {"sport": "trail"}, flat_reference_speed_ms, 10000, 0)
+        self.assertEqual(source, "riegel")
+        expected_reference_flat_m = 10000 + 200 * M.TRAIL_FLAT_M_PER_M_DPLUS
+        expected_predicted_s = M.riegel(3000, expected_reference_flat_m, 10000, M.RIEGEL_EXPONENT["trail"])
+        expected_race_speed = 10000 / expected_predicted_s
+        self.assertAlmostEqual(race_speed, expected_race_speed, places=6)
+        self.assertAlmostEqual(factor, expected_race_speed / flat_reference_speed_ms, places=6)
+
+    def test_objective_differing_from_gpx_warns_but_uses_the_gpx(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (52000, 2400)")
+        self._insert_activity(conn, sport="trail", distance_m=10000, duration_s=2400, intensity="race")
+        # GPX réellement analysé : 31 km, bien loin des 52 km de l'objectif (> 10 %).
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "trail"}, 2.9, 31000, 912)
+        self.assertTrue(any("objectif" in n.lower() and "gpx" in n.lower() for n in notes), notes)
+
+    def test_objective_close_to_gpx_does_not_warn(self):
+        conn = self._conn()
+        conn.execute("INSERT INTO objective (distance_m, elevation_gain_m) VALUES (10000, 0)")
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 2.9, 10100, 0)
+        self.assertEqual(notes, [])
+
+    def test_factor_below_one_under_the_clamp_duration_is_clamped_with_a_note(self):
+        # Référence plus LENTE en équivalent plat que la référence d'endurance —
+        # implausible sur une prédiction courte (< 4h30) : plafonné à 1.0.
+        conn = self._conn()
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=3000, intensity="race")
+        factor, source, race_speed, notes = RP._resolve_intensity_factor(conn, {"sport": "road"}, 4.0, 10000, 0)
+        self.assertEqual(factor, 1.0)
+        self.assertTrue(any("plafonné" in n.lower() for n in notes), notes)
+
+    def test_sweep_of_flat_distances_up_to_marathon_all_faster_than_endurance_pace(self):
+        # Repère de non-régression (revue de code #59) : sur un profil PLAT,
+        # jusqu'au marathon, l'allure de course mise à l'échelle reste toujours
+        # plus RAPIDE que l'allure d'endurance mesurée (facteur > 1), avec une
+        # seule référence dure de 10 km.
+        conn = self._conn()
+        self._insert_activity(conn, sport="running", distance_m=10000, duration_s=2400, intensity="race")
+        flat_reference_speed_ms = 2.9
+        for distance_m in (5000, 10000, 21097, 42195):
+            factor, source, race_speed, notes = RP._resolve_intensity_factor(
+                conn, {"sport": "road"}, flat_reference_speed_ms, distance_m, 0)
+            self.assertEqual(source, "riegel", distance_m)
+            self.assertGreater(factor, 1.0, distance_m)
 
 
 class _Args:

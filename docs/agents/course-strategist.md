@@ -49,11 +49,16 @@ parcours en segments (distance cible fusionnée par pente similaire), intégré
 point par point (pas la seule pente moyenne — un aller-retour compte plus
 qu'un plat) pour prédire le temps de chaque segment depuis le modèle personnel
 pente → allure (`scripts/arc_slope_model.py`, #58), mis à l'échelle de
-l'intensité de COURSE visée (Riegel/VDOT, `scripts/arc_metrics.py`, #33 —
-`arc_slope_model` ne connaît que l'allure d'ENDURANCE d'entraînement). Fade de
-fin de course depuis la durabilité récente (`scripts/arc_durability.py`, #48,
-ou un repli générique signalé comme tel, échelonné à la durée réelle de la
-course), ajustement chaleur/acclimatation (#38) et vérification des barrières
+l'intensité de COURSE visée — Riegel depuis un effort RÉCENT et DUR (tempo/
+seuil/VO2max/course, jamais un simple footing) converti en équivalent plat des
+deux côtés, VDOT en repli (`scripts/arc_metrics.py`, #33 — `arc_slope_model`
+ne connaît que l'allure d'ENDURANCE d'entraînement), calculée sur le GPX
+analysé, jamais sur `planning/active_objective.md`. Fade de fin de course
+depuis la durabilité récente (`scripts/arc_durability.py`, #48, rendu NEUTRE
+en temps total quand Riegel/VDOT s'applique déjà — jamais une double
+dégradation d'endurance — ou un repli générique signalé comme tel, échelonné à
+la durée réelle de la course), ajustement chaleur/acclimatation (#38) et
+vérification des barrières
 horaires (formats `HH:MM`, `+HH:MM` élapsé ou date-heure ISO 8601 pour un
 ultra multi-jours). Chaque segment porte sa **provenance**
 (`personal`/`generic`/`mixed`) — le plan la cite explicitement, jamais un

@@ -174,6 +174,30 @@ MERGE_GRADE_DELTA_PCT = 2.0  # points de pourcentage
 DEFAULT_BAND = "endurance"
 DEFAULT_FADE_WEEKS = 12  # même fenêtre par défaut que decoupling/vam/descent/durability
 
+# Référence Riegel (revue de code #59, BLOQUANT) : seules les intensités
+# planifiées d'un effort RÉELLEMENT dur (tempo et au-delà) qualifient une
+# activité comme référence de vitesse de COURSE — un footing facile, même
+# long, sous-estime largement l'allure de course et produirait une prédiction
+# plus LENTE que l'allure d'endurance elle-même. Mêmes valeurs que
+# `arc_contract.INTENSITY`, sous-ensemble « dur ».
+HARD_REFERENCE_INTENSITIES = ("tempo", "threshold", "vo2max", "race")
+# Distance minimale d'une référence Riegel — même seuil que
+# `arc_metrics.predictions`/`RECORD_DISTANCES_KM` (`km >= 5` = « le plus long
+# effort est le plus prédictif »).
+MIN_REFERENCE_DISTANCE_M = 5000.0
+# En dessous de ce seuil, un `intensity_factor` calculé sous 1.0 (allure de
+# course plus LENTE que l'allure d'endurance mesurée) est implausible et
+# plafonné à 1.0 (revue de code #59, BLOQUANT) — au-delà, l'exposant de Riegel
+# en trail (1.15, `arc_metrics.RIEGEL_EXPONENT`) prédit déjà, à raison, un
+# ralentissement marqué sur un ultra : aucun plancher n'y est nécessaire.
+INTENSITY_CLAMP_DURATION_S = 4.5 * 3600.0
+# Écart (%) entre l'objectif chiffré (`planning/active_objective.md`) et le GPX
+# réellement analysé, en équivalent plat, au-delà duquel un avertissement est
+# émis — l'intensité de course est TOUJOURS calculée depuis le GPX (revue de
+# code #59, BLOQUANT), jamais depuis l'objectif, qui peut décrire une autre
+# course ou une distance arrondie.
+OBJECTIVE_GPX_MISMATCH_PCT = 10.0
+
 # Clés EN ANGLAIS (contrat ```arc, AGENTS.md « clés en anglais ») — mêmes noms
 # que `race_plan.scenarios` déjà défini par le skill `workspace-data-contract`
 # (`{"ambitious": s, "realistic": s, "safe": s}`) : un plan de course par
@@ -269,11 +293,18 @@ ASSUMPTIONS = {
         "prédire la vitesse d'un plat qui n'existe pas. `predict_segments` intègre donc `Δd / "
         "v(pente locale)` sur CHAQUE paire de points GPX consécutifs du segment (pente lissée de "
         "`arc_elevation.grade_series`, moyenne des deux pentes d'extrémité de la paire), jamais sur la "
-        "seule pente moyenne — `grade_mean_pct` reste UNIQUEMENT un repère d'affichage. Une pente "
-        "quasi plate mais à l'intérieur du panier CENTRAL du modèle (`arc_slope_model.GRADE_BINS`) est "
-        "en plus SNAPÉE exactement sur 0 % avant la prédiction (`_snap_flat_grade`) : sans ce snap, une "
-        "pente de bruit GPS de ±0,3 % interpolerait parfois entre le panier plat personnel et un panier "
-        "voisin générique, étiquetant à tort un plat réel `\"mixed\"` (revue de code #59, should-fix)."
+        "seule pente moyenne — `grade_mean_pct` reste UNIQUEMENT un repère d'affichage. Une pente qui "
+        "tombe dans l'intervalle `[lo, hi)` d'un panier PERSONNEL du modèle est en plus SNAPÉE "
+        "EXACTEMENT sur le point milieu de ce panier avant la prédiction (`_snap_grade_to_bin`, 2ᵉ revue "
+        "de code #59, should-fix) : sans ce snap, `predict_speed` interpole entre deux paniers voisins "
+        "dès que la pente n'est pas EXACTEMENT sur un point milieu, étiquetant à tort `\"mixed\"` un "
+        "point qui tombe pourtant bien dans la plage MESURÉE d'un panier personnel — jusqu'à 58 % de "
+        "segments `\"mixed\"` observés sur un profil trail synthétique dont les pentes de 1-2 % "
+        "tombaient hors du seul panier central snappé par la première version de ce correctif. Repli, "
+        "pour un `bins` de test sans `grade_lo`/`grade_hi` (ou si aucun panier personnel ne couvre la "
+        "pente) : neutralise seulement le panier CENTRAL canonique du modèle "
+        "(`arc_slope_model.GRADE_BINS`), pour ne jamais interpoler un bruit GPS de quelques dixièmes de "
+        "point autour du plat."
     ),
     "scenarios": (
         "Un segment prédit par le modèle PERSONNEL (`source == \"personal\"`) utilise directement la "
@@ -296,21 +327,43 @@ ASSUMPTIONS = {
         "`arc_slope_model.predict_speed` (#58) est ajusté sur la bande « endurance » (effort facile "
         "d'entraînement) : ses vitesses ne sont PAS l'allure de COURSE visée, en général nettement plus "
         "rapide (revue de code #59, blocant — cette distinction n'était affichée nulle part). "
-        "`intensity_factor` corrige l'écart : `(vitesse plate équivalente prédite pour l'objectif de "
-        "course) / (référence plate personnelle de la bande endurance, "
-        "slope_model_report.flat_reference_speed_ms)`. La vitesse plate équivalente vient de "
-        "`arc_metrics.predictions` (#33) évaluée sur la distance ET le D+ de `planning/"
-        "active_objective.md` (équivalence plat trail : `arc_metrics.TRAIL_FLAT_M_PER_M_DPLUS`) — "
-        "Riegel (méthode retenue en priorité, décision du coordinateur de revue #59) à partir du "
-        "meilleur effort récent réel (`arc_metrics.best_efforts`, ≥ 5 km, 90 derniers jours) quand il "
-        "existe, VDOT (tendance de VO2max, `metric_day.vo2max`) en repli sinon. Toutes les vitesses "
-        "issues du modèle (personnel ET générique) sont multipliées par ce facteur avant d'en dériver "
-        "les trois scénarios — la dispersion personnelle (IQR) est donc, elle aussi, mise à l'échelle "
-        "de l'intensité de course, pas seulement le point central. Sans objectif chiffré (`objective."
-        "distance_m` absent), sans référence plate personnelle, ou sans meilleur effort/tendance VO2max "
-        "exploitable, `intensity_factor` reste `1.0` et `intensity_source` vaut `\"none\"` — le plan "
-        "reste alors EXPLICITEMENT une allure d'ENDURANCE (jamais une allure de course inventée), "
-        "signalé en clair dans `warnings`."
+        "`intensity_factor` corrige l'écart : `(vitesse plate équivalente prédite pour la course) / "
+        "(référence plate personnelle de la bande endurance, slope_model_report."
+        "flat_reference_speed_ms)`.\n\n"
+        "**Cible = le GPX analysé, jamais l'objectif** (2ᵉ revue de code #59, BLOQUANT) : la vitesse "
+        "plate cible se calcule sur `distance_m`/`elevation_gain_m` mesurés du GPX (équivalence plat "
+        "trail : `arc_metrics.TRAIL_FLAT_M_PER_M_DPLUS`), jamais sur `planning/active_objective.md` — "
+        "un objectif qui décrit une autre course, ou une distance arrondie, aurait sinon faussé le "
+        "facteur sans rapport avec le parcours réellement chargé. Si `planning/active_objective.md` "
+        "existe et diffère de plus de `OBJECTIVE_GPX_MISMATCH_PCT` (10 %) du GPX en équivalent plat, un "
+        "avertissement le signale dans `warnings` — l'objectif reste alors purement informatif.\n\n"
+        "**Référence = un effort RÉEL et DUR, jamais un footing facile** (2ᵉ revue de code #59, "
+        "BLOQUANT) : un simple filtre « le plus long effort connu » (l'ancienne méthode) retenait "
+        "parfois une longue sortie d'ENDURANCE vallonnée comme référence de vitesse de COURSE — sa "
+        "pente ralentit déjà la référence (aucune conversion plate n'était appliquée côté référence), "
+        "ET la courbe pente -> allure la ralentit une seconde fois sur les segments en côte du plan : un "
+        "double comptage qui pouvait rendre l'allure de « course » plus LENTE que l'allure d'endurance "
+        "mesurée. La référence Riegel n'est donc retenue que parmi les activités course à pied "
+        "d'au moins `MIN_REFERENCE_DISTANCE_M` (5 km) dont l'intensité planifiée "
+        "(`arc_index.planned_intensity_for`) est dans `HARD_REFERENCE_INTENSITIES` (tempo/seuil/VO2max/"
+        "course), ou, à défaut de plan, dont la FC moyenne dépasse la borne Z3/Z4 de l'athlète "
+        "(`arc_index.athlete_hr_zone_bounds`) — la plus longue qualifiante est la plus prédictive (même "
+        "principe que `arc_metrics.predictions`). Sa distance ET son D+ propres sont convertis en "
+        "équivalent plat EXACTEMENT comme la cible, avant d'appeler `arc_metrics.riegel` — les DEUX "
+        "côtés de la comparaison sont ainsi en équivalent plat, jamais un mélange brut/converti qui "
+        "compterait le relief deux fois. VDOT (tendance de VO2max, `metric_day.vo2max`) en repli si "
+        "aucune référence dure n'est trouvée.\n\n"
+        "Toutes les vitesses issues du modèle (personnel ET générique) sont multipliées par ce facteur "
+        "avant d'en dériver les trois scénarios — la dispersion personnelle (IQR) est donc, elle aussi, "
+        "mise à l'échelle de l'intensité de course, pas seulement le point central. Un facteur calculé "
+        "sous 1.0 pour une course prédite de moins de `INTENSITY_CLAMP_DURATION_S` (4h30) est implausible "
+        "(l'allure de course ne peut pas être plus lente que l'allure d'endurance sur une distance "
+        "courte) et plafonné à 1.0, avec un avertissement — au-delà de ce seuil, l'exposant de Riegel en "
+        "trail (1.15) prédit déjà, à raison, un ralentissement marqué sur un ultra, aucun plancher n'y "
+        "est appliqué. Sans distance GPX exploitable, sans référence plate personnelle, ou sans "
+        "référence dure/tendance VO2max exploitable, `intensity_factor` reste `1.0` et `intensity_source` "
+        "vaut `\"none\"` — le plan reste alors EXPLICITEMENT une allure d'ENDURANCE (jamais une allure de "
+        "course inventée), signalé en clair dans `warnings`."
     ),
     "fade": (
         "Le fade GAP médian des sorties longues récentes (`arc_durability`/`arc_index.durability_trend`, "
@@ -333,7 +386,18 @@ ASSUMPTIONS = {
         "PLEINEMENT un fade mesuré sur des sorties de plus de 90 minutes à une course de 30 minutes n'a "
         "aucune justification physiologique. `fade_pct_applied` (proportionnel à `durée prédite / 90 "
         "min`, plafonné à 1) est la valeur RÉELLEMENT appliquée ; `fade_pct` reste la valeur mesurée/"
-        "générique brute, pour la transparence."
+        "générique brute, pour la transparence.\n\n"
+        "**Neutre en temps total quand `intensity_source != \"none\"`** (2ᵉ revue de code #59, "
+        "should-fix) : Riegel/VDOT prédisent déjà un temps de course qui intègre implicitement une "
+        "dégradation d'endurance sur la distance (l'exposant de Riegel > 1, la courbe VDOT) — appliquer "
+        "EN PLUS le fade GAP comme un ralentissement NET aurait compté cette dégradation deux fois, "
+        "gonflant le temps total au-delà de ce que Riegel/VDOT prédisent déjà. Le fade est alors "
+        "RENORMALISÉ après application (`_renormalize_fade_time_neutral`) : chaque scénario garde le "
+        "MÊME total qu'un plan sans fade (plus rapide en début de course, plus lent en fin — la FORME "
+        "reste utile pour le rythme à tenir), seule la RÉPARTITION dans le temps change, jamais le total. "
+        "Quand `intensity_source == \"none\"` (allure d'endurance simple, aucune prédiction Riegel/VDOT "
+        "sous-jacente), le fade reste un vrai ralentissement NET comme avant — rien à double-compter, "
+        "l'allure de base n'intègre alors aucune dégradation implicite."
     ),
     "heat": (
         "Reprend TELS QUELS les seuils déjà documentés dans `agents/course-strategist.md` (ÉTAPE 6) — "
@@ -382,9 +446,11 @@ ASSUMPTIONS = {
         "ces portions faisait tomber le temps de segment ENTIER à `None`, ignoré par `compute_passages` "
         "comme une contribution nulle (un GPX sans AUCUNE altitude rendait donc un plan à 0 seconde, "
         "`exit 0`, sans le moindre avertissement). Une pente `None` est maintenant traitée comme un "
-        "PLAT explicite (grade 0, source de la prédiction inchangée — personnel si un panier plat "
-        "personnel existe, générique sinon) avec un `reason_code`/une note dédiés "
-        "(`\"missing_elevation\"`) sur le segment concerné, ET un avertissement `warnings` au niveau du "
+        "PLAT explicite (grade 0) avec un `reason_code`/une note dédiés (`\"missing_elevation\"`) sur le "
+        "segment concerné — `source` est TOUJOURS `\"generic\"` pour ces points (nit, revue de code #59) : "
+        "ce n'est jamais une mesure de terrain réelle, dire `\"personal\"` (ce que le modèle rendrait pour "
+        "une VRAIE pente plate) prétendrait à une confiance que l'absence d'altitude ne permet pas. ET un "
+        "avertissement `warnings` au niveau du "
         "plan dès que la couverture d'altitude du GPX est incomplète (`< 99,5 %` des points) — un GPX "
         "SANS AUCUNE altitude déclenche un avertissement fort (parcours entier traité à plat, D+/D- "
         "inconnus). Le D+/D- total reste, lui, sous-estimé d'autant (aucune donnée pour le calculer) — "
@@ -461,6 +527,30 @@ def elevation_coverage_pct(pts: Sequence[dict]) -> float:
         return 100.0
     known = sum(1 for p in pts if p.get("ele") is not None)
     return known / len(pts) * 100.0
+
+
+def course_totals(pts: Sequence[dict], *, smooth_taps: int = EL.DEFAULT_SMOOTH_TAPS) -> Tuple[float, float, float]:
+    """Distance/D+/D- TOTAUX du GPX, calcul LÉGER (même lissage d'altitude que
+    `segment_course`, mais sans segmentation) — utilisé par `main()` pour
+    résoudre `intensity_factor` depuis les totaux du GPX RÉELLEMENT analysé,
+    jamais depuis `planning/active_objective.md` (voir
+    `ASSUMPTIONS["base_pace"]`, revue de code #59, BLOQUANT). `(0.0, 0.0, 0.0)`
+    pour moins de 2 points."""
+    if len(pts) < 2:
+        return 0.0, 0.0, 0.0
+    dist = _cumulative_distances(pts)
+    ele_smooth = EL.smooth_moving_average([p.get("ele") for p in pts], smooth_taps)
+    gain = loss = 0.0
+    for k in range(1, len(pts)):
+        a, b = ele_smooth[k - 1], ele_smooth[k]
+        if a is None or b is None:
+            continue
+        d = b - a
+        if d > 0:
+            gain += d
+        else:
+            loss += -d
+    return dist[-1], gain, loss
 
 
 # ---------------------------------------------------------------------------
@@ -629,19 +719,30 @@ def segment_course(pts: Sequence[dict], *, target_segment_m: float = DEFAULT_SEG
 # ---------------------------------------------------------------------------
 
 # Panier CENTRAL du modèle (celui qui contient la pente 0, `arc_slope_model.GRADE_BINS`)
-# — voir `ASSUMPTIONS["rolling_terrain"]` pour `_snap_flat_grade`.
+# — repli de `_snap_grade_to_bin` (voir `ASSUMPTIONS["rolling_terrain"]`) pour
+# un `bins` de test sans `grade_lo`/`grade_hi`.
 _CENTER_BIN_LO, _CENTER_BIN_HI = next((lo, hi) for lo, hi, _ in SL.GRADE_BINS if lo <= 0.0 < hi)
 
 
-def _snap_flat_grade(grade: Optional[float]) -> Optional[float]:
-    """Une pente à l'intérieur du panier CENTRAL (plat) du modèle est snapée
-    exactement sur 0 % avant la prédiction — voir
-    `ASSUMPTIONS["rolling_terrain"]` : sans ce snap, une pente de bruit GPS de
-    quelques dixièmes de point interpolerait parfois entre le panier plat
-    personnel et un panier voisin générique, étiquetant à tort un plat réel
-    `"mixed"`."""
+def _snap_grade_to_bin(grade: Optional[float], bins: Sequence[dict]) -> Optional[float]:
+    """Neutralise l'interpolation de `predict_speed` pour une pente qui tombe
+    dans l'intervalle `[lo, hi)` d'un panier PERSONNEL de `bins` — voir
+    `ASSUMPTIONS["rolling_terrain"]` (2ᵉ revue de code #59, should-fix). Rend
+    exactement le point milieu de ce panier, jamais la pente brute. Un panier
+    sans `grade_lo`/`grade_hi` (clés absentes — fixtures de test à un seul
+    point) est IGNORÉ pour cette recherche, jamais traité comme couvrant
+    `[-inf, +inf)` (ce que renverrait `dict.get` par défaut). Repli, si aucun
+    panier personnel ne couvre `grade` : neutralise seulement le panier
+    CENTRAL canonique du modèle (`_CENTER_BIN_LO`/`_CENTER_BIN_HI`)."""
     if grade is None:
         return None
+    for b in bins:
+        if b.get("source") != "personal" or "grade_lo" not in b or "grade_hi" not in b:
+            continue
+        lo = b["grade_lo"] if b["grade_lo"] is not None else float("-inf")
+        hi = b["grade_hi"] if b["grade_hi"] is not None else float("inf")
+        if lo <= grade < hi:
+            return b["grade_mid"]
     if _CENTER_BIN_LO <= grade < _CENTER_BIN_HI:
         return 0.0
     return grade
@@ -802,11 +903,18 @@ def predict_segments(segments: Sequence[dict], bins: Sequence[dict], *,
             else:
                 query_grade = grade
 
-            prediction = SL.predict_speed(_snap_flat_grade(query_grade), bins)
+            prediction = SL.predict_speed(_snap_grade_to_bin(query_grade, bins), bins)
             prediction = _scale_prediction_speeds(prediction, intensity_factor)
-            sources.append(prediction.get("source"))
-            if grade is not None and prediction.get("reason_code"):
-                reason_codes.add(prediction["reason_code"])
+            if grade is None:
+                # Altitude manquante (nit, revue de code #59) : jamais `"personal"`
+                # (ce que le modèle rendrait pour une VRAIE pente plate mesurée) —
+                # cette pente est SUPPOSÉE, pas mesurée, `"generic"` quelle que soit
+                # la provenance que `predict_speed` rendrait pour 0 %.
+                sources.append("generic" if prediction.get("speed_ms") is not None else None)
+            else:
+                sources.append(prediction.get("source"))
+                if prediction.get("reason_code"):
+                    reason_codes.add(prediction["reason_code"])
 
             fade_mult = fade_speed_multiplier(point_frac, fade_pct)
             for scenario, base_speed in _scenario_speeds(prediction).items():
@@ -1024,12 +1132,56 @@ def check_cutoffs(aid_station_passages: Sequence[dict], aid_stations: Sequence[d
 # Orchestration pure (assemblage complet, sans accès disque)
 # ---------------------------------------------------------------------------
 
+def _renormalize_fade_time_neutral(segments: Sequence[dict], provisional_totals: Dict[str, Optional[float]]) -> Tuple[List[dict], Optional[str]]:
+    """Rend le fade NEUTRE en temps total (voir `ASSUMPTIONS["fade"]`, 2ᵉ revue
+    de code #59, should-fix) : Riegel/VDOT prédisent déjà une dégradation
+    d'endurance sur la distance, le fade ne doit alors PAS s'ajouter par-dessus
+    en NET, seulement redistribuer le MÊME temps total dans la course (plus
+    rapide en début, plus lent en fin). `provisional_totals` : totaux par
+    scénario d'une prédiction SANS fade (même `intensity_factor`/`heat_factor`)
+    — la cible que le total AVEC fade doit retrouver après renormalisation.
+    Rend `(segments, note)` — `note` est `None` si rien n'a changé (aucun total
+    provisoire exploitable, ou fade déjà neutre)."""
+    faded_totals = {
+        s: (sum(seg["predicted_time_s"][s] for seg in segments if seg["predicted_time_s"][s] is not None) or None)
+        for s in SCENARIOS
+    }
+    ratios = {}
+    for s in SCENARIOS:
+        prov, faded = provisional_totals.get(s), faded_totals.get(s)
+        ratios[s] = (prov / faded) if prov and faded else 1.0
+    if all(abs(r - 1.0) < 1e-9 for r in ratios.values()):
+        return list(segments), None
+
+    out = []
+    for seg in segments:
+        new_time: Dict[str, Optional[float]] = {}
+        new_pace: Dict[str, Optional[float]] = {}
+        for s in SCENARIOS:
+            t = seg["predicted_time_s"][s]
+            if t is None:
+                new_time[s], new_pace[s] = None, None
+                continue
+            scaled_t = t * ratios[s]
+            new_time[s] = int(round(scaled_t))
+            new_pace[s] = round(1000.0 * scaled_t / seg["distance_m"], 1) if seg["distance_m"] else None
+        out.append({**seg, "predicted_time_s": new_time, "pace_s_km": new_pace})
+
+    note = (
+        "fade rendu neutre en temps total (revue de code #59, should-fix) : la prédiction de temps de "
+        "course (Riegel/VDOT) intègre déjà une dégradation d'endurance sur la distance — le fade "
+        "redistribue ce même temps total (plus rapide en début de course, plus lent en fin) au lieu de "
+        "s'ajouter par-dessus la prédiction.")
+    return out, note
+
+
 def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      aid_stations: Optional[Sequence[dict]] = None,
                      fade_pct: float = 0.0, fade_source: str = "generic",
                      temp_max_c: Optional[float] = None, acclimated: Optional[bool] = None,
                      acclimation_note: Optional[str] = None,
                      intensity_factor: float = 1.0, intensity_source: str = "none",
+                     intensity_notes: Optional[Sequence[str]] = None,
                      flat_reference_speed_ms: Optional[float] = None, band: str = DEFAULT_BAND,
                      official_distance_m: Optional[float] = None,
                      start_time: str = "07:00", race_date: Optional[str] = None,
@@ -1057,9 +1209,10 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             "sous-estimé d'autant.")
     if intensity_source == "none":
         warnings.append(
-            "Aucune prédiction de temps de course exploitable (objectif chiffré, meilleur effort récent "
-            "ou tendance VO2max manquants) : les allures reflètent l'allure D'ENDURANCE mesurée à "
+            "Aucune prédiction de temps de course exploitable (distance GPX, référence dure récente ou "
+            "tendance VO2max manquants) : les allures reflètent l'allure D'ENDURANCE mesurée à "
             "l'entraînement, PAS l'allure de course visée — voir ASSUMPTIONS['base_pace'].")
+    warnings.extend(intensity_notes or [])
 
     aid_stations = list(aid_stations or [])
     raw_segments = segment_course(pts, target_segment_m=segment_m)
@@ -1072,12 +1225,17 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
 
     # Passe préliminaire SANS fade (le facteur de fade dépend de la durée totale
     # PRÉDITE de la course, voir ASSUMPTIONS["fade"]) pour échelonner un fade
-    # mesuré sur sortie longue à une course bien plus courte.
+    # mesuré sur sortie longue à une course bien plus courte, ET pour disposer
+    # d'un total DE RÉFÉRENCE par scénario (renormalisation "fade neutre",
+    # voir `_renormalize_fade_time_neutral`).
     provisional = predict_segments(raw_segments, bins, fade_pct=0.0, heat_factor=heat_factor,
                                     intensity_factor=intensity_factor)
-    provisional_times = [seg["predicted_time_s"]["realistic"] for seg in provisional
-                          if seg["predicted_time_s"]["realistic"] is not None]
-    predicted_duration_s = sum(provisional_times) if provisional_times else None
+    provisional_totals = {
+        s: (sum(seg["predicted_time_s"][s] for seg in provisional if seg["predicted_time_s"][s] is not None)
+            or None)
+        for s in SCENARIOS
+    }
+    predicted_duration_s = provisional_totals["realistic"]
     fade_pct_applied = scale_fade_to_duration(fade_pct, predicted_duration_s)
     fade_notes = []
     if fade_pct > 0 and fade_pct_applied < fade_pct - 1e-9:
@@ -1088,6 +1246,14 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
 
     segments = predict_segments(raw_segments, bins, fade_pct=fade_pct_applied, heat_factor=heat_factor,
                                  intensity_factor=intensity_factor)
+
+    # Fade rendu NEUTRE en temps total dès qu'une prédiction Riegel/VDOT sous-jacente
+    # existe (voir ASSUMPTIONS["fade"]) : elle intègre déjà une dégradation d'endurance
+    # sur la distance, l'ajouter EN PLUS aurait compté la fatigue deux fois.
+    if intensity_source != "none":
+        segments, renorm_note = _renormalize_fade_time_neutral(segments, provisional_totals)
+        if renorm_note:
+            fade_notes.append(renorm_note)
 
     passages = compute_passages(segments, aid_stations)
     cutoffs = check_cutoffs(passages["aid_station_passages"], aid_stations, start_dt)
@@ -1177,47 +1343,110 @@ def _resolve_acclimated(conn, conf: dict, today_date: date,
     return hot_sessions >= HEAT_ACCLIMATION_MIN_HOT_SESSIONS, note
 
 
-def _resolve_intensity_factor(conn, conf: dict,
-                               flat_reference_speed_ms: Optional[float]) -> Tuple[float, str, Optional[float]]:
-    """`(intensity_factor, intensity_source, race_flat_speed_ms)` — voir
-    `ASSUMPTIONS["base_pace"]`. `intensity_source` : `"riegel"` (méthode
-    retenue en priorité), `"vdot"` (repli) ou `"none"` (facteur `1.0`, allure
-    d'endurance inchangée)."""
-    if not flat_reference_speed_ms or flat_reference_speed_ms <= 0:
-        return 1.0, "none", None
-    obj = conn.execute("SELECT distance_m, elevation_gain_m FROM objective LIMIT 1").fetchone()
-    if not obj or not obj["distance_m"]:
-        return 1.0, "none", None
-    acts = []
+def _flat_equivalent_m(distance_m: Optional[float], elevation_gain_m: Optional[float], primary: str) -> float:
+    """Distance équivalente plat (`arc_metrics.TRAIL_FLAT_M_PER_M_DPLUS`, trail
+    uniquement — voir `ASSUMPTIONS["base_pace"]`). `0.0` si `distance_m` est
+    absent."""
+    if not distance_m or distance_m <= 0:
+        return 0.0
+    flat_m = distance_m
+    if primary == "trail" and elevation_gain_m:
+        flat_m += elevation_gain_m * M.TRAIL_FLAT_M_PER_M_DPLUS
+    return flat_m
+
+
+def _select_hard_reference(conn, conf: dict) -> Optional[dict]:
+    """Meilleur effort RÉCENT et DUR (planifié tempo+/seuil/VO2max/course, ou à
+    défaut de plan FC moyenne au-dessus de la borne Z3/Z4 de l'athlète) — voir
+    `ASSUMPTIONS["base_pace"]` (2ᵉ revue de code #59, BLOQUANT) : un footing
+    facile, même long, n'est PAS une référence d'allure de COURSE. Rend
+    l'activité (dict) la plus LONGUE parmi les qualifiantes (la plus
+    prédictive — même principe que `arc_metrics.predictions`), ou `None`."""
+    import arc_index as IDX  # noqa: E402 (import tardif, voir docstring du module)
+    bounds = IDX.athlete_hr_zone_bounds(conn, conf)
+    hard_hr_threshold = bounds[0][3] if bounds else None
+    best = None
     for row in conn.execute(
-            "SELECT id, date, sport, distance_m FROM activity WHERE sport IN ('running', 'trail')").fetchall():
+            "SELECT date, sport, distance_m, duration_s, elevation_gain_m, avg_hr_bpm FROM activity "
+            "WHERE sport IN ('running', 'trail') AND distance_m >= ? AND duration_s > 0",
+            (MIN_REFERENCE_DISTANCE_M,)).fetchall():
         act = dict(row)
-        act["splits"] = [dict(r) for r in conn.execute(
-            "SELECT km, distance_m, duration_s FROM activity_split WHERE activity_id = ?",
-            (act["id"],)).fetchall()]
-        acts.append(act)
-    records = M.best_efforts(acts)
-    vo2max_row = conn.execute(
-        "SELECT vo2max FROM metric_day WHERE vo2max IS NOT NULL ORDER BY date DESC LIMIT 1").fetchone()
-    current_vdot = vo2max_row["vo2max"] if vo2max_row else None
+        planned = IDX.planned_intensity_for(conn, act.get("date"), act.get("sport"))
+        if planned is not None:
+            is_hard = planned in HARD_REFERENCE_INTENSITIES
+        else:
+            is_hard = (hard_hr_threshold is not None and act.get("avg_hr_bpm") is not None
+                       and act["avg_hr_bpm"] >= hard_hr_threshold)
+        if not is_hard:
+            continue
+        if best is None or act["distance_m"] > best["distance_m"]:
+            best = act
+    return best
+
+
+def _resolve_intensity_factor(conn, conf: dict, flat_reference_speed_ms: Optional[float],
+                               gpx_distance_m: Optional[float],
+                               gpx_elevation_gain_m: Optional[float]) -> Tuple[float, str, Optional[float], List[str]]:
+    """`(intensity_factor, intensity_source, race_flat_speed_ms, notes)` — voir
+    `ASSUMPTIONS["base_pace"]`. `intensity_source` : `"riegel"` (méthode
+    retenue en priorité, référence dure exigée), `"vdot"` (repli) ou `"none"`
+    (facteur `1.0`, allure d'endurance inchangée). La cible est TOUJOURS le
+    GPX analysé (`gpx_distance_m`/`gpx_elevation_gain_m`), jamais `planning/
+    active_objective.md` (2ᵉ revue de code #59, BLOQUANT) — un avertissement
+    est ajouté à `notes` si l'objectif diffère sensiblement du GPX."""
+    notes: List[str] = []
+    if not flat_reference_speed_ms or flat_reference_speed_ms <= 0:
+        return 1.0, "none", None, notes
     primary = conf.get("sport", "trail")
-    rows = M.predictions(current_vdot, records, primary, obj["distance_m"],
-                          obj["elevation_gain_m"] if primary == "trail" else None)
-    objective_row = next((r for r in rows if r.get("tag") == "objective"), None)
-    if not objective_row:
-        return 1.0, "none", None
-    # Riegel (meilleur effort récent RÉEL) préféré au VDOT (tendance dérivée) —
-    # décision du coordinateur de revue #59 ; VDOT en repli seulement si aucun
-    # meilleur effort >= 5 km n'est connu (`M.predictions` ne rend alors pas de
-    # `riegel_s`).
-    predicted_s, source = objective_row.get("riegel_s"), "riegel"
+    target_flat_m = _flat_equivalent_m(gpx_distance_m, gpx_elevation_gain_m, primary)
+    if target_flat_m <= 0:
+        return 1.0, "none", None, notes
+
+    obj = conn.execute("SELECT distance_m, elevation_gain_m FROM objective LIMIT 1").fetchone()
+    if obj and obj["distance_m"]:
+        obj_flat_m = _flat_equivalent_m(obj["distance_m"], obj["elevation_gain_m"], primary)
+        if obj_flat_m > 0 and abs(obj_flat_m - target_flat_m) / obj_flat_m * 100.0 > OBJECTIVE_GPX_MISMATCH_PCT:
+            notes.append(
+                f"l'objectif actif ({obj['distance_m']:.0f} m / {obj['elevation_gain_m'] or 0:.0f} m D+) et "
+                f"le GPX analysé ({gpx_distance_m:.0f} m / {gpx_elevation_gain_m or 0:.0f} m D+) diffèrent "
+                f"de plus de {OBJECTIVE_GPX_MISMATCH_PCT:g} % en équivalent plat : l'intensité de course "
+                "est calculée depuis LE GPX, pas depuis l'objectif.")
+
+    exponent = M.RIEGEL_EXPONENT.get(primary, M.RIEGEL_EXPONENT["road"])
+    predicted_s: Optional[float] = None
+    source = "none"
+    reference = _select_hard_reference(conn, conf)
+    if reference:
+        reference_flat_m = _flat_equivalent_m(reference["distance_m"], reference.get("elevation_gain_m"), primary)
+        predicted_s = M.riegel(reference["duration_s"], reference_flat_m, target_flat_m, exponent)
+        source = "riegel"
     if not predicted_s:
-        predicted_s, source = objective_row.get("vdot_s"), "vdot"
-    effort_m = objective_row.get("effort_distance_m")
-    if not predicted_s or predicted_s <= 0 or not effort_m or effort_m <= 0:
-        return 1.0, "none", None
-    race_flat_speed_ms = effort_m / predicted_s
-    return race_flat_speed_ms / flat_reference_speed_ms, source, race_flat_speed_ms
+        vo2max_row = conn.execute(
+            "SELECT vo2max FROM metric_day WHERE vo2max IS NOT NULL ORDER BY date DESC LIMIT 1").fetchone()
+        current_vdot = vo2max_row["vo2max"] if vo2max_row else None
+        if current_vdot:
+            predicted_s = M.predict_time_vdot(current_vdot, target_flat_m)
+            source = "vdot"
+    if not predicted_s or predicted_s <= 0:
+        return 1.0, "none", None, notes
+
+    race_flat_speed_ms = target_flat_m / predicted_s
+    factor = race_flat_speed_ms / flat_reference_speed_ms
+
+    # Plancher (2ᵉ revue de code #59, BLOQUANT) — voir ASSUMPTIONS["base_pace"] :
+    # sous `INTENSITY_CLAMP_DURATION_S` (4h30), un facteur < 1.0 est implausible
+    # (l'allure de course ne peut pas être plus lente que l'allure d'endurance
+    # mesurée sur une distance courte). Aucun plancher au-delà : l'exposant de
+    # Riegel en trail (1.15) prédit déjà, à raison, un ralentissement marqué.
+    if predicted_s < INTENSITY_CLAMP_DURATION_S and factor < 1.0:
+        notes.append(
+            f"facteur d'intensité calculé ({factor:.2f}) sous 1.0 pour une course prédite de "
+            f"{predicted_s / 3600.0:.1f} h (< {INTENSITY_CLAMP_DURATION_S / 3600.0:.1f} h) : implausible "
+            "(l'allure de course ne peut pas être plus lente que l'allure d'endurance mesurée sur cette "
+            "distance) — plafonné à 1.0.")
+        factor = 1.0
+
+    return factor, source, race_flat_speed_ms, notes
 
 
 def _load_aid_stations(path: Optional[str]) -> List[dict]:
@@ -1306,8 +1535,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     fade_pct, fade_source = _resolve_fade(conn, today_date, args)
     temp_max_c = _read_temp_max_c(args)
     acclimated, acclimation_note = _resolve_acclimated(conn, conf, today_date, temp_max_c)
-    intensity_factor, intensity_source, _race_flat_speed = _resolve_intensity_factor(
-        conn, conf, flat_reference_speed_ms)
+    # La cible d'intensité est TOUJOURS le GPX ANALYSÉ, jamais l'objectif (voir
+    # ASSUMPTIONS["base_pace"], 2ᵉ revue de code #59, BLOQUANT).
+    gpx_distance_m, gpx_elevation_gain_m, _gpx_elevation_loss_m = course_totals(pts)
+    intensity_factor, intensity_source, _race_flat_speed, intensity_notes = _resolve_intensity_factor(
+        conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
 
     try:
@@ -1315,6 +1547,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pts, bins, aid_stations=aid_stations, fade_pct=fade_pct, fade_source=fade_source,
             temp_max_c=temp_max_c, acclimated=acclimated, acclimation_note=acclimation_note,
             intensity_factor=intensity_factor, intensity_source=intensity_source,
+            intensity_notes=intensity_notes,
             flat_reference_speed_ms=flat_reference_speed_ms, band=args.band,
             official_distance_m=args.official_distance_m,
             start_time=args.start, race_date=args.race_date, segment_m=args.segment_m)
