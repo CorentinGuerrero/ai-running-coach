@@ -16,10 +16,26 @@ contrat, un lot à la fois.
 python3 scripts/arc_index.py backfill-plan
 ```
 
-La commande réindexe le workspace et écrit `.arc/backfill.md` : un fichier par
-ligne, avec ce qui lui manque. La liste tient déjà compte de la configuration —
-en `[health].morning_check = "off"`, un fichier santé sans HRV n'y figure pas.
-Si elle annonce **0 fichier**, dites-le en une ligne et arrêtez-vous.
+La commande réindexe le workspace et écrit `.arc/backfill.md`, en **deux
+sections distinctes** :
+
+- **« Fichiers hors contrat »** : un fichier par ligne, avec ce qui lui manque.
+  La liste tient déjà compte de la configuration — en `[health].morning_check
+  = "off"`, un fichier santé sans HRV n'y figure pas. C'est la section que ce
+  skill traite (étape 2 ci-dessous).
+- **« Collisions de semaine » (#69)** : des fichiers `planning/Semaine_*.md`
+  **déjà valides** au contrat, mais dont une semaine est éclipsée par un autre
+  fichier qui décrit la même semaine (`week_start`) — un fichier dédié et un
+  plan multi-semaines (`weeks[]`) qui la recouvre, le plus souvent. **N'y
+  touchez pas avec ce skill** : ce n'est jamais un bloc ```arc à réécrire (il
+  est déjà correct), l'action est de RETIRER l'entrée `weeks[]` en trop (ou de
+  supprimer le fichier entier s'il ne couvre plus que des semaines déjà
+  décrites ailleurs) — voir `skills/workspace-data-contract/SKILL.md`, section
+  « week », pour le détail de la règle de priorité. Signalez-les à l'athlète
+  sans les traiter dans ce lot.
+
+Si les deux sections annoncent **0 fichier**, dites-le en une ligne et
+arrêtez-vous.
 
 ## 2. Traiter un lot
 

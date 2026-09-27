@@ -215,6 +215,66 @@ class TestDecisionsApiPlacementEdgeCases(InstallAsserts):
         self.assertEqual(status, 404)
 
 
+class TestDecisionsApiMultiWeekSessionRef(InstallAsserts):
+    """#69, revue de code should-fix 4 : `session_ref_route`/`resolve_source`
+    (`sources`) ne doivent JAMAIS router vers le lundi du NOM du fichier
+    (toujours celui de la 1re semaine d'un plan multi-semaines, `weeks[]`) —
+    le lundi de la séance/date réellement visée, s'il est connu, fait foi."""
+
+    def setUp(self):
+        self.sb = Sandbox().__enter__()
+        self.addCleanup(self.sb.__exit__, None, None, None)
+        self.ws = build(self.sb.root / "ws", days=14, sport="trail", seed=12345,
+                        today=datetime.date.fromisoformat(TODAY))
+        # Fichier NOMMÉ d'après sa 1re semaine (2026-10-05), mais la séance
+        # référencée par la décision vit dans sa 2e semaine (2026-10-12).
+        (self.ws / "planning/Semaine_2026-10-05.md").write_text(
+            "# Plan multi-semaines\n\n" + _block({
+                "arc": 1, "kind": "week", "weeks": [
+                    {"week_start": "2026-10-05", "location": "Tournai", "sessions": []},
+                    {"week_start": "2026-10-12", "location": "Tournai", "sessions": [
+                        {"date": "2026-10-13", "sport": "trail", "title": "Côtes",
+                         "intensity": "vo2max", "status": "planned"},
+                    ]},
+                ],
+            }) + "\nTexte libre.\n", encoding="utf-8")
+        decision = {
+            "arc": 1, "kind": "decision", "date": "2026-10-13",
+            "created_at": "2026-10-13T07:00:00+02:00", "trigger": "guardrail",
+            "summary": "Séance allégée, semaine 2 d'un plan multi-semaines.", "outcome": "applied",
+            "sources": ["planning/Semaine_2026-10-05.md"],
+            "session_ref": {"week": "planning/Semaine_2026-10-05.md", "date": "2026-10-13"},
+        }
+        (self.ws / "planning/2026-10-13_decision_semaine2.md").write_text(
+            "# Décision\n\n" + _block(decision) + "\nTexte libre.\n", encoding="utf-8")
+        self.server = Server(self.sb, ["python3", str(self.sb.repo / "scripts/arc_serve.py"),
+                                       "--workspace", str(self.ws), "--port", "0", "--today", "2026-10-13"])
+        self.addCleanup(self.server.stop)
+        self.assertIsNotNone(self.server.url,
+                             self.server.proc.stderr.read() if self.server.proc.poll() is not None else "pas d'URL")
+
+    def _get_json(self, path):
+        status, body, _ = self.server.get(path)
+        return status, (json.loads(body) if body else None)
+
+    def _detail(self):
+        status, payload = self._get_json("/api/decisions?days=3650")
+        listed = next(d for d in payload["decisions"]
+                      if d["summary"] == "Séance allégée, semaine 2 d'un plan multi-semaines.")
+        status, detail = self._get_json(f"/api/decision/{listed['id']}")
+        self.assertEqual(status, 200)
+        return detail
+
+    def test_session_ref_route_uses_the_monday_of_the_referenced_session(self):
+        detail = self._detail()
+        self.assertEqual(detail["session_ref_route"], "#/semaine?debut=2026-10-12")
+
+    def test_source_link_for_the_same_multi_week_file_also_uses_the_right_monday(self):
+        detail = self._detail()
+        link = next(link for link in detail["source_links"] if link["kind"] == "week")
+        self.assertEqual(link["route"], "#/semaine?debut=2026-10-12")
+
+
 class TestDecisionsApiDefaultWindow(InstallAsserts):
     """#55, revue de code (nit) : `/api/decisions` sans `days` ni `all=1` ne doit
     plus rendre tout le journal (un workspace ancien finirait par en charger des

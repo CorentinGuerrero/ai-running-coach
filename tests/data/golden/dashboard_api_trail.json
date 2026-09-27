@@ -6371,7 +6371,8 @@
           "sleep_debt_7d_s": 17977,
           "sleep_need_s": 27000
         },
-        "today": "2026-09-23"
+        "today": "2026-09-23",
+        "week_collisions_count": 0
       },
       "status": 200
     },

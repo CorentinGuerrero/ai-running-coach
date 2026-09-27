@@ -132,7 +132,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_metrics as M  # noqa: E402
@@ -624,7 +624,7 @@ _SESSION_SELECTOR_RE = re.compile(
 )
 
 
-def _load_session_arg(value: str, workspace: Path) -> dict:
+def _load_session_arg(value: str, workspace: Path) -> Tuple[dict, Optional[dict]]:
     """`--session` : soit un JSON inline (`{"intensity": "endurance", ...}`),
     soit `chemin/vers/Semaine.md#SÉLECTEUR` (une séance du bloc ```arc
     `week.sessions[]` de ce fichier). Un JSON inline commençant par `{` est
@@ -641,12 +641,20 @@ def _load_session_arg(value: str, workspace: Path) -> dict:
     `{{TODAY}} == {{WEEK_START}}`, une séance déjà réalisée ce jour-là et une
     séance encore planifiée ce même jour partagent la même date : prendre « la
     première » aurait pu rendre la MAUVAISE séance, silencieusement, aussi bien
-    dans un test que dans un usage réel)."""
+    dans un test que dans un usage réel).
+
+    Rend `(session, source)` — `source` est `None` pour un JSON inline (aucun
+    fichier, jamais de semaine à vérifier), sinon `{"path": <chemin relatif au
+    workspace si possible>, "week_start": <lundi de la semaine qui porte cette
+    séance>}` (#69, revue de code should-fix 5) : `main()` s'en sert pour
+    avertir si cette semaine précise est éclipsée par une collision
+    (`arc_index.week_collisions`) — un fichier valide au contrat peut quand
+    même être ignoré du tableau de bord/des autres CLI pour cette semaine."""
     import json
     if value.lstrip().startswith("{"):
-        return json.loads(value)
+        return json.loads(value), None
     if "#" not in value:
-        return json.loads(value)
+        return json.loads(value), None
     file_part, _, selector = value.rpartition("#")
     m = _SESSION_SELECTOR_RE.match(selector)
     if not m:
@@ -664,7 +672,29 @@ def _load_session_arg(value: str, workspace: Path) -> dict:
     start = text.find("\n", start) + 1
     end = text.find("```", start)
     block = json.loads(text[start:end])
-    candidates = [sess for sess in block.get("sessions", []) if sess.get("date") == date_part]
+    # #69 : un fichier PLAN MULTI-SEMAINES (`weeks[]`) n'a pas de `sessions` au
+    # premier niveau — ses séances sont réparties dans `weeks[].sessions`. On les
+    # rassemble toutes avant de filtrer par date, chacune associée au
+    # `week_start` de SA propre entrée (pour l'avertissement de collision
+    # ci-dessus) : le sélecteur reste `AAAA-MM-JJ` (`@index`/`:titre`), inchangé,
+    # la bonne semaine étant déjà déterminée par la date de la séance elle-même,
+    # jamais par un `week_start` à choisir à part.
+    weeks = block.get("weeks")
+    if isinstance(weeks, list):
+        all_sessions = [(sess, w.get("week_start")) for w in weeks if isinstance(w, dict)
+                         for sess in (w.get("sessions") or []) if isinstance(sess, dict)]
+    else:
+        all_sessions = [(sess, block.get("week_start"))
+                         for sess in block.get("sessions", []) if isinstance(sess, dict)]
+    try:
+        rel_path = str(path.resolve().relative_to(workspace.resolve()).as_posix())
+    except ValueError:
+        rel_path = str(path)   # hors du workspace (rare, ex. fichier temporaire de test) : chemin tel quel
+
+    def _found(sess: dict, week_start) -> Tuple[dict, dict]:
+        return sess, {"path": rel_path, "week_start": week_start}
+
+    candidates = [pair for pair in all_sessions if pair[0].get("date") == date_part]
     if not candidates:
         raise ValueError(f"{path} : aucune séance datée {date_part} dans sessions[]")
     if index_part is not None:
@@ -672,21 +702,21 @@ def _load_session_arg(value: str, workspace: Path) -> dict:
         if idx >= len(candidates):
             raise ValueError(
                 f"{path} : index @{idx} hors limites pour {date_part} ({len(candidates)} séance(s) à cette date)")
-        return candidates[idx]
+        return _found(*candidates[idx])
     if title_part is not None:
-        matches = [sess for sess in candidates if sess.get("title") == title_part]
+        matches = [pair for pair in candidates if pair[0].get("title") == title_part]
         if not matches:
             raise ValueError(f"{path} : aucune séance datée {date_part} de titre {title_part!r}")
         if len(matches) > 1:
             raise ValueError(
                 f"{path} : plusieurs séances datées {date_part} de titre {title_part!r} : ambigu, précisez @index")
-        return matches[0]
+        return _found(*matches[0])
     if len(candidates) > 1:
-        titles = ", ".join(repr(sess.get("title")) for sess in candidates)
+        titles = ", ".join(repr(pair[0].get("title")) for pair in candidates)
         raise ValueError(
             f"{path} : {len(candidates)} séances datées {date_part} ({titles}) : ambigu, précisez "
             f"#{date_part}@index ou #{date_part}:titre")
-    return candidates[0]
+    return _found(*candidates[0])
 
 
 def build_arg_parser():
@@ -715,7 +745,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     workspace = workspace_root(args.workspace)
     try:
-        session = _load_session_arg(args.session, workspace)
+        session, source = _load_session_arg(args.session, workspace)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         print(f"erreur : {exc}", file=sys.stderr)
         return 1
@@ -728,6 +758,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     athlete = dict(athlete_row) if athlete_row else {}
     report = IDX.slope_model_report(conn, args.band)
     bins = report.get("bins") or []
+
+    # #69, revue de code should-fix 5 : la séance vient d'une semaine ÉCLIPSÉE par
+    # une collision de `week_start` (fichier dédié vs plan multi-semaines) — les
+    # cibles restent calculées sur son propre contenu, mais un avertissement
+    # évite de pousser une séance d'un plan que le tableau de bord/les autres CLI
+    # ignorent déjà (voir `arc_index.week_collisions`).
+    if source and source.get("week_start"):
+        row = conn.execute(
+            "SELECT shadowed FROM week WHERE source_path = ? AND week_start = ?",
+            (source["path"], source["week_start"])).fetchone()
+        if row and row["shadowed"]:
+            winner = next((c["winner"] for c in IDX.week_collisions(conn)
+                           if c["week_start"] == source["week_start"]), None)
+            print(
+                f"avertissement : la semaine {source['week_start']} de {source['path']} est "
+                f"éclipsée par {winner} (#69, collision de week_start) — le tableau de bord et "
+                "les autres CLI ignorent ce fichier pour cette semaine ; les cibles ci-dessous "
+                "restent calculées, mais corrigez la collision avant de pousser ce plan.",
+                file=sys.stderr)
 
     result = build_session_targets(session, athlete=athlete, bins=bins,
                                     hr_zones_method=conf.get("hr_zones"), band=args.band,

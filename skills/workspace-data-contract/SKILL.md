@@ -78,7 +78,7 @@ inattendu pour le dossier) se corrigent aussi.
 | `activity` | `activities/YYYY-MM-DD_<type>.md` | coach (sync Garmin) |
 | `health` | `medical/YYYY-MM-DD_health.md` | coach (sync), medical |
 | `weather` | `medical/YYYY-MM-DD_meteo.md` | coach (skill `weather-forecast`) |
-| `week` | `planning/Semaine_YYYY-MM-DD.md` (lundi de la semaine) | coach |
+| `week` | `planning/Semaine_YYYY-MM-DD.md` (lundi de la semaine, ou de la première semaine — plan multi-semaines, #69) | coach |
 | `nutrition` | `nutrition/YYYY-MM-DD_nutrition.md` | nutritionist |
 | `report` | `rapports/YYYY-MM-DD_rapport.md`, `rapports/YYYY-MM-DD_comparaison_<lieu>.md`, `rapports/YYYY-MM-DD_debrief_<course>.md` | coach |
 | `course_eval` | `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` | skill `gpx-analysis` |
@@ -569,6 +569,112 @@ Tenez `status` à jour quand une séance est réalisée, manquée ou déplacée.
   ]
 }
 ```
+
+**Plan multi-semaines (#69).** Un fichier peut porter **plusieurs semaines** au
+lieu d'une seule : `weeks`, une liste d'objets ayant chacun exactement la forme
+ci-dessus (`week_start`/`location`/`sessions` obligatoires par entrée, le reste
+facultatif). Les deux formats sont **mutuellement exclusifs** dans un même
+fichier — `weeks` ET `week_start`/`location`/`sessions`/`phase`/`target_*` au
+premier niveau ensemble est une erreur de contrat (« ne mélangez pas… »). Un
+fichier à une seule semaine reste écrit exactement comme avant #69 (format du
+premier exemple ci-dessus) : `weeks` est un AJOUT, jamais une obligation.
+
+Chaque semaine de `weeks` est validée **individuellement**, avec les mêmes
+règles qu'une semaine unique, plus trois vérifications propres au format
+multi-semaines : `week_start` doit tomber un **lundi** (message nommant le jour
+trouvé), aucune séance de `sessions` ne peut porter une `date` en dehors de sa
+propre semaine (lundi à dimanche), et deux entrées de `weeks` ne peuvent pas
+partager le même `week_start` (doublon signalé avec l'index de la première
+occurrence). Un chevauchement plus large (deux lundis distincts dont les
+plages de 7 jours se recouvriraient) ne peut pas se produire tant que chaque
+`week_start` est lui-même un lundi valide — la vérification de lundi couvre
+donc déjà ce cas, le doublon exact restant le seul autre à contrôler.
+
+```arc
+{
+  "arc": 1, "kind": "week",
+  "weeks": [
+    {"week_start": "2026-09-21", "location": "Tournai", "phase": "Spécifique",
+     "sessions": [
+       {"date": "2026-09-22", "sport": "running", "title": "Endurance fondamentale 50 min", "planned_duration_s": 3000, "intensity": "endurance", "outdoor": true, "status": "planned"},
+       {"date": "2026-09-24", "sport": "trail", "title": "Côtes 8 × 90 s", "planned_duration_s": 4200, "planned_elevation_m": 450, "intensity": "vo2max", "outdoor": true, "status": "planned"}
+     ]},
+    {"week_start": "2026-09-28", "location": "Tournai", "phase": "Spécifique",
+     "sessions": [
+       {"date": "2026-09-30", "sport": "trail", "title": "Sortie longue 28 km / 1000 m D+", "planned_distance_m": 28000, "planned_elevation_m": 1000, "intensity": "endurance", "outdoor": true, "status": "planned"}
+     ]}
+  ]
+}
+```
+
+**Nom de fichier.** Comme pour une semaine unique, le fichier vit dans
+`planning/`, nommé `Semaine_<lundi>.md` — pour un plan multi-semaines, le lundi
+de la **première** semaine du fichier (`weeks[0].week_start`). L'index
+(`scripts/arc_index.py`) éclate un fichier `weeks` en autant de lignes que de
+semaines dans la table dérivée `week` (une ligne par `week_start`, toutes
+partageant le même `source_path`) — le tableau de bord (vue Semaine) retrouve
+chaque semaine par sa propre date sans distinguer les deux formats. La purge
+par fichier (une écriture qui change le fichier) retire bien TOUTES ses
+semaines à la fois, comme avant #69 pour une semaine unique.
+
+**`scripts/arc_guardrails.py check --week`** ne peut pas deviner tout seul
+*laquelle* des semaines d'un fichier `weeks[]` vérifier : par défaut, il prend
+la **première dont le lundi tombe le jour de `--today` ou après** — ce qui
+couvre le cas courant (vérifier la semaine en cours, ou la prochaine si le
+fichier ne contient plus que des semaines à venir) sans qu'il soit nécessaire
+de faux-dater `--today` (qui fausserait par ailleurs la projection ACWR).
+Précisez `--week-start AAAA-MM-JJ` pour vérifier une AUTRE semaine du fichier
+explicitement (ex. la semaine d'après, ou une semaine déjà passée) :
+
+```bash
+python3 scripts/arc_guardrails.py check --week planning/Semaine_2026-09-21.md --week-start 2026-10-05
+```
+
+**`scripts/arc_workout_targets.py --session <path>#<date>`**, lui, n'a pas ce
+problème : le sélecteur porte déjà une date de séance précise, qui suffit à
+retrouver la bonne semaine (`weeks[].sessions[]` parcourues toutes ensemble)
+sans argument supplémentaire.
+
+**Le format historique (une semaine au premier niveau) garde ses contrôles
+d'AVANT #69, inchangés** : ni le contrôle de lundi, ni celui de la fenêtre de
+séances (ajoutés SEULEMENT pour chaque entrée de `weeks[]`) ne s'appliquent à
+lui — un fichier à une seule semaine déjà écrit ne peut donc jamais devenir non
+conforme à cause de cette histoire (voir `arc_contract._validate_week`).
+`--week-start` reste utilisable sur un tel fichier, mais seulement pour
+VÉRIFIER qu'il désigne bien sa seule semaine (erreur explicite sinon) — il n'a
+qu'une semaine à choisir.
+
+**Collision entre un fichier dédié et une entrée multi-semaines.** Rien
+n'empêche un fichier dédié `planning/Semaine_2026-09-28.md` (une semaine) et un
+fichier multi-semaines `planning/Semaine_2026-09-21.md` (`weeks` couvrant
+21 et 28) de décrire tous les deux la semaine du 28 septembre. L'index tranche
+par **priorité au fichier dédié** — celui dont le nom porte exactement ce
+lundi (`Semaine_<week_start>.md`) — et, à défaut d'un tel fichier (deux
+fichiers multi-semaines qui se recouvrent sans qu'aucun ne soit le fichier
+dédié de cette semaine), au fichier dont le **chemin est le plus petit par
+ordre alphabétique** (jamais la date de dernière modification — voir
+`arc_index.week_collisions` pour pourquoi : `mtime` n'est pas reconstituée par
+un `git clone`/`checkout`, un départage par mtime redeviendrait arbitraire dès
+qu'un workspace versionné change de machine). La semaine écartée n'est pas
+hors contrat pour autant (elle a été validée comme les autres) : elle est
+seulement retirée des tables dérivées lues par le tableau de bord et les CLI
+(colonne `shadowed`) — `scripts/arc_guardrails.py check --week` et
+`scripts/arc_workout_targets.py --session` continuent de fonctionner sur son
+propre contenu, mais impriment un avertissement (`shadowed_warning`/stderr)
+quand la semaine sélectionnée est justement celle-là. L'écart apparaît aussi
+dans les `issues` du fichier perdant, dans une section **séparée** de
+`.arc/backfill.md` (« Collisions de semaine », jamais mélangée aux fichiers
+réellement hors contrat — voir le skill `arc-backfill`).
+
+Évitez la collision plutôt que d'en dépendre comme mécanisme de remplacement :
+**quand un nouveau plan reprend des semaines déjà écrites ailleurs** (ancien
+plan multi-semaines, ou fichiers dédiés qu'on réorganise), retirez ou
+supprimez vous-même les semaines qui se chevauchent dans l'ANCIEN fichier —
+n'écrivez jamais un nouveau fichier en laissant le doublon au hasard du
+départage. `weeks` doit rester une liste NON VIDE d'objets, jamais `null` :
+`{"weeks": null}` est une erreur de contrat explicite (`week.weeks : liste
+attendue`), jamais une clé silencieusement ignorée comme une clé inconnue
+ordinaire.
 
 ### `nutrition`
 

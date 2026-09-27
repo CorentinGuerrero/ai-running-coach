@@ -310,7 +310,16 @@ def api_summary(store: Store, q: dict) -> dict:
                               (today.isoformat(),)), "body_md", "data_json")
     files = store.rows("SELECT parsed_ok, COUNT(*) AS n FROM source_file WHERE kind IS NOT NULL "
                        "AND kind NOT IN ('athlete','objective') GROUP BY parsed_ok")
-    incomplete = len(store.backfill())
+    # `collision` (#69, revue de code) : un item de `backfill()` peut être un
+    # fichier DÉJÀ VALIDE au contrat, seulement éclipsé pour une semaine par un
+    # autre fichier (voir `arc_index.backfill_items`) — ce n'est pas une dette
+    # de contrat, `incomplete_files` (nav « N fichier(s) hors contrat ») ne doit
+    # donc JAMAIS le compter : un fichier parfaitement valide se retrouverait
+    # sinon étiqueté « hors contrat ». Compté à part (`week_collisions_count`),
+    # pour la même visibilité sans le mauvais libellé.
+    backfill_items = store.backfill()
+    incomplete = sum(1 for i in backfill_items if not i.get("collision"))
+    week_collisions_count = sum(1 for i in backfill_items if i.get("collision"))
     sleep_debt = None
     if settings.get("morning_check") == "full":
         # Dette de sommeil 7 j (#37), même porte que la ligne de base HRV : voir
@@ -331,7 +340,8 @@ def api_summary(store: Store, q: dict) -> dict:
         "gear": store.gear_mileage(),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
-        "incomplete_files": incomplete, "assumptions": store.meta("assumptions"),
+        "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,
+        "assumptions": store.meta("assumptions"),
         "compliance_trend": api_compliance_trend(store, q),
         "counts": {
             "activities": (store.one("SELECT COUNT(*) AS n FROM activity") or {}).get("n", 0),
@@ -468,11 +478,20 @@ def api_health(store: Store, q: dict) -> dict:
 
 def _week_sessions_and_activities(store: Store, monday: date) -> Tuple[list, list]:
     sunday = monday + timedelta(days=6)
-    sessions = store.rows("SELECT * FROM planned_session WHERE date >= ? AND date <= ? ORDER BY date",
+    # `shadowed = 0` (#69, plan multi-semaines) : exclut les séances d'un fichier
+    # écarté par une collision de `week_start` (voir `arc_index._mark_week_shadowing`)
+    # — sinon une même semaine décrite deux fois (fichier dédié + plan multi-semaines
+    # qui la recouvre) doublerait ses séances ici.
+    sessions = store.rows("SELECT * FROM planned_session WHERE date >= ? AND date <= ? "
+                          "AND shadowed = 0 ORDER BY date",
                           (monday.isoformat(), sunday.isoformat()))
     activities = store.rows("SELECT id, date, sport, name, distance_m, duration_s, elevation_gain_m, avg_hr_bpm, load "
                             "FROM activity WHERE date >= ? AND date <= ? ORDER BY date",
                             (monday.isoformat(), sunday.isoformat()))
+    # `shadowed` déjà filtré (toujours 0 ici) : ne sert à rien côté client, on ne
+    # le sérialise pas (revue de code #69, nit — évite un champ figé à 0 dans
+    # chaque séance de `/api/week`, et un diff de golden qui n'apporterait rien).
+    sessions = [_strip(s, "shadowed") for s in sessions]
     return sessions, activities
 
 
@@ -490,14 +509,18 @@ def api_week(store: Store, q: dict) -> dict:
         monday = _monday(today)
     monday = _monday(monday)
     sunday = monday + timedelta(days=6)
-    week = store.one("SELECT * FROM week WHERE week_start = ?", (monday.isoformat(),))
+    # `shadowed = 0` (#69) : même raison que `_week_sessions_and_activities` ci-dessus
+    # — une semaine éclipsée par une collision de `week_start` ne doit jamais être
+    # servie à la place de celle qui fait foi.
+    week = store.one("SELECT * FROM week WHERE week_start = ? AND shadowed = 0", (monday.isoformat(),))
     sessions, done = _week_sessions_and_activities(store, monday)
     weather = store.rows("SELECT date, location, category, best_slot, slot_reason, temp_max_c, wind_kmh, precip_mm "
                          "FROM weather_day WHERE date >= ? AND date <= ? ORDER BY date", (monday.isoformat(), sunday.isoformat()))
-    weeks = [r["week_start"] for r in store.rows("SELECT DISTINCT week_start FROM week ORDER BY week_start")]
+    weeks = [r["week_start"] for r in store.rows(
+        "SELECT DISTINCT week_start FROM week WHERE shadowed = 0 ORDER BY week_start")]
     return {
         "week_start": monday.isoformat(), "today": today.isoformat(),
-        "week": _strip(week, "body_md"), "body_html": render_markdown(I.C.body_after_block(week["body_md"] or "")) if week else None,
+        "week": _strip(week, "body_md", "shadowed"), "body_html": render_markdown(I.C.body_after_block(week["body_md"] or "")) if week else None,
         "sessions": sessions, "activities": done, "weather": weather, "known_weeks": weeks,
         "compliance": M.week_compliance(sessions, done, today),
     }
@@ -1032,7 +1055,7 @@ def rule_info(rule_id: str) -> dict:
     }
 
 
-def resolve_source(store: Store, path: str) -> dict:
+def resolve_source(store: Store, path: str, target_date: Optional[str] = None) -> dict:
     """Résout un chemin `sources`/`supersedes`/`session_ref.week` de décision
     (#55) en `{"path", "kind", "label", "route"}` — `route` un hash de l'app
     (`#/...`) vers une vue EXISTANTE du dashboard quand le chemin s'y prête,
@@ -1041,9 +1064,23 @@ def resolve_source(store: Store, path: str) -> dict:
     ici, seules des requêtes SQL déjà utilisées par d'autres routes (`activity`/
     `report`/`decision` par `source_path`) enrichissent le libellé quand c'est
     bon marché. Aucun contenu de fichier n'est jamais renvoyé — la surface
-    exposée reste celle, déjà publique, des autres routes `/api/*`."""
+    exposée reste celle, déjà publique, des autres routes `/api/*`.
+
+    `target_date` (#69, revue de code should-fix 4) : pour `kind == "week"`,
+    `classify_source_path` ne rend que le lundi du NOM DU FICHIER — correct
+    pour une semaine unique, mais TOUJOURS le lundi de la PREMIÈRE semaine d'un
+    plan multi-semaines (`weeks[]`), quelle que soit la semaine réellement
+    visée. Quand l'appelant connaît une date à viser (la propre `date` de la
+    décision qui cite ce fichier dans `sources`), on route vers le lundi DE
+    CETTE semaine plutôt que vers celui du nom de fichier — sinon un lien vers
+    la 2e semaine ou plus d'un tel plan ouvrirait systématiquement la 1re."""
     info = I.classify_source_path(path)
     kind, day = info["kind"], info["date"]
+    if kind == "week" and target_date:
+        try:
+            day = _monday(date.fromisoformat(target_date)).isoformat()
+        except ValueError:
+            pass
     label, route = path, None
     if kind == "health":
         label, route = f"Santé du {day}", "#/sante"
@@ -1076,7 +1113,10 @@ def _enrich_decision(store: Store, d: dict) -> dict:
     d = dict(d)
     d["id"] = _decision_id(d["source_path"])
     d["rules"] = [rule_info(rid) for rid in (d.get("rule_ids") or [])]
-    d["source_links"] = [resolve_source(store, p) for p in (d.get("sources") or [])]
+    # `d["date"]` (#69, revue de code should-fix 4) : la meilleure date connue à
+    # viser pour un `sources` qui serait un fichier `week` multi-semaines — voir
+    # `resolve_source`, `target_date`.
+    d["source_links"] = [resolve_source(store, p, d.get("date")) for p in (d.get("sources") or [])]
     return d
 
 
@@ -1156,11 +1196,28 @@ def api_decision(store: Store, decision_id: str):
                                (source_path,))
     d["superseded_by"] = [{**r, "id": _decision_id(r["source_path"])} for r in superseded_by]
     d["session_ref_route"] = None
-    week_path = (d.get("session_ref") or {}).get("week") if d.get("session_ref") else None
+    session_ref = d.get("session_ref") or {}
+    week_path = session_ref.get("week")
     if week_path:
         week_info = I.classify_source_path(week_path)
         if week_info["kind"] == "week":
-            d["session_ref_route"] = f"#/semaine?debut={week_info['date']}"
+            # #69, revue de code should-fix 4 : `session_ref.date` (la date de LA
+            # séance référencée) fait foi pour choisir le lundi visé, jamais le
+            # lundi du NOM du fichier (`week_info["date"]`) — celui-ci est
+            # toujours celui de la PREMIÈRE semaine d'un plan multi-semaines
+            # (`weeks[]`), quelle que soit la semaine où vit réellement la
+            # séance. Repli sur le lundi du nom de fichier seulement si
+            # `session_ref.date` est absent ou illisible (ancienne décision,
+            # ou format inattendu) — mieux vaut un lien vers LA semaine du
+            # fichier que pas de lien du tout.
+            week_start = week_info["date"]
+            session_date = session_ref.get("date")
+            if isinstance(session_date, str):
+                try:
+                    week_start = _monday(date.fromisoformat(session_date)).isoformat()
+                except ValueError:
+                    pass
+            d["session_ref_route"] = f"#/semaine?debut={week_start}"
     d["body_html"] = render_markdown(strip_leading_heading(I.C.body_after_block(body)))
     return d
 

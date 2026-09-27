@@ -1328,7 +1328,7 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 22)
+        self.assertEqual(I.SCHEMA_VERSION, 23)
 
     def test_real_v4_database_is_rebuilt_at_current_version(self):
         """Pas seulement « la constante vaut N » : une vraie base laissée par une
@@ -1415,6 +1415,203 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertEqual(len(result["history"]), 1)
         self.assertEqual(result["history"][0]["value"], 610.0)
         conn.close()
+
+
+class TestMultiWeekIndex(Workspace):
+    """#69 : plan multi-semaines (`week.weeks[]`) — éclatement en plusieurs lignes
+    `week`/`planned_session`, purge par fichier, collision avec un fichier dédié."""
+
+    def week_block(self, week_start, sessions=None, **extra):
+        return {"week_start": week_start, "location": "Tournai",
+                "sessions": sessions if sessions is not None else [], **extra}
+
+    def write_multi(self, rel, weeks):
+        self.write(rel, arc(json.dumps({"arc": 1, "kind": "week", "weeks": weeks})))
+
+    def write_single(self, rel, week_start, sessions=None, **extra):
+        block = {"arc": 1, "kind": "week", **self.week_block(week_start, sessions, **extra)}
+        self.write(rel, arc(json.dumps(block)))
+
+    def test_schema_version_23_adds_shadowed_column(self):
+        db_path = self.tmp / "legacy.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '22');"
+            "CREATE TABLE week (source_path TEXT, week_start TEXT);"
+            "CREATE TABLE planned_session (source_path TEXT, week_start TEXT, date TEXT);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        self.assertEqual(
+            conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0],
+            str(I.SCHEMA_VERSION))
+        week_columns = {row[1] for row in conn.execute("PRAGMA table_info(week)").fetchall()}
+        self.assertIn("shadowed", week_columns)
+        session_columns = {row[1] for row in conn.execute("PRAGMA table_info(planned_session)").fetchall()}
+        self.assertIn("shadowed", session_columns)
+        conn.close()
+
+    def test_multi_week_file_explodes_into_one_row_per_week(self):
+        self.write_multi("planning/Semaine_2026-09-21.md", [
+            self.week_block("2026-09-21", [{"date": "2026-09-22", "sport": "running", "title": "Footing"}]),
+            self.week_block("2026-09-28", [{"date": "2026-09-30", "sport": "trail", "title": "Sortie longue"}]),
+        ])
+        self.index()
+        rows = self.conn.execute(
+            "SELECT week_start, source_path FROM week ORDER BY week_start").fetchall()
+        self.assertEqual([r["week_start"] for r in rows], ["2026-09-21", "2026-09-28"])
+        self.assertTrue(all(r["source_path"] == "planning/Semaine_2026-09-21.md" for r in rows))
+        sessions = self.conn.execute(
+            "SELECT date, week_start FROM planned_session ORDER BY date").fetchall()
+        self.assertEqual([(s["date"], s["week_start"]) for s in sessions],
+                          [("2026-09-22", "2026-09-21"), ("2026-09-30", "2026-09-28")])
+
+    def test_single_week_file_still_indexes_one_row(self):
+        """Le format historique (pas de `weeks`) doit continuer à produire
+        exactement une ligne — pas de régression du chemin existant (#69)."""
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21",
+                           [{"date": "2026-09-22", "sport": "running", "title": "Footing"}])
+        self.index()
+        rows = self.conn.execute("SELECT week_start FROM week").fetchall()
+        self.assertEqual([r["week_start"] for r in rows], ["2026-09-21"])
+
+    def test_per_file_purge_removes_all_weeks_of_a_multi_week_file(self):
+        self.write_multi("planning/Semaine_2026-09-21.md", [
+            self.week_block("2026-09-21"), self.week_block("2026-09-28"),
+        ])
+        self.index()
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM week").fetchone()[0], 2)
+        # Le fichier change (une seule semaine désormais) : la purge par
+        # `source_path` doit avoir retiré LES DEUX anciennes lignes, pas seulement
+        # celle qui correspond encore au fichier.
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.index()
+        rows = self.conn.execute("SELECT week_start FROM week").fetchall()
+        self.assertEqual([r["week_start"] for r in rows], ["2026-09-21"])
+
+    def test_file_removal_purges_all_its_weeks(self):
+        self.write_multi("planning/Semaine_2026-09-21.md", [
+            self.week_block("2026-09-21"), self.week_block("2026-09-28"),
+        ])
+        self.index()
+        (self.ws / "planning/Semaine_2026-09-21.md").unlink()
+        self.index()
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM week").fetchone()[0], 0)
+
+    def test_dedicated_file_wins_collision_over_multi_week_entry(self):
+        """Un plan multi-semaines (#69) couvrant incidemment une semaine déjà
+        décrite par son propre fichier dédié : le fichier dédié fait foi — sa
+        semaine reste visible (`shadowed = 0`), l'entrée concurrente est éclipsée."""
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"),
+            self.week_block("2026-09-21", [{"date": "2026-09-22", "sport": "running", "title": "Multi"}]),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21",
+                           [{"date": "2026-09-22", "sport": "running", "title": "Dédié"}])
+        self.index()
+        rows = {r["source_path"]: r["shadowed"] for r in self.conn.execute(
+            "SELECT source_path, shadowed FROM week WHERE week_start = '2026-09-21'").fetchall()}
+        self.assertEqual(rows, {
+            "planning/Semaine_2026-09-14.md": 1,
+            "planning/Semaine_2026-09-21.md": 0,
+        })
+        # La semaine du 14 (pas de collision) reste, elle, visible.
+        self.assertEqual(self.conn.execute(
+            "SELECT shadowed FROM week WHERE week_start = '2026-09-14'").fetchone()[0], 0)
+        # La séance éclipsée ne doit pas non plus apparaître dans `planned_session`.
+        titled = {r["title"] for r in self.conn.execute(
+            "SELECT title, shadowed FROM planned_session WHERE date = '2026-09-22' AND shadowed = 0"
+        ).fetchall()}
+        self.assertEqual(titled, {"Dédié"})
+        # Avertissement visible côté fichier perdant (#69, backfill/`issues`).
+        issues = json.loads(self.conn.execute(
+            "SELECT issues FROM source_file WHERE path = 'planning/Semaine_2026-09-14.md'").fetchone()[0])
+        self.assertTrue(any("en collision avec" in i and "2026-09-21" in i for i in issues), issues)
+
+    def test_collision_without_dedicated_file_picks_alphabetically_first(self):
+        self.write_multi("planning/Semaine_2026-09-07.md", [self.week_block("2026-09-21")])
+        self.write_multi("planning/Semaine_2026-09-14.md", [self.week_block("2026-09-21")])
+        self.index()
+        rows = {r["source_path"]: r["shadowed"] for r in self.conn.execute(
+            "SELECT source_path, shadowed FROM week WHERE week_start = '2026-09-21'").fetchall()}
+        self.assertEqual(rows, {
+            "planning/Semaine_2026-09-07.md": 0,   # premier par ordre alphabétique
+            "planning/Semaine_2026-09-14.md": 1,
+        })
+
+    def test_collision_warning_disappears_once_resolved(self):
+        """Un avertissement de collision (#69) ne doit jamais rester périmé une
+        fois la collision résolue (ici : le fichier dédié est supprimé)."""
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"), self.week_block("2026-09-21"),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.index()
+        issues = json.loads(self.conn.execute(
+            "SELECT issues FROM source_file WHERE path = 'planning/Semaine_2026-09-14.md'").fetchone()[0])
+        self.assertTrue(any("en collision avec" in i for i in issues), issues)
+
+        (self.ws / "planning/Semaine_2026-09-21.md").unlink()
+        self.index()
+        issues = json.loads(self.conn.execute(
+            "SELECT issues FROM source_file WHERE path = 'planning/Semaine_2026-09-14.md'").fetchone()[0])
+        self.assertFalse(any("en collision avec" in i for i in issues), issues)
+        self.assertEqual(self.conn.execute(
+            "SELECT shadowed FROM week WHERE week_start = '2026-09-21'").fetchone()[0], 0)
+
+    def test_collision_surfaces_in_backfill_items_despite_valid_contract(self):
+        """#69 : le fichier perdant reste `parsed_ok = "ok"` (son bloc ```arc est
+        valide) mais sa collision doit quand même apparaître dans
+        `backfill_items` — sinon l'écart resterait invisible du tableau de bord
+        (`/api/files`)."""
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"), self.week_block("2026-09-21"),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.index()
+        items = {item["path"]: item for item in I.backfill_items(self.conn)}
+        self.assertIn("planning/Semaine_2026-09-14.md", items)
+        self.assertEqual(items["planning/Semaine_2026-09-14.md"]["status"], "ok")
+        self.assertTrue(items["planning/Semaine_2026-09-14.md"]["collision"])
+        self.assertTrue(any("en collision avec" in i for i in items["planning/Semaine_2026-09-14.md"]["issues"]))
+        self.assertNotIn("planning/Semaine_2026-09-21.md", items)
+
+    def test_write_backfill_lists_collisions_separately_from_contract_debt(self):
+        """#69, revue de code should-fix 2 : un item de collision (fichier VALIDE
+        au contrat) ne doit jamais apparaître dans la section « à réécrire », qui
+        enverrait `arc-backfill` (ou l'athlète) réécrire un bloc déjà correct.
+        Un vrai fichier hors contrat (santé sans bloc) reste dans sa propre
+        section, inchangée."""
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"), self.week_block("2026-09-21"),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.write("medical/2026-09-20_health.md", "# Santé\n\nPas de bloc.\n")
+        self.index()
+        out = I.write_backfill(self.conn, self.ws)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("## Fichiers hors contrat", text)
+        self.assertIn("## Collisions de semaine", text)
+        contract_section, collision_section = text.split("## Collisions de semaine")
+        self.assertIn("medical/2026-09-20_health.md", contract_section)
+        self.assertNotIn("planning/Semaine_2026-09-14.md", contract_section)
+        self.assertIn("planning/Semaine_2026-09-14.md", collision_section)
+        self.assertNotIn("medical/2026-09-20_health.md", collision_section)
+
+    def test_week_collisions_helper_reports_winner_and_losers(self):
+        self.write_multi("planning/Semaine_2026-09-14.md", [
+            self.week_block("2026-09-14"), self.week_block("2026-09-21"),
+        ])
+        self.write_single("planning/Semaine_2026-09-21.md", "2026-09-21")
+        self.index()
+        collisions = I.week_collisions(self.conn)
+        self.assertEqual(collisions, [{
+            "week_start": "2026-09-21",
+            "winner": "planning/Semaine_2026-09-21.md",
+            "losers": ["planning/Semaine_2026-09-14.md"],
+        }])
 
 
 class TestGearMileageIndex(Workspace):
