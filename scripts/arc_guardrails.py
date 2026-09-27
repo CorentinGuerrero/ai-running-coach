@@ -346,7 +346,27 @@ ASSUMPTIONS: Dict[str, str] = {
         "en `block` par qui veut la fermeté. `resources/` ne contient pas ces "
         "références (dossier propre au workspace de l'utilisateur, hors du dépôt "
         "public) : citées ici depuis la littérature, comme le fait déjà "
-        "`arc_metrics.ASSUMPTIONS`."
+        "`arc_metrics.ASSUMPTIONS`. "
+        "Plan MULTI-SEMAINES (#69, revue de code, 2e tour, BLOCKER) : ce qui précède "
+        "couvre la charge réelle (avant `today`) et celle de la semaine PROPOSÉE "
+        "elle-même (`week_start`..`week_end`) — mais quand `--week-start` vérifie une "
+        "semaine AU-DELÀ de la prochaine dans un fichier `weeks[]`, les semaines "
+        "INTERCALAIRES (`today` -> veille de `week_start`) ne rentraient dans AUCUNE "
+        "de ces deux catégories : ni réelles (pas encore eu lieu), ni la semaine "
+        "proposée (hors de sa fenêtre). Ces jours comptaient donc 0 (repos complet), "
+        "sous-estimant l'ACWR projeté alors même que le plan y prévoit des séances. "
+        "`_intervening_weeks_loads` (appelée par `build_context` via son paramètre "
+        "`other_weeks`, rempli par `main()` depuis `raw_block[\"weeks\"]`) répare ça "
+        "en calculant la charge de CHAQUE semaine intercalaire avec le MÊME "
+        "estimateur que la semaine proposée (`_week_loads_by_date`, donc "
+        "`projected_session_load`, réel > projeté par séance via "
+        "`arc_metrics.resolve_sessions`), fusionnée dans `loads_by_date` avant "
+        "`_project_series`. Repro verrouillé dans "
+        "`tests/data/test_arc_guardrails.py::TestMultiWeekAcwrProjection` : 119 j de "
+        "charge constante puis deux semaines identiques (+1, +2) — sans le correctif, "
+        "l'ACWR de la semaine +2 tombe nettement sous celui de la +1 (0,923 contre "
+        "1,021) ; avec, il remonte à 1,042, cohérent avec un plan qui prolonge "
+        "simplement le régime déjà en place."
     ),
     "distance_only_estimate": (
         "Séance planifiée en DISTANCE seule (`planned_distance_m`, sans "
@@ -801,7 +821,7 @@ def _active_objective_race_date(conn) -> Optional[str]:
 
 
 def build_context(conn, config: Dict[str, dict], gconf: dict, week_start: date,
-                   today: Optional[date] = None) -> dict:
+                   today: Optional[date] = None, other_weeks: Optional[List[dict]] = None) -> dict:
     """Construit le `context` consommé par `evaluate`, en lisant l'index dérivé
     (`conn`, ouvert par `arc_index.open_db`/`index_workspace`) et la configuration
     déjà résolue par `arc_index.settings`/`guardrail_settings`.
@@ -819,6 +839,19 @@ def build_context(conn, config: Dict[str, dict], gconf: dict, week_start: date,
       recevoir le bénéfice d'une charge qui n'a peut-être jamais eu lieu. Un jour
       ≥ `today` (aujourd'hui inclus) reçoit la charge projetée comme avant :
       c'est le sens même d'une valeur « projetée ».
+
+    `other_weeks` (#69, revue de code, BLOCKER) : les AUTRES entrées `weeks[]` du
+    même fichier multi-semaines que `week_start` (`None`/`[]` pour une semaine
+    unique, ou quand `week_start` est la semaine la plus proche à venir — rien à
+    y ajouter alors, ces jours sont déjà couverts par la charge réelle). Quand
+    `week_start` désigne une semaine AU-DELÀ de la prochaine, les semaines
+    intercalaires (de `today` à la veille de `week_start`) portent des séances
+    PLANIFIÉES qui n'ont pas encore eu lieu : sans elles, l'ACWR traiterait ces
+    jours comme un repos complet — voir `_intervening_weeks_loads`, qui calcule
+    leur charge avec le MÊME estimateur que la semaine proposée elle-même, et
+    est fusionnée ici dans `loads_by_date` (donc traitée comme de la charge déjà
+    connue par `_project_series`, filtrée `< week_start`).
+
     Voir ASSUMPTIONS pour la méthode complète.
     """
     today = today or date.today()
@@ -835,6 +868,20 @@ def build_context(conn, config: Dict[str, dict], gconf: dict, week_start: date,
     loads_by_date: Dict[str, float] = {}
     for d, load in rows:
         loads_by_date[d] = loads_by_date.get(d, 0.0) + (load or 0.0)
+
+    recent_run_pace_s_km = _recent_run_pace_s_km(conn, week_start)
+    if other_weeks:
+        intervening = _intervening_weeks_loads(conn, recent_run_pace_s_km, other_weeks, today, week_start)
+        # ÉCRASE, ne fusionne pas avec `setdefault` : la valeur de
+        # `_intervening_weeks_loads` pour un jour donné est déjà réel + projeté
+        # (elle recalcule le réel de CETTE semaine intercalaire elle-même,
+        # identique à ce que `loads_by_date` porte déjà pour ce jour, PLUS la
+        # charge projetée des séances non appariées) — donc toujours au moins
+        # aussi complète que la valeur réelle seule déjà présente ici. La
+        # priorité au réel est appliquée à l'intérieur de
+        # `_intervening_weeks_loads` (par séance, via `resolve_sessions`), pas
+        # ici au niveau du jour.
+        loads_by_date.update(intervening)
 
     # --- Semaine de référence / moyenne 4 semaines (R2/R3) -----------------
     previous_week = _run_family_totals(conn, week_start - timedelta(days=7), week_start - timedelta(days=1))
@@ -858,7 +905,7 @@ def build_context(conn, config: Dict[str, dict], gconf: dict, week_start: date,
         "has_load_history": bool(loads_by_date),
         "loads_by_date": loads_by_date,
         "week_activities": _week_activities(conn, week_start, week_end),
-        "recent_run_pace_s_km": _recent_run_pace_s_km(conn, week_start),
+        "recent_run_pace_s_km": recent_run_pace_s_km,
         "previous_week": previous_week,
         "mean4_weeks": mean4,
         "health_by_date": health_by_date,
@@ -999,6 +1046,62 @@ def _week_loads_by_date(context: dict, sessions: List[dict], week_start: date, w
             continue
         loads[day_iso] = loads.get(day_iso, 0.0) + projected_session_load(r["session"], recent_pace)
     return loads
+
+
+def _intervening_weeks_loads(conn, recent_pace_s_km: Optional[float], other_weeks: List[dict],
+                              today: date, week_start: date) -> Dict[str, float]:
+    """#69, revue de code (2e tour), BLOCKER : quand `--week-start` vérifie une
+    semaine au-delà de la PROCHAINE dans un plan multi-semaines (`weeks[]`), les
+    semaines intercalaires (de `today` à la veille de `week_start`) ne portaient
+    AUCUNE charge dans la projection — ni réelle (elles n'ont pas encore eu
+    lieu), ni celle de la semaine proposée (`_week_loads_by_date` ne couvre que
+    `week_start`..`week_end`). L'ACWR traitait donc ces jours comme un repos
+    complet alors que le plan y prévoit des séances, sous-estimant le risque
+    projeté de la semaine réellement vérifiée.
+
+    Répétition : 60 de charge/jour pendant 119 jours, `today` 2026-09-27. La
+    semaine +1 (2026-09-28) donne un ACWR projeté de 1,091 ; la semaine +2
+    (2026-10-05), elle, tombait à 0,931 — sans ce correctif, les séances
+    planifiées de la semaine +1 (intercalaire quand on vérifie +2) manquaient à
+    l'appel. Avec, elle remonte à 1,058 (calcul reproduit dans le test dédié).
+
+    Réutilise EXACTEMENT le même estimateur que pour la semaine proposée elle-
+    même (`_week_loads_by_date`, donc `projected_session_load`, `resolve_sessions`
+    contre les activités RÉELLES de CHAQUE semaine intercalaire — le réel prime
+    toujours, une séance appariée ne compte jamais deux fois) : une semaine
+    `other_weeks` par appel, la charge résultante ne retenant que les dates dans
+    `[today, week_start - 1 jour]` (les dates hors de cette fenêtre restent
+    couvertes ailleurs — charge réelle déjà indexée avant `today`, ou semaine
+    proposée elle-même à partir de `week_start`)."""
+    span_start, span_end = today, week_start - timedelta(days=1)
+    if span_start > span_end:
+        return {}
+    merged: Dict[str, float] = {}
+    for w in other_weeks:
+        if not isinstance(w, dict):
+            continue
+        w_start_raw = w.get("week_start")
+        if not isinstance(w_start_raw, str):
+            continue
+        try:
+            w_start = date.fromisoformat(w_start_raw)
+        except ValueError:
+            continue
+        w_end = w_start + timedelta(days=6)
+        if w_end < span_start or w_start > span_end:
+            continue   # semaine hors de la fenêtre intercalaire : rien à ajouter ici
+        sessions = [s for s in (w.get("sessions") or []) if isinstance(s, dict)]
+        week_context = {"week_activities": _week_activities(conn, w_start, w_end),
+                        "recent_run_pace_s_km": recent_pace_s_km}
+        day_loads = _week_loads_by_date(week_context, sessions, w_start, w_end, today, zero_proposed=False)
+        for day_iso, load in day_loads.items():
+            try:
+                day = date.fromisoformat(day_iso)
+            except ValueError:
+                continue
+            if span_start <= day <= span_end:
+                merged[day_iso] = merged.get(day_iso, 0.0) + load
+    return merged
 
 
 def _max_week_acwr(series: List[dict]) -> Optional[float]:
@@ -2108,7 +2211,16 @@ def main(argv=None) -> int:
     I.index_workspace(conn, workspace, today.isoformat())
     config = I.load_config(workspace)
     gconf = guardrail_settings(config)
-    context = build_context(conn, config, gconf, week_start, today)
+    # #69, revue de code (2e tour), BLOCKER : les AUTRES semaines du même fichier
+    # multi-semaines (`raw_block["weeks"]`, sélection faite plus haut par
+    # `_select_week_entry`) — voir `build_context`/`_intervening_weeks_loads`
+    # pour pourquoi elles doivent entrer dans la projection ACWR d'une semaine
+    # au-delà de la prochaine. `None` pour une semaine unique (`raw_block` sans
+    # `weeks`) : rien à ajouter, `other_weeks` reste optionnel.
+    all_weeks = raw_block.get("weeks")
+    other_weeks = ([w for w in all_weeks if isinstance(w, dict) and w.get("week_start") != week_start_raw]
+                   if isinstance(all_weeks, list) else None)
+    context = build_context(conn, config, gconf, week_start, today, other_weeks)
     result = evaluate(proposed_week, context, gconf)
     # #69, revue de code should-fix 5 : la semaine vérifiée peut être celle d'un
     # fichier ÉCLIPSÉ par une collision de `week_start` (fichier dédié vs plan

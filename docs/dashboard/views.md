@@ -764,6 +764,15 @@ reprendre : [Migrer vos fichiers](migration.md). Les fichiers écartés à desse
 séance prescrite jamais courue, un doublon) peuvent y rester : c'est une liste de
 contrôle, pas une erreur.
 
+Une seconde section, **« Collisions de semaine »** (#69), liste séparément les
+fichiers plan (`planning/Semaine_*.md`) déjà **valides** au contrat dont une semaine
+est éclipsée par un autre fichier décrivant la même semaine (un fichier dédié et un
+plan multi-semaines qui la recouvre, le plus souvent) — ce n'est jamais une dette de
+contrat, donc jamais mélangé à la liste ci-dessus ni compté dans son lien de menu :
+son propre lien (« N collision(s) de semaine ») les compte à part. L'action attendue
+n'est pas de réécrire un bloc — il est déjà correct — mais de retirer ou supprimer
+l'entrée `weeks[]` en trop.
+
 ## En sombre, et sur le téléphone
 
 ![Forme & charge en thème sombre](../assets/dashboard/sombre-forme.webp)

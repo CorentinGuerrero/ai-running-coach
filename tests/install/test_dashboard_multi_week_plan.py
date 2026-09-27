@@ -116,3 +116,11 @@ class TestMultiWeekPlanView(InstallAsserts):
         files = json.loads(self.server.get("/api/files")[1])["items"]
         avant = next(item for item in files if item["path"] == "planning/Semaine_avant.md")
         self.assertTrue(any("collision" in issue for issue in avant["issues"]), avant["issues"])
+        # Revue de code (2e tour) : ce fichier est déjà VALIDE au contrat (une
+        # collision, pas une dette de contrat) — `collision` doit le dire, et
+        # `/api/summary` ne doit jamais le compter dans `incomplete_files`
+        # (« N fichier(s) hors contrat »), un libellé qui serait faux ici.
+        self.assertTrue(avant["collision"])
+        summary = json.loads(self.server.get("/api/summary")[1])
+        self.assertEqual(summary["incomplete_files"], 0)
+        self.assertEqual(summary["week_collisions_count"], 1)

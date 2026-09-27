@@ -1009,6 +1009,120 @@ class TestEndToEndOnWorkspace(WorkspaceCase):
         self.assertLess(result["context"]["history_span_days"], G.MIN_HISTORY_DAYS_FOR_PROJECTION)
 
 
+class TestMultiWeekAcwrProjection(WorkspaceCase):
+    """#69, revue de code (2e tour), BLOCKER : `check --week-start` pour une
+    semaine au-delà de la prochaine, dans un plan multi-semaines, ignorait la
+    charge PLANIFIÉE des semaines intercalaires (`today` -> veille de
+    `week_start`) — ces jours comptaient comme un repos complet dans l'ACWR
+    projeté, sous-estimant le risque. `_intervening_weeks_loads` répare ça en
+    réutilisant le même estimateur que pour la semaine proposée elle-même."""
+
+    TODAY = date(2026, 9, 27)
+    HISTORY_DAYS = 119   # > MIN_HISTORY_DAYS_FOR_PROJECTION (84 j)
+
+    def _write_history(self):
+        """119 jours de charge constante (~60/jour : 40 min à RPE 5, la même
+        formule que `projected_session_load` — voir `arc_metrics.session_load`,
+        repli sRPE sans FC) jusqu'à la veille de `today`."""
+        d = self.TODAY - timedelta(days=self.HISTORY_DAYS)
+        while d < self.TODAY:
+            self.write(f"activities/{d.isoformat()}_running.md",
+                       {"kind": "activity", "date": d.isoformat(), "sport": "running",
+                        "duration_s": 2400, "rpe": 5})
+            d += timedelta(days=1)
+
+    def _week_sessions(self, start: date) -> list:
+        """7 séances quotidiennes d'endurance, 50 min chacune : charge PROJETÉE
+        de 60 par jour (`INTENSITY_RPE["endurance"] == 4`,
+        `(3000 / 60) * 4 * arc_metrics.RPE_TO_TRIMP == 60`) — la même échelle
+        que la charge réelle ci-dessus, pour un plan qui prolonge simplement le
+        régime déjà en place (ACWR qui devrait rester stable autour de 1)."""
+        out = []
+        d = start
+        for _ in range(7):
+            out.append(session(d.isoformat(), sport="running", intensity="endurance",
+                               planned_duration_s=3000))
+            d += timedelta(days=1)
+        return out
+
+    def test_week_plus_two_acwr_is_understated_without_intervening_week(self):
+        """Repro du bug : sans `other_weeks`, la semaine +2 ignore les séances
+        planifiées de la semaine +1 (intercalaire) — ACWR sous-estimé."""
+        self._write_history()
+        self.index(today=self.TODAY.isoformat())
+        config = I.load_config(self.ws)
+        gc = G.guardrail_settings(config)
+        week1_start, week2_start = date(2026, 9, 28), date(2026, 10, 5)
+
+        ctx1 = G.build_context(self.conn, config, gc, week1_start, self.TODAY)
+        w1 = week(self._week_sessions(week1_start), week_start=week1_start.isoformat())
+        acwr_week1 = G.evaluate(w1, ctx1, gc)["context"]["acwr_projected"]
+
+        ctx2_broken = G.build_context(self.conn, config, gc, week2_start, self.TODAY)
+        w2 = week(self._week_sessions(week2_start), week_start=week2_start.isoformat())
+        acwr_week2_broken = G.evaluate(w2, ctx2_broken, gc)["context"]["acwr_projected"]
+
+        # Charge constante avant ET après `today` : l'ACWR de la semaine +1 doit
+        # déjà être proche de 1 (pas de rupture de rythme). Sans `other_weeks`,
+        # la semaine +2 (qui saute la charge intercalaire de la +1) doit tomber
+        # NETTEMENT en dessous — c'est le bug.
+        self.assertAlmostEqual(acwr_week1, 1.021, places=3)
+        self.assertAlmostEqual(acwr_week2_broken, 0.923, places=3)
+        self.assertLess(acwr_week2_broken, acwr_week1 - 0.05)
+
+    def test_week_plus_two_acwr_is_corrected_with_intervening_week(self):
+        """Même scénario, `other_weeks=[semaine_1]` (comme `main()` le fait
+        désormais à partir de `raw_block["weeks"]`) : l'ACWR de la semaine +2
+        remonte près de celui de la semaine +1 — le plan reste cohérent."""
+        self._write_history()
+        self.index(today=self.TODAY.isoformat())
+        config = I.load_config(self.ws)
+        gc = G.guardrail_settings(config)
+        week1_start, week2_start = date(2026, 9, 28), date(2026, 10, 5)
+        w1 = week(self._week_sessions(week1_start), week_start=week1_start.isoformat())
+        w2 = week(self._week_sessions(week2_start), week_start=week2_start.isoformat())
+
+        ctx2_fixed = G.build_context(self.conn, config, gc, week2_start, self.TODAY, [w1])
+        acwr_week2_fixed = G.evaluate(w2, ctx2_fixed, gc)["context"]["acwr_projected"]
+
+        self.assertAlmostEqual(acwr_week2_fixed, 1.042, places=3)
+
+    def test_intervening_week_respects_excluded_and_real_activity(self):
+        """`_intervening_weeks_loads` doit respecter les mêmes règles que la
+        semaine proposée elle-même : une séance intercalaire ANNULÉE n'ajoute
+        rien, et un jour déjà couvert par une activité RÉELLE indexée (séance
+        de la semaine +1 déjà faite) ne compte pas sa charge deux fois."""
+        self._write_history()
+        # La semaine +1 a en réalité déjà commencé : son premier jour est fait
+        # (activité réelle indexée), avec une charge DIFFÉRENTE de la charge
+        # planifiée (90 au lieu de 60) — la charge réelle doit prévaloir.
+        week1_start = date(2026, 9, 28)
+        self.write(f"activities/{week1_start.isoformat()}_running.md",
+                   {"kind": "activity", "date": week1_start.isoformat(), "sport": "running",
+                    "duration_s": 3600, "rpe": 5})   # (3600/60)*5*0.3 = 90
+        self.index(today=self.TODAY.isoformat())
+        config = I.load_config(self.ws)
+        gc = G.guardrail_settings(config)
+        week2_start = date(2026, 10, 5)
+
+        sessions1 = self._week_sessions(week1_start)
+        sessions1[1]["status"] = "cancelled"   # 2e jour : annulée, ne doit rien ajouter
+        # (le premier jour, déjà réel ci-dessus, reste "planned" dans le plan —
+        # `resolve_sessions` doit l'apparier à l'activité réelle plutôt que
+        # d'ajouter sa charge projetée par-dessus.)
+        w1 = week(sessions1, week_start=week1_start.isoformat())
+
+        loads = G._intervening_weeks_loads(
+            self.conn, recent_pace_s_km=None, other_weeks=[w1],
+            today=self.TODAY, week_start=week2_start)
+        first_day = week1_start.isoformat()
+        self.assertAlmostEqual(loads[first_day], 90.0, places=3)   # réel, pas 60 projeté
+        second_day = (week1_start + timedelta(days=1)).isoformat()
+        # Annulée : ni la charge projetée (60) ni aucune autre valeur ajoutée —
+        # absente de `loads`, exactement comme un jour de repos non planifié.
+        self.assertNotIn(second_day, loads)
+
+
 class TestSelectWeekEntry(unittest.TestCase):
     """`arc_guardrails._select_week_entry` (#69, revue de code du 27/09,
     blocker) — unitaire, sans passer par le CLI/subprocess."""
@@ -1256,6 +1370,49 @@ class TestCLI(WorkspaceCase):
         self.assertIn("Semaine_2026-09-28.md", result.stderr)
         payload = json.loads(result.stdout)
         self.assertIn("shadowed_warning", payload)
+
+    def test_check_week_start_wires_intervening_weeks_into_acwr(self):
+        """#69, revue de code (2e tour), BLOCKER, bout en bout : `main()` doit
+        calculer `other_weeks` depuis `raw_block["weeks"]` tout seul et le
+        transmettre à `build_context` — verrouille le câblage CLI, la logique
+        de calcul elle-même est testée dans `TestMultiWeekAcwrProjection`."""
+        today = date(2026, 9, 27)
+        d = today - timedelta(days=119)
+        while d < today:
+            self.write(f"activities/{d.isoformat()}_running.md",
+                       {"kind": "activity", "date": d.isoformat(), "sport": "running",
+                        "duration_s": 2400, "rpe": 5})
+            d += timedelta(days=1)
+
+        def week_sessions(start):
+            out, dd = [], start
+            for _ in range(7):
+                out.append({"date": dd.isoformat(), "sport": "running", "title": "EF",
+                            "intensity": "endurance", "planned_duration_s": 3000})
+                dd += timedelta(days=1)
+            return out
+
+        week1_start, week2_start = date(2026, 9, 28), date(2026, 10, 5)
+        self.write("planning/Semaine_2026-09-28.md", {
+            "kind": "week",
+            "weeks": [
+                {"week_start": week1_start.isoformat(), "location": "Tournai",
+                 "sessions": week_sessions(week1_start)},
+                {"week_start": week2_start.isoformat(), "location": "Tournai",
+                 "sessions": week_sessions(week2_start)},
+            ],
+        })
+        result = self._run("check", "--week", str(self.ws / "planning/Semaine_2026-09-28.md"),
+                            "--workspace", str(self.ws), "--today", today.isoformat(),
+                            "--week-start", week2_start.isoformat())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        # Même valeur que `TestMultiWeekAcwrProjection.
+        # test_week_plus_two_acwr_is_corrected_with_intervening_week` (même
+        # scénario) : la charge de la semaine intercalaire (+1) est bien entrée
+        # dans la projection, pas le chiffre sous-estimé (0.923) qu'on aurait
+        # sans le câblage `other_weeks`.
+        self.assertAlmostEqual(payload["context"]["acwr_projected"], 1.042, places=3)
 
 
 class TestRuleLabels(unittest.TestCase):

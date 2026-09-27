@@ -310,7 +310,16 @@ def api_summary(store: Store, q: dict) -> dict:
                               (today.isoformat(),)), "body_md", "data_json")
     files = store.rows("SELECT parsed_ok, COUNT(*) AS n FROM source_file WHERE kind IS NOT NULL "
                        "AND kind NOT IN ('athlete','objective') GROUP BY parsed_ok")
-    incomplete = len(store.backfill())
+    # `collision` (#69, revue de code) : un item de `backfill()` peut être un
+    # fichier DÉJÀ VALIDE au contrat, seulement éclipsé pour une semaine par un
+    # autre fichier (voir `arc_index.backfill_items`) — ce n'est pas une dette
+    # de contrat, `incomplete_files` (nav « N fichier(s) hors contrat ») ne doit
+    # donc JAMAIS le compter : un fichier parfaitement valide se retrouverait
+    # sinon étiqueté « hors contrat ». Compté à part (`week_collisions_count`),
+    # pour la même visibilité sans le mauvais libellé.
+    backfill_items = store.backfill()
+    incomplete = sum(1 for i in backfill_items if not i.get("collision"))
+    week_collisions_count = sum(1 for i in backfill_items if i.get("collision"))
     sleep_debt = None
     if settings.get("morning_check") == "full":
         # Dette de sommeil 7 j (#37), même porte que la ligne de base HRV : voir
@@ -331,7 +340,8 @@ def api_summary(store: Store, q: dict) -> dict:
         "gear": store.gear_mileage(),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
-        "incomplete_files": incomplete, "assumptions": store.meta("assumptions"),
+        "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,
+        "assumptions": store.meta("assumptions"),
         "compliance_trend": api_compliance_trend(store, q),
         "counts": {
             "activities": (store.one("SELECT COUNT(*) AS n FROM activity") or {}).get("n", 0),

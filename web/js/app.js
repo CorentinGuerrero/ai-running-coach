@@ -383,7 +383,11 @@ function renderNav(s) {
     ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
   ];
   $("#nav").innerHTML = items.map(([h, l]) => `<a href="#/${h}" data-route="${h}">${l}</a>`).join("")
-    + (s.incomplete_files ? `<a href="#/fichiers" data-route="fichiers" class="nav__debt">${s.incomplete_files} fichier${s.incomplete_files > 1 ? "s" : ""} hors contrat</a>` : "");
+    + (s.incomplete_files ? `<a href="#/fichiers" data-route="fichiers" class="nav__debt">${s.incomplete_files} fichier${s.incomplete_files > 1 ? "s" : ""} hors contrat</a>` : "")
+    // `week_collisions_count` (#69, revue de code) : compté À PART de
+    // `incomplete_files` — ces fichiers sont déjà valides au contrat, jamais
+    // « hors contrat » (voir `arc_serve.api_summary`/`viewFiles`).
+    + (s.week_collisions_count ? `<a href="#/fichiers" data-route="fichiers" class="nav__debt">${s.week_collisions_count} collision${s.week_collisions_count > 1 ? "s" : ""} de semaine</a>` : "");
 }
 
 function markNav(route) {
@@ -2009,12 +2013,27 @@ async function viewNutrition() {
   }
 }
 
+/** #69, revue de code : un item `collision` (fichier VALIDE au contrat, une de
+ * ses semaines seulement éclipsée par un autre fichier — voir
+ * `arc_index.week_collisions`/`backfill_items`) n'est PAS un fichier hors
+ * contrat. Il ne doit ni apparaître sous « Fichiers hors contrat » (avec le
+ * conseil `/arc-backfill`, qui réécrirait un bloc déjà correct), ni compter
+ * dans `incomplete_files` (`/api/summary`, `viewToday`) — les deux comptent
+ * une dette de CONTRAT, la collision en est une différente (trim/suppression
+ * de l'entrée en trop). Une section séparée, sa propre explication. */
 async function viewFiles() {
   const { items } = await api("files", { fresh: true });
-  main.innerHTML = `${header("Fichiers hors contrat", "Lus au mieux par le tableau de bord, mais sans bloc <code>```arc</code> valide.")}
-    ${items.length ? `${note("Pour les mettre au contrat, lancez <code>/arc-backfill</code> dans votre IDE : le coach les reprend par lots, sans rien inventer, en conservant le texte existant.")}
-      <ul class="list">${items.map((i) => `<li><code>${F.esc(i.path)}</code><span class="list__meta">${F.esc(i.status === "no" ? "illisible" : i.status === "invalid" ? "bloc invalide" : "lecture partielle")} — ${F.esc(i.issues.slice(0, 3).join(" · "))}</span></li>`).join("")}</ul>`
-    : empty("Tout est au contrat", "Chaque fichier du workspace porte un bloc <code>```arc</code> valide.")}`;
+  const contractItems = items.filter((i) => !i.collision);
+  const collisionItems = items.filter((i) => i.collision);
+  const contractBlock = contractItems.length
+    ? `<section class="band">${note("Pour les mettre au contrat, lancez <code>/arc-backfill</code> dans votre IDE : le coach les reprend par lots, sans rien inventer, en conservant le texte existant.")}
+        <ul class="list">${contractItems.map((i) => `<li><code>${F.esc(i.path)}</code><span class="list__meta">${F.esc(i.status === "no" ? "illisible" : i.status === "invalid" ? "bloc invalide" : "lecture partielle")} — ${F.esc(i.issues.slice(0, 3).join(" · "))}</span></li>`).join("")}</ul></section>`
+    : empty("Tout est au contrat", "Chaque fichier du workspace porte un bloc <code>```arc</code> valide.");
+  const collisionBlock = collisionItems.length
+    ? `<section class="band"><h2>Collisions de semaine</h2>${note("Ces fichiers sont déjà valides au contrat : n'y ajoutez ni ne réécrivez aucun bloc <code>```arc</code>. Un autre fichier décrit déjà la même semaine et fait foi (le fichier dédié, sinon le chemin le plus petit) — corrigez en retirant ou en supprimant l'entrée <code>weeks[]</code> en trop.")}
+        <ul class="list">${collisionItems.map((i) => `<li><code>${F.esc(i.path)}</code><span class="list__meta">${F.esc(i.issues.slice(0, 3).join(" · "))}</span></li>`).join("")}</ul></section>`
+    : "";
+  main.innerHTML = `${header("Fichiers hors contrat", "Lus au mieux par le tableau de bord, mais sans bloc <code>```arc</code> valide.")}${contractBlock}${collisionBlock}`;
 }
 
 // ---------------------------------------------------------------------------
