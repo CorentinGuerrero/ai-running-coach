@@ -140,7 +140,12 @@ python3 scripts/arc_race_pacing.py plan \
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
 (`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
 élapsé ou une date-heure ISO 8601 complète pour une barrière du surlendemain
-sur un ultra). `--official-distance-m <distance officielle>` si le GPX mesure
+sur un ultra). Persiste `stop_s` dans le champ `aid_stations` du bloc ```arc
+du plan (#61) dès qu'un arrêt attendu à ce ravito diffère du défaut générique
+de 90 s (`arc_race_pacing.DEFAULT_AID_STATION_STOP_S`) — repas chaud, drop
+bag, changement de chaussettes — jamais une valeur inventée pour un ravito
+simple : #61 (débrief post-course) s'appuie sur ce même `stop_s` pour comparer
+le temps réellement pris au ravito au temps prévu. `--official-distance-m <distance officielle>` si le GPX mesure
 une distance sensiblement différente de la distance officielle de course
 (rééchelonne les `km` de ravitaillement dessus). Sans `--temp-max-c`, lance
 d'abord le skill `weather-forecast` puis repasse la température max prévue ici

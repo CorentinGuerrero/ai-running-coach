@@ -643,18 +643,18 @@ class TestRealPlanNonRegression(unittest.TestCase):
         plan = self._load("plan.json")
         activity = self._load("activity.json")
         result = D.build_race_debrief(plan, activity)
-        # Course courue exactement sur plan : le résidu observé (~0,7 %, 29 s
-        # sur ~4150 s) n'est PAS un arrondi de segment — `arc_race_pacing`
-        # arrondit `predicted_time_s` à la SECONDE près (`SEGMENT_ROUND_S`),
-        # jamais à la minute (cet arrondi-là ne s'applique qu'aux CUMULS
-        # affichés, `PASSAGE_ROUND_S`, jamais recomposé ici). Il vient de ce
-        # que `scenarios.realistic` du plan (prédiction Riegel/VDOT globale)
-        # et la somme de `segments[].predicted_time_s` (modèle pente -> allure
-        # par segment) sont deux calculs INDÉPENDANTS dans `arc_race_pacing.py`
-        # — proches par construction, jamais garantis identiques au-delà d'un
-        # petit résidu. Jamais les +209 s / dizaines de % observés avant le
-        # correctif des arrêts ravito (BLOQUANT 2, 2ᵉ revue de code).
-        self.assertLess(abs(result["totals"]["delta_pct"]), 1.0)
+        # Course courue exactement sur plan. Ravito 2 (km 8) porte un arrêt
+        # RÉEL de 120 s dans l'activité, différent du défaut générique
+        # (`DEFAULT_AID_STATION_STOP_S`, 90 s) — la fixture du plan déclare
+        # donc explicitement `"stop_s": 120` sur ce ravito (#61, should-fix 5 :
+        # le contrat permet de le persister). Le débrief ne compare JAMAIS son
+        # temps planifié recalculé au `scenarios` du plan lui-même au-delà d'un
+        # simple avertissement (> 5 % d'écart, voir `build_race_debrief`) — ce
+        # n'est pas la source du résidu ici. Sans ce `stop_s` explicite, le
+        # repli sur le défaut (90 s au lieu de 120 s) manquait 30 s à l'arrêt
+        # réel, d'où le résidu de ~29 s observé avant ce correctif. Avec le
+        # bon arrêt déclaré, le delta total tombe à ~1 s.
+        self.assertLessEqual(abs(result["totals"]["delta_s"]), 2.0)
         codes = [f["code"] for f in result["findings"]]
         self.assertNotIn("depart_trop_rapide", codes)
         self.assertEqual(result["suggested_profile_updates"], [])
