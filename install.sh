@@ -1401,6 +1401,16 @@ sync_times() {
     ARC_WORKSPACE="$WORKSPACE_ROOT" bash -c 'source "$0/scripts/lib/config.sh"; toml_get_list sync times "07:15 14:15"' "$PROJECT_ROOT"
 }
 
+# Clé scalaire de [sync] (mode, watch_interval_min), même précédence que sync_times.
+sync_setting() {
+    ARC_WORKSPACE="$WORKSPACE_ROOT" bash -c 'source "$0/scripts/lib/config.sh"; toml_get sync "$1" "$2"' "$PROJECT_ROOT" "$1" "$2"
+}
+
+# Source de données ([data].source) : la surveillance n'existe que pour Garmin.
+data_source() {
+    ARC_WORKSPACE="$WORKSPACE_ROOT" bash -c 'source "$0/scripts/lib/config.sh"; toml_get data source garmin' "$PROJECT_ROOT"
+}
+
 # Lit la crontab existante. Distingue « pas de crontab » (cas normal) d'une
 # vraie erreur (droits, cron.deny) : dans le second cas on doit renoncer, sinon
 # « crontab - » remplace la table complète de l'utilisateur par nos deux lignes.
@@ -1420,9 +1430,30 @@ install_daily_sync() {
         return 0
     fi
     log "Synchronisation Garmin automatique (scripts/daily-sync.sh)"
-    local sync="$PROJECT_ROOT/scripts/daily-sync.sh" times t hour minute
+    local sync="$PROJECT_ROOT/scripts/daily-sync.sh" times t hour minute mode interval
+    local watch="$PROJECT_ROOT/scripts/garmin_watch.py"
+    mode="$(sync_setting mode schedule)"
+    interval="$(sync_setting watch_interval_min 15)"
+    case "$mode" in
+        schedule) ;;
+        watch)
+            # intervals.icu n'est pas surveillé (pas de sonde équivalente) : heures fixes.
+            if [[ "$(data_source)" != "garmin" ]]; then
+                warn "[sync].mode = \"watch\" n'existe que pour [data].source = \"garmin\" — heures fixes ([sync].times)."
+                mode="schedule"
+            elif [[ ! "$interval" =~ ^[0-9]+$ ]] || (( 10#$interval < 1 || 10#$interval > 59 )); then
+                die "[sync].watch_interval_min invalide : « $interval » (entier de 1 à 59 minutes)."
+            fi ;;
+        *) die "[sync].mode invalide : « $mode » (schedule | watch)." ;;
+    esac
     times="$(sync_times | tr '\n' ' ')"
-    log "Heures : $times (config [sync].times)"
+    if [[ "$mode" == "watch" ]]; then
+        interval="$((10#$interval))"
+        log "Mode surveillance : scripts/garmin_watch.py toutes les $interval min, LLM seulement s'il y a du neuf ([sync].mode)"
+        times=""
+    else
+        log "Heures : $times (config [sync].times)"
+    fi
 
     for t in $times; do
         if [[ ! "$t" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
@@ -1438,20 +1469,27 @@ install_daily_sync() {
 "
         done
         # Un « & » dans un chemin suffit à produire un plist que launchctl refuse.
-        local x_sync x_ws
+        local x_sync x_ws program schedule
         x_sync="$(xml_escape "$sync")"; x_ws="$(xml_escape "$WORKSPACE_ROOT")"
+        if [[ "$mode" == "watch" ]]; then
+            program="  <key>ProgramArguments</key><array><string>/usr/bin/env</string><string>python3</string><string>$(xml_escape "$watch")</string></array>"
+            schedule="  <key>StartInterval</key><integer>$((interval * 60))</integer>"
+        else
+            program="  <key>ProgramArguments</key><array><string>$x_sync</string></array>"
+            schedule="  <key>StartCalendarInterval</key>
+  <array>
+$entries  </array>"
+        fi
         write_file "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.ai-running-coach.daily-sync</string>
-  <key>ProgramArguments</key><array><string>$x_sync</string></array>
+$program
   <key>WorkingDirectory</key><string>$x_ws</string>
   <key>EnvironmentVariables</key><dict><key>ARC_WORKSPACE</key><string>$x_ws</string></dict>
-  <key>StartCalendarInterval</key>
-  <array>
-$entries  </array>
+$schedule
   <key>StandardOutPath</key><string>$x_ws/logs/launchd-sync.log</string>
   <key>StandardErrorPath</key><string>$x_ws/logs/launchd-sync.log</string>
 </dict>
@@ -1478,6 +1516,10 @@ EOF
             lines+="$minute $hour * * * ARC_WORKSPACE=\"$WORKSPACE_ROOT\" \"$sync\" >/dev/null 2>&1 $marker
 "
         done
+        if [[ "$mode" == "watch" ]]; then
+            lines="*/$interval * * * * ARC_WORKSPACE=\"$WORKSPACE_ROOT\" python3 \"$watch\" >/dev/null 2>&1 $marker
+"
+        fi
         if [[ "$DRY_RUN" -eq 1 ]]; then
             printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} crontab :"
             printf '%s' "$lines"

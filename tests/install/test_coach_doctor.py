@@ -630,6 +630,51 @@ class TestDailySyncScheduled(InstallAsserts):
             self.assertEqual(check["status"], "info")
 
 
+class TestWatchHeartbeat(InstallAsserts):
+    """Mode surveillance : le cron existe, mais le watcher a-t-il tourné récemment ?"""
+
+    NOW = "2026-09-27T09:00:00+00:00"
+    CRON = '*/15 * * * * ARC_WORKSPACE="/ws" python3 "/e/scripts/garmin_watch.py" >/dev/null 2>&1 # ai-running-coach daily-sync\n'
+
+    def _check(self, sb: Sandbox, last_check_utc: str | None):
+        from datetime import datetime
+
+        ws = sb.root / "ws"
+        (ws / "logs").mkdir(parents=True)
+        if last_check_utc is not None:
+            # Le watcher écrit l'heure LOCALE naïve : même conversion que le doctor.
+            local = datetime.fromisoformat(last_check_utc).astimezone().replace(tzinfo=None)
+            (ws / "logs/.watch-state.json").write_text(json.dumps({
+                "last_check": local.isoformat(timespec="seconds"),
+                "runs": {"date": local.date().isoformat(), "count": 2},
+            }))
+        sb.set_crontab(self.CRON)
+        proc = sb.script(
+            "coach_doctor.py", "--json", "--workspace", str(ws), "--tokens-dir", str(_fresh_tokens_dir(sb)),
+            ARC_FAKE_UNAME="Linux", ARC_DOCTOR_NOW=self.NOW,
+        )
+        return _find(json.loads(proc.stdout), "daily_sync_scheduled")
+
+    def test_recent_heartbeat_is_ok(self):
+        with Sandbox() as sb:
+            check = self._check(sb, "2026-09-27T08:50:00+00:00")
+            self.assertEqual(check["status"], "ok")
+            self.assertIn("10 min", check["message"])
+            self.assertIn("2 run(s)", check["message"])
+
+    def test_stale_heartbeat_is_warning(self):
+        with Sandbox() as sb:
+            check = self._check(sb, "2026-09-27T07:00:00+00:00")
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("silencieuse", check["message"])
+
+    def test_never_ran_is_warning(self):
+        with Sandbox() as sb:
+            check = self._check(sb, None)
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("jamais", check["message"])
+
+
 class TestNtfyConfigured(InstallAsserts):
     def test_disabled_by_default_is_info(self):
         with Sandbox() as sb:

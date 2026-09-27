@@ -26,7 +26,7 @@ commande de correction sous chaque ligne non ✅ :
 | `athlete_profile` | FC max / FC de repos renseignées dans le profil — sinon repli sur le RPE |
 | `index_freshness` | `.arc/coach.db` à jour par rapport aux fichiers du workspace |
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme |
-| `daily_sync_scheduled` | Tâche cron ou LaunchAgent du daily-sync installée |
+| `daily_sync_scheduled` | Tâche cron ou LaunchAgent du daily-sync installée ; en mode `[sync].mode = "watch"`, passage récent de `garmin_watch.py` (⚠ après 3 intervalles de silence) |
 | `ntfy_configured` | Notifications push configurées (si activées) |
 
 Un ❌ fait échouer la commande (code de sortie non nul) ; un ⚠️ ou un ℹ️ jamais
