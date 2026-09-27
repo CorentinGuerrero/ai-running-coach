@@ -863,6 +863,17 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
 # performance VO2 » (VO2max, vue Performance du tableau de bord) matchait
 # aussi, à cause du `.*$` permissif après « de performance ».
 _INDEX_TOP_HEADING_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b.*(itra|utmb).*$", re.I | re.M)
+# Repli (revue de code #109, 3e tour) : un titre « nu », sans ITRA/UTMB — un
+# athlète qui a renommé/simplifié le titre du modèle, ou une variante plus
+# ancienne. Volontairement plus STRICT que le motif principal pour ne rien
+# accepter à tort à sa place : la ligne doit s'arrêter juste après
+# « performance », avec au plus une parenthèse en fin de ligne — jamais un
+# texte libre qui suit sans parenthèses (ce qui aurait, par exemple, laissé
+# passer « Indice de performance VO2 » à nouveau). Accepté mais SIGNALÉ (voir
+# `parse_performance_index`) : mieux vaut lire une section probable avec un
+# avertissement que la faire disparaître silencieusement.
+_INDEX_TOP_HEADING_LOOSE_RE = re.compile(r"^(#{2,4})\s*indices? de performance\b(?:\s*\([^)\n]*\))?\s*$",
+                                          re.I | re.M)
 _INDEX_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
 _ANY_HEADING_RE = re.compile(r"^(#{1,6})\s", re.M)
 # Séparateur date / reste de la ligne : cadratin/demi-cadratin entouré d'espaces,
@@ -891,24 +902,36 @@ def _strip_html_comments(text: str) -> str:
     return re.sub(r"<!--.*?-->", "", text, flags=re.S)
 
 
-def _index_section(text: str) -> Optional[str]:
-    """Texte de la section « Indices de performance » : depuis le titre
-    principal (n'importe quel niveau entre `##` et `####`) jusqu'au prochain
-    titre de niveau ÉGAL OU SUPÉRIEUR (donc jamais coupé par la sous-section
-    « ### Historique des indices », de niveau plus profond) — ou la fin du
-    fichier. `None` si le titre principal est absent. Les commentaires HTML
-    sont retirés avant la recherche, comme `_gear_section` — l'exemple
-    commenté du modèle ne doit jamais être lu comme un relevé réel."""
+def _index_section(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """`(texte, avertissement)` de la section « Indices de performance » :
+    depuis le titre principal (n'importe quel niveau entre `##` et `####`)
+    jusqu'au prochain titre de niveau ÉGAL OU SUPÉRIEUR (donc jamais coupé par
+    la sous-section « ### Historique des indices », de niveau plus profond) —
+    ou la fin du fichier. `(None, None)` si aucun titre, strict ou nu, n'est
+    trouvé. Les commentaires HTML sont retirés avant la recherche, comme
+    `_gear_section` — l'exemple commenté du modèle ne doit jamais être lu
+    comme un relevé réel.
+
+    Titre STRICT (mentionne ITRA/UTMB) d'abord, sans avertissement. À défaut,
+    titre NU (`_INDEX_TOP_HEADING_LOOSE_RE`, revue de code #109 3e tour) —
+    accepté quand même, mais avec un avertissement : un titre renommé ou
+    simplifié par l'athlète reste plus probablement CETTE section qu'une
+    coïncidence, mieux vaut la lire en le signalant que la perdre en silence."""
     text = _strip_html_comments(text)
     m = _INDEX_TOP_HEADING_RE.search(text)
+    warning = None
     if not m:
-        return None
+        m = _INDEX_TOP_HEADING_LOOSE_RE.search(text)
+        if not m:
+            return None, None
+        warning = (f"titre « {m.group(0).strip()} » sans mention ITRA/UTMB — lu comme la section "
+                   "« Indices de performance » quand même, à vérifier.")
     level = len(m.group(1))
     rest = text[m.end():]
     for candidate in _ANY_HEADING_RE.finditer(rest):
         if len(candidate.group(1)) <= level:
-            return rest[: candidate.start()]
-    return rest
+            return rest[: candidate.start()], warning
+    return rest, warning
 
 
 def _normalize_index_category(tokens: List[str]) -> Optional[str]:
@@ -997,10 +1020,10 @@ def parse_performance_index(text: str) -> Tuple[List[Dict[str, Any]], List[str]]
     ne viennent QUE de ce que l'athlète a écrit lui-même (voir AGENTS.md,
     règle de vie privée #62 — un agent peut proposer une recherche web, mais
     seulement sur demande explicite, et jamais l'écrire sans confirmation)."""
-    section = _index_section(text)
+    section, heading_warning = _index_section(text)
     if not section:
         return [], []
-    warnings: List[str] = []
+    warnings: List[str] = [heading_warning] if heading_warning else []
     parsed: List[Dict[str, Any]] = []
     ordinal = 0
     for line in section.splitlines():

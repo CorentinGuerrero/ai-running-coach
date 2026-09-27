@@ -948,9 +948,38 @@ class TestParsePerformanceIndex(unittest.TestCase):
         """Revue de code #109, 2e tour, nit : « #### Indice de performance VO2 »
         (VO2max, vue Performance du tableau de bord) ne doit jamais être pris
         pour le titre de la section ITRA/UTMB — seul un titre qui mentionne
-        explicitement ITRA ou UTMB l'est."""
+        explicitement ITRA ou UTMB l'est, ou un titre NU qui s'arrête juste
+        après « performance » (voir les tests de repli ci-dessous)."""
         text = ("# Profil\n\n#### Indice de performance VO2\n\n"
                 "- 2025-11-01 — itra : 610\n")
+        self.assertEqual(L.parse_performance_index(text), ([], []))
+
+    # -- revue de code #109, 3e tour : titre NU (sans ITRA/UTMB), repli --------
+
+    def test_bare_heading_without_itra_or_utmb_is_read_with_a_warning(self):
+        text = "# Profil\n\n## Indices de performance\n\n- 2025-11-01 — itra : 610\n"
+        entries, warnings = L.parse_performance_index(text)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["value"], 610.0)
+        self.assertTrue(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_bare_heading_with_trailing_parenthetical_is_read_with_a_warning(self):
+        text = "# Profil\n\n## Indices de performance (facultatif)\n\n- 2025-11-01 — itra : 610\n"
+        entries, warnings = L.parse_performance_index(text)
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_heading_with_itra_or_utmb_never_gets_the_bare_heading_warning(self):
+        text = "# Profil\n\n## Indices de performance (ITRA / UTMB)\n\n- 2025-11-01 — itra : 610\n"
+        _, warnings = L.parse_performance_index(text)
+        self.assertFalse(any("sans mention ITRA/UTMB" in w for w in warnings))
+
+    def test_bare_heading_with_unrelated_trailing_text_is_still_rejected(self):
+        """Le repli reste STRICT (revue de code #109, 3e tour) : un texte libre
+        après « performance » et SANS parenthèses (comme « VO2 » ci-dessus)
+        n'est jamais un titre nu accepté — seule une ligne qui s'arrête net,
+        éventuellement suivie d'une seule parenthèse, l'est."""
+        text = "# Profil\n\n#### Indice de performance VO2\n\n- 2025-11-01 — itra : 610\n"
         self.assertEqual(L.parse_performance_index(text), ([], []))
 
     # -- revue de code #62 : normalisation « général »/synonymes -------------

@@ -34,6 +34,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -63,11 +64,33 @@ def _tracked_files() -> list:
     return proc.stdout.splitlines()
 
 
+# Sentinelle (revue de code #109, 3e tour) : un fichier dont on SAIT qu'il
+# doit toujours faire partie du scan. Sert de garde-fou contre un `git
+# ls-files` qui rendrait silencieusement une liste vide ou tronquée (dépôt mal
+# reconnu, `GIT_DIR`/`cwd` inattendus, `.git` absent d'une copie extraite) —
+# sans cette vérification, `violations([])` passe toujours, même avec
+# `itra.run` injecté ailleurs dans le dépôt : un faux sentiment de sécurité
+# pire qu'une absence de test.
+SENTINEL_FILE = "scripts/arc_index.py"
+
+
 def scanned_files() -> list:
     """Scripts Python, scripts shell et code de tableau de bord (`web/js`) —
-    voir la liste en tête de module — parmi les fichiers suivis par git."""
+    voir la liste en tête de module — parmi les fichiers suivis par git.
+
+    Échoue bruyamment (au lieu de rendre une liste vide/tronquée en silence)
+    si `SENTINEL_FILE`, qui doit TOUJOURS être suivi par git dans ce dépôt,
+    n'apparaît pas dans `git ls-files` — signe que la commande n'a pas vu le
+    dépôt réel (voir `SENTINEL_FILE`)."""
+    tracked = _tracked_files()
+    if SENTINEL_FILE not in tracked:
+        raise AssertionError(
+            f"git ls-files n'a pas rendu {SENTINEL_FILE!r} (dépôt : {REPO}) — la commande ne voit "
+            "probablement pas le vrai dépôt git de ce test (GIT_DIR/cwd inattendus, .git absent "
+            "d'une copie extraite...). Ce lint ne peut alors RIEN garantir : mieux vaut échouer "
+            "bruyamment ici que rendre silencieusement une liste vide de fichiers scannés.")
     files = []
-    for rel in _tracked_files():
+    for rel in tracked:
         is_engine_python = (rel.startswith("scripts/") or rel.startswith("skills/")) and rel.endswith(".py")
         is_shell = rel.endswith(".sh")
         is_dashboard_js = rel.startswith("web/js/") and rel.endswith(".js")
@@ -94,6 +117,23 @@ class TestNoThirdPartyIndexFetchInScripts(unittest.TestCase):
         self.assertEqual(problems, [],
                           f"fichier(s) référençant itra.run/utmb.world — récupération "
                           f"automatique de données personnelles interdite (#62) : {problems}")
+
+
+class TestScanGuardsAgainstEmptyGitLsFiles(unittest.TestCase):
+    """Revue de code #109, 3e tour, blocker : un `git ls-files` qui rendrait
+    silencieusement une liste vide (ou tronquée, sans `SENTINEL_FILE`) ne doit
+    JAMAIS laisser `test_no_file_references_itra_or_utmb_domains` passer au
+    vert sans avoir rien vérifié — il doit échouer bruyamment à la place."""
+
+    def test_scanned_files_raises_when_sentinel_is_missing(self):
+        with unittest.mock.patch(f"{__name__}._tracked_files", return_value=["docs/index.md"]):
+            with self.assertRaises(AssertionError):
+                scanned_files()
+
+    def test_scanned_files_raises_on_empty_git_ls_files(self):
+        with unittest.mock.patch(f"{__name__}._tracked_files", return_value=[]):
+            with self.assertRaises(AssertionError):
+                scanned_files()
 
 
 class TestViolationsHelperDetectsInjectedReference(unittest.TestCase):

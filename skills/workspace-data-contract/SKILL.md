@@ -205,7 +205,13 @@ premier niveau, en langage libre — même principe que `### Chaussures`
 ci-dessus. Les puces peuvent vivre directement sous ce titre, ou sous sa
 propre sous-section `### Historique des indices` (les deux sont lues pareil —
 un profil installé avant l'ajout de cette sous-section, ou un athlète qui
-colle simplement ses relevés sous le titre principal, n'a rien à changer) :
+colle simplement ses relevés sous le titre principal, n'a rien à changer). Le
+titre lui-même est reconnu même renommé/simplifié SANS mention ITRA/UTMB (ex.
+« ## Indices de performance » nu, ou suivi d'une seule parenthèse comme
+« (facultatif) ») — accepté quand même, avec un avertissement (revue de code
+#109, 3e tour) plutôt que de perdre la section en silence ; un titre qui
+continue en texte libre SANS parenthèses (ex. « Indice de performance VO2 »,
+la vue Performance du tableau de bord) reste, lui, exclu.
 
 ```markdown
 ## Indices de performance (ITRA / UTMB)
