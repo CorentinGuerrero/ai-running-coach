@@ -30,18 +30,23 @@ TODAY = "2026-09-26"
 
 
 class TestSlopeModelApi(InstallAsserts):
-    def setUp(self):
-        self.sb = Sandbox().__enter__()
+    # Workspace (200 jours avec échantillons FIT), index et serveur construits
+    # UNE fois pour la classe : c'était ~8 s par test en local, ~50 s sur le
+    # runner macOS. Aucun test n'écrit dans le workspace — GET seulement, et le
+    # CLI `slope-model` lit ou recalcule à la volée sans rien persister.
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.sb = Sandbox().__enter__()
+        cls.addClassCleanup(cls.sb.__exit__, None, None, None)
         import datetime
-        self.ws = build(self.sb.root / "ws", days=200, sport="trail", seed=11,
-                         today=datetime.date.fromisoformat(TODAY), with_samples=True)
-        self.server = Server(self.sb, ["python3", str(self.sb.repo / "scripts/arc_serve.py"),
-                                       "--workspace", str(self.ws), "--port", "0", "--today", TODAY])
-        self.assertIsNotNone(self.server.url, self.server.proc.stderr.read() if self.server.proc.poll() is not None else "pas d'URL")
-
-    def tearDown(self):
-        self.server.stop()
-        self.sb.__exit__(None, None, None)
+        cls.ws = build(cls.sb.root / "ws", days=200, sport="trail", seed=11,
+                       today=datetime.date.fromisoformat(TODAY), with_samples=True)
+        cls.server = Server(cls.sb, ["python3", str(cls.sb.repo / "scripts/arc_serve.py"),
+                                     "--workspace", str(cls.ws), "--port", "0", "--today", TODAY])
+        cls.addClassCleanup(cls.server.stop)
+        if cls.server.url is None:
+            raise AssertionError(cls.server.proc.stderr.read() if cls.server.proc.poll() is not None else "pas d'URL")
 
     def test_default_band_is_endurance_and_has_personal_bins(self):
         status, body, _ = self.server.get("/api/slope-model")
