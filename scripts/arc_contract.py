@@ -193,6 +193,13 @@ SCHEMA = {
         "required": {"date": "date", "sport": _enum(SPORTS), "duration_s": "num+"},
         "optional": {
             "garmin_activity_id": "int+",
+            # Intervals.icu (#68, `[data].source = "intervals"`) : identifiant
+            # d'activité de CE serveur, une CHAÎNE (ex. "i12345678") — jamais le
+            # même champ que `garmin_activity_id` (entier), les deux ne
+            # partagent ni le type ni l'espace de nommage. Une activité
+            # synchronisée depuis Intervals.icu porte celui-ci et omet
+            # `garmin_activity_id`, jamais l'inverse.
+            "intervals_activity_id": "str",
             "name": "str",
             "location": "str",
             "start_time": "datetime",

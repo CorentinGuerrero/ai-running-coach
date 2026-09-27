@@ -58,8 +58,9 @@ Ne jamais réactiver silencieusement un niveau plus strict que celui configuré.
 
 **Avec `[data].source = "intervals"` (#68) :** intervals.icu n'a pas de score de
 readiness algorithmique équivalent à celui de Garmin — seul un champ
-`subjective.readiness` auto-déclaré par l'athlète existe côté intervals.icu, ce
-n'est pas la même mesure. À `full`, le bilan devient donc HRV + FC de repos
+`subjective.readiness` existe côté intervals.icu, une valeur manuelle du jour
+qui peut venir de l'athlète OU d'un appareil tiers synchronisé (Oura, Whoop...),
+jamais un score calculé par intervals.icu. À `full`, le bilan devient donc HRV + FC de repos
 (les deux dans le même appel `get_wellness_for_date`) **et l'indisponibilité du
 readiness est dite explicitement** ("readiness indisponible — source
 intervals.icu"), jamais remplacée par le champ subjectif présenté comme
@@ -149,7 +150,7 @@ source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
 | Sommeil | `get_sleep_data` | `get_wellness_for_date` (`sleep.*`) | |
 | Readiness algorithmique | `get_training_readiness` | **aucun équivalent** | intervals.icu n'expose que `subjective.readiness` — une valeur manuelle dans le champ wellness du jour, qui peut venir de l'athlète OU d'un appareil tiers synchronisé (Oura, Whoop...), jamais un score calculé par intervals.icu lui-même — jamais présenté comme équivalent au Training Readiness Garmin. Dire explicitement l'indisponibilité (voir `[health].morning_check` ci-dessus). |
 | Activités récentes | `get_activities` / `get_activities_by_date` | `get_recent_activities` | |
-| Détail d'une activité | `get_activity` | `get_activity_details` | Pas de fréquence cardiaque de récupération (HRR/`recovery_hr_bpm`) ni de `splits` par km sur ce serveur — champs omis, jamais inventés (impacte aussi `course-comparison`, qui exige `splits`). |
+| Détail d'une activité | `get_activity` | `get_activity_details` | Pas de fréquence cardiaque de récupération (HRR/`recovery_hr_bpm`) ni de `splits` par km sur ce serveur — champs omis, jamais inventés (impacte aussi `course-comparison`, qui exige `splits`). Renseigner `intervals_activity_id` (chaîne, ex. `"i12345678"`) sur `activities/*.md` au lieu de `garmin_activity_id` (entier) — `workspace-data-contract`. |
 | Événements planifiés | `get_calendar_events` / `get_scheduled_workouts` | `get_calendar_events` / `get_upcoming_workouts` | |
 | Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | Ne renvoie que id/date/name/category/description/type/metrics — jamais de structure de séance. |
 | Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | **Pas un remplacement direct** — charger le skill `intervals-icu-best-practices` (pas `garmin-workout-scheduling`) : `create_event`/`update_event` n'ont PAS de paramètre structuré (pas de `workout_doc`) ; les cibles (#60) s'écrivent en texte dans `description` ; aucun upsert n'existe (vérifier `get_calendar_events` avant chaque push, pas de réutilisation de `workout_id`) ; la vérification post-push ne porte que sur les champs que `get_event` renvoie réellement. |

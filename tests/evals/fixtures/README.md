@@ -103,8 +103,16 @@ ne teste pas la source intervals.icu n'expose pas ce serveur. Sa liste
 d'outils (`get_wellness_for_date`, `get_recent_activities`,
 `get_calendar_events`, ...) est désormais **vérifiée (#68)** contre le code
 source du serveur retenu par le projet,
-[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp)
-(`src/intervals_icu_mcp/tools/*.py`, branche `main`) — snake_case, pas le
-kebab-case d'une hypothèse antérieure (#26) que cette story corrige. Table de
-correspondance complète avec les outils Garmin équivalents : `AGENTS.md` →
-« Backends MCP ».
+[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp),
+commit `cb91d4a` — snake_case, pas le kebab-case d'une hypothèse antérieure
+(#26) que cette story corrige. Chaque réponse canned est enveloppée
+`{"data": ..., "metadata": {...}}` (`ResponseBuilder.build_response` réel),
+jamais un objet à plat. Table de correspondance complète avec les outils
+Garmin équivalents : `AGENTS.md` → « Backends MCP ».
+
+`stub-responses/intervals-recent-activities.json` : réponse `file`-overridée
+pour `get_recent_activities` dans le cas `sync-intervals-source` — nécessaire
+car `test_stub_section_is_well_formed` exige `file` ou `error` sur toute
+entrée `[stub.intervals.<outil>]` (une section vide ne câblerait rien
+silencieusement), et c'est la seule entrée nécessaire pour que le runner
+enregistre le serveur `intervals` (voir le commentaire du cas).

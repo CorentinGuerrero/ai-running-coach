@@ -40,8 +40,9 @@ every Garmin tool named below (`get_hrv_data`, `get_rhr_day`, `get_sleep_data`)
 maps to `get_wellness_for_date` per the correspondence table in `AGENTS.md` —
 one call returns HRV, resting HR and sleep together. **No intervals.icu
 equivalent exists for the Garmin training-readiness score** — say so
-explicitly (never substitute the unrelated self-reported `subjective.readiness`
-field for it) per `AGENTS.md` → `[health].morning_check`.
+explicitly (never substitute the unrelated `subjective.readiness` field — a
+manual daily value, not a computed score — for it) per `AGENTS.md` →
+`[health].morning_check`.
 
 ### OBJECTIVE ALIGNMENT
 - **Context:** Always ensure your health strategy is aligned with the active training objective stored in `planning/active_objective.md`.

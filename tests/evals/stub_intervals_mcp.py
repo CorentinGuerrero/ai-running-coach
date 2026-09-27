@@ -7,23 +7,33 @@ d'éval que `stub_garmin_mcp.py` (partagés via `mcp_stub_common.py`) — seuls 
 liste d'outils et les données canned changent, pour coller à une source de
 données alternative.
 
-**Liste d'outils : VÉRIFIÉE (#68), plus une hypothèse.** Le serveur retenu par
-le projet (`./install.sh --source intervals`, voir `AGENTS.md` → « Backends
-MCP ») est le serveur communautaire
-[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp).
-Les noms ci-dessous viennent directement de son code source
-(`src/intervals_icu_mcp/tools/*.py`, branche `main` au moment de cette story) —
-snake_case, PAS le kebab-case d'une version antérieure de ce stub (héritée
-d'une hypothèse non vérifiée avant #68) : `get_wellness_for_date`,
-`get_wellness_data`, `get_recent_activities`, `get_activity_details`,
-`get_calendar_events`, `get_upcoming_workouts`, `get_athlete_profile`,
-`get_fitness_summary`, `create_event`, `update_event`, `delete_event`,
-`bulk_create_events`. On n'en reprend ici qu'un sous-ensemble plausible pour ce
-que les agents `coach`/`medical` consomment aujourd'hui côté Garmin (table de
-correspondance complète : `AGENTS.md`).
+**Liste d'outils et FORME de réponse : VÉRIFIÉES (#68, revue PR #116)** contre
+le code source du serveur réellement installé par le projet
+(`./install.sh --source intervals`, voir `AGENTS.md` → « Backends MCP ») :
+[`eddmann/intervals-icu-mcp`](https://github.com/eddmann/intervals-icu-mcp),
+commit `cb91d4a` (`src/intervals_icu_mcp/tools/*.py`, `response_builder.py`).
+
+Deux points de fidélité qui ont changé depuis une première version non
+vérifiée de ce stub :
+
+1. **Enveloppe `{"data": ..., "metadata": {...}}`** (et `"analysis"` quand le
+   vrai outil en produit une) — `ResponseBuilder.build_response` l'applique à
+   CHAQUE outil, contrairement à `garmin_mcp` qui rend ses résultats à plat.
+   Une assertion `payload["data"][...]` doit fonctionner contre ce stub
+   exactement comme contre le vrai serveur.
+2. **Formes imbriquées fidèles** par outil (`heart.resting_hr`, `sleep.*`,
+   `subjective.readiness`, `fitness_metrics.ctl.value`...) — jamais un
+   raccourci plat qui n'existe pas côté serveur réel.
 
 **Scriptable par cas d'éval (#26)**, identique à `stub_garmin_mcp.py` :
 `[stub.intervals.<outil>] file = "…json"` ou `error = "401" | "timeout" | "empty"`.
+Note de fidélité sur `error = "empty"` : `mcp_stub_common.resolve_content` vide
+tout le gabarit `default` (ici l'enveloppe entière), donc `{}` — pas
+`{"data": {}, "metadata": {...}}` comme le rendrait le vrai serveur pour un
+résultat vide. Ce mécanisme est partagé avec `stub_garmin_mcp.py` ; aucun cas
+d'éval de cette story ne scripte `error = "empty"` contre `intervals`, donc
+l'écart n'affecte aucune assertion existante — à corriger dans
+`mcp_stub_common.py` si un futur cas en a besoin.
 
 JSON-RPC 2.0 sur stdin/stdout, une requête par ligne. Bibliothèque standard.
 """
@@ -46,51 +56,104 @@ def _day(offset: int) -> str:
     return (TODAY - timedelta(days=offset)).isoformat()
 
 
+def _envelope(data, *, query_type: str, analysis=None, metadata=None):
+    """Reproduit `ResponseBuilder.build_response` : `data` (+ `analysis`
+    optionnelle) sous une `metadata` qui porte toujours `query_type` (le
+    vrai `fetched_at` horodaté n'est pas reproduit — sans intérêt pour les
+    assertions des cas d'éval, qui ne portent jamais sur un timestamp)."""
+    meta = {"query_type": query_type}
+    if metadata:
+        meta.update(metadata)
+    envelope = {"data": data, "metadata": meta}
+    if analysis:
+        envelope["analysis"] = analysis
+    return envelope
+
+
 # Données synthétiques : un athlète reposé, sans signal d'alerte — même
 # posture que le stub garmin, pour que basculer `[data].source` entre les
-# deux ne change rien au comportement par défaut d'un scénario. Forme
-# imbriquée fidèle à `ResponseBuilder`/`get_wellness_for_date` du serveur réel
-# (sleep/heart/subjective groupés) — PAS le get_hrv_data/get_rhr_day plats de
-# garmin_mcp : c'est précisément ce qui matérialise, dans le stub, qu'un seul
-# appel intervals.icu couvre ce que trois appels Garmin couvrent (AGENTS.md).
+# deux ne change rien au comportement par défaut d'un scénario.
 CANNED = {
-    "get_wellness_for_date": {
-        "date": _day(0),
-        "sleep": {"duration_seconds": 25800, "score": 78},
-        "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
-        # Auto-déclaré par l'athlète — PAS un score de readiness calculé
-        # (aucun outil de ce serveur n'en produit un, voir AGENTS.md).
-        "subjective": {"readiness": 71},
-    },
-    "get_wellness_data": [{
-        "date": _day(0),
-        "sleep": {"duration_seconds": 25800, "score": 78},
-        "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
-        "subjective": {"readiness": 71},
-    }],
-    "get_recent_activities": {
-        "activities": [{
-            "id": "i99000001",
-            "name": "Sortie longue",
-            "start_date": f"{_day(2)}T12:05:00",
-            "type": "Run",
-            "distance_meters": 24800.0,
-            "moving_time_seconds": 9660.0,
-            "elevation_gain_meters": 890.0,
-            "average_heartrate": 141,
+    "get_wellness_for_date": _envelope(
+        {
+            "date": _day(0),
+            "sleep": {"duration_seconds": 25800, "score": 78},
+            "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
+            # Valeur manuelle du jour — PAS un score de readiness calculé
+            # (aucun outil de ce serveur n'en produit un, voir AGENTS.md).
+            "subjective": {"readiness": 71},
+        },
+        query_type="wellness_for_date",
+    ),
+    "get_wellness_data": _envelope(
+        [{
+            "date": _day(0),
+            "sleep": {"duration_seconds": 25800, "score": 78},
+            "heart": {"hrv_rmssd": 62.0, "resting_hr": 49},
+            "subjective": {"readiness": 71},
         }],
-        "count": 1,
-    },
-    "get_activity_details": {"id": "i99000001", "stub": True},
-    "get_calendar_events": [],
-    "get_upcoming_workouts": [],
-    "get_event": {"stub": True},
-    "get_athlete_profile": {"id": "i0", "name": "Athlete"},
-    "get_fitness_summary": {"ctl": 42.0, "atl": 38.0, "form": 4.0},
+        query_type="wellness_data",
+    ),
+    "get_recent_activities": _envelope(
+        {
+            "activities": [{
+                "id": "i99000001",
+                "name": "Sortie longue",
+                "start_date": f"{_day(2)}T12:05:00",
+                "type": "Run",
+                "distance_meters": 24800.0,
+                "moving_time_seconds": 9660.0,
+                "elevation_gain_meters": 890.0,
+                "average_heartrate": 141,
+            }],
+            "count": 1,
+        },
+        query_type="recent_activities",
+    ),
+    "get_activity_details": _envelope(
+        {
+            "id": "i99000001", "name": "Sortie longue", "type": "Run",
+            "start_date": f"{_day(2)}T12:05:00",
+            "distance_meters": 24800.0, "moving_time_seconds": 9660.0,
+            "elevation_gain_meters": 890.0,
+            "heart_rate": {"average": 141, "max": 168},
+        },
+        query_type="activity_details",
+    ),
+    # Fenêtre vide (aucun événement) : forme réelle du serveur pour ce cas
+    # précis — `data.events` (jamais `events_by_date`, qui n'apparaît que
+    # lorsque la liste n'est pas vide).
+    "get_calendar_events": _envelope(
+        {"events": [], "count": 0, "date_range": {"oldest": _day(0), "newest": _day(-7)}},
+        query_type="calendar_events",
+    ),
+    "get_upcoming_workouts": _envelope(
+        {"workouts": [], "count": 0},
+        query_type="upcoming_workouts",
+    ),
+    "get_event": _envelope(
+        {"id": 123456, "date": _day(0), "name": "Endurance 60 min", "category": "WORKOUT"},
+        query_type="get_event",
+    ),
+    "get_athlete_profile": _envelope(
+        {"profile": {"id": "i0", "name": "Athlete"}, "fitness": {"ctl": 42.0, "atl": 38.0, "tsb": 4.0}},
+        query_type="athlete_profile",
+    ),
+    "get_fitness_summary": _envelope(
+        {
+            "athlete_name": "Athlete",
+            "fitness_metrics": {
+                "ctl": {"value": 42.0, "description": "Chronic Training Load (Fitness)"},
+                "atl": {"value": 38.0, "description": "Acute Training Load (Fatigue)"},
+                "tsb": {"value": 4.0, "description": "Training Stress Balance (Form)"},
+            },
+        },
+        query_type="fitness_summary",
+    ),
 }
 
 TOOLS = [
-    ("get_wellness_for_date", "Wellness (HRV, FC repos, sommeil, ressenti auto-déclaré) pour une date."),
+    ("get_wellness_for_date", "Wellness (HRV, FC repos, sommeil, valeur manuelle du jour) pour une date."),
     ("get_wellness_data", "Wellness entre deux dates."),
     ("get_recent_activities", "Dernières activités enregistrées."),
     ("get_activity_details", "Détail d'une activité."),
@@ -100,7 +163,7 @@ TOOLS = [
     ("get_athlete_profile", "Profil de l'athlète."),
     ("get_fitness_summary", "CTL/ATL/forme courants."),
     ("create_event", "Planifie une séance dans le calendrier intervals.icu."),
-    ("update_event", "Modifie un événement planifié."),
+    ("update_event", "Modifie un événement planifié existant (event_id requis)."),
     ("delete_event", "Supprime un événement planifié."),
     ("bulk_create_events", "Planifie plusieurs séances en un appel."),
 ]
@@ -109,9 +172,21 @@ TOOLS = [
 def result_for(name: str, arguments: dict):
     if name in CANNED:
         return CANNED[name]
-    if name.startswith(("create_", "update_", "delete_", "bulk_")):
-        return {"status": "ok", "stub": True, "tool": name, "received": arguments}
-    return {"status": "ok", "stub": True, "tool": name, "data": []}
+    if name in ("create_event", "update_event", "bulk_create_events"):
+        # Formes réelles vérifiées (event_management.py) : un event unique
+        # écho des champs fournis pour create_event/update_event, une liste
+        # `events` pour bulk_create_events — jamais de `workout_doc` en
+        # retour (voir `skills/intervals-icu-best-practices/SKILL.md`).
+        if name == "bulk_create_events":
+            return _envelope({"events": []}, query_type="bulk_create_events")
+        echoed = {k: v for k, v in (arguments or {}).items() if k != "event_id"}
+        return _envelope({"id": arguments.get("event_id", 123456), **echoed}, query_type=name)
+    if name == "delete_event":
+        return _envelope(
+            {"event_id": (arguments or {}).get("event_id"), "deleted": True},
+            query_type="delete_event",
+        )
+    return _envelope({}, query_type=name)
 
 
 def main() -> int:

@@ -1328,7 +1328,30 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 23)
+        self.assertEqual(I.SCHEMA_VERSION, 24)
+
+    def test_schema_version_24_adds_intervals_activity_id_column(self):
+        """#68 : `activity` gagne `intervals_activity_id` (TEXT) — une base
+        construite par une version d'AVANT #68 doit être reconstruite avec la
+        nouvelle colonne, sinon `store()` échouerait sur la première activité
+        synchronisée depuis Intervals.icu avec « no such column »."""
+        db_path = self.tmp / "legacy.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '23');"
+            "CREATE TABLE activity (id INTEGER PRIMARY KEY, source_path TEXT, date TEXT, "
+            "garmin_activity_id INTEGER);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        self.assertEqual(
+            conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0],
+            str(I.SCHEMA_VERSION))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(activity)").fetchall()}
+        self.assertIn("intervals_activity_id", columns)
+        conn.close()
 
     def test_real_v4_database_is_rebuilt_at_current_version(self):
         """Pas seulement « la constante vaut N » : une vraie base laissée par une

@@ -27,8 +27,12 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   seul appel `get_wellness_for_date` couvre HRV + FC de repos + sommeil. Le
   readiness Garmin n'a pas d'équivalent : à `full`, dire "readiness
   indisponible — source intervals.icu" au lieu d'un score ; ne jamais
-  substituer le champ `subjective.readiness` (auto-déclaré, pas calculé). Le
-  serveur MCP interrogé est alors `intervals`, pas `garmin`.
+  substituer le champ `subjective.readiness` (une valeur manuelle du jour,
+  pas un score calculé — voir AGENTS.md). Le serveur MCP interrogé est alors
+  `intervals`, pas `garmin` ; l'activité persistée porte `intervals_activity_id`
+  (chaîne) au lieu de `garmin_activity_id` (entier), et omet HRR/`splits`
+  (aucun équivalent). Aucun échantillon FIT téléchargé (étape 2 ci-dessous
+  sautée entièrement — Garmin uniquement).
 - **Pas de contrôle de premier démarrage** : le coach propose `/coach-setup` quand aucune
   configuration n'existe. **Ici, ne jamais le proposer** : personne ne peut répondre, et la
   proposition finirait dans la notification push. Travailler avec les défauts et le signaler

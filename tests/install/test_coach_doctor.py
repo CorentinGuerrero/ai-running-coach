@@ -656,6 +656,42 @@ class TestNtfyConfigured(InstallAsserts):
             self.assertEqual(check["status"], "ok")
 
 
+class TestDataSourceAware(InstallAsserts):
+    """`[data].source = "intervals"` (#68) : ni `garmin_token` ni `garmin_mcp`
+    ne doivent rapporter une panne — l'athlète n'a jamais eu de compte
+    Garmin, ces deux vérifications n'ont rien à évaluer (revue PR #116)."""
+
+    def test_garmin_checks_become_info_under_intervals_source(self):
+        with Sandbox() as sb:
+            (sb.repo / "config").mkdir(exist_ok=True)
+            (sb.repo / "config/workspace.user.toml").write_text('[data]\nsource = "intervals"\n')
+            proc = sb.script(
+                "coach_doctor.py", "--json", "--workspace", str(sb.repo),
+                "--tokens-dir", str(sb.root / "tokens-absent"),
+            )
+            self.assertSucceeded(proc)
+            payload = json.loads(proc.stdout)
+            token_check = _find(payload, "garmin_token")
+            mcp_check = _find(payload, "garmin_mcp")
+            self.assertEqual(token_check["status"], "info")
+            self.assertEqual(mcp_check["status"], "info")
+            self.assertNotIn("expires_at", token_check)
+
+    def test_garmin_checks_run_normally_under_default_source(self):
+        with Sandbox() as sb:
+            proc = sb.script(
+                "coach_doctor.py", "--json", "--workspace", str(sb.repo),
+                "--tokens-dir", str(sb.root / "tokens-absent"),
+            )
+            # Tokens absents => statut non "info" (avertissement/erreur réel),
+            # PAS le succès de commande : seul le comportement du check
+            # garmin_token nous intéresse ici, pas le code de sortie global.
+            payload = json.loads(proc.stdout)
+            token_check = _find(payload, "garmin_token")
+            self.assertNotEqual(token_check["status"], "info")
+            self.assertIn("expires_at", token_check)
+
+
 class TestJsonSchema(InstallAsserts):
     def test_schema_shape(self):
         with Sandbox() as sb:

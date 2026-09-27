@@ -360,15 +360,18 @@ class TestIntervalsStubFraming(StubProcessTestCase):
         self.assertEqual(response["result"]["serverInfo"]["name"], "intervals-stub")
 
     def test_tools_call_default_wellness(self):
-        # Nom et forme vérifiés (#68) contre eddmann/intervals-icu-mcp :
-        # snake_case, champ imbriqué `heart.resting_hr` (PAS `restingHR` plat
-        # ni kebab-case — hypothèse antérieure non vérifiée corrigée par #68).
+        # Nom et forme vérifiés (#68, revue PR #116) contre eddmann/intervals-icu-mcp :
+        # snake_case, enveloppe `{"data": {...}, "metadata": {...}}`
+        # (`ResponseBuilder.build_response`), champ imbriqué `heart.resting_hr`
+        # sous `data` (PAS `restingHR` plat, PAS de kebab-case, PAS un objet
+        # racine sans enveloppe — hypothèses antérieures non vérifiées).
         proc = self.start()
         self.initialize(proc)
         self.call(proc, "get_wellness_for_date")
         response = self.recv(proc)
         payload = json.loads(response["result"]["content"][0]["text"])
-        self.assertIn("resting_hr", payload["heart"])
+        self.assertIn("metadata", payload)
+        self.assertIn("resting_hr", payload["data"]["heart"])
 
     def test_shares_the_call_log_format_with_garmin(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -382,6 +385,9 @@ class TestIntervalsStubFraming(StubProcessTestCase):
             self.assertEqual(entries[0]["server"], "intervals")
 
     def test_injected_error_matches_garmin_semantics(self):
+        # `error = "empty"` vide tout le gabarit `default` — ici l'enveloppe
+        # entière (`{"data": ..., "metadata": ...}`), pas seulement `data` :
+        # écart de fidélité assumé et documenté en tête de stub_intervals_mcp.py.
         proc = self.start(stub_config={"get_wellness_for_date": {"error": "empty"}})
         self.initialize(proc)
         self.call(proc, "get_wellness_for_date")
