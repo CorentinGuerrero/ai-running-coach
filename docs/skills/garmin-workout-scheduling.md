@@ -15,12 +15,35 @@
 - **Idempotence** : éviter les doublons lors des re-push
 - **Détail des séances de renforcement** : exercices, répétitions, poids, repos, boucles `RepeatGroupDTO`
 - **Pattern verify-after-push** : vérifier que la séance est bien dans le calendrier après le push
+- **Cibles personnelles (#60)** : zones FC, allure GAP plate, D+ de côte
 
 ## Principes clés
 
 - Le **calendrier Garmin est la destination PRIMAIRE** de planification
 - **Intervals.icu est secondaire** (uniquement si l'utilisateur le demande)
 - Les séances de renforcement doivent inclure le **détail complet** (boucles, exercices, séries, poids, repos)
+
+## Cibles personnelles (`scripts/arc_workout_targets.py`, #60)
+
+Avant de construire le `workout_data` d'une séance, l'agent `coach` calcule
+ses cibles PERSONNELLES — jamais une borne générique — avec :
+
+```bash
+python3 scripts/arc_workout_targets.py targets --session planning/Semaine.md#2026-09-30
+```
+
+| Cible | Champ | Source | Unité DTO |
+|---|---|---|---|
+| Zone FC | `hr_target.bounds_bpm` | Zones de l'athlète (#43), mappées depuis l'intensité planifiée : `recovery`→Z1, `endurance`→Z2, `tempo`→Z3, `threshold`→Z4, `vo2max`→Z5 | bpm, entier (`targetValueOne`/`targetValueTwo`) |
+| Allure plate | `pace_target.speed_low_ms`/`speed_high_ms` | Référence plate GAP personnelle/générique (#44/#58), UNIQUEMENT pour `recovery`/`endurance` | **mètres/seconde** (`targetValueOne`/`targetValueTwo`, `pace.zone`) |
+| D+ de côte | `hill_repeats.per_rep.elevation_gain_m` | Vitesse personnelle/générique prédite à la pente demandée (#58) × durée du répétitif | mètres (informatif, dans la description du pas — Garmin n'a pas de champ D+) |
+
+Chaque cible non calculable rend `reason`/`reason_code` explicite (profil sans
+zones FC, pente sans modèle, intensité sans mise à l'échelle d'allure
+validée) : l'agent retire alors la cible correspondante du DTO plutôt que
+d'en inventer une. Voir `skills/garmin-workout-scheduling/SKILL.md`, section
+« Personal targets », pour le détail complet (mapping, provenance,
+conversions d'unités, D+ attendu vs mesuré).
 
 ## Fichier source
 
