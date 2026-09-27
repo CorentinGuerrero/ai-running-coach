@@ -1949,6 +1949,32 @@ def _read_week_argument(value: str) -> dict:
     return data
 
 
+def _select_week_entry(block: dict, today: date) -> dict:
+    """#69 : `--week` peut désigner un fichier PLAN MULTI-SEMAINES (`weeks[]`)
+    plutôt qu'une semaine unique — sélectionne alors la semaine dont le
+    `week_start` (lundi) contient `today` (`--today`, ou la date du jour). Rend
+    `block` tel quel quand il n'a pas de `weeks` (format historique, une seule
+    semaine — comportement INCHANGÉ). Lève `ConfigError` si aucune semaine du
+    fichier ne couvre `today` : `check` porte toujours sur LA semaine en cours,
+    jamais sur « la première du fichier » choisie au hasard."""
+    weeks = block.get("weeks")
+    if weeks is None:
+        return block
+    if not isinstance(weeks, list) or not weeks:
+        raise ConfigError("--week : « weeks » doit être une liste non vide de semaines.")
+    target = (today - timedelta(days=today.weekday())).isoformat()
+    for entry in weeks:
+        if isinstance(entry, dict) and entry.get("week_start") == target:
+            return entry
+    available = ", ".join(sorted(
+        str(e.get("week_start")) for e in weeks if isinstance(e, dict)
+    ))
+    raise ConfigError(
+        f"--week : fichier multi-semaines sans semaine du {target} (lundi de --today) — "
+        f"semaines présentes : {available or 'aucune'}."
+    )
+
+
 # Codes de sortie (revue de code #98, should-fix 11) — documentés ici ET dans
 # `--help` : un agent en headless (câblage #53) doit pouvoir les distinguer sans
 # ambiguïté.
@@ -2023,7 +2049,12 @@ def main(argv=None) -> int:
 
     if not args.week:
         raise ConfigError("--week : obligatoire pour la sous-commande « check » (voir --help).")
-    proposed_week = _read_week_argument(args.week)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    raw_block = _read_week_argument(args.week)
+    # #69 : un fichier PLAN MULTI-SEMAINES (`weeks[]`) porte plusieurs semaines —
+    # sélectionne celle de `today` avant de continuer exactement comme pour une
+    # semaine unique (format historique, `_select_week_entry` la rend telle quelle).
+    proposed_week = _select_week_entry(raw_block, today)
     week_start_raw = proposed_week.get("week_start")
     if not week_start_raw:
         raise ConfigError("--week : « week_start » (AAAA-MM-JJ) obligatoire dans la semaine proposée.")
@@ -2037,7 +2068,6 @@ def main(argv=None) -> int:
 
     workspace = workspace_root(args.workspace)
     conn = I.open_db(workspace, args.db, args.memory)
-    today = date.fromisoformat(args.today) if args.today else date.today()
     I.index_workspace(conn, workspace, today.isoformat())
     config = I.load_config(workspace)
     gconf = guardrail_settings(config)

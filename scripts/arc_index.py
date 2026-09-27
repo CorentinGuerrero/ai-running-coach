@@ -202,7 +202,14 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # SCHEMA_VERSION` restant vrai), et `performance_index()`/`/api/summary`
 # échouent avec « no such table » — panne du tableau de bord entier pour un
 # utilisateur existant (revue de code #109, 2e tour, blocker).
-SCHEMA_VERSION = 22
+# #69 : plan multi-semaines (`week.weeks[]`) — `week`/`planned_session` gagnent
+# une colonne `shadowed` (0/1), calculée à CHAQUE `index_workspace()` par
+# `_mark_week_shadowing` (jamais persistée entre deux semaines contradictoires :
+# recalculée en entier à chaque passage, jamais périmée même si le fichier
+# « gagnant » d'une collision disparaît). Sans ce bump, une base déjà construite
+# par une version antérieure n'a pas la colonne et `store()`/les requêtes du
+# tableau de bord échoueraient avec « no such column ».
+SCHEMA_VERSION = 23
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -483,15 +490,22 @@ CREATE TABLE weather_day (
     temp_min_c REAL, temp_max_c REAL, feels_like_c REAL, wind_kmh REAL, gust_kmh REAL,
     precip_mm REAL, chance_of_rain_pct REAL, uv_index REAL, data_json TEXT
 );
+-- `shadowed` (#69, plan multi-semaines) : 0 par défaut, posé à 1 par
+-- `_mark_week_shadowing` pour la ou les semaines écartées d'une collision de
+-- `week_start` entre plusieurs fichiers (voir SKILL.md, section « Collision »).
+-- Recalculé en ENTIER à chaque `index_workspace()`, jamais un état persisté
+-- entre deux passes : une semaine ne reste jamais figée « shadowed » après la
+-- disparition du fichier qui la masquait.
 CREATE TABLE week (
     source_path TEXT, arc_version INTEGER, week_start TEXT, location TEXT, phase TEXT,
-    target_duration_s REAL, target_distance_m REAL, target_elevation_m REAL, body_md TEXT
+    target_duration_s REAL, target_distance_m REAL, target_elevation_m REAL, body_md TEXT,
+    shadowed INTEGER DEFAULT 0
 );
 CREATE TABLE planned_session (
     source_path TEXT, week_start TEXT, date TEXT, sport TEXT, title TEXT,
     planned_duration_s REAL, planned_distance_m REAL, planned_elevation_m REAL,
     intensity TEXT, outdoor INTEGER, garmin_workout_id INTEGER, status TEXT,
-    weather_category TEXT, best_slot TEXT
+    weather_category TEXT, best_slot TEXT, shadowed INTEGER DEFAULT 0
 );
 CREATE TABLE nutrition_day (
     source_path TEXT, date TEXT, intake_kcal REAL, carbs_g REAL, protein_g REAL, fat_g REAL,
@@ -994,23 +1008,35 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
             "data_json": _data_json(data),
         })
     elif kind == "week":
-        _insert(conn, "week", {
-            "source_path": rel, "arc_version": arc_version, "week_start": g("week_start"),
-            "location": g("location"), "phase": g("phase"), "target_duration_s": g("target_duration_s"),
-            "target_distance_m": g("target_distance_m"), "target_elevation_m": g("target_elevation_m"),
-            "body_md": body,
-        })
-        for s in g("sessions") or []:
-            if not isinstance(s, dict):
+        # #69 : `weeks` (liste) éclate un fichier multi-semaines en une ligne
+        # `week` par semaine, toutes partageant ce `source_path` — la purge par
+        # fichier (`_purge`, filtrée sur `source_path` seul) les retire donc
+        # TOUTES d'un coup à la prochaine écriture, exactement comme pour une
+        # semaine unique. Le format historique (pas de `weeks`) est traité comme
+        # une liste d'une seule semaine — même code, aucun cas particulier.
+        weeks = g("weeks")
+        entries = weeks if isinstance(weeks, list) else [data]
+        for entry in entries:
+            if not isinstance(entry, dict):
                 continue
-            _insert(conn, "planned_session", {
-                "source_path": rel, "week_start": g("week_start"),
-                **{k: s.get(k) for k in (
-                    "date", "sport", "title", "planned_duration_s", "planned_distance_m",
-                    "planned_elevation_m", "intensity", "garmin_workout_id", "status",
-                    "weather_category", "best_slot")},
-                "outdoor": None if s.get("outdoor") is None else int(bool(s["outdoor"])),
+            ge = entry.get
+            _insert(conn, "week", {
+                "source_path": rel, "arc_version": arc_version, "week_start": ge("week_start"),
+                "location": ge("location"), "phase": ge("phase"), "target_duration_s": ge("target_duration_s"),
+                "target_distance_m": ge("target_distance_m"), "target_elevation_m": ge("target_elevation_m"),
+                "body_md": body,
             })
+            for s in ge("sessions") or []:
+                if not isinstance(s, dict):
+                    continue
+                _insert(conn, "planned_session", {
+                    "source_path": rel, "week_start": ge("week_start"),
+                    **{k: s.get(k) for k in (
+                        "date", "sport", "title", "planned_duration_s", "planned_distance_m",
+                        "planned_elevation_m", "intensity", "garmin_workout_id", "status",
+                        "weather_category", "best_slot")},
+                    "outdoor": None if s.get("outdoor") is None else int(bool(s["outdoor"])),
+                })
     elif kind == "nutrition":
         _insert(conn, "nutrition_day", {
             "source_path": rel, **{k: g(k) for k in (
@@ -1074,7 +1100,8 @@ def planned_intensity_for(conn, date: Optional[str], sport: Optional[str]) -> Op
         return None
     family = M.sport_family(sport)
     for row in conn.execute(
-            "SELECT sport, intensity FROM planned_session WHERE date = ? AND intensity IS NOT NULL",
+            "SELECT sport, intensity FROM planned_session "
+            "WHERE date = ? AND intensity IS NOT NULL AND shadowed = 0",
             (date,)).fetchall():
         if M.sport_family(row["sport"]) == family:
             return row["intensity"]
@@ -1835,6 +1862,97 @@ def weekly_polarisation(conn, weeks: int, today: date) -> List[dict]:
     return out
 
 
+# `planning/Semaine_<lundi>.md` — reconnaît le fichier DÉDIÉ d'une semaine
+# précise, qu'il porte une semaine unique ou (accessoirement) un plan
+# multi-semaines dont la première entrée est justement cette semaine-là. Utilisé
+# UNIQUEMENT par `_mark_week_shadowing` pour la priorité de collision (#69) —
+# distinct de `_SOURCE_WEEK_RE` plus bas (qui, lui, sert à afficher une date pour
+# n'importe quel fichier `planning/Semaine_*.md`, sans notion de priorité).
+def _dedicated_week_source(week_start: str) -> str:
+    return f"planning/Semaine_{week_start}.md"
+
+
+def week_collisions(conn) -> List[dict]:
+    """Semaines (`week_start`) décrites par PLUSIEURS fichiers à la fois (#69) —
+    un fichier dédié `planning/Semaine_<lundi>.md` et un plan multi-semaines qui
+    couvre incidemment le même lundi, ou deux plans multi-semaines qui se
+    recouvrent. Rend une entrée par collision : `week_start`, `winner` (le
+    `source_path` qui l'emporte), `losers` (les autres, écartés des tables
+    dérivées). Priorité au fichier DÉDIÉ de cette semaine (son nom porte
+    exactement ce lundi) ; à défaut, au chemin le plus petit par ordre
+    alphabétique — déterministe, ne dépend d'aucun ordre de traitement.
+
+    Pure lecture (aucune écriture) : calculée à la demande à partir du contenu
+    ACTUEL de la table `week`, jamais d'un état mémorisé qui pourrait rester
+    périmé si le fichier gagnant disparaît. `_mark_week_shadowing` (appelée par
+    `index_workspace` à chaque passage) applique ce même calcul aux colonnes
+    `shadowed` de `week`/`planned_session` que lisent le tableau de bord et les
+    CLI ; cette fonction-ci existe pour les tests et un futur affichage
+    explicite de la collision (backfill, `/api/files`)."""
+    rows = conn.execute(
+        "SELECT DISTINCT week_start, source_path FROM week WHERE week_start IS NOT NULL"
+    ).fetchall()
+    by_week: Dict[str, List[str]] = {}
+    for row in rows:
+        by_week.setdefault(row["week_start"], []).append(row["source_path"])
+    collisions = []
+    for week_start, sources in sorted(by_week.items()):
+        if len(sources) <= 1:
+            continue
+        sources = sorted(sources)
+        dedicated = _dedicated_week_source(week_start)
+        winner = dedicated if dedicated in sources else sources[0]
+        collisions.append({
+            "week_start": week_start, "winner": winner,
+            "losers": [s for s in sources if s != winner],
+        })
+    return collisions
+
+
+_WEEK_COLLISION_MARKER = "en collision avec"  # identifie nos propres messages dans `issues`
+
+
+def _mark_week_shadowing(conn) -> None:
+    """Recalcule EN ENTIER (#69) la colonne `shadowed` de `week`/`planned_session`
+    à partir de `week_collisions` ci-dessus, et tient à jour un avertissement
+    dans les `issues` du/des fichier(s) perdant(s) — visible dans
+    `backfill_items` et le tableau de bord (`/api/files`) sans qu'on ait besoin
+    d'ouvrir le fichier. Repart de zéro à chaque appel (jamais un `shadowed`
+    incrémental, jamais un avertissement seulement AJOUTÉ) : les anciens
+    messages de collision sont retirés avant que les collisions ACTUELLES ne
+    soient réécrites, pour qu'une collision résolue (fichier gagnant réécrit ou
+    supprimé) ne laisse jamais un avertissement périmé dans `issues`."""
+    conn.execute("UPDATE week SET shadowed = 0")
+    conn.execute("UPDATE planned_session SET shadowed = 0")
+    loser_messages: Dict[str, List[str]] = {}
+    for collision in week_collisions(conn):
+        week_start, winner = collision["week_start"], collision["winner"]
+        for loser in collision["losers"]:
+            conn.execute(
+                "UPDATE week SET shadowed = 1 WHERE source_path = ? AND week_start = ?",
+                (loser, week_start))
+            conn.execute(
+                "UPDATE planned_session SET shadowed = 1 WHERE source_path = ? AND week_start = ?",
+                (loser, week_start))
+            loser_messages.setdefault(loser, []).append(
+                f"semaine {week_start} en collision avec {winner} : {winner} fait foi "
+                f"pour cette semaine (#69, priorité au fichier dédié sinon au chemin le "
+                f"plus petit), cette entrée est ignorée du tableau de bord et des CLI"
+            )
+    previously_flagged = {
+        row["path"] for row in conn.execute(
+            f"SELECT path FROM source_file WHERE issues LIKE '%{_WEEK_COLLISION_MARKER}%'"
+        ).fetchall()
+    }
+    for path in previously_flagged | set(loser_messages):
+        row = conn.execute("SELECT issues FROM source_file WHERE path = ?", (path,)).fetchone()
+        if row is None:
+            continue
+        issues = [i for i in json.loads(row["issues"] or "[]") if _WEEK_COLLISION_MARKER not in i]
+        issues.extend(loser_messages.get(path, []))
+        conn.execute("UPDATE source_file SET issues = ? WHERE path = ?", (_j(issues), path))
+
+
 def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
     """Indexe (incrémental) puis recalcule les métriques. Rend un résumé."""
     conf = settings(load_config(workspace))
@@ -1880,6 +1998,12 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
             _purge(conn, rel)
             conn.execute("DELETE FROM source_file WHERE path = ?", (rel,))
             counts["removed"] += 1
+    # #69 : collisions de `week_start` entre fichiers (fichier dédié vs plan
+    # multi-semaines, ou deux plans qui se recouvrent) — recalculé en ENTIER à
+    # CHAQUE passage, changement ou non (voir la docstring de la fonction : un
+    # fichier gagnant supprimé/inchangé pas de ce passage ne doit jamais laisser
+    # une semaine ni un avertissement périmés).
+    _mark_week_shadowing(conn)
     # Échantillons FIT (#42) — table dédiée `sample_file`, jamais `source_file` (voir
     # `ingest_samples`) : sa propre découverte/nettoyage ne touche donc jamais la boucle
     # ci-dessus. Le rattachement à `activity` n'est plus résolu ICI (il l'était par
@@ -1937,6 +2061,13 @@ def backfill_items(conn) -> List[dict]:
     L'attendu tient compte de la configuration : en `morning_check = "off"`, un
     fichier santé sans HRV n'est pas une dette (expected_keys ne demande rien) ;
     un workspace sans nutritionniste n'a pas de `nutrition/` à remplir.
+
+    Inclut aussi (#69) un fichier par ailleurs VALIDE (`parsed_ok = "ok"`) dont
+    une semaine est éclipsée par une collision de `week_start` avec un autre
+    fichier (`_mark_week_shadowing`) : ce n'est pas un fichier hors contrat,
+    mais son plan est ignoré du tableau de bord tant que la collision n'est pas
+    résolue — une dette réelle, actionnable (réécrire le fichier), qui mérite
+    la même visibilité qu'une dette de contrat plutôt que de rester invisible.
     """
     items = []
     for row in conn.execute(
@@ -1945,7 +2076,7 @@ def backfill_items(conn) -> List[dict]:
         # type NEUF, jamais écrit avant ce contrat — aucun fichier historique à
         # reprendre, jamais de dette de backfill à faire apparaître pour lui.
         "WHERE kind IS NOT NULL AND kind NOT IN ('athlete', 'objective', 'decision') "
-        "AND parsed_ok != 'ok' ORDER BY path"
+        f"AND (parsed_ok != 'ok' OR issues LIKE '%{_WEEK_COLLISION_MARKER}%') ORDER BY path"
     ).fetchall():
         # Seul un fichier hors contrat (sans bloc, bloc invalide, illisible) est une dette.
         # Une clé facultative absente d'un bloc valide (pas de verdict ce jour-là, pas de

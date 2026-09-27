@@ -134,7 +134,7 @@ Quelques habitudes suffisent pour qu'il soit toujours à jour.
 | **Le matin** | [Aujourd'hui](views.md#aujourdhui) | Le verdict et la séance du jour. Pas de verdict ? Demandez au coach « je cours aujourd'hui ? » : il fait le bilan, tranche et l'écrit. |
 | **Après une séance** | [Séances](views.md#seances) → détail | Les splits, la FC, l'analyse du coach — une fois la séance synchronisée. |
 | **Le dimanche** | [Semaine](views.md#semaine), [Forme & charge](views.md#forme-charge) | Le réalisé face au plan, la tendance de forme. Puis, avec le coach, le plan de la semaine suivante. |
-| **Quand le coach planifie** | [Semaine](views.md#semaine) | Que chaque semaine du plan a bien son fichier `planning/Semaine_<lundi>.md` : un plan sur plusieurs semaines = un fichier par semaine. |
+| **Quand le coach planifie** | [Semaine](views.md#semaine) | Que chaque semaine du plan est bien lisible : un fichier `planning/Semaine_<lundi>.md` par semaine, ou un seul fichier multi-semaines (`weeks[]`, #69) — les deux formes s'affichent semaine par semaine. |
 | **Avant une course** | [Performance](views.md#performance), [Rapports](views.md#rapports) | Les temps prédits, le plan de course du stratège. |
 
 Avec une [machine coach](headless.md), la synchronisation de chaque matin fait le

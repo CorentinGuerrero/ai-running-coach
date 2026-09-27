@@ -1093,6 +1093,38 @@ class TestCLI(WorkspaceCase):
                             "--today", "2026-09-20", input_text=json.dumps(payload))
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_check_on_multi_week_file_selects_the_week_of_today(self):
+        """#69 : `--week` sur un fichier `weeks[]` doit vérifier la semaine du
+        lundi de `--today`, pas « la première du fichier »."""
+        self.write("planning/Semaine_2026-09-21.md", {
+            "kind": "week",
+            "weeks": [
+                {"week_start": "2026-09-21", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-22", "sport": "trail", "title": "EF",
+                               "planned_duration_s": 3000, "intensity": "endurance"}]},
+                {"week_start": "2026-09-28", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-29", "sport": "trail", "title": "EF",
+                               "planned_duration_s": 3000, "intensity": "endurance"}]},
+            ],
+        })
+        result = self._run("check", "--week", str(self.ws / "planning/Semaine_2026-09-21.md"),
+                            "--workspace", str(self.ws), "--today", "2026-09-27")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertIn("ok", payload)
+
+    def test_check_on_multi_week_file_without_a_matching_week_is_a_clean_error(self):
+        self.write("planning/Semaine_2026-09-21.md", {
+            "kind": "week",
+            "weeks": [
+                {"week_start": "2026-09-21", "location": "Tournai", "sessions": []},
+            ],
+        })
+        result = self._run("check", "--week", str(self.ws / "planning/Semaine_2026-09-21.md"),
+                            "--workspace", str(self.ws), "--today", "2026-10-12")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("2026-10-12", result.stderr)
+
 
 class TestRuleLabels(unittest.TestCase):
     """#55 : `RULE_LABELS` doit toujours couvrir exactement `RULE_IDS`, jamais

@@ -468,7 +468,12 @@ def api_health(store: Store, q: dict) -> dict:
 
 def _week_sessions_and_activities(store: Store, monday: date) -> Tuple[list, list]:
     sunday = monday + timedelta(days=6)
-    sessions = store.rows("SELECT * FROM planned_session WHERE date >= ? AND date <= ? ORDER BY date",
+    # `shadowed = 0` (#69, plan multi-semaines) : exclut les séances d'un fichier
+    # écarté par une collision de `week_start` (voir `arc_index._mark_week_shadowing`)
+    # — sinon une même semaine décrite deux fois (fichier dédié + plan multi-semaines
+    # qui la recouvre) doublerait ses séances ici.
+    sessions = store.rows("SELECT * FROM planned_session WHERE date >= ? AND date <= ? "
+                          "AND shadowed = 0 ORDER BY date",
                           (monday.isoformat(), sunday.isoformat()))
     activities = store.rows("SELECT id, date, sport, name, distance_m, duration_s, elevation_gain_m, avg_hr_bpm, load "
                             "FROM activity WHERE date >= ? AND date <= ? ORDER BY date",
@@ -490,11 +495,15 @@ def api_week(store: Store, q: dict) -> dict:
         monday = _monday(today)
     monday = _monday(monday)
     sunday = monday + timedelta(days=6)
-    week = store.one("SELECT * FROM week WHERE week_start = ?", (monday.isoformat(),))
+    # `shadowed = 0` (#69) : même raison que `_week_sessions_and_activities` ci-dessus
+    # — une semaine éclipsée par une collision de `week_start` ne doit jamais être
+    # servie à la place de celle qui fait foi.
+    week = store.one("SELECT * FROM week WHERE week_start = ? AND shadowed = 0", (monday.isoformat(),))
     sessions, done = _week_sessions_and_activities(store, monday)
     weather = store.rows("SELECT date, location, category, best_slot, slot_reason, temp_max_c, wind_kmh, precip_mm "
                          "FROM weather_day WHERE date >= ? AND date <= ? ORDER BY date", (monday.isoformat(), sunday.isoformat()))
-    weeks = [r["week_start"] for r in store.rows("SELECT DISTINCT week_start FROM week ORDER BY week_start")]
+    weeks = [r["week_start"] for r in store.rows(
+        "SELECT DISTINCT week_start FROM week WHERE shadowed = 0 ORDER BY week_start")]
     return {
         "week_start": monday.isoformat(), "today": today.isoformat(),
         "week": _strip(week, "body_md"), "body_html": render_markdown(I.C.body_after_block(week["body_md"] or "")) if week else None,

@@ -398,18 +398,26 @@ tard, avec les fiches de renforcement et le home trainer :
 
 | Alimentée par | Écrit par |
 |---|---|
-| `planning/Semaine_<lundi>.md` : **un fichier par semaine**, nommé d'après son lundi (`Semaine_2026-09-21.md`) | le coach, quand il planifie ou pousse le plan sur Garmin |
+| `planning/Semaine_<lundi>.md` : un fichier par semaine, OU un seul fichier multi-semaines (`weeks[]`, #69) nommé d'après le lundi de sa première semaine | le coach, quand il planifie ou pousse le plan sur Garmin |
 | `activities/*.md` (le réalisé) | la synchronisation |
 | `medical/<date>_meteo.md` | le coach, skill `weather-forecast` |
 
-!!! warning "« Pas de plan de semaine au contrat pour ces dates »"
-    La vue ne lit que les fichiers `planning/Semaine_<lundi>.md`. Un plan de
-    plusieurs semaines rangé dans un seul fichier (« plan de transition sur
-    10 semaines ») reste invisible, et n'apparaît même pas dans les fichiers hors
-    contrat. Demandez au coach d'en écrire **un fichier par semaine** — dix semaines,
-    dix fichiers —, chacun avec son bloc de données : séances datées, et
-    `garmin_workout_id` quand elles sont sur le calendrier Garmin. Le plan d'origine
-    reste la référence ; chaque fichier semaine y renvoie.
+Un plan de plusieurs semaines (« plan de transition sur 10 semaines ») n'a plus
+besoin d'un fichier par semaine (#69) : le coach peut écrire un seul fichier
+`planning/Semaine_<premier-lundi>.md` avec un bloc `weeks` — une entrée par
+semaine, chacune avec ses séances datées et son `garmin_workout_id` quand
+elles sont sur le calendrier Garmin. La vue Semaine retrouve chaque semaine du
+fichier par sa propre date, exactement comme pour un fichier par semaine — les
+deux formes restent possibles, au choix du coach (voir `skills/
+workspace-data-contract/SKILL.md`, section `week`).
+
+!!! warning "Collision entre deux fichiers pour la même semaine"
+    Si un fichier dédié `planning/Semaine_<lundi>.md` ET un plan multi-semaines
+    décrivent tous les deux la même semaine, le fichier DÉDIÉ fait foi — l'autre
+    entrée est ignorée de cette vue (elle reste visible dans les fichiers hors
+    contrat/à vérifier, avec un message expliquant lequel des deux l'emporte).
+    Évitez la situation plutôt que d'en dépendre : réécrivez ou supprimez le
+    fichier de trop.
 
 ## Séances
 

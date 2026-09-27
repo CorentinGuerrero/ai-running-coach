@@ -664,7 +664,18 @@ def _load_session_arg(value: str, workspace: Path) -> dict:
     start = text.find("\n", start) + 1
     end = text.find("```", start)
     block = json.loads(text[start:end])
-    candidates = [sess for sess in block.get("sessions", []) if sess.get("date") == date_part]
+    # #69 : un fichier PLAN MULTI-SEMAINES (`weeks[]`) n'a pas de `sessions` au
+    # premier niveau — ses séances sont réparties dans `weeks[].sessions`. On les
+    # rassemble toutes avant de filtrer par date : le sélecteur reste `AAAA-MM-JJ`
+    # (`@index`/`:titre`), inchangé, la bonne semaine étant déjà déterminée par la
+    # date de la séance elle-même, jamais par un `week_start` à choisir à part.
+    weeks = block.get("weeks")
+    if isinstance(weeks, list):
+        all_sessions = [sess for w in weeks if isinstance(w, dict)
+                         for sess in (w.get("sessions") or []) if isinstance(sess, dict)]
+    else:
+        all_sessions = [sess for sess in block.get("sessions", []) if isinstance(sess, dict)]
+    candidates = [sess for sess in all_sessions if sess.get("date") == date_part]
     if not candidates:
         raise ValueError(f"{path} : aucune séance datée {date_part} dans sessions[]")
     if index_part is not None:

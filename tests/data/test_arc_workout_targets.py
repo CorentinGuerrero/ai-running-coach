@@ -495,6 +495,51 @@ class TestLoadSessionArg(unittest.TestCase):
             with self.assertRaises(ValueError):
                 T._load_session_arg(f"{path}#not-a-date", Path(tmp))
 
+    # -- #69 : fichier plan multi-semaines (`weeks[]`) ------------------------
+
+    def _multi_week_file(self, tmp: Path, weeks: list) -> Path:
+        path = Path(tmp) / "Semaine.md"
+        block = {"arc": 1, "kind": "week", "weeks": weeks}
+        path.write_text("# Semaine\n\n```arc\n" + json.dumps(block, ensure_ascii=False) + "\n```\n",
+                         encoding="utf-8")
+        return path
+
+    def test_session_found_across_weeks_of_a_multi_week_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._multi_week_file(tmp, [
+                {"week_start": "2026-09-21", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-22", "sport": "trail", "title": "Footing S1"}]},
+                {"week_start": "2026-09-28", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-30", "sport": "trail", "title": "Footing S2"}]},
+            ])
+            session = T._load_session_arg(f"{path}#2026-09-30", Path(tmp))
+            self.assertEqual(session["title"], "Footing S2")
+
+    def test_session_not_found_in_any_week_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._multi_week_file(tmp, [
+                {"week_start": "2026-09-21", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-22", "sport": "trail", "title": "Footing"}]},
+            ])
+            with self.assertRaises(ValueError):
+                T._load_session_arg(f"{path}#2026-10-05", Path(tmp))
+
+    def test_ambiguous_date_across_weeks_resolved_by_title(self):
+        """Une date en double n'arrive normalement pas ENTRE deux semaines
+        distinctes (#69, chaque semaine couvre 7 jours disjoints) — mais le
+        sélecteur `:titre`/`@index` reste utilisable si ça se produisait quand
+        même (fichier mal formé, deux `week_start` en collision non résolue ici :
+        cette fonction lit le texte brut, pas la table indexée)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._multi_week_file(tmp, [
+                {"week_start": "2026-09-21", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-22", "sport": "trail", "title": "Seuil"}]},
+                {"week_start": "2026-09-21", "location": "Tournai",
+                 "sessions": [{"date": "2026-09-22", "sport": "trail", "title": "Endurance"}]},
+            ])
+            session = T._load_session_arg(f"{path}#2026-09-22:Endurance", Path(tmp))
+            self.assertEqual(session["title"], "Endurance")
+
 
 class TestMainCli(unittest.TestCase):
     """`arc_workout_targets.main` bout en bout, workspace jetable (#107 revue

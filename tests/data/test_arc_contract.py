@@ -510,6 +510,100 @@ class TestHealthPain(unittest.TestCase):
         self.assertEqual(errors + warnings, [])
 
 
+class TestWeek(unittest.TestCase):
+    """#69 : plan multi-semaines (`week.weeks[]`) — rétrocompatibilité de la
+    semaine unique, et validation individuelle de chaque semaine du tableau."""
+
+    def session(self, day, **extra):
+        return {"date": day, "sport": "running", "title": "Footing", **extra}
+
+    def single(self, **extra):
+        return {"arc": 1, "kind": "week", "week_start": "2026-09-21", "location": "Tournai",
+                "sessions": [self.session("2026-09-22")], **extra}
+
+    def multi(self, weeks):
+        return {"arc": 1, "kind": "week", "weeks": weeks}
+
+    # -- rétrocompatibilité : le format historique n'a pas changé ------------
+
+    def test_single_week_still_valid(self):
+        errors, warnings = C.validate(self.single())
+        self.assertEqual(errors + warnings, [])
+
+    def test_single_week_still_requires_week_start(self):
+        data = self.single()
+        del data["week_start"]
+        errors, _ = C.validate(data)
+        self.assertTrue(any("week.week_start" in e for e in errors), errors)
+
+    def test_single_week_still_requires_sessions(self):
+        data = self.single()
+        del data["sessions"]
+        errors, _ = C.validate(data)
+        self.assertTrue(any("week.sessions" in e for e in errors), errors)
+
+    def test_single_week_never_validated_against_monday_or_session_window(self):
+        """Le format historique garde EXACTEMENT son comportement d'avant #69 :
+        aucun contrôle de lundi ni de fenêtre de séance n'y est ajouté (seul le
+        format `weeks[]`, neuf, porte ces contrôles) — un fichier déjà écrit
+        avant #69 ne peut donc pas devenir NON conforme après cette histoire."""
+        data = self.single(week_start="2026-09-23",  # mercredi, jamais rejeté ici
+                            sessions=[self.session("2026-10-05")])  # hors de la semaine
+        errors, warnings = C.validate(data)
+        self.assertEqual(errors + warnings, [])
+
+    # -- format multi-semaines -----------------------------------------------
+
+    def test_multi_week_valid(self):
+        errors, warnings = C.validate(self.multi([
+            {"week_start": "2026-09-21", "location": "Tournai", "sessions": [self.session("2026-09-22")]},
+            {"week_start": "2026-09-28", "location": "Tournai", "sessions": [self.session("2026-09-29")]},
+        ]))
+        self.assertEqual(errors + warnings, [])
+
+    def test_multi_week_entry_requires_week_start(self):
+        errors, _ = C.validate(self.multi([{"location": "Tournai", "sessions": []}]))
+        self.assertTrue(any("weeks[0].week_start" in e for e in errors), errors)
+
+    def test_multi_week_empty_list_is_rejected(self):
+        errors, _ = C.validate(self.multi([]))
+        self.assertTrue(any("week.weeks" in e for e in errors), errors)
+
+    def test_multi_week_non_monday_is_rejected(self):
+        errors, _ = C.validate(self.multi([
+            {"week_start": "2026-09-22", "location": "Tournai", "sessions": []},
+        ]))
+        self.assertTrue(any("n'est pas un lundi" in e for e in errors), errors)
+        self.assertTrue(any("mardi" in e for e in errors), errors)
+
+    def test_multi_week_duplicate_week_start_is_rejected(self):
+        errors, _ = C.validate(self.multi([
+            {"week_start": "2026-09-21", "location": "Tournai", "sessions": []},
+            {"week_start": "2026-09-21", "location": "Tournai", "sessions": []},
+        ]))
+        self.assertTrue(any("en double" in e for e in errors), errors)
+
+    def test_multi_week_session_outside_its_week_is_rejected(self):
+        errors, _ = C.validate(self.multi([
+            {"week_start": "2026-09-21", "location": "Tournai",
+             "sessions": [self.session("2026-09-30")]},  # semaine suivante
+        ]))
+        self.assertTrue(any("weeks[0].sessions[0].date" in e and "hors de la semaine" in e for e in errors), errors)
+
+    def test_multi_week_session_on_sunday_boundary_is_accepted(self):
+        """Dimanche (jour 6) reste DANS la semaine — borne inclusive des deux côtés."""
+        errors, warnings = C.validate(self.multi([
+            {"week_start": "2026-09-21", "location": "Tournai",
+             "sessions": [self.session("2026-09-27")]},  # dimanche de cette semaine
+        ]))
+        self.assertEqual(errors + warnings, [])
+
+    def test_mixing_single_and_multi_format_is_rejected(self):
+        data = self.single(weeks=[{"week_start": "2026-09-28", "location": "Tournai", "sessions": []}])
+        errors, _ = C.validate(data)
+        self.assertTrue(any("ne mélangez pas" in e for e in errors), errors)
+
+
 class TestGuardrailRuleIdsMatchContractPattern(unittest.TestCase):
     """#100, revue de code : `arc_guardrails.RULE_IDS` et `arc_contract.RULE_ID_RE`
     ne doivent jamais diverger silencieusement — un `rule_id` réel qui ne

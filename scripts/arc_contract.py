@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 ARC_VERSION = 1
@@ -297,6 +297,18 @@ SCHEMA = {
         },
     },
     "week": {
+        # #69 : un fichier `week` porte soit UNE semaine (les champs `required`
+        # ci-dessous, au premier niveau — format historique, INCHANGÉ), soit
+        # PLUSIEURS (`weeks`, liste d'objets `week_entry` — voir
+        # `SUBSCHEMA["week_entry"]` juste en dessous). `validate()` court-circuite
+        # `_check_object` pour ce `kind` (voir `_validate_week`) : ce `required`
+        # sert donc à DEUX choses seulement — documenter le format historique, et
+        # rester le repli legacy (`read_file`, fichier sans bloc ```arc du tout,
+        # ancien format Markdown d'avant ce contrat) qui, lui, continue de lire
+        # `SCHEMA["week"]["required"]` tel quel. Ne JAMAIS le vider : un fichier
+        # `week` pré-contrat redeviendrait alors toujours « inutilisable »
+        # (`read_file`, `usable`), même quand `L.legacy_week` en a bien extrait
+        # `week_start`.
         "required": {
             "week_start": "date",
             "location": "str",
@@ -307,6 +319,11 @@ SCHEMA = {
             "target_duration_s": "num+",
             "target_distance_m": "num+",
             "target_elevation_m": "num+",
+            # #69, plan multi-semaines : liste de `week_entry` (même forme qu'une
+            # semaine unique ci-dessus), une entrée par semaine. Mutuellement
+            # exclusif avec les champs de semaine unique au premier niveau — un
+            # fichier choisit un seul format, voir SKILL.md.
+            "weeks": "[week_entry]",
         },
     },
     "nutrition": {
@@ -408,6 +425,24 @@ SUBSCHEMA = {
     "pain": {
         "required": {"location": "str", "score": "pain_score"},
         "optional": {},
+    },
+    # `week.weeks[]` (#69, plan multi-semaines) : exactement la forme d'une semaine
+    # unique historique (`SCHEMA["week"]` avant #69) — `week_start`/`location`/
+    # `sessions` obligatoires, le reste facultatif. Jamais utilisable comme `kind`
+    # de fichier à part entière (comme tout `SUBSCHEMA`) : une entrée de `weeks[]`
+    # n'a de sens que rattachée au fichier qui la porte.
+    "week_entry": {
+        "required": {
+            "week_start": "date",
+            "location": "str",
+            "sessions": "[session]",
+        },
+        "optional": {
+            "phase": "str",
+            "target_duration_s": "num+",
+            "target_distance_m": "num+",
+            "target_elevation_m": "num+",
+        },
     },
     "session": {
         "required": {"date": "date", "sport": _enum(SPORTS), "title": "str"},
@@ -830,6 +865,106 @@ def _check_time_in_zone(data: dict, errors: list, warnings: list) -> None:
                            f"({duration} s)")
 
 
+# #69 : clés du format « semaine unique » (premier niveau) — présentes en même
+# temps que `weeks` (format multi-semaines), c'est un mélange refusé (un fichier
+# choisit un seul format, voir SKILL.md).
+WEEK_SINGLE_KEYS = (
+    "week_start", "location", "sessions", "phase",
+    "target_duration_s", "target_distance_m", "target_elevation_m",
+)
+
+
+def _validate_week(data: dict, errors: list, warnings: list) -> None:
+    """Valide un bloc `kind: "week"` (#69) : soit une semaine unique au premier
+    niveau (format historique, INCHANGÉ — mêmes clés obligatoires et mêmes
+    messages qu'avant #69, pour que les fichiers existants restent rétro-
+    compatibles à l'octet près), soit plusieurs via `weeks` (liste de
+    `week_entry`, voir SUBSCHEMA). Chaque semaine du tableau `weeks` est validée
+    INDIVIDUELLEMENT (contrat `week_entry`, `week_start` sur un lundi, ses
+    séances datées à l'intérieur de cette semaine), et aucune paire ne peut
+    partager le même `week_start` (doublon) dans le même fichier — le
+    chevauchement au sens large (deux lundis distincts dont les plages de 7
+    jours se recouvriraient) ne peut pas se produire tant que `week_start` est
+    lui-même sur un lundi (les blocs de 7 jours alignés sur le lundi sont soit
+    identiques, soit disjoints) : le contrôle de lundi ci-dessous couvre donc
+    aussi le chevauchement, le doublon de `week_start` restant le seul autre cas
+    à vérifier explicitement."""
+    weeks = data.get("weeks")
+    has_single = any(data.get(k) is not None for k in WEEK_SINGLE_KEYS)
+    if weeks is not None:
+        if has_single:
+            errors.append(
+                "week : ne mélangez pas `weeks` (plan multi-semaines) et les champs de "
+                "semaine unique (week_start/location/sessions/…) au premier niveau du "
+                "même fichier — choisissez un seul format (voir SKILL.md)."
+            )
+        if not isinstance(weeks, list) or not weeks:
+            errors.append("week.weeks : liste non vide de semaines attendue")
+            return
+        seen_week_starts: dict = {}
+        for i, entry in enumerate(weeks):
+            where = f"week.weeks[{i}]"
+            if not isinstance(entry, dict):
+                errors.append(f"{where} : objet attendu")
+                continue
+            _check_object(SUBSCHEMA["week_entry"], entry, where, errors, warnings)
+            _check_week_start_and_sessions(entry, where, i, seen_week_starts, errors)
+        return
+    # Format historique : une seule semaine au premier niveau — EXACTEMENT le
+    # schéma `week_entry` ci-dessus (`week_start`/`location`/`sessions`
+    # obligatoires), donc les mêmes erreurs qu'avant #69 pour un fichier qui
+    # n'utilise pas `weeks`.
+    _check_object(SUBSCHEMA["week_entry"], data, "week", errors, warnings)
+
+
+def _check_week_start_and_sessions(entry: dict, where: str, index: int,
+                                    seen_week_starts: dict, errors: list) -> None:
+    """Lundi obligatoire, doublon de `week_start` refusé, séances de l'entrée
+    contenues dans sa propre semaine (lundi à dimanche) — les trois contrôles
+    propres au format multi-semaines (#69), en plus du schéma générique déjà
+    vérifié par `_check_object` juste avant l'appel."""
+    week_start = entry.get("week_start")
+    if not isinstance(week_start, str) or not DATE_RE.match(week_start):
+        return   # déjà signalé par `_check_object` (clé manquante ou mal typée)
+    try:
+        monday = date.fromisoformat(week_start)
+    except ValueError:
+        return   # déjà signalé (date inexistante)
+    if monday.weekday() != 0:
+        errors.append(
+            f"{where}.week_start : {week_start} n'est pas un lundi — le contrat exige "
+            "le lundi de la semaine (jour {} trouvé)".format(
+                ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")[monday.weekday()]
+            )
+        )
+    if week_start in seen_week_starts:
+        errors.append(
+            f"{where}.week_start : {week_start} en double dans ce fichier (déjà "
+            f"weeks[{seen_week_starts[week_start]}])"
+        )
+    else:
+        seen_week_starts[week_start] = index
+    sunday = monday + timedelta(days=6)
+    sessions = entry.get("sessions")
+    if not isinstance(sessions, list):
+        return   # déjà signalé par `_check_object`
+    for j, session in enumerate(sessions):
+        if not isinstance(session, dict):
+            continue
+        session_date = session.get("date")
+        if not isinstance(session_date, str) or not DATE_RE.match(session_date):
+            continue   # déjà signalé par `_check_object` (session.date)
+        try:
+            parsed = date.fromisoformat(session_date)
+        except ValueError:
+            continue
+        if not monday <= parsed <= sunday:
+            errors.append(
+                f"{where}.sessions[{j}].date : {session_date} est hors de la semaine "
+                f"{week_start} (lundi) – {sunday.isoformat()} (dimanche)"
+            )
+
+
 def validate(data: dict) -> tuple:
     """Rend (erreurs, avertissements). Aucune erreur = bloc conforme."""
     errors, warnings = [], []
@@ -838,6 +973,15 @@ def validate(data: dict) -> tuple:
     kind = data.get("kind")
     if kind not in SCHEMA:
         errors.append(f"kind : une valeur parmi {', '.join(KINDS)} attendue, {kind!r} trouvé")
+        return errors, warnings
+    if kind == "week":
+        # #69 : validation dédiée — le format effectivement utilisé (semaine
+        # unique vs `weeks[]`) décide ce qui est obligatoire, ce que `_check_object`
+        # générique ne peut pas savoir tout seul (`SCHEMA["week"]["required"]`
+        # reste celui du format historique, pour le repli legacy de
+        # `arc_index.read_file` —
+        # voir le commentaire au-dessus de `SCHEMA["week"]`).
+        _validate_week(data, errors, warnings)
         return errors, warnings
     _check_object(SCHEMA[kind], data, kind, errors, warnings)
     if kind == "activity":
