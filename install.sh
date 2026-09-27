@@ -111,29 +111,40 @@ Usage :
   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
   ./install.sh --no-medical       # tous les agents sauf le médecin
   ./install.sh --no-auth          # saute l'authentification Garmin
+  ./install.sh --auth             # force l'authentification Garmin (annule --no-auth d'un préréglage)
   ./install.sh --use-leanproxy    # mode passerelle leanproxy (power user)
+  ./install.sh --skip-leanproxy   # mode direct (annule --use-leanproxy d'un préréglage)
   ./install.sh --daily-sync       # cron/launchd : sync Garmin aux heures de [sync].times
+  ./install.sh --no-daily-sync    # désactive la sync (annule --daily-sync d'un préréglage)
   ./install.sh --remote-control   # service Remote Control (le coach dans la poche)
+  ./install.sh --no-remote-control # désactive Remote Control (annule --remote-control d'un préréglage)
   ./install.sh --dry-run          # affiche les actions sans rien exécuter
   ./install.sh --help
 
 Préréglages (--preset), chacun ne fait que composer les options ci-dessus —
 toute option passée explicitement l'emporte toujours, quel que soit l'ordre
 (« --preset laptop --daily-sync » et « --daily-sync --preset laptop » sont
-équivalents) :
+équivalents ; utilisez --auth/--no-daily-sync/--no-remote-control pour
+désactiver ce qu'un préréglage aurait activé) :
 
   laptop        --ide all                          (docs/quickstart.md : usage interactif
-                                                      sur votre machine, tous les IDE)
+                                                      sur votre machine, tous les IDE — c'est
+                                                      exactement la configuration par défaut)
   coach-server  --ide claude --daily-sync
                 --remote-control                    (docs/mobile.md : machine « coach »
                                                       toujours allumée, sync + téléphone)
-  docker        --ide claude --daily-sync --no-auth (docs/dashboard/docker.md : machine
-                                                      qui sert le tableau de bord en
-                                                      conteneur derrière un reverse proxy —
-                                                      pas d'authentification Garmin
-                                                      interactive à l'installation, pas de
-                                                      Remote Control, la sync cron garde le
-                                                      workspace monté à jour)
+  docker        --ide claude --daily-sync           (docs/dashboard/docker.md : machine
+                                                      « coach » qui sert AUSSI le tableau de
+                                                      bord en conteneur — la sync a besoin de
+                                                      l'authentification Garmin comme sur
+                                                      n'importe quelle machine coach, donc
+                                                      elle reste active ; pas de Remote
+                                                      Control, l'interface de cette machine
+                                                      est le tableau de bord web. Le
+                                                      préréglage ne prépare que l'hôte : le
+                                                      conteneur lui-même se lance séparément
+                                                      avec « docker compose up -d --build »,
+                                                      voir docs/dashboard/docker.md)
 
 Prérequis : macOS ou Linux, bash 3.2+, curl, git.
 Documentation : https://mmornati.github.io/ai-running-coach/
@@ -178,16 +189,19 @@ apply_preset() {
             PRESET_REMOTE_CONTROL=1
             ;;
         docker)
-            # docs/dashboard/docker.md : machine qui sert le tableau de bord en
-            # conteneur derrière un reverse proxy (Traefik + authentification
-            # unique). Le conteneur ne parle jamais à Garmin (workspace monté en
-            # lecture seule) : l'authentification interactive n'a pas sa place
-            # dans cette installation, souvent scriptée/sans terminal (--no-auth).
-            # --daily-sync garde le workspace monté à jour ; --remote-control
-            # est sauté car l'interface de cette machine est le tableau de bord
-            # web, pas le chat depuis le téléphone.
+            # docs/dashboard/docker.md : « Sur la machine coach, dans le dépôt
+            # du moteur » — le conteneur du tableau de bord se déploie SUR la
+            # machine coach, pas sur une machine à part. Sa synchronisation
+            # Garmin (scripts/daily-sync.sh) a donc besoin d'une authentification
+            # comme n'importe quelle machine coach : --no-auth romprait le cron,
+            # qui échouerait deux fois par jour faute de tokens. --daily-sync
+            # garde le workspace monté (lecture seule par le conteneur) à jour ;
+            # --remote-control est sauté car l'interface de cette machine est le
+            # tableau de bord web, pas le chat depuis le téléphone. Ce préréglage
+            # ne prépare que l'HÔTE : le conteneur lui-même se lance séparément
+            # avec « docker compose up -d --build » (docs/dashboard/docker.md).
             PRESET_IDE="claude"
-            PRESET_DO_AUTH=0
+            PRESET_DO_AUTH=1
             PRESET_USE_LEANPROXY=0
             PRESET_DAILY_SYNC=1
             PRESET_REMOTE_CONTROL=0
@@ -210,12 +224,21 @@ _scan_i=0
 while [[ "$_scan_i" -lt "$_scan_n" ]]; do
     if [[ "${_scan_args[$_scan_i]}" == "--preset" ]]; then
         _scan_i=$((_scan_i + 1))
-        [[ "$_scan_i" -lt "$_scan_n" ]] || die "L'option --preset attend une valeur (voir --help)."
-        PRESET="${_scan_args[$_scan_i]}"
+        # Une valeur absente OU qui ressemble à une autre option (« --dry-run »)
+        # est traitée comme une valeur manquante, jamais comme un préréglage
+        # nommé « --dry-run » (qui échouerait avec un message trompeur).
+        if [[ "$_scan_i" -ge "$_scan_n" || "${_scan_args[$_scan_i]}" == --* ]]; then
+            die "L'option --preset attend une valeur (voir --help)."
+        fi
+        _scan_value="${_scan_args[$_scan_i]}"
+        if [[ -n "$PRESET" && "$PRESET" != "$_scan_value" ]]; then
+            die "Option --preset répétée avec des valeurs différentes : « $PRESET » puis « $_scan_value » (voir --help)."
+        fi
+        PRESET="$_scan_value"
     fi
     _scan_i=$((_scan_i + 1))
 done
-unset _scan_args _scan_n _scan_i
+unset _scan_args _scan_n _scan_i _scan_value
 
 if [[ -n "$PRESET" ]]; then
     apply_preset "$PRESET"
@@ -231,13 +254,16 @@ while [[ $# -gt 0 ]]; do
         --preset) need_value "$@"; shift 2 ;;  # déjà résolu ci-dessus
         --ide) need_value "$@"; IDE="$2"; EXPLICIT_IDE=1; shift 2 ;;
         --no-auth) DO_AUTH=0; EXPLICIT_DO_AUTH=1; shift ;;
+        --auth) DO_AUTH=1; EXPLICIT_DO_AUTH=1; shift ;;  # annule --no-auth composé par un préréglage
         --use-leanproxy) USE_LEANPROXY=1; EXPLICIT_LEANPROXY=1; shift ;;
         --skip-leanproxy) USE_LEANPROXY=0; EXPLICIT_LEANPROXY=1; shift ;;  # rétro-compatibilité
         --workspace) need_value "$@"; WORKSPACE_ARG="$2"; shift 2 ;;
         --agents) need_value "$@"; AGENTS_ARG="$2"; EXPLICIT_AGENTS=1; shift 2 ;;
         --no-medical) AGENTS_ARG="${AGENTS_ARG:-__all_but__}:medical"; EXPLICIT_AGENTS=1; shift ;;
         --daily-sync) DAILY_SYNC=1; EXPLICIT_DAILY_SYNC=1; shift ;;
+        --no-daily-sync) DAILY_SYNC=0; EXPLICIT_DAILY_SYNC=1; shift ;;  # annule --daily-sync composé par un préréglage
         --remote-control) REMOTE_CONTROL=1; EXPLICIT_REMOTE_CONTROL=1; shift ;;
+        --no-remote-control) REMOTE_CONTROL=0; EXPLICIT_REMOTE_CONTROL=1; shift ;;  # annule --remote-control composé par un préréglage
         --dry-run) DRY_RUN=1; shift ;;
         --help|-h) usage ;;
         *) die "Option inconnue : $1 (voir --help)" ;;
@@ -1206,25 +1232,29 @@ _config_origin() {
     fi
 }
 
+
+# « clé : valeur (origine) », sans tentative d'alignement en colonnes : un
+# `printf %-Ns` compte des OCTETS, pas des caractères — un mot accentué (UTF-8,
+# multi-octets) désaligne toutes les lignes qui le suivent.
+recap_line() { printf '  %s : %s (%s)\n' "$1" "$2" "$3"; }
+
 print_config_recap() {
     log "Récapitulatif de la configuration effective :"
-    [[ -n "$PRESET" ]] && printf '  %-22s %s\n' "Préréglage" "$PRESET"
-    printf '  %-22s %-12s (%s)\n' "IDE" "$IDE" "$(_config_origin "$EXPLICIT_IDE")"
+    [[ -n "$PRESET" ]] && printf '  Préréglage : %s\n' "$PRESET"
+    recap_line "IDE" "$IDE" "$(_config_origin "$EXPLICIT_IDE")"
     # Les préréglages ne touchent jamais au staff d'agents (voir apply_preset) :
     # « défaut » veut dire ici config/workspace.user.toml ou, à défaut, tous.
-    printf '  %-22s %-12s (%s)\n' "Agents" "$ENABLED_AGENTS" \
-        "$([[ "$EXPLICIT_AGENTS" -eq 1 ]] && echo "explicite" || echo "défaut")"
-    printf '  %-22s %-12s (%s)\n' "Auth Garmin" \
+    recap_line "Agents" "$ENABLED_AGENTS" "$([[ "$EXPLICIT_AGENTS" -eq 1 ]] && echo "explicite" || echo "défaut")"
+    recap_line "Auth Garmin" \
         "$([[ "$DO_AUTH" -eq 1 ]] && echo "activée" || echo "sautée")" "$(_config_origin "$EXPLICIT_DO_AUTH")"
-    printf '  %-22s %-12s (%s)\n' "Passerelle leanproxy" \
+    recap_line "Passerelle leanproxy" \
         "$([[ "$USE_LEANPROXY" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_LEANPROXY")"
-    printf '  %-22s %-12s (%s)\n' "Sync auto (cron)" \
+    recap_line "Sync auto (cron)" \
         "$([[ "$DAILY_SYNC" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_DAILY_SYNC")"
-    printf '  %-22s %-12s (%s)\n' "Remote Control" \
+    recap_line "Remote Control" \
         "$([[ "$REMOTE_CONTROL" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_REMOTE_CONTROL")"
-    printf '  %-22s %-12s (%s)\n' "Workspace" "$WORKSPACE_ROOT" \
-        "$([[ -n "$WORKSPACE_ARG" ]] && echo "explicite" || echo "défaut")"
-    printf '  %-22s %-12s (%s)\n' "Dry-run" \
+    recap_line "Workspace" "$WORKSPACE_ROOT" "$([[ -n "$WORKSPACE_ARG" ]] && echo "explicite" || echo "défaut")"
+    recap_line "Dry-run" \
         "$([[ "$DRY_RUN" -eq 1 ]] && echo "oui" || echo "non")" "$([[ "$DRY_RUN" -eq 1 ]] && echo "explicite" || echo "défaut")"
     echo
 }

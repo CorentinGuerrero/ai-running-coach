@@ -73,9 +73,9 @@ Le script installe et configure automatiquement :
 ### Options du script
 
 ```bash
-./install.sh --preset laptop        # préréglage : composent les options ci-dessous (voir docs/quickstart.md#prereglages---preset)
+./install.sh --preset laptop        # préréglage : composent les options ci-dessous (voir docs/quickstart.md#prereglages)
 ./install.sh --preset coach-server  #   coach-server = --ide claude --daily-sync --remote-control
-./install.sh --preset docker        #   docker       = --ide claude --daily-sync --no-auth
+./install.sh --preset docker        #   docker       = --ide claude --daily-sync (prépare l'hôte, pas le conteneur)
 ./install.sh --ide claude      # installe pour un IDE précis (claude|copilot|opencode|gemini|cursor|windsurf)
 ./install.sh --agents LISTE    # staff à installer, ex. coach,nutritionist
 ./install.sh --no-medical      # tous les agents sauf le médecin

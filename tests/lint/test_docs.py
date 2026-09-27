@@ -57,13 +57,30 @@ class TestInternalLinks(unittest.TestCase):
 
 
 def _slugify(heading: str) -> str:
-    """Approche la génération d'ancre de mkdocs (Python-Markdown `toc`)."""
+    """Génération d'ancre mkdocs — l'implémentation réelle si disponible.
+
+    `markdown.extensions.toc.slugify` est ce que mkdocs-material utilise
+    vraiment (voir `mkdocs.yml` → `toc.permalink`) : on l'utilise quand le
+    paquet est installé (CI docs, ou un `pip install -r requirements-docs.txt`
+    local), pour ne jamais diverger de la sortie réelle. Le repli ci-dessous
+    n'est qu'une approximation pour les environnements sans `markdown` — un
+    point qui compte : `[-\\s]+` fusionne UN SEUL tiret entre deux mots
+    (Python-Markdown ne préserve pas les tirets multiples d'une ponctuation
+    retirée), contrairement à un `[\\s_]+` qui laisserait des tirets doubles.
+    """
+    try:
+        from markdown.extensions.toc import slugify as _markdown_slugify
+
+        return _markdown_slugify(heading, "-")
+    except ImportError:
+        pass
+
     import unicodedata
 
     text = unicodedata.normalize("NFKD", heading)
     text = "".join(c for c in text if not unicodedata.combining(c)).lower()
-    text = re.sub(r"[^\w\s-]", "", text)
-    return re.sub(r"[\s_]+", "-", text).strip("-")
+    text = re.sub(r"[^\w\s-]", "", text).strip()
+    return re.sub(r"[-\s]+", "-", text)
 
 
 class TestNav(unittest.TestCase):

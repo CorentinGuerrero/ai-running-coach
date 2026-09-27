@@ -1,14 +1,23 @@
 """Palier A — préréglages d'installation (`--preset laptop|coach-server|docker`, #64).
 
 Chaque préréglage ne fait que composer des options déjà existantes
-(`--ide`, `--daily-sync`, `--remote-control`, `--no-auth`, `--use-leanproxy`) —
-voir `apply_preset()` dans `install.sh`. Ces tests verrouillent :
+(`--ide`, `--daily-sync`, `--remote-control`, `--no-auth`/`--auth`,
+`--use-leanproxy`, et leurs négations `--no-daily-sync`/`--no-remote-control`)
+— voir `apply_preset()` dans `install.sh`. Ces tests verrouillent :
 
   - le mapping réel de chaque préréglage (empreinte d'arborescence, en
-    `--dry-run` et en installation réelle) ;
+    `--dry-run` et en installation réelle) — notamment que `docker` garde
+    l'authentification Garmin ACTIVE (revue #111 : le conteneur ne parle
+    jamais à Garmin, mais `docs/dashboard/docker.md` le déploie « sur la
+    machine coach », dont la synchronisation en a besoin comme n'importe
+    quelle autre machine coach) ;
   - la priorité systématique d'une option explicite sur le préréglage,
-    quel que soit l'ordre des arguments ;
-  - le rejet propre d'un préréglage inconnu.
+    quel que soit l'ordre des arguments, y compris pour ÉTEINDRE une valeur
+    qu'un préréglage aurait allumée (`--no-daily-sync`, `--no-remote-control`,
+    `--auth`) ;
+  - le rejet propre d'un préréglage inconnu, d'une valeur manquante (y
+    compris quand elle ressemble à une autre option) et d'un `--preset`
+    répété avec deux valeurs différentes.
 
 `ARC_FAKE_UNAME=Darwin` fixe le backend (LaunchAgent, jamais crontab) pour que
 les empreintes d'arborescence soient les mêmes sur les machines de CI Linux et
@@ -188,8 +197,10 @@ class TestPresetRealRunFingerprint(InstallAsserts):
             self.assertIsFile(sb.home / "Library/LaunchAgents/com.ai-running-coach.remote.plist")
             self.assertCalled(sb, "uv", "run garmin-mcp-auth")
 
-    def test_docker_skips_interactive_auth_and_remote_control(self):
-        """docs/dashboard/docker.md : le conteneur ne parle jamais à Garmin."""
+    def test_docker_keeps_auth_on_and_skips_remote_control(self):
+        """docs/dashboard/docker.md : « sur la machine coach » — le conteneur ne parle
+        jamais à Garmin lui-même, mais la synchronisation (elle, sur l'hôte) en a
+        besoin comme sur n'importe quelle machine coach : l'auth reste active."""
         with Sandbox() as sb:
             self.assertSucceeded(sb.install("--preset", "docker", **DARWIN))
             self.assertIsFile(sb.home / "Library/LaunchAgents/com.ai-running-coach.daily-sync.plist")
@@ -197,11 +208,19 @@ class TestPresetRealRunFingerprint(InstallAsserts):
                 (sb.home / "Library/LaunchAgents/com.ai-running-coach.remote.plist").exists(),
                 "docker ne doit pas activer Remote Control",
             )
-            self.assertFalse(
+            self.assertTrue(
                 any("garmin-mcp-auth" in args for _, args in sb.stub_calls("uv")),
-                "docker : garmin-mcp-auth ne devrait pas tourner (--no-auth composé par le préréglage)",
+                "docker : l'authentification Garmin doit tourner (--daily-sync en a besoin)",
             )
-            self.assertOutputContains(sb.install("--preset", "docker", "--dry-run", **DARWIN), "sautée")
+
+    def test_docker_help_and_preset_table_do_not_disable_auth(self):
+        """Régression : le préréglage ne doit plus composer --no-auth (#111 review)."""
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "docker", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "Auth Garmin : activée (préréglage docker)")
+            help_proc = sb.install("--help")
+            self.assertOutputLacks(help_proc, "docker        --ide claude --daily-sync --no-auth")
 
 
 class TestPresetExplicitOverridesWin(InstallAsserts):
@@ -245,14 +264,70 @@ class TestPresetExplicitOverridesWin(InstallAsserts):
             self.assertIsFile(sb.repo / ".cursor/mcp.json")
 
     def test_recap_marks_explicit_vs_preset_origin(self):
+        """Vérifie des LIGNES précises, pas juste la présence du mot « explicite »
+        quelque part dans la sortie (qui passerait même si la mauvaise ligne le
+        portait, p. ex. sur Dry-run plutôt que sur Auth Garmin)."""
         with Sandbox() as sb:
             proc = sb.install("--preset", "coach-server", "--no-auth", "--dry-run", **DARWIN)
             self.assertSucceeded(proc)
             out = proc.stdout
-            self.assertIn("Récapitulatif de la configuration effective", out)
-            # Option explicite : marquée comme telle, jamais rattachée au préréglage.
-            self.assertIn("explicite", out)
-            self.assertIn("préréglage coach-server", out)
+            self.assertRegex(out, r"Auth Garmin\s*:\s*sautée\s*\(explicite\)")
+            self.assertRegex(out, r"Sync auto \(cron\)\s*:\s*oui\s*\(préréglage coach-server\)")
+            self.assertRegex(out, r"Remote Control\s*:\s*oui\s*\(préréglage coach-server\)")
+            self.assertRegex(out, r"IDE\s*:\s*claude\s*\(préréglage coach-server\)")
+
+    def test_negating_flag_turns_off_preset_daily_sync_after(self):
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "coach-server", "--no-daily-sync", "--no-auth", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc)
+            self.assertRegex(proc.stdout, r"Sync auto \(cron\)\s*:\s*non\s*\(explicite\)")
+
+    def test_negating_flag_turns_off_preset_daily_sync_before(self):
+        with Sandbox() as sb:
+            proc = sb.install("--no-daily-sync", "--preset", "coach-server", "--no-auth", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc)
+            self.assertRegex(proc.stdout, r"Sync auto \(cron\)\s*:\s*non\s*\(explicite\)")
+
+    def test_negating_flag_turns_off_preset_remote_control_after(self):
+        with Sandbox() as sb:
+            self.assertSucceeded(
+                sb.install("--preset", "coach-server", "--no-remote-control", "--no-auth", **DARWIN)
+            )
+            self.assertFalse((sb.home / "Library/LaunchAgents/com.ai-running-coach.remote.plist").exists())
+
+    def test_negating_flag_turns_off_preset_remote_control_before(self):
+        with Sandbox() as sb:
+            self.assertSucceeded(
+                sb.install("--no-remote-control", "--preset", "coach-server", "--no-auth", **DARWIN)
+            )
+            self.assertFalse((sb.home / "Library/LaunchAgents/com.ai-running-coach.remote.plist").exists())
+
+    def test_auth_flag_turns_auth_back_on_after_docker_style_no_auth(self):
+        """`--auth` doit pouvoir annuler un `--no-auth` explicite antérieur sur la
+        ligne de commande (comportement standard « le dernier gagne » pour deux
+        options explicites contradictoires, indépendant des préréglages)."""
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--no-auth", "--auth", **DARWIN))
+            self.assertTrue(
+                any("garmin-mcp-auth" in args for _, args in sb.stub_calls("uv")),
+                "--auth après --no-auth devrait réactiver l'authentification",
+            )
+
+    def test_laptop_preset_equals_defaults_and_recap_says_so(self):
+        """laptop == les défauts du script (docs/quickstart.md n'utilise aucune
+        option) : la seule différence observable est que le récapitulatif
+        rattache désormais IDE au préréglage plutôt qu'à « défaut »."""
+        with Sandbox() as sb:
+            before = sb.tree()
+            proc_plain = sb.install("--no-auth", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc_plain)
+            self.assertTreeUnchanged(before, sb.tree(), "--dry-run sans préréglage a écrit sur le disque")
+
+            proc_preset = sb.install("--preset", "laptop", "--no-auth", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc_preset)
+            self.assertRegex(proc_preset.stdout, r"IDE\s*:\s*all\s*\(préréglage laptop\)")
+            # Sans préréglage, la même valeur IDE est un défaut, pas un préréglage.
+            self.assertRegex(proc_plain.stdout, r"IDE\s*:\s*all\s*\(défaut\)")
 
 
 class TestUnknownPreset(InstallAsserts):
@@ -270,3 +345,26 @@ class TestUnknownPreset(InstallAsserts):
             proc = sb.install("--preset")
             self.assertFailed(proc, "--preset sans valeur")
             self.assertOutputLacks(proc, "unbound variable")
+
+    def test_preset_followed_by_another_flag_is_a_missing_value_not_an_unknown_preset(self):
+        """`--preset --dry-run` : « --dry-run » est une option, pas une valeur de
+        préréglage — le message doit porter sur la valeur manquante, jamais dire
+        « préréglage inconnu : --dry-run »."""
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "--dry-run")
+            self.assertFailed(proc, "--preset suivi d'une autre option")
+            self.assertOutputContains(proc, "--preset attend une valeur")
+            self.assertOutputLacks(proc, "Préréglage inconnu")
+
+    def test_repeated_preset_with_different_values_is_rejected(self):
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "laptop", "--preset", "coach-server", "--dry-run")
+            self.assertFailed(proc, "--preset répété avec des valeurs différentes")
+            self.assertOutputContains(proc, "laptop")
+            self.assertOutputContains(proc, "coach-server")
+            self.assertOutputLacks(proc, "unbound variable")
+
+    def test_repeated_preset_with_same_value_is_accepted(self):
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "laptop", "--preset", "laptop", "--dry-run", **DARWIN)
+            self.assertSucceeded(proc, "--preset répété avec la même valeur")
