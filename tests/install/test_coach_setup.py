@@ -232,6 +232,27 @@ class TestApplyProfile(SetupCase):
             self.assertEqual(data["written"], [])
             self.assertEqual(data["skipped"], ["FC max"])
 
+    def test_rejects_a_boolean_value(self):
+        """`bool` est une sous-classe d'`int` en Python : sans un contrôle
+        dédié, `{"FC max": true}` passerait la validation « chaîne ou nombre »
+        et écrirait le texte littéral « True » (revue de code #112, 3ᵉ tour)."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": True}))
+            self.assertFailed(proc, "booléen refusé comme valeur")
+            self.assertOutputContains(proc, "booléen")
+            content = (sb.repo / "planning/Runner_Profile.md").read_text()
+            self.assertNotIn("True", content)
+
+    def test_rejects_a_boolean_source(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182", "source": False},
+            }))
+            self.assertFailed(proc, "booléen refusé comme source")
+            self.assertOutputContains(proc, "booléen")
+
     def test_rejects_a_list_value(self):
         with Sandbox() as sb:
             self.setup(sb, "--scaffold")

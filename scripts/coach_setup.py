@@ -200,7 +200,15 @@ def _ensure_scalar(raw, raw_label: str, field: str) -> None:
     """`value`/`source` doivent être une chaîne ou un nombre — jamais une
     liste ni un objet JSON, qui s'écrirait tel quel (`str([...])`) dans le
     profil sous une forme illisible et potentiellement injectante (revue de
-    code #112, 2ᵉ tour)."""
+    code #112, 2ᵉ tour). Un booléen JSON est rejeté À PART (revue de code
+    #112, 3ᵉ tour) : `bool` est une sous-classe d'`int` en Python, donc
+    `isinstance(True, (list, dict))` ne l'attrape pas, et `str(True)`
+    écrirait le texte littéral « True »/« False » dans le profil — aussi
+    invalide qu'un `None` écrit en « None »."""
+    if isinstance(raw, bool):
+        raise ConfigError(
+            f"« {raw_label} » : « {field} » doit être une chaîne ou un nombre, pas un booléen."
+        )
     if isinstance(raw, (list, dict)):
         raise ConfigError(
             f"« {raw_label} » : « {field} » doit être une chaîne ou un nombre, pas une liste/un objet."
