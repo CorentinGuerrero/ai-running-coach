@@ -57,19 +57,47 @@ CANNED = {
         "status": "BALANCED", "baseline": {"lowUpper": 48, "balancedLow": 52, "balancedUpper": 74},
     },
     "get_rhr_day": {"date": _day(0), "restingHeartRate": 49},
-    # Story #65 (`/coach-setup` pré-rempli) : noms de champs vérifiés contre le
-    # paquet `garmin_mcp` réellement installé (0.1.0) — `get_stats` curate déjà
-    # `stats.get('maxHeartRate')`/`stats.get('restingHeartRate')` en
-    # `max_heart_rate_bpm`/`resting_heart_rate_bpm` (health_wellness.py), et
-    # `get_training_status` curate `vo2_max`/`vo2_max_precise` depuis
-    # `mostRecentVO2Max.generic` (training.py) — jamais les noms bruts Garmin.
+    # Story #65 (`/coach-setup` pré-rempli), revue de code : noms de champs
+    # vérifiés contre le paquet `garmin_mcp` réellement installé (0.1.0).
+    # `get_stats().max_heart_rate_bpm`/`resting_heart_rate_bpm` sont des
+    # valeurs DU JOUR (187/47, volontairement différentes de tout ce qu'un
+    # pré-remplissage doit écrire) — jamais utilisées pour « FC max »/« FC de
+    # repos » : seul `last_7_days_avg_resting_hr` (moyenne 7 j) sert de FC de
+    # repos, et la FC max vient du maximum observé sur `get_activities_by_date`
+    # (ci-dessous), jamais de `get_stats`.
     "get_stats": {
         "date": _day(0), "max_heart_rate_bpm": 187, "resting_heart_rate_bpm": 47,
         "last_7_days_avg_resting_hr": 48,
     },
+    # 6 séances course à pied/trail sur les 180 derniers jours (N ≥ 5, seuil du
+    # skill) + 1 séance vélo à FC volontairement plus haute (192) pour prouver
+    # que le filtre `type` exclut bien ce qui n'est pas running/trail_running —
+    # si le maximum retenu était 192, le filtre serait cassé. Max attendu chez
+    # running/trail_running : 178 bpm (curation vérifiée dans
+    # `garmin_mcp/activity_management.py::get_activities_by_date`).
+    "get_activities_by_date": {
+        "count": 7, "page": 0, "page_size": 100, "has_more": False,
+        "date_range": {"start": _day(180), "end": _day(0)},
+        "activities": [
+            {"id": 99000010, "name": "Footing", "type": "running", "start_time": f"{_day(9)} 07:05:00",
+             "distance_meters": 8200.0, "duration_seconds": 2700.0, "avg_hr_bpm": 138, "max_hr_bpm": 165},
+            {"id": 99000011, "name": "Sortie trail", "type": "trail_running", "start_time": f"{_day(16)} 08:10:00",
+             "distance_meters": 18000.0, "duration_seconds": 7200.0, "avg_hr_bpm": 145, "max_hr_bpm": 178},
+            {"id": 99000012, "name": "Fractionné", "type": "running", "start_time": f"{_day(23)} 18:30:00",
+             "distance_meters": 9500.0, "duration_seconds": 2400.0, "avg_hr_bpm": 152, "max_hr_bpm": 172},
+            {"id": 99000013, "name": "Footing", "type": "running", "start_time": f"{_day(30)} 07:00:00",
+             "distance_meters": 7800.0, "duration_seconds": 2550.0, "avg_hr_bpm": 136, "max_hr_bpm": 160},
+            {"id": 99000014, "name": "Sortie trail", "type": "trail_running", "start_time": f"{_day(37)} 08:00:00",
+             "distance_meters": 15500.0, "duration_seconds": 6300.0, "avg_hr_bpm": 143, "max_hr_bpm": 168},
+            {"id": 99000015, "name": "Footing", "type": "running", "start_time": f"{_day(44)} 07:15:00",
+             "distance_meters": 8000.0, "duration_seconds": 2650.0, "avg_hr_bpm": 135, "max_hr_bpm": 158},
+            {"id": 99000016, "name": "Home trainer", "type": "cycling", "start_time": f"{_day(12)} 19:00:00",
+             "distance_meters": 25000.0, "duration_seconds": 3000.0, "avg_hr_bpm": 150, "max_hr_bpm": 192},
+        ],
+    },
     "get_lactate_threshold": {
         "lactate_threshold_speed_mps": 3.42, "lactate_threshold_heart_rate_bpm": 168,
-        "speed_hr_date": _day(5),
+        "speed_hr_date": _day(5), "is_stale": False,
     },
     "get_training_status": {
         "date": _day(0), "training_status": "PRODUCTIVE", "vo2_max": 52.0, "vo2_max_precise": 52.3,

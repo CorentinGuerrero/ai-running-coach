@@ -4,6 +4,12 @@
 # volontairement directif : le runner (`claude -p`) tourne en un seul tour, il
 # n'y a personne pour répondre à une vraie question de suivi — le prompt SIMULE
 # donc un athlète qui répond à tout et confirme le pré-remplissage d'un coup.
+#
+# Revue de code (PR #112) : la FC max ne vient JAMAIS de `get_stats` (valeur du
+# jour, ~187 chez le stub) mais du MAXIMUM observé sur `get_activities_by_date`
+# (180 j, running/trail_running uniquement — 178 chez le stub, cycling à 192
+# exclu) ; la FC de repos vient de `last_7_days_avg_resting_hr` (48 chez le
+# stub), jamais de la valeur du jour (47).
 id = "setup-prefill-garmin"
 prompt = """
 /coach-setup
@@ -22,18 +28,23 @@ que je confirme CHACUNE d'elles telle quelle, sans correction.
 fixture = "empty"
 
 [expect]
-tools_called = ["get_stats", "get_lactate_threshold", "get_training_status"]
+tools_called = ["get_activities_by_date", "get_stats", "get_lactate_threshold", "get_training_status"]
 files_created = ["planning/Runner_Profile.md", "config/workspace.user.toml"]
-max_words = 400
+max_words = 450
 
 # Valeurs canned du stub (`stub_garmin_mcp.CANNED`) — présentes dans le profil
-# écrit UNIQUEMENT si l'agent les a bien proposées puis écrites via
-# `coach_setup.py --apply-profile` après confirmation, jamais inventées.
-# Ancrées sur le libellé du modèle pour éviter un faux positif sur un nombre
-# qui apparaîtrait ailleurs par coïncidence (ex. un mot de compte).
+# UNIQUEMENT si l'agent a bien proposé puis écrit, via
+# `coach_setup.py --apply-profile`, la bonne source pour chaque champ (jamais
+# la valeur du jour de `get_stats` pour FC max/FC de repos). Ancrées sur le
+# libellé du modèle pour éviter un faux positif sur un nombre qui
+# apparaîtrait ailleurs par coïncidence.
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
-any = ["fc max** : 187"]
+any = ["fc max** : 178"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc de repos de référence** : 48"]
 
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
@@ -42,3 +53,9 @@ any = ["fc au seuil** : 168"]
 [[expect.file_contains_any]]
 glob = "planning/Runner_Profile.md"
 any = ["vo2max (garmin)** : 52"]
+
+# La provenance doit être tracée en commentaire HTML (coach_setup.py
+# --apply-profile, `source`), pas seulement la valeur brute.
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["<!-- source : garmin"]

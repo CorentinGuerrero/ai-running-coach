@@ -207,6 +207,101 @@ class TestApplyProfile(SetupCase):
             self.assertEqual(data["written"], [])
             self.assertEqual(data["skipped"], ["FC max"])
 
+    def test_json_null_is_skipped_never_written_as_the_word_none(self):
+        """Revue de code #112 : un `null` JSON (`None` côté Python) ne doit
+        jamais finir écrit tel quel (`str(None)` = « None ») — un bug qui
+        verrouille le champ pour toujours, puisqu'il compterait alors comme
+        rempli."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": None, "FC au seuil": {"value": None, "source": "Garmin"},
+            })))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(sorted(data["skipped"]), ["FC au seuil", "FC max"])
+            content = (sb.repo / "planning/Runner_Profile.md").read_text()
+            self.assertNotIn("None", content)
+
+    def test_rejects_a_newline_in_the_value(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182\n- **FC au seuil** : 999", "source": "x"},
+            }))
+            self.assertFailed(proc, "retour à la ligne dans la valeur")
+            self.assertOutputContains(proc, "retour à la ligne")
+            content = (sb.repo / "planning/Runner_Profile.md").read_text()
+            self.assertNotIn("999", content, "aucune ligne injectée : le fichier n'a pas dû être touché")
+
+    def test_rejects_a_newline_in_the_source(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182", "source": "Garmin\n- **Sexe** : H"},
+            }))
+            self.assertFailed(proc, "retour à la ligne dans la source")
+            self.assertOutputContains(proc, "retour à la ligne")
+
+    def test_rejects_a_double_dash_in_the_source(self):
+        """`--` fermerait prématurément le commentaire HTML `<!-- source : ... -->`."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {
+                "FC max": {"value": "182", "source": "x --> <script>y</script>"},
+            }))
+            self.assertFailed(proc, "-- dans la source")
+            self.assertOutputContains(proc, "--")
+            content = (sb.repo / "planning/Runner_Profile.md").read_text()
+            self.assertNotIn("<script>", content)
+
+    def test_rejects_an_html_comment_in_the_value(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            proc = self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "182 <!-- oops -->"}))
+            self.assertFailed(proc, "commentaire HTML dans la valeur")
+            self.assertOutputContains(proc, "commentaire HTML")
+
+    def test_field_filled_via_indented_sub_bullets_counts_as_filled(self):
+        """« Zones / seuils » sans valeur sur sa propre ligne, mais suivi d'une
+        sous-liste indentée (Z1/Z2/...), compte comme déjà rempli — jamais de
+        réécriture par-dessus une sous-liste existante."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            profile = sb.repo / "planning/Runner_Profile.md"
+            profile.write_text(profile.read_text().replace(
+                "- **Zones / seuils** :",
+                "- **Zones / seuils** :\n  - Z1 : 120-135\n  - Z2 : 136-150",
+            ))
+            before = profile.read_text()
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"Zones / seuils": "Z2 140-155"})))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(data["skipped"], ["Zones / seuils"])
+            self.assertEqual(profile.read_text(), before)
+
+    def test_accepts_the_bold_colon_label_style_when_empty(self):
+        """`- **FC max :**` (deux-points DANS le gras) est un style toléré par
+        `arc_legacy.parse_bullets` — doit être reconnu comme le même champ,
+        pas comme un libellé inconnu."""
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            profile = sb.repo / "planning/Runner_Profile.md"
+            profile.write_text(profile.read_text().replace("- **FC max** :", "- **FC max :**"))
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "182"})))
+            self.assertEqual(data["written"], ["FC max"])
+            self.assertFileContains(profile, "182")
+
+    def test_bold_colon_label_style_already_filled_is_never_overwritten(self):
+        with Sandbox() as sb:
+            self.setup(sb, "--scaffold")
+            profile = sb.repo / "planning/Runner_Profile.md"
+            profile.write_text(profile.read_text().replace("- **FC max** :", "- **FC max :** 175"))
+            data = self.json_out(self.setup(sb, "--apply-profile", self.answers(sb, {"FC max": "999"})))
+            self.assertEqual(data["written"], [])
+            self.assertEqual(data["skipped"], ["FC max"])
+            self.assertFileContains(profile, "175")
+            content = profile.read_text()
+            self.assertNotIn("999", content)
+
 
 class TestStatus(SetupCase):
     def test_reports_a_fresh_workspace(self):

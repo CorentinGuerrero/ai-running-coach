@@ -1,0 +1,47 @@
+# Story #65, revue de code (PR #112, blocage 9) : `[health].morning_check =
+# "off"` doit couper la récupération SILENCIEUSE de FC de repos
+# (`get_stats`, donnée de bilan matinal) — l'athlète a explicitement demandé
+# de ne rien faire dépendre de la santé matinale. FC max (activités) et FC au
+# seuil/VO2max (biométrie d'effort, pas le bilan matinal) restent récupérées
+# normalement.
+id = "setup-prefill-garmin-morning-off"
+prompt = """
+/coach-setup
+
+Pour aller vite, voici mes réponses à toutes les questions de configuration
+que tu comptes me poser, dans l'ordre où le script les liste : style factuel,
+fermeté équilibrée, longueur brève, discipline trail, aucun sport croisé,
+staff coach seul, bilan matinal COUPÉ (off), langue des documents français,
+langue des réponses auto, unités métriques. Écris-les sans me les reposer.
+
+Ensuite, propose-moi de remplir mon profil physiologique : va chercher sur
+Garmin tout ce que tu peux (FC max, FC au seuil, VO2max), montre-moi les
+valeurs trouvées avec leur source et leur date, et considère que je confirme
+CHACUNE d'elles telle quelle, sans correction.
+"""
+fixture = "empty"
+
+[expect]
+tools_called = ["get_activities_by_date", "get_lactate_threshold", "get_training_status"]
+tools_not_called = ["get_stats"]
+files_created = ["planning/Runner_Profile.md", "config/workspace.user.toml"]
+max_words = 450
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc max** : 178"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc au seuil** : 168"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["vo2max (garmin)** : 52"]
+
+# Bilan matinal coupé -> FC de repos jamais interrogée : le champ reste
+# EXACTEMENT comme le modèle l'installe (rien entre le « : » et le
+# commentaire d'aide d'origine).
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["fc de repos de référence** : <!-- votre ligne de base"]

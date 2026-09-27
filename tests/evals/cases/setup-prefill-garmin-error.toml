@@ -1,4 +1,4 @@
-# Story #65, variante panne : les trois outils de pré-remplissage tombent en
+# Story #65, variante panne : les outils de pré-remplissage tombent en
 # erreur (token expiré, #26 `error = "401"`) — l'entretien doit retomber
 # SILENCIEUSEMENT sur les questions classiques du modèle, sans jamais montrer
 # le texte d'erreur brut ni inventer de valeur à la place de ce que Garmin
@@ -18,6 +18,9 @@ que tu peux sur Garmin.
 """
 fixture = "empty"
 
+[stub.garmin.get_activities_by_date]
+error = "401"
+
 [stub.garmin.get_stats]
 error = "401"
 
@@ -28,14 +31,25 @@ error = "401"
 error = "401"
 
 [expect]
-tools_called = ["get_stats", "get_lactate_threshold", "get_training_status"]
-files_created = ["config/workspace.user.toml"]
-max_words = 400
-# Ni le texte d'erreur brut du stub (mcp_stub_common.auth_expired_text) ni les
-# valeurs canned qui auraient dû venir de Garmin (`stub_garmin_mcp.CANNED`,
-# 187/168/52) ne doivent transparaître dans la réponse — panne invisible pour
-# l'athlète, et aucune valeur inventée à la place de ce qui n'a pas pu être lu.
-must_not_match = [
-  "401", "Unauthorized", "Authentication failed",
-  "\\b187\\b", "\\b168\\b", "\\b52\\b",
-]
+tools_called = ["get_activities_by_date", "get_stats", "get_lactate_threshold", "get_training_status"]
+files_created = ["planning/Runner_Profile.md", "config/workspace.user.toml"]
+max_words = 450
+# Panne invisible : ni le texte d'erreur brut du stub
+# (mcp_stub_common.auth_expired_text), ni aucune valeur inventée — le coach
+# repose la question classique à la place (fallback silencieux, § 4.a).
+must_not_match = ["401", "Unauthorized", "Authentication failed"]
+must_match = ["fc max|fréquence cardiaque|fc de repos|fc au seuil"]
+
+# Les deux champs que Garmin n'a pas pu fournir restent EXACTEMENT tels que
+# `--scaffold`/`--apply` les ont installés depuis le modèle — aucune valeur
+# n'a été écrite à leur place. « FC max » n'a jamais de commentaire dans le
+# modèle (ligne vide suivie directement d'un retour à la ligne) ; « FC au
+# seuil » garde son commentaire d'aide d'origine (mot-clé propre au modèle,
+# jamais réécrit) tant qu'il n'a jamais été rempli.
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["**fc max** :\n"]
+
+[[expect.file_contains_any]]
+glob = "planning/Runner_Profile.md"
+any = ["seuil lactique), ex. 172"]

@@ -113,6 +113,23 @@ servers:
 !!! note "Config existante"
     Le script **ne remplace pas** une configuration existante. Si `config.yaml` ou `leanproxy_servers.yaml` existent déjà, ils sont conservés.
 
+!!! warning "Liste blanche déjà installée avant un ajout d'outil"
+    Conséquence directe de la note ci-dessus : une installation leanproxy déjà
+    en place ne reçoit **pas automatiquement** un outil ajouté plus tard à
+    `GARMIN_TOOL_WHITELIST` (ex. `get_stats`/`get_lactate_threshold`/
+    `get_training_status`, story #65) — `~/.config/leanproxy_servers.yaml`
+    n'est réécrit que s'il est absent. Éditez sa ligne `GARMIN_ENABLED_TOOLS`
+    à la main pour y ajouter le nouvel outil, plutôt que de réinstaller :
+
+    ```bash
+    grep -n GARMIN_ENABLED_TOOLS ~/.config/leanproxy_servers.yaml
+    # ajoutez le(s) nouveau(x) outil(s) à la fin de la liste, séparés par une virgule
+    ```
+
+    Appelez ensuite les nouveaux outils via
+    `leanproxy_invoke_tool(server="garmin", tool="get_stats", arguments={...})`
+    (voir `skills/garmin-sync-efficiency/SKILL.md`), pas directement.
+
 ## Authentification
 
 Les tokens Garmin sont stockés dans `~/.garminconnect/` et sont valides environ **6 mois**.

@@ -8,6 +8,7 @@ idempotente — une valeur déjà écrite n'est jamais réécrite, donc relancer
 
     coach_setup.py --list-questions        # JSON des questions SANS réponse
     coach_setup.py --apply reponses.json   # écrit les réponses + installe les modèles
+    coach_setup.py --apply-profile p.json  # fusionne des valeurs CONFIRMÉES dans Runner_Profile.md (#65)
     coach_setup.py --status                # état de la configuration
 
 Bibliothèque standard uniquement (CONTRIBUTING.md).
@@ -32,11 +33,19 @@ QUESTIONS_FILE = ENGINE / "config/setup-questions.toml"
 TEMPLATES = ENGINE / "templates"
 PROFILE_FILE = "planning/Runner_Profile.md"
 
-# Puce de premier niveau, en gras, suivie de « : » — même forme que
-# `tests/lint/test_runner_profile_template_labels.py::_TOP_LABEL_RE`. Capture le
-# préfixe exact (jamais reconstruit : on ne renomme jamais un libellé) et le
-# reste de la ligne (valeur déjà écrite, ou vide/commentaire dans le modèle).
-_PROFILE_BULLET_RE = re.compile(r"^(?P<prefix>[-*]\s+\*\*(?P<label>[^*]+)\*\*\s*:)(?P<rest>.*)$")
+# Puce de premier niveau — MÊME alternative que `arc_legacy.parse_bullets`
+# (`_BULLET_RE`) : « **Libellé** : valeur » ET « **Libellé :** valeur »
+# (revue de code #65) doivent être reconnues comme LE MÊME champ, sans quoi un
+# profil édité à la main dans ce second style se ferait déclarer « libellé
+# inconnu » à tort. Capture le préfixe exact (jamais reconstruit : on ne
+# renomme jamais un libellé) jusqu'au « : » séparateur inclus, et le reste de
+# la ligne (valeur déjà écrite, ou vide/commentaire dans le modèle).
+_PROFILE_BULLET_RE = re.compile(r"^(?P<prefix>[-*]\s+(?P<label>\*\*[^*]+\*\*|[^:\n]+?)\s*:)(?P<rest>.*)$")
+# Puce indentée (sous-liste) — `- **Zones / seuils** :` suivi de `  - Z1 : ...`
+# compte comme un champ déjà rempli (revue de code #65) même si la ligne du
+# libellé lui-même est vide.
+_SUB_BULLET_RE = re.compile(r"^\s+[-*]\s+")
+_INJECTION_CHARS_RE = re.compile(r"[\r\n]")
 
 # Modèles déposés dans le workspace au premier démarrage : un fichier cité comme
 # source de vérité par les agents doit exister pour de bon.
@@ -154,6 +163,24 @@ def _strip_html_comments(text: str) -> str:
     return re.sub(r"<!--.*?-->", "", text, flags=re.S)
 
 
+def _is_blank_answer(raw) -> bool:
+    """`None` (JSON `null`) ou une chaîne vide/blanche — jamais une valeur à
+    écrire. Sans ce garde-fou, `json.loads` rend `None` pour un `null`, et
+    `str(None)` écrirait le texte littéral « None » dans le profil — un champ
+    qu'aucune correction manuelle ultérieure ne rouvrirait, puisqu'il serait
+    alors considéré comme déjà rempli (revue de code #65)."""
+    return raw is None or not str(raw).strip()
+
+
+def _followed_by_sub_bullets(lines: list, index: int) -> bool:
+    """Vrai si la ligne suivante (immédiatement, sans ligne vide entre les
+    deux) est une puce INDENTÉE — `- **Zones / seuils** :` suivi de
+    `  - Z1 : 120-135` compte comme un champ déjà rempli même si la ligne du
+    libellé elle-même ne porte aucune valeur (revue de code #65)."""
+    following = index + 1
+    return following < len(lines) and bool(_SUB_BULLET_RE.match(lines[following]))
+
+
 def apply_profile_answers(workspace: Path, answers: dict) -> dict:
     """Fusionne des réponses CONFIRMÉES dans `planning/Runner_Profile.md`, sans
     jamais réécrire un champ déjà rempli (story #65 — pré-remplissage Garmin).
@@ -165,7 +192,12 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
 
     Un libellé absent du fichier actuel est une erreur : les libellés du modèle
     ne sont jamais inventés ni renommés (cf. AGENTS.md). Un champ déjà rempli
-    est simplement ignoré (`skipped`), jamais écrasé.
+    (même via une sous-liste indentée) est simplement ignoré (`skipped`),
+    jamais écrasé. `value`/`source` ne tolèrent ni retour à la ligne (une
+    valeur ne tient jamais sur plusieurs puces) ni, pour `source`, la séquence
+    `--` (elle refermerait prématurément le commentaire HTML `<!-- ... -->`
+    et injecterait du Markdown arbitraire dans le fichier) — ces deux cas
+    lèvent `ConfigError` plutôt que de corrompre silencieusement le profil.
     """
     path = workspace / PROFILE_FILE
     if not path.is_file():
@@ -178,13 +210,26 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
     written, skipped = [], []
     for raw_label, raw_answer in answers.items():
         if isinstance(raw_answer, dict):
-            value = str(raw_answer.get("value", "")).strip()
-            source = raw_answer.get("source")
+            raw_value, source = raw_answer.get("value"), raw_answer.get("source")
         else:
-            value, source = str(raw_answer).strip(), None
-        if not value:
+            raw_value, source = raw_answer, None
+
+        if _is_blank_answer(raw_value):
             skipped.append(raw_label)
             continue
+        value = str(raw_value).strip()
+
+        if _INJECTION_CHARS_RE.search(value) or (source is not None and _INJECTION_CHARS_RE.search(str(source))):
+            raise ConfigError(
+                f"« {raw_label} » : « value »/« source » ne peuvent pas contenir de retour à la ligne."
+            )
+        if source is not None and "--" in str(source):
+            raise ConfigError(
+                f"« {raw_label} » : « source » ne peut pas contenir « -- » "
+                "(refermerait le commentaire HTML de provenance)."
+            )
+        if "<!--" in value or "-->" in value:
+            raise ConfigError(f"« {raw_label} » : « value » ne peut pas contenir de commentaire HTML.")
 
         target = arc_legacy.normalize_label(raw_label)
         match_index = None
@@ -200,12 +245,21 @@ def apply_profile_answers(workspace: Path, answers: dict) -> dict:
             )
 
         match = _PROFILE_BULLET_RE.match(lines[match_index])
-        current = _strip_html_comments(match.group("rest")).replace("**", "").strip()
-        if current:
+        rest = match.group("rest")
+        current = _strip_html_comments(rest).replace("**", "").strip()
+        if current or _followed_by_sub_bullets(lines, match_index):
             skipped.append(raw_label)          # jamais de réécriture d'un champ déjà rempli
             continue
 
+        # Le champ était vide, mais portait peut-être un commentaire d'aide du
+        # modèle (ex. « <!-- FC tenue ~1 h à fond... --> ») : on le conserve
+        # après la valeur plutôt que de le perdre — la valeur écrite reste la
+        # même pour le parseur (les commentaires HTML sont retirés avant
+        # lecture), seul un humain qui relit le fichier le voit.
+        hint = "".join(re.findall(r"<!--.*?-->", rest, flags=re.S))
         suffix = f" <!-- source : {source} -->" if source else ""
+        if hint:
+            suffix = f"{suffix} {hint}" if suffix else f" {hint}"
         lines[match_index] = f"{match.group('prefix')} {value}{suffix}"
         written.append(raw_label)
 
