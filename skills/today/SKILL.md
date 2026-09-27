@@ -1,0 +1,87 @@
+---
+name: today
+description: Short daily command — invoked as /today. Reports today's session from the current week file (planning/Semaine_*.md), the morning check at the configured [health].morning_check level, and the weather slot when the session is outdoor. One-line verdict first, read-only (never writes a plan, never pushes to Garmin). Load when the user runs /today or asks "what's today's session".
+gemini_command: "true"
+---
+
+# `/today` — thin daily status command
+
+This skill adds **no new coaching logic**: it is a short, predictable wrapper
+that asks the `coach` agent (or does the equivalent work itself, see below)
+for exactly today's status, in a fixed short format suitable for a phone
+screen. It never asks a question and never writes anything.
+
+## Configuration read first
+
+`config/workspace.toml` then `config/workspace.user.toml` (its values win,
+key by key) — `[language].responses` (output language), `[coaching].verbosity`
+(`brief`/`standard`/`detailed`, see `config/coaching-styles.md`),
+`[health].morning_check` (`full`/`minimal`/`off`), `[agents].enabled`,
+`[athlete].units`.
+
+## Delegation
+
+If `coach` is in `[agents].enabled` (or the key is absent, meaning every
+agent is reachable), delegate via the `task` tool to the agent **`coach`**,
+prompt in English plus **"Respond in <language of `[language].responses`,
+falling back to the language of this request if `auto`>"**:
+
+> Read-only status check, NOT a validation: report today's session from the
+> current week file (`planning/Semaine_YYYY-MM-DD.md` — if more than one week
+> file covers today because of a multi-week plan, use the CLI/selector that
+> resolves the current week rather than re-parsing the files by hand) and the
+> morning check at the configured `[health].morning_check` level (see
+> `agents/coach.md`'s morning-check section for the exact triad/single-metric
+> rules). If today's session is outdoor, load the `weather-forecast` skill and
+> report the recommended time slot. Do **not** validate, adjust, or cancel
+> anything, do **not** write or edit any file, do **not** call
+> `schedule_workouts`/`schedule_week`/`upload_workout`/any Garmin write tool —
+> this is a read of the existing plan and existing health data only, following
+> the usual freshness rules (skip a Garmin fetch if today's health file
+> already exists). Reply using the exact output contract below.
+
+If `coach` is **not** enabled, do this yourself, within your own competence,
+without naming the missing agent: read `planning/active_objective.md` and the
+current `planning/Semaine_*.md` for today's session, apply the morning-check
+rules directly (see below), and load `weather-forecast` yourself for an
+outdoor session.
+
+## Morning check — exact behaviour per level
+
+- `full` (default): the triad is indivisible — HRV (`get_hrv_data`), resting
+  heart rate (`get_rhr_day`) and training readiness (`get_training_readiness`),
+  all three, never two. Skip the fetch and reuse the value if today's
+  `medical/YYYY-MM-DD_health.md` already exists (freshness rule).
+- `minimal`: `get_training_readiness` only, one line. Never call
+  `get_hrv_data` or `get_rhr_day`, never mention HRV or resting heart rate,
+  never cancel or flag a session on health data alone at this level.
+- `off`: no health tool is called at all (`get_hrv_data`, `get_rhr_day`,
+  `get_training_readiness` all absent from the trace) — plan on load, history
+  and declared feeling only.
+
+Never silently upgrade to a stricter level than configured.
+
+## Output contract
+
+**First line, fixed prefix, one-line verdict** (translated to
+`[language].responses`; French example, the default documents language):
+
+```
+Aujourd'hui — <verdict court : séance prévue / repos / à ajuster + le motif en quelques mots>
+```
+
+Then, respecting `[coaching].verbosity` (`brief` = 3-5 lines total,
+`standard` = a short paragraph plus the key figures, `detailed` = adds the
+reasoning) and `[health].morning_check`:
+
+- the session itself (type, duration/distance, intensity) or "repos" if none
+  is planned;
+- the morning-check line(s) at the configured level (nothing at `off`);
+- a weather + time-slot line **only** when the session is outdoor (skip this
+  line entirely for an indoor/rest day — never invent a slot for a session
+  that has none).
+
+No question, no proposal to act, no mention of `/coach-setup` here even on a
+fresh install (this command answers a factual question, it does not onboard).
+If no `active_objective.md`/week file exists yet, say so in one line rather
+than inventing a session.

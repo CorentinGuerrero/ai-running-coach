@@ -1,0 +1,57 @@
+---
+name: week
+description: Short command — invoked as /week. Compact status of this week's plan (done/planned/remaining load, guardrail status) as a table/list. Read-only. Load when the user runs /week or asks for a status of the current week.
+gemini_command: "true"
+---
+
+# `/week` — compact status of the current week
+
+Thin wrapper: no new planning logic, no write. Reports the current week's
+sessions with their status (done/planned/remaining) and the load, plus the
+guardrail verdict, in a short table.
+
+## Configuration read first
+
+`config/workspace.toml` / `config/workspace.user.toml` — `[language].responses`,
+`[coaching].verbosity`, `[agents].enabled`, `[athlete].units`.
+
+## Delegation
+
+If `coach` is enabled, delegate via `task` to **`coach`**, English prompt +
+"Respond in <language>":
+
+> Read-only status, not a validation or a re-plan: locate the week file(s)
+> covering today (`planning/Semaine_YYYY-MM-DD.md`, Monday of the week — if a
+> multi-week plan means more than one file could apply, use the CLI/selector
+> that resolves the current week rather than re-parsing file names by hand).
+> For each session in that week: date, type, status (`done`/`planned`/
+> `skipped`/`cancelled`), and its load contribution (duration or distance).
+> Sum done vs planned load. Then run `python3 scripts/arc_guardrails.py check
+> --week <file> --today <date>` and report its verdict (ok / block / warn-info
+> / input error — see `agents/coach.md`'s guardrails section for the three
+> outcomes) as a single status word, never a full re-explanation (that is
+> `/why`'s job). Do not modify the week file, do not push anything to Garmin,
+> do not propose changes — only report facts already on record.
+
+If `coach` is not enabled, read the week file(s) and run the guardrails check
+yourself.
+
+## Output contract
+
+**First line, fixed prefix**, translated to `[language].responses` (French
+default):
+
+```
+Semaine — <réalisé>/<prévu> (unité selon [athlete].units), garde-fous : <ok|bloqué|à surveiller>
+```
+
+Then, respecting `[coaching].verbosity` (`brief` = the table only, `standard`/
+`detailed` add a short comment per flagged session):
+
+A compact table, one row per session:
+
+| Date | Type | Statut | Charge |
+|---|---|---|---|
+
+No week file found for the current week: say so in one line rather than
+inventing sessions or falling back to a past/future week silently.

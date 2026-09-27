@@ -97,12 +97,17 @@ Chaque séance est poussée dans votre calendrier Garmin Connect. Après l'effor
 <div class="arc-section" markdown>
   <div class="arc-section__inner" markdown>
 
-## Treize skills, prêts à l'emploi
+## Dix-sept skills, prêts à l'emploi
 
 Chaque agent s'appuie sur des skills spécialisés — des protocoles précis que l'IA suit à la lettre.
+Quatre d'entre eux sont aussi des commandes courtes pour un usage quotidien depuis le téléphone.
 
 <div class="arc-skills">
 
+<div class="arc-skill"><span class="arc-skill__name">Aujourd'hui (/today)</span><span class="arc-skill__desc">séance du jour, bilan matinal, créneau météo</span></div>
+<div class="arc-skill"><span class="arc-skill__name">Pourquoi (/why)</span><span class="arc-skill__desc">explique la dernière décision du journal, jamais une raison inventée</span></div>
+<div class="arc-skill"><span class="arc-skill__name">Semaine (/week)</span><span class="arc-skill__desc">statut compact de la semaine en cours, réalisé/prévu, garde-fous</span></div>
+<div class="arc-skill"><span class="arc-skill__name">Course (/race)</span><span class="arc-skill__desc">compte à rebours de l'objectif, score Trail Shape, plan de course</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Analyse GPX</span><span class="arc-skill__desc">profil, D+, compatibilité avec une séance cible</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Comparaison de parcours</span><span class="arc-skill__desc">progression sur un même lieu, séance après séance</span></div>
 <div class="arc-skill"><span class="arc-skill__name">Planification Garmin</span><span class="arc-skill__desc">push des séances au calendrier Garmin Connect</span></div>

@@ -41,6 +41,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `itra-index-lookup-confirm` | — | — |
 | `itra-index-privacy` | — | — |
 | `no-medical-no-delegation` | — | — |
+| `race-countdown-trail-shape` | — | — |
 | `race-debrief` | — | — |
 | `race-plan-personal-model` | — | — |
 | `setup-first-run` | — | — |
@@ -56,7 +57,11 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `sync-activity-arc-fields` | — | — |
 | `sync-declared-fuel` | — | — |
 | `sync-writes-arc-block` | — | — |
+| `today-morning-check-off` | — | — |
+| `today-outdoor-full` | — | — |
 | `trail-shape` | — | — |
+| `week-status-compact` | — | — |
+| `why-explains-logged-decision` | — | — |
 | `workout-personal-targets` | — | — |
 
 > **Pas encore de relevé.** Le harnais est complet et validé — scénarios,
@@ -66,6 +71,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 > puis remplacez ce tableau par le relevé obtenu.
 
 <!-- Régénéré via `python3 tests/evals/render_results.py --results <(echo '{}')`
-     (#63) : `trail-shape` a été ajouté par cette régénération. Date et modèle
-     remis à `_jamais exécuté_`/« défaut » à la main après régénération :
-     aucune exécution réelle n'a eu lieu. -->
+     (#66) : `today-outdoor-full`, `today-morning-check-off`,
+     `why-explains-logged-decision`, `week-status-compact` et
+     `race-countdown-trail-shape` ont été ajoutés par cette régénération. Date
+     et modèle remis à `_jamais exécuté_`/« défaut » à la main après
+     régénération : aucune exécution réelle n'a eu lieu. -->
