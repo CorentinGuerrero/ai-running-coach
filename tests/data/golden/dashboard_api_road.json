@@ -788,6 +788,7 @@
           "best_climb_vam_elapsed_m_h": null,
           "best_vam_10min_m_h": null,
           "best_vam_20min_m_h": null,
+          "calories_bmr_kcal": null,
           "calories_kcal": 680.0,
           "carbs_g": null,
           "date": "2026-09-23",

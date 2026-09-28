@@ -24,6 +24,8 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py climb-history [--segment ID | --activity GARMIN_ID]  # identité de montée entre séances (#49)
     arc_index.py decisions [--date D | --days N] [--trigger T] [--outcome O] [--active]
                                                                         # journal des décisions, en JSON (#54)
+    arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
+                                                                        # dépense modèle vs Garmin, en JSON (#60)
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
 compris) : elle réindexe puis rend le point du jour de `arc_metrics.hrv_baseline_series`
@@ -149,6 +151,42 @@ décision »). Sans filtre de date, rend tout l'historique. Consommée par le ta
 de bord (#55, encart « Pourquoi aujourd'hui ? » + journal filtrable) et par
 `/garmin-daily-sync` (#56, ligne « Pourquoi » du bloc `resume`).
 
+`energy` (#60, épopée #21) rend la dépense énergétique modèle (RE3 course + marche de
+Minetti, `scripts/arc_energy.py`) d'une ou plusieurs séances, EN REGARD de
+`calories_kcal` Garmin (référence par défaut partout — ce calcul reste un CONTRÔLE
+INDÉPENDANT, jamais un remplacement, voir `arc_energy.py`) : `garmin_kcal`,
+`model_kcal`, `delta_pct`/`flag` (`arc_energy.delta_pct`/`delta_flag`,
+`DELTA_ALERT_PCT` = 15 %, `delta_reason: "no_garmin_kcal"` si `calories_kcal` manque),
+`bmr_kcal` (`calories_bmr_kcal`, quand connu) et le NET Garmin/modèle qui en découle
+(`− bmr_kcal`, `net_reason: "no_bmr"` sans BMR connu), poids utilisé + sa source
+(`weight_kg`/`weight_source`, voir `resolve_weight_kg_as_of`), décomposition
+plat/montée/descente/marche/arrêt — kcal et pourcentages arrondis à 1 décimale
+(`_round1`, même précision que les autres KPI dérivés stockés). `--activity GARMIN_ID`
+cible une séance précise (ou l'argument positionnel) ; `--date AAAA-MM-JJ` toutes les
+séances éligibles de ce jour ; `--since AAAA-MM-JJ` toutes les séances éligibles depuis
+cette date (INCLUSE, ordre chronologique) ; sans filtre, les `--limit` (défaut 10)
+dernières séances éligibles, rendues en ORDRE CHRONOLOGIQUE (la plus ancienne des
+`--limit` en tête, la plus récente en dernier). `--limit` est INCOMPATIBLE avec
+`--activity`/`--date`/`--since` (ne s'applique qu'à la liste par défaut), et l'argument
+positionnel est INCOMPATIBLE avec `--activity` (un seul moyen de désigner la séance) —
+rejetés avec un message explicite, jamais une précédence silencieuse. Une séance sans
+ligne dans `activity_energy` (hors famille course à pied, sans identifiant Garmin —
+`reason_code: "no_garmin_id"`, typiquement `[data].source = "intervals"` — ou sans
+échantillons FIT ingérés) obtient une `reason`/`reason_code` explicite à la lecture
+(jamais une absence silencieuse) ; une séance AVEC ligne mais `model_kcal: None` (poids
+introuvable ou implausible, `reason_code: "no_weight"`, ou erreur interne,
+`"internal_error"`) la porte directement depuis la table. `--activity`/`--date`/
+`--since` sont INCOMPATIBLES entre eux (comme `--date`/`--days` pour `decisions`) : au
+plus un filtre de sélection à la fois, jamais une précédence silencieuse. Colonnes
+`activity.calories_bmr_kcal` et table `activity_energy` recalculées en entier à chaque
+`compute_metrics` — même discipline que GAP/#44, découplage/#45, VAM/#46, descente/#47,
+durabilité/#48, mais dans son PROPRE `try`/`except` (revue de code) : un échec du calcul
+d'énergie ne remet jamais à NULL les autres KPI FIT de la séance, et réciproquement.
+Réponse toujours accompagnée de `model_id` et, par défaut, `assumptions_summary` (1-2
+lignes, `arc_energy.SUMMARY`) — `--assumptions` bascule sur `assumptions`
+(`arc_energy.ASSUMPTIONS` en entier, plusieurs Ko) pour l'agent qui veut vérifier une
+hypothèse précise, jamais les deux en même temps.
+
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
 <workspace>/.arc/coach.db), `--memory` (base en mémoire, rien sur disque),
@@ -180,6 +218,7 @@ import arc_contract as C  # noqa: E402
 import arc_decoupling as DC  # noqa: E402
 import arc_descent as DS  # noqa: E402
 import arc_durability as DU  # noqa: E402
+import arc_energy as EN  # noqa: E402
 import arc_gap as G  # noqa: E402
 import arc_legacy as L  # noqa: E402
 import arc_metrics as M  # noqa: E402
@@ -214,7 +253,14 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # reste un entier) pour les activités synchronisées depuis `[data].source =
 # "intervals"`. Sans ce bump, une base déjà construite par une version
 # antérieure n'a pas la colonne et l'insertion échouerait avec « no such column ».
-SCHEMA_VERSION = 24
+# #60 (épopée #21, étape 2) : `activity` gagne `calories_bmr_kcal` (copie déclarative
+# du champ `bmr_calories` Garmin, voir `arc_contract.py`) et une nouvelle table
+# `activity_energy` (dépense énergétique modèle RE3 + marche, `scripts/arc_energy.py`,
+# recalculée en entier à chaque `compute_metrics` comme `activity_descent_class`/
+# `activity_climb`). Sans ce bump, une base déjà construite par une version
+# antérieure n'a ni la colonne ni la table et l'indexation échouerait avec « no such
+# column »/« no such table ».
+SCHEMA_VERSION = 25
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -428,7 +474,7 @@ CREATE TABLE activity (
     name TEXT, location TEXT, garmin_activity_id INTEGER, intervals_activity_id TEXT, start_time TEXT,
     distance_m REAL, duration_s REAL, moving_duration_s REAL, elevation_gain_m REAL,
     elevation_loss_m REAL, avg_hr_bpm REAL, max_hr_bpm REAL, recovery_hr_bpm REAL,
-    avg_cadence_spm REAL, calories_kcal REAL, te_aerobic REAL, te_anaerobic REAL, rpe REAL,
+    avg_cadence_spm REAL, calories_kcal REAL, calories_bmr_kcal REAL, te_aerobic REAL, te_anaerobic REAL, rpe REAL,
     load REAL, load_source TEXT, vo2max_est REAL, missing_reason TEXT,
     gear_id TEXT, carbs_g REAL, fluid_intake_ml REAL, weight_pre_kg REAL, weight_post_kg REAL,
     sweat_rate_l_h REAL, gap_pace_s_km REAL, decoupling_pct REAL, ef_whole REAL,
@@ -676,6 +722,33 @@ CREATE TABLE activity_descent_class (
     mean_speed_ms REAL, mean_pace_s_km REAL, mean_gap_speed_ms REAL, mean_grade REAL, efficiency REAL
 );
 CREATE INDEX activity_descent_class_activity ON activity_descent_class(activity_id);
+-- Dépense énergétique modèle RE3 + marche (#60, épopée #21, `arc_energy.py`), UNE ligne
+-- par activité éligible (id INTERNE `activity_id`, comme `activity_descent_class`/
+-- `activity_climb`/`hr_zone_time` ci-dessus — JAMAIS `garmin_activity_id` : la ligne est
+-- recréée en entier à chaque `compute_metrics`, sans purge par fichier, un `activity_id`
+-- change à chaque édition du Markdown, voir ASSUMPTIONS["hr_zones"]). Restreinte à la
+-- famille course à pied (`arc_metrics.SPORT_FAMILY` = "run" : running/trail/hiking/
+-- walking, le moteur gère la marche) AVEC des échantillons FIT ingérés — même garde que
+-- GAP/#44, découplage/#45, VAM/#46, descente/#47 : une activité hors de cette famille ou
+-- sans FIT n'a simplement AUCUNE ligne ici (jamais une ligne à `model_kcal: NULL` sans
+-- raison pour ce cas-là — la raison se déduit alors de l'absence même de ligne, voir
+-- `energy_report`/`activity_energy_report`). En revanche, une activité ÉLIGIBLE (famille
+-- + FIT) dont le POIDS n'a pu être résolu obtient bien une ligne, `model_kcal` NULL avec
+-- `reason`/`reason_code` explicites (`weight_kg`/`weight_source` NULL aussi) — jamais un
+-- NULL muet ni une exception : voir `resolve_weight_kg_as_of`/ASSUMPTIONS["weight"].
+-- `model_kcal`/`weight_kg`/`weight_source`/`counted_s`/`gap_s`/`elevation_missing` :
+-- voir `arc_energy.energy_from_samples`. `walk_s`/`stopped_s`/`uphill_s`/`downhill_s`/
+-- `flat_s` (+ leur kcal) : décomposition PAR CATÉGORIE de
+-- `arc_energy.BREAKDOWN_CATEGORIES` (elle-même issue de `energy_from_samples`
+-- ["breakdown"]) — jamais recalculée séparément ici.
+CREATE TABLE activity_energy (
+    activity_id INTEGER, model_id TEXT, model_kcal REAL, weight_kg REAL, weight_source TEXT,
+    counted_s REAL, gap_s REAL, elevation_missing INTEGER,
+    flat_s REAL, flat_kcal REAL, uphill_s REAL, uphill_kcal REAL, downhill_s REAL, downhill_kcal REAL,
+    walk_s REAL, walk_kcal REAL, stopped_s REAL, stopped_kcal REAL,
+    reason TEXT, reason_code TEXT
+);
+CREATE INDEX activity_energy_activity ON activity_energy(activity_id);
 -- Modèle personnel pente -> allure (#58, `arc_slope_model.py`) — GLOBAL au workspace
 -- (pas par activité, comme `climb_segment` ci-dessus) : recalculé INTÉGRALEMENT à chaque
 -- `compute_metrics`, jamais de purge partielle. Une ligne par (`band`, panier de pente) —
@@ -983,6 +1056,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
             "elevation_loss_m": g("elevation_loss_m"), "avg_hr_bpm": g("avg_hr_bpm"),
             "max_hr_bpm": g("max_hr_bpm"), "recovery_hr_bpm": g("recovery_hr_bpm"),
             "avg_cadence_spm": g("avg_cadence_spm"), "calories_kcal": g("calories_kcal"),
+            "calories_bmr_kcal": g("calories_bmr_kcal"),
             "te_aerobic": g("training_effect_aerobic"), "te_anaerobic": g("training_effect_anaerobic"),
             "rpe": g("rpe"), "missing_reason": _j(g("missing_reason")),
             "gear_id": g("gear_id"), "carbs_g": g("carbs_g"), "fluid_intake_ml": g("fluid_intake_ml"),
@@ -1114,6 +1188,89 @@ def planned_intensity_for(conn, date: Optional[str], sport: Optional[str]) -> Op
     return None
 
 
+def _round1(value: Optional[float]) -> Optional[float]:
+    """`round(value, 1)`, `None` si `value` est `None` — même précision que les
+    autres KPI dérivés stockés (`hr_zone_time.seconds`, `round(seconds, 1)`) pour
+    `activity_energy` (#60, revue de code) : kcal/secondes à 1 décimale, jamais la
+    précision flottante brute du calcul dans la base ni dans le JSON du CLI."""
+    return None if value is None else round(value, 1)
+
+
+def _plausible_weight_kg(value: Optional[float]) -> Optional[float]:
+    """`value` si dans `arc_contract.BODY_WEIGHT_KG_PLAUSIBLE` (30-200 kg, la même
+    plage que la validation du contrat pour `weight_kg`/`weight_pre_kg`/
+    `weight_post_kg`), `None` sinon — jamais un poids aberrant (0 kg, une faute de
+    frappe à 3 chiffres en trop, un export en livres non converti) utilisé comme
+    s'il était plausible (revue de code #60) : une valeur hors plage est traitée
+    EXACTEMENT comme une valeur absente, l'appelant (`resolve_weight_kg_as_of`)
+    retombe alors sur la source suivante, jamais sur `weight_kg=0` avec une raison
+    « aucun poids connu » qui serait un mensonge (une valeur A bien été trouvée,
+    elle est seulement jugée implausible)."""
+    if value is None:
+        return None
+    lo, hi = C.BODY_WEIGHT_KG_PLAUSIBLE
+    return value if lo <= value <= hi else None
+
+
+def resolve_weight_kg_as_of(conn, day: Optional[str], athlete: dict) -> Tuple[Optional[float], Optional[str]]:
+    """Poids (kg) à utiliser pour la dépense énergétique modèle (#60, épopée #21) d'une
+    séance datée `day` — voir la section « `energy` » du docstring du module pour le
+    contexte d'ensemble. Résolution, PAR ORDRE DE PRIORITÉ :
+
+    1. La DERNIÈRE pesée PLAUSIBLE connue (`health_day.weight_kg` OU
+       `nutrition_day.weight_kg`, filtrées par `_plausible_weight_kg` —
+       `arc_contract.BODY_WEIGHT_KG_PLAUSIBLE`, 30-200 kg, revue de code) À LA DATE
+       DE LA SÉANCE OU AVANT — jamais une pesée future, qui supposerait un poids que
+       l'athlète n'avait pas encore le jour de l'effort. Les deux sources sont
+       interrogées séparément (dernière date <= `day` avec un poids PLAUSIBLE dans
+       chacune — une pesée aberrante à cette date-là est ignorée, la requête
+       retombe sur la pesée plausible ANTÉRIEURE de la même source, jamais sur la
+       source concurrente à tort) puis comparées : la source dont la date est la
+       PLUS RÉCENTE gagne (la vraie « dernière valeur connue ») ; à date égale,
+       `health_day` gagne TOUJOURS (même précédence que `arc_metrics.
+       merge_weight_kg` — la pesée de santé est celle du bilan matinal,
+       `nutrition_day.weight_kg` n'a aucune garantie d'horaire). Un doublon DANS
+       une même source à la date gagnante (deux fichiers santé, ou deux fichiers
+       nutrition, pour le même jour) : `source_path` le plus grand par ordre
+       alphabétique gagne (même règle que `arc_serve.py`, `ORDER BY date DESC,
+       source_path DESC`).
+    2. À défaut (aucune pesée PLAUSIBLE connue à cette date ou avant, dans AUCUNE
+       des deux sources) : `athlete.weight_kg` (`planning/Runner_Profile.md`), SI
+       ELLE AUSSI plausible — un profil mal rempli (0, ou en livres non converties,
+       voir `arc_legacy.parse_athlete`) ne doit pas fausser silencieusement TOUTES
+       les séances faute de pesée santé/nutrition.
+    3. À défaut de tout : `(None, None)` — jamais un poids inventé (voir
+       `arc_energy.ASSUMPTIONS["no_exception"]`, qui rend alors `None` sans
+       exception), et jamais `weight_kg=0` avec la raison « aucun poids connu » —
+       une valeur À ÉTÉ trouvée mais jugée implausible, `reason_code="no_weight"`
+       le couvre identiquement (la CLI ne distingue pas « rien trouvé » de « trouvé
+       mais rejeté », les deux se résolvent en `(None, None)` ici).
+
+    `weight_source` vaut `"health_day"`, `"nutrition_day"` ou `"profile"`, pour que la
+    CLI (`arc_index.py energy`) puisse toujours dire QUELLE source a fourni le poids
+    utilisé, jamais une valeur muette. `day` absent (ne devrait pas arriver, `date` est
+    obligatoire au contrat `activity`) : repli direct sur le profil, une recherche « à
+    cette date ou avant » n'ayant pas de sens sans date."""
+    lo, hi = C.BODY_WEIGHT_KG_PLAUSIBLE
+    if not day:
+        profile_weight = _plausible_weight_kg(athlete.get("weight_kg"))
+        return (profile_weight, "profile") if profile_weight else (None, None)
+    health_row = conn.execute(
+        "SELECT date, weight_kg FROM health_day WHERE date <= ? AND weight_kg IS NOT NULL "
+        "AND weight_kg BETWEEN ? AND ? ORDER BY date DESC, source_path DESC LIMIT 1", (day, lo, hi)).fetchone()
+    nutrition_row = conn.execute(
+        "SELECT date, weight_kg FROM nutrition_day WHERE date <= ? AND weight_kg IS NOT NULL "
+        "AND weight_kg BETWEEN ? AND ? ORDER BY date DESC, source_path DESC LIMIT 1", (day, lo, hi)).fetchone()
+    health_date = health_row["date"] if health_row else None
+    nutrition_date = nutrition_row["date"] if nutrition_row else None
+    if health_date is not None and (nutrition_date is None or health_date >= nutrition_date):
+        return health_row["weight_kg"], "health_day"
+    if nutrition_date is not None:
+        return nutrition_row["weight_kg"], "nutrition_day"
+    profile_weight = _plausible_weight_kg(athlete.get("weight_kg"))
+    return (profile_weight, "profile") if profile_weight else (None, None)
+
+
 def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     """Charge par séance, VO2max par séance, temps en zone FC + polarisation, puis la
     série quotidienne matérialisée."""
@@ -1142,6 +1299,7 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     conn.execute("DELETE FROM hr_polarisation_time")
     conn.execute("DELETE FROM activity_climb")
     conn.execute("DELETE FROM activity_descent_class")
+    conn.execute("DELETE FROM activity_energy")
     conn.execute("DELETE FROM climb_segment")
     conn.execute("DELETE FROM slope_model_bin")
     conn.execute("DELETE FROM slope_model_meta")
@@ -1477,6 +1635,72 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                         "durability_reason = ?, durability_reason_code = ? WHERE id = ?",
                         ("calcul impossible (erreur interne)", "calcul impossible (erreur interne)",
                          "internal_error", act["id"]),
+                    )
+                # Dépense énergétique modèle RE3 + marche (#60, épopée #21) : try/except SÉPARÉ
+                # du bloc GAP/VAM/descente/durabilité ci-dessus (revue de code) — un bug dans
+                # UN calcul ne doit jamais empêcher l'AUTRE : un détecteur de montée qui lève ne
+                # doit pas priver la séance de sa ligne `activity_energy`, et une exception ici
+                # ne doit JAMAIS remettre à NULL `gap_pace_s_km`/`decoupling_pct`/etc. de la
+                # séance (aucune donnée partagée entre les deux blocs hors `act_samples`, en
+                # lecture seule). Réutilise `act_samples` déjà chargés ci-dessus —
+                # `arc_energy.energy_from_samples` fait sa PROPRE segmentation/lissage (fenêtre
+                # différente de GAP, voir `arc_energy.ASSUMPTIONS["segmentation"]`), jamais un
+                # second appel à `arc_elevation` en dehors du module. Poids résolu À LA DATE DE
+                # LA SÉANCE (`resolve_weight_kg_as_of`, voir sa docstring) — jamais le poids du
+                # jour de l'INDEXATION, qui changerait rétroactivement la dépense d'une séance
+                # ancienne à chaque nouvelle pesée. Même discipline `sqlite3.Error`/
+                # `ARC_STRICT_METRICS` que le bloc ci-dessus.
+                try:
+                    weight_kg, weight_source = resolve_weight_kg_as_of(conn, act.get("date"), athlete)
+                    energy = EN.energy_from_samples(act_samples, weight_kg)
+                    if energy is None:
+                        # `weight_kg` absent/non positif/implausible (voir ASSUMPTIONS["no_exception"]
+                        # d'`arc_energy.py` et `resolve_weight_kg_as_of`) : une ligne est quand même
+                        # insérée (contrairement à une activité hors famille course à pied/sans FIT,
+                        # qui n'a AUCUNE ligne ici) — la raison est alors le poids, pas
+                        # l'admissibilité de la séance elle-même, et doit rester explicite pour la
+                        # CLI (`energy`).
+                        energy = {
+                            "kcal": None,
+                            "breakdown": {cat: {"seconds": None, "kcal": None} for cat in EN.BREAKDOWN_CATEGORIES},
+                            "counted_s": None, "gap_s": None,
+                            "elevation_missing": None, "model_id": EN.MODEL_ID,
+                            "reason": "aucun poids plausible connu (santé, nutrition ou profil) à la date de "
+                                       "la séance ou avant", "reason_code": "no_weight",
+                        }
+                    breakdown = energy["breakdown"]
+                    conn.execute(
+                        "INSERT INTO activity_energy (activity_id, model_id, model_kcal, weight_kg, "
+                        "weight_source, counted_s, gap_s, elevation_missing, flat_s, flat_kcal, uphill_s, "
+                        "uphill_kcal, downhill_s, downhill_kcal, walk_s, walk_kcal, stopped_s, stopped_kcal, "
+                        "reason, reason_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (act["id"], energy["model_id"], _round1(energy["kcal"]), weight_kg, weight_source,
+                         _round1(energy["counted_s"]), _round1(energy["gap_s"]),
+                         None if energy["elevation_missing"] is None else int(energy["elevation_missing"]),
+                         _round1(breakdown["flat"]["seconds"]), _round1(breakdown["flat"]["kcal"]),
+                         _round1(breakdown["uphill"]["seconds"]), _round1(breakdown["uphill"]["kcal"]),
+                         _round1(breakdown["downhill"]["seconds"]), _round1(breakdown["downhill"]["kcal"]),
+                         _round1(breakdown["walk"]["seconds"]), _round1(breakdown["walk"]["kcal"]),
+                         _round1(breakdown["stopped"]["seconds"]), _round1(breakdown["stopped"]["kcal"]),
+                         energy.get("reason"), energy.get("reason_code")),
+                    )
+                except sqlite3.Error:
+                    raise  # infrastructure de la base : jamais rattrapé, voir le commentaire ci-dessus.
+                except Exception as exc:  # noqa: BLE001 — défense en profondeur assumée, voir ci-dessus
+                    if os.environ.get("ARC_STRICT_METRICS") == "1":
+                        raise
+                    print(
+                        f"avertissement : dépense énergétique modèle a échoué pour l'activité "
+                        f"id={act['id']} (garmin_activity_id={act.get('garmin_activity_id')}) : {exc!r} — "
+                        "ligne activity_energy avec reason_code=internal_error, indexation poursuivie "
+                        "(GAP/VAM/descente/durabilité de cette séance ne sont PAS affectés par cet échec).",
+                        file=sys.stderr,
+                    )
+                    conn.execute("DELETE FROM activity_energy WHERE activity_id = ?", (act["id"],))
+                    conn.execute(
+                        "INSERT INTO activity_energy (activity_id, model_id, reason, reason_code) "
+                        "VALUES (?, ?, ?, ?)",
+                        (act["id"], EN.MODEL_ID, "calcul impossible (erreur interne)", "internal_error"),
                     )
     # Écriture du registre `climb_segment` (#49), une fois toutes les activités traitées :
     # `climb_registry.segments` porte le profil/la position représentative (première
@@ -1836,6 +2060,197 @@ def activity_gap_report(conn, garmin_activity_id: int) -> dict:
                 "reason": reason}
     return {"garmin_activity_id": garmin_activity_id, "gap_pace_s_km": act["gap_pace_s_km"],
             "splits": [dict(s) for s in splits], "reason": None}
+
+
+# ---------------------------------------------------------------------------
+# Dépense énergétique modèle vs Garmin (#60, épopée #21).
+# ---------------------------------------------------------------------------
+
+# Séances éligibles au calcul (`activity_energy`, `arc_energy.py` gère aussi la
+# marche) — mêmes sports que la famille course à pied `arc_metrics.SPORT_FAMILY`
+# = "run", jamais une liste maintenue séparément qui pourrait diverger.
+ENERGY_ELIGIBLE_SPORTS = tuple(sport for sport, family in M.SPORT_FAMILY.items() if family == "run")
+ENERGY_DEFAULT_LIMIT = 10
+
+
+def _energy_net(total_kcal: Optional[float], bmr_kcal: Optional[float]) -> Optional[float]:
+    """`total_kcal - bmr_kcal`, `None` si l'une des deux valeurs manque — jamais un
+    NET partiel qui laisserait croire à une soustraction faite alors qu'elle ne
+    l'a pas été (voir `arc_energy.ASSUMPTIONS["model"]` : le modèle rend un BRUT,
+    le NET n'existe qu'une fois `calories_bmr_kcal` connu)."""
+    if total_kcal is None or bmr_kcal is None:
+        return None
+    return total_kcal - bmr_kcal
+
+
+def _energy_breakdown_from_row(row: dict) -> Dict[str, Dict[str, Optional[float]]]:
+    return {cat: {"seconds": row[f"{cat}_s"], "kcal": row[f"{cat}_kcal"]} for cat in EN.BREAKDOWN_CATEGORIES}
+
+
+def _energy_session_dict(act: dict, energy_row: Optional[dict]) -> dict:
+    """Un point de la sortie `energy` (#60) à partir d'une ligne `activity` et de
+    sa ligne `activity_energy` correspondante (`None` si l'activité n'a AUCUNE
+    ligne — hors famille course à pied ou sans FIT, voir
+    `_energy_reason_for_missing_row`, appelée par l'appelant AVANT cette
+    fonction pour peupler `reason`/`reason_code` dans ce cas). Rend TOUJOURS le
+    même jeu de clés, `None` pour tout ce qui n'est pas calculable — jamais une
+    clé absente selon les données rencontrées (un consommateur JSON ne doit pas
+    avoir à deviner quelles clés une séance particulière porte).
+
+    `delta_pct`/`net_garmin_kcal`/`net_model_kcal` arrondis à 1 décimale (revue de
+    code) — même précision que les autres colonnes stockées (`_round1`), jamais la
+    précision flottante brute du calcul exposée telle quelle dans le JSON.
+    `delta_reason`/`net_reason` (revue de code) : raisons SPÉCIFIQUES à l'absence
+    de `delta_pct`/`net_*_kcal` quand la cause n'est PAS déjà celle de
+    `reason_code` (poids/éligibilité) mais une donnée GARMIN manquante —
+    `delta_reason="no_garmin_kcal"` si `calories_kcal` est absent (delta
+    incalculable même si le modèle, lui, a un résultat) ; `net_reason="no_bmr"`
+    si `calories_bmr_kcal` est absent (net incalculable des DEUX côtés). Si
+    `net_model_kcal` est `None` alors que le BMR est connu, c'est que `model_kcal`
+    lui-même manque — déjà expliqué par `reason`/`reason_code`, `net_reason` reste
+    alors `None` (pas de double explication contradictoire)."""
+    model_kcal = energy_row["model_kcal"] if energy_row else None
+    garmin_kcal = act.get("calories_kcal")
+    bmr_kcal = act.get("calories_bmr_kcal")
+    delta_pct = EN.delta_pct(model_kcal, garmin_kcal)
+    return {
+        "garmin_activity_id": act.get("garmin_activity_id"),
+        "date": act.get("date"),
+        "name": act.get("name"),
+        "sport": act.get("sport"),
+        "garmin_kcal": garmin_kcal,
+        "model_kcal": model_kcal,
+        "model_id": (energy_row["model_id"] if energy_row else None) or EN.MODEL_ID,
+        "delta_pct": _round1(delta_pct),
+        "delta_reason": "no_garmin_kcal" if garmin_kcal is None else None,
+        "flag": EN.delta_flag(delta_pct),
+        "bmr_kcal": bmr_kcal,
+        "net_garmin_kcal": _round1(_energy_net(garmin_kcal, bmr_kcal)),
+        "net_model_kcal": _round1(_energy_net(model_kcal, bmr_kcal)),
+        "net_reason": "no_bmr" if bmr_kcal is None else None,
+        "weight_kg": energy_row["weight_kg"] if energy_row else None,
+        "weight_source": energy_row["weight_source"] if energy_row else None,
+        "counted_s": energy_row["counted_s"] if energy_row else None,
+        "gap_s": energy_row["gap_s"] if energy_row else None,
+        "elevation_missing": (bool(energy_row["elevation_missing"])
+                               if energy_row and energy_row["elevation_missing"] is not None else None),
+        "breakdown": _energy_breakdown_from_row(energy_row) if energy_row else None,
+        "reason": energy_row["reason"] if energy_row else None,
+        "reason_code": energy_row["reason_code"] if energy_row else None,
+    }
+
+
+def _energy_reason_for_missing_row(conn, act: dict) -> Tuple[str, str]:
+    """`reason`/`reason_code` d'une séance SANS ligne `activity_energy` — hors
+    famille course à pied, sans identifiant Garmin (séance synchronisée depuis
+    Intervals.icu, `[data].source = "intervals"`, #68 — voir AGENTS.md, table de
+    correspondance des outils : aucun FIT possible sans passer par
+    `garminconnect`), ou sans échantillon FIT ingéré (les seules raisons pour
+    lesquelles `compute_metrics` n'insère aucune ligne, voir la DDL de
+    `activity_energy`). Jamais appelée pour une séance qui A une ligne (poids
+    introuvable y est déjà `reason_code: "no_weight"`, porté par la ligne
+    elle-même)."""
+    if M.sport_family(act.get("sport")) != "run":
+        return ("hors de la famille course à pied (arc_metrics.sport_family) — le moteur "
+                "ne couvre que running/trail/hiking/walking", "not_run_family")
+    if act.get("garmin_activity_id") is None:
+        # Revue de code : distinct de « no_samples » — une séance sans identifiant
+        # Garmin (typiquement `[data].source = "intervals"`, #68) n'a jamais pu
+        # avoir de FIT ingéré, ce n'est pas un simple oubli de synchronisation.
+        return ("aucun identifiant Garmin pour cette séance (probablement synchronisée depuis "
+                "Intervals.icu, #68) — le moteur dépend des échantillons FIT, disponibles "
+                "uniquement via garminconnect", "no_garmin_id")
+    sample_count = conn.execute(
+        "SELECT COUNT(*) FROM activity_sample WHERE garmin_activity_id = ?",
+        (act.get("garmin_activity_id"),)).fetchone()[0]
+    if sample_count == 0:
+        return "aucun échantillon FIT ingéré pour cette séance", "no_samples"
+    # Ne devrait pas arriver (une activité de la famille course à pied avec des
+    # échantillons FIT obtient toujours une ligne, voir compute_metrics) — filet de
+    # sécurité honnête plutôt qu'une exception si l'invariant est un jour rompu.
+    return "aucune ligne activity_energy pour cette séance (cause inconnue)", "no_row"
+
+
+def _energy_session_for_activity_row(conn, act: dict) -> dict:
+    energy_row = conn.execute(
+        "SELECT * FROM activity_energy WHERE activity_id = ?", (act["id"],)).fetchone()
+    session = _energy_session_dict(act, dict(energy_row) if energy_row else None)
+    if energy_row is None:
+        session["reason"], session["reason_code"] = _energy_reason_for_missing_row(conn, act)
+    return session
+
+
+def activity_energy_report(conn, garmin_activity_id: int) -> dict:
+    """Détail de dépense énergétique modèle vs Garmin (#60) d'UNE séance, par
+    `garmin_activity_id` — pour la CLI (`arc_index.py energy --activity`) et les
+    agents en headless. Rend TOUJOURS le même jeu de clés (voir
+    `_energy_session_dict`), `reason`/`reason_code` explicites si `model_kcal`
+    est `None` — jamais une exception ni un échec muet, même discipline que
+    `activity_gap_report`/`activity_descent_report`."""
+    act = conn.execute(
+        "SELECT id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
+        "WHERE garmin_activity_id = ?", (garmin_activity_id,)).fetchone()
+    if act is None:
+        empty = _energy_session_dict({"garmin_activity_id": garmin_activity_id}, None)
+        empty["reason"] = "aucune activité indexée pour ce garmin_activity_id"
+        empty["reason_code"] = "unknown_activity"
+        return empty
+    return _energy_session_for_activity_row(conn, dict(act))
+
+
+def energy_report(conn, *, activity: Optional[int] = None, day: Optional[str] = None,
+                   since: Optional[str] = None, limit: int = ENERGY_DEFAULT_LIMIT,
+                   assumptions: bool = False) -> dict:
+    """Dépense énergétique modèle vs Garmin (#60) d'un ensemble de séances — pour
+    la CLI (`arc_index.py energy`) et pour les agents en headless (étape 3, non
+    implémentée ici). Un SEUL des trois sélecteurs (`activity`/`day`/`since`) à
+    la fois — la CLI (`main`) rejette explicitement leur combinaison plutôt que
+    de laisser une précédence silencieuse tromper un appelant headless, comme
+    `--date`/`--days` pour `decisions`. Sans sélecteur : les `limit` dernières
+    séances ÉLIGIBLES (`ENERGY_ELIGIBLE_SPORTS`), en ORDRE CHRONOLOGIQUE (la plus
+    ANCIENNE des `limit` en tête, la plus RÉCENTE en dernier — cohérent avec le
+    code, `rows` est explicitement inversé après le `ORDER BY ... DESC ... LIMIT`
+    qui sélectionne les `limit` séances les plus récentes) — une séance hors de
+    cette famille de sport n'apparaît JAMAIS dans ce mode par défaut
+    (contrairement à `--activity`, qui accepte n'importe quel sport pour en
+    expliquer explicitement l'inéligibilité). Rend TOUJOURS le même jeu de clés
+    `{"model_id", "assumptions", "assumptions_summary", "sessions"}` (revue de
+    code) — MAIS `assumptions`/`assumptions_summary` sont MUTUELLEMENT
+    EXCLUSIFS, l'une des deux valant toujours `None` : `assumptions` porte
+    `arc_energy.ASSUMPTIONS` en entier (plusieurs Ko de JSON) UNIQUEMENT si
+    `assumptions=True` (CLI `--assumptions`), sinon `None` et
+    `assumptions_summary` porte le résumé court `arc_energy.SUMMARY` (1-2
+    lignes) — un agent qui liste des séances n'a pas besoin de relire tout le
+    modèle à chaque appel, mais peut le demander explicitement quand il veut
+    vérifier une hypothèse."""
+    if activity is not None:
+        sessions = [activity_energy_report(conn, activity)]
+    else:
+        cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+        placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
+        if day:
+            rows = conn.execute(
+                f"SELECT {cols} FROM activity WHERE date = ? AND sport IN ({placeholders}) "
+                "ORDER BY date, start_time, garmin_activity_id, id",
+                (day, *ENERGY_ELIGIBLE_SPORTS)).fetchall()
+        elif since:
+            rows = conn.execute(
+                f"SELECT {cols} FROM activity WHERE date >= ? AND sport IN ({placeholders}) "
+                "ORDER BY date, start_time, garmin_activity_id, id",
+                (since, *ENERGY_ELIGIBLE_SPORTS)).fetchall()
+        else:
+            effective_limit = limit if limit and limit > 0 else ENERGY_DEFAULT_LIMIT
+            rows = conn.execute(
+                f"SELECT {cols} FROM activity WHERE sport IN ({placeholders}) "
+                "ORDER BY date DESC, start_time DESC, garmin_activity_id DESC, id DESC LIMIT ?",
+                (*ENERGY_ELIGIBLE_SPORTS, effective_limit)).fetchall()
+            rows = list(reversed(rows))  # chronologique, comme les modes --date/--since
+        sessions = [_energy_session_for_activity_row(conn, dict(row)) for row in rows]
+    out = {"model_id": EN.MODEL_ID}
+    out["assumptions"] = EN.ASSUMPTIONS if assumptions else None
+    out["assumptions_summary"] = None if assumptions else EN.SUMMARY
+    out["sessions"] = sessions
+    return out
 
 
 def weekly_polarisation(conn, weeks: int, today: date) -> List[dict]:
@@ -2946,7 +3361,7 @@ def build_parser() -> argparse.ArgumentParser:
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
                                  "heat-acclimation", "gear", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
-                                 "climb-history", "decisions", "slope-model", "trail-shape"))
+                                 "climb-history", "decisions", "slope-model", "trail-shape", "energy"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -2956,9 +3371,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--today", help="date de fin des séries (AAAA-MM-JJ)")
     parser.add_argument("--validate", nargs="+", metavar="FICHIER")
     parser.add_argument("--activity", type=int, metavar="GARMIN_ID",
-                        help="commande « zones »/« gap »/« decoupling »/« vam »/« descent »/« durability » : "
-                             "temps en zone, GAP, découplage, montées/VAM, efficacité en descente ou "
-                             "durabilité d'une séance (garmin_activity_id)")
+                        help="commande « zones »/« gap »/« decoupling »/« vam »/« descent »/« durability »/"
+                             "« energy » : temps en zone, GAP, découplage, montées/VAM, efficacité en "
+                             "descente, durabilité ou dépense énergétique d'une séance (garmin_activity_id)")
     parser.add_argument("--weeks", type=int, metavar="N",
                         help="commande « zones »/« decoupling »/« vam »/« descent »/« durability » : "
                              "polarisation ou tendance sur les N dernières semaines (défaut 8 pour "
@@ -2969,11 +3384,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « samples » : inclut lat_deg/lon_deg dans la sortie "
                              "(désactivé par défaut depuis #49 — débogage GPS local uniquement)")
     parser.add_argument("--date", metavar="AAAA-MM-JJ",
-                        help="commande « decisions » : décisions d'une date précise "
-                             "(incompatible avec --days, voir plus bas)")
+                        help="commande « decisions »/« energy » : décisions d'une date précise, ou "
+                             "séances éligibles de cette date pour « energy » "
+                             "(incompatible avec --days/--since selon la commande, voir plus bas)")
     parser.add_argument("--days", type=int, metavar="N",
                         help="commande « decisions » : fenêtre glissante de N jours (>= 1) se "
                              "terminant à --today (défaut : toutes les décisions connues)")
+    parser.add_argument("--since", metavar="AAAA-MM-JJ",
+                        help="commande « energy » : toutes les séances éligibles depuis cette date "
+                             "(incluse), ordre chronologique — incompatible avec --activity/--date")
+    parser.add_argument("--limit", type=int, metavar="N",
+                        help="commande « energy » : nombre de dernières séances éligibles à rendre "
+                             "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
+    parser.add_argument("--assumptions", action="store_true",
+                        help="commande « energy » : rend arc_energy.ASSUMPTIONS en entier au lieu du "
+                             "résumé court par défaut (assumptions_summary)")
     parser.add_argument("--trigger", choices=C.DECISION_TRIGGER,
                         help="commande « decisions » : ne garde que les décisions de ce déclencheur")
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
@@ -3115,6 +3540,45 @@ def main(argv=None) -> int:
             print(json.dumps(activity_durability_report(conn, garmin_id), ensure_ascii=False))
             return 0
         print(json.dumps(durability_trend(conn, today_date, args.weeks), ensure_ascii=False))
+        return 0
+    if args.command == "energy":
+        # Positionnel ET --activity en même temps (revue de code) : ambigu, jamais
+        # une précédence silencieuse (contrairement aux autres sous-commandes, où
+        # le positionnel n'est qu'un ALIAS de --activity et les deux ne sont
+        # jamais fournis ensemble par erreur en pratique) — rejeté explicitement.
+        if args.activity is not None and args.selector:
+            raise ConfigError("commande « energy » : passez garmin_activity_id soit en argument "
+                               "positionnel, soit via --activity, jamais les deux à la fois.")
+        # Un SEUL sélecteur à la fois (#60) — même discipline que `--date`/`--days` pour
+        # `decisions` : jamais une précédence silencieuse entre --activity/--date/--since.
+        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
+        selectors_used = sum(1 for v in (garmin_id, args.date, args.since) if v is not None)
+        if selectors_used > 1:
+            raise ConfigError("commande « energy » : --activity/--date/--since sont incompatibles "
+                               "entre eux, choisissez un seul sélecteur.")
+        if args.date:
+            try:
+                date.fromisoformat(args.date)
+            except ValueError:
+                raise ConfigError(f"--date : date AAAA-MM-JJ attendue, « {args.date} » reçue.")
+        if args.since:
+            try:
+                date.fromisoformat(args.since)
+            except ValueError:
+                raise ConfigError(f"--since : date AAAA-MM-JJ attendue, « {args.since} » reçue.")
+        if args.limit is not None and args.limit < 1:
+            raise ConfigError(f"--limit : un entier >= 1 attendu, « {args.limit} » reçu.")
+        # --limit ne s'applique qu'à la liste PAR DÉFAUT (revue de code) : combiné à
+        # un sélecteur, il ne serait jamais utilisé (`energy_report` l'ignore dans
+        # ce cas) — un appelant qui le fournit croit presque toujours, à tort,
+        # qu'il borne le résultat d'un sélecteur ; rejeté explicitement plutôt que
+        # silencieusement sans effet.
+        if args.limit is not None and selectors_used >= 1:
+            raise ConfigError("commande « energy » : --limit ne s'applique qu'à la liste par défaut "
+                               "(sans --activity/--date/--since), où il n'aurait aucun effet.")
+        print(json.dumps(energy_report(conn, activity=garmin_id, day=args.date, since=args.since,
+                                        limit=args.limit or ENERGY_DEFAULT_LIMIT,
+                                        assumptions=args.assumptions), ensure_ascii=False))
         return 0
     if args.command == "climb-history":
         # #49 : `--segment ID` prime (historique direct d'un segment) ; sinon `--activity

@@ -432,6 +432,19 @@ ASSUMPTIONS = {
     ),
 }
 
+# Résumé COURT (1-2 lignes) des hypothèses du modèle — pour la CLI
+# (`arc_index.py energy`, sans `--assumptions`) : le détail complet
+# (`ASSUMPTIONS`) coûte plusieurs Ko de JSON à chaque appel, inutile pour un
+# agent qui liste juste des séances sans creuser le modèle. `--assumptions`
+# rend `ASSUMPTIONS` en entier à la place de ce résumé — jamais les deux à la
+# fois (voir `arc_index.energy_report`).
+SUMMARY = (
+    f"Modèle {MODEL_ID} : équation RE3 (course) + polynôme marche de Minetti (marche), résultat BRUT "
+    f"comparable à calories_kcal Garmin — Garmin reste la référence, ce calcul est un CONTRÔLE INDÉPENDANT "
+    f"(seuil de signalement |Δ| > {DELTA_ALERT_PCT:.0f} %) et un outil de PRÉVISION, jamais un remplacement. "
+    "Voir --assumptions pour le détail complet des hypothèses."
+)
+
 
 # ---------------------------------------------------------------------------
 # Puissance métabolique brute (W/kg).
