@@ -21,9 +21,16 @@ Le port vient de `[dashboard].port` (défaut 8765). S'il est pris, les 9 suivant
 sont essayés ; `--port 0` laisse le système choisir (tests). La ligne
 `URL: http://127.0.0.1:<port>/` est imprimée dès que le serveur écoute.
 
-L'index est rafraîchi au démarrage puis, au plus toutes les 30 s, à la
-première requête qui suit — un fichier écrit par un agent apparaît donc sans
-relancer le serveur.
+L'index est construit en arrière-plan dès le démarrage (le serveur écoute
+aussitôt ; les requêtes API attendent la fin de ce premier passage), puis
+rafraîchi toutes les 30 s par ce même fil — jamais dans une requête : un fichier
+écrit par un agent apparaît donc sans relancer le serveur, et aucune page
+n'attend une réindexation. Un passage sans changement ne recalcule pas les
+métriques ; un passage avec changement ne recalcule que les séances touchées
+(`arc_index.MetricsCache`).
+
+Les fichiers statiques sont revalidés par ETag (`304`), et toute réponse
+textuelle est compressée (gzip) quand le client l'accepte.
 
 Bibliothèque standard uniquement (CONTRIBUTING.md).
 """
@@ -31,6 +38,8 @@ Bibliothèque standard uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import html
 import json
 import os
@@ -57,8 +66,16 @@ from coach_config import ConfigError  # noqa: E402
 LOOPBACK = "127.0.0.1"                   # défaut : le tableau de bord ne sort pas de la machine
 DEFAULT_PORT = 8765
 WEB_ROOT = I.ENGINE / "web"
-# Intervalle minimal entre deux réindexations (ARC_DASHBOARD_REFRESH_S pour les tests).
+# Intervalle entre deux réindexations (ARC_DASHBOARD_REFRESH_S pour les tests).
 REFRESH_EVERY_S = float(os.environ.get("ARC_DASHBOARD_REFRESH_S", "30"))
+# Plancher du fil de rafraîchissement : `ARC_DASHBOARD_REFRESH_S=0` (tests) ne doit
+# pas devenir une boucle active.
+MIN_BACKGROUND_INTERVAL_S = 0.2
+# Attente maximale d'une requête API pendant le tout premier index.
+READY_TIMEOUT_S = float(os.environ.get("ARC_DASHBOARD_READY_TIMEOUT_S", "120"))
+# En dessous, la compression coûte plus qu'elle ne rapporte.
+GZIP_MIN_BYTES = 1024
+COMPRESSIBLE = ("text/", "application/json", "image/svg+xml")
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
@@ -195,27 +212,69 @@ def strip_leading_heading(text: str) -> str:
 
 
 class Store:
-    """Connexion SQLite partagée entre les threads, sous verrou."""
+    """Connexion SQLite partagée entre les threads, sous verrou.
 
-    def __init__(self, workspace: Path, db=None, memory=False, today=None):
+    Par défaut (tests, usages en bibliothèque), le premier index est construit dans le
+    constructeur. `background=True` (le serveur) le laisse à `start_background`, dont
+    le fil réindexe ensuite à intervalle fixe : aucune requête ne réindexe jamais.
+    """
+
+    def __init__(self, workspace: Path, db=None, memory=False, today=None, background=False):
         self.workspace, self.today, self.db, self.memory = workspace, today, db, memory
         self.lock = threading.Lock()
         self.conn = I.open_db(workspace, db, memory)
         self.last_index = 0.0
-        self.refresh(force=True)
+        self.last_counts: dict = {}
+        self.metrics_cache = I.MetricsCache()
+        self.ready = threading.Event()
+        self.background = background
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        if not background:
+            self.refresh(force=True)
 
     def refresh(self, force=False) -> None:
         with self.lock:
             if force or time.monotonic() - self.last_index > REFRESH_EVERY_S:
                 try:
-                    I.index_workspace(self.conn, self.workspace, self.today)
+                    counts = I.index_workspace(self.conn, self.workspace, self.today, self.metrics_cache)
                 except sqlite3.DatabaseError:
                     # Base remplacée ou corrompue par un autre processus : elle est
-                    # dérivée, on rouvre et on réindexe.
+                    # dérivée, on rouvre et on réindexe — sans rien reprendre du cache,
+                    # les échantillons vont être réingérés.
                     self.conn.close()
+                    self.metrics_cache.clear()
                     self.conn = I.open_db(self.workspace, self.db, self.memory, rebuild=True)
-                    I.index_workspace(self.conn, self.workspace, self.today)
+                    counts = I.index_workspace(self.conn, self.workspace, self.today, self.metrics_cache)
+                self.last_counts = counts
                 self.last_index = time.monotonic()
+        self.ready.set()
+
+    def start_background(self, interval: float = REFRESH_EVERY_S) -> None:
+        """Premier index puis réindexation toutes les `interval` s, dans un fil démon."""
+        self._thread = threading.Thread(target=self._loop, args=(max(interval, MIN_BACKGROUND_INTERVAL_S),),
+                                        name="arc-index", daemon=True)
+        self._thread.start()
+
+    def stop_background(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=30)
+
+    def _loop(self, interval: float) -> None:
+        while not self._stop.is_set():
+            try:
+                self.refresh(force=True)
+            except Exception as exc:  # noqa: BLE001 — le fil ne doit jamais mourir
+                print(f"avertissement : réindexation impossible : {type(exc).__name__}: {exc}", file=sys.stderr)
+            finally:
+                # Même en échec : les requêtes servent alors l'état précédent (ou une
+                # base vide) plutôt que d'attendre indéfiniment.
+                self.ready.set()
+            self._stop.wait(interval)
+
+    def wait_ready(self, timeout: Optional[float] = None) -> bool:
+        return self.ready.wait(READY_TIMEOUT_S if timeout is None else timeout)
 
     def rows(self, sql: str, params=()) -> list:
         with self.lock:
@@ -342,7 +401,6 @@ def api_summary(store: Store, q: dict) -> dict:
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,
-        "assumptions": store.meta("assumptions"),
         "compliance_trend": api_compliance_trend(store, q),
         "counts": {
             "activities": (store.one("SELECT COUNT(*) AS n FROM activity") or {}).get("n", 0),
@@ -350,6 +408,12 @@ def api_summary(store: Store, q: dict) -> dict:
             "nutrition": (store.one("SELECT COUNT(*) AS n FROM nutrition_day") or {}).get("n", 0),
         },
     }
+
+
+def api_assumptions(store: Store, q: dict) -> dict:
+    """Hypothèses des métriques (≈ 100 Ko de texte) : route à part plutôt que dans
+    `/api/summary`, chargé à chaque ouverture — seule la vue Performance les affiche."""
+    return {"assumptions": store.meta("assumptions")}
 
 
 def _days(q: dict, default: int, cap: int = 3650) -> int:
@@ -1265,7 +1329,7 @@ def api_injury_risk(store: Store, q: dict) -> dict:
 
 
 ROUTES = {
-    "/api/summary": api_summary, "/api/form": api_form, "/api/load": api_load,
+    "/api/summary": api_summary, "/api/assumptions": api_assumptions, "/api/form": api_form, "/api/load": api_load,
     "/api/health": api_health, "/api/week": api_week, "/api/activities": api_activities,
     "/api/performance": api_performance, "/api/reports": api_reports, "/api/report": api_report,
     "/api/calendar": api_calendar, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
@@ -1289,11 +1353,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):         # silencieux : c'est un outil local
         pass
 
-    def _send(self, status: int, body: bytes, ctype: str) -> None:
+    def _accepts_gzip(self) -> bool:
+        return any(part.split(";")[0].strip() == "gzip"
+                   for part in (self.headers.get("Accept-Encoding") or "").lower().split(","))
+
+    def _send(self, status: int, body: bytes, ctype: str, cache: str = "no-store",
+              etag: Optional[str] = None, gzipped: Optional[bytes] = None) -> None:
+        """`cache` : `no-store` pour l'API (données de santé, jamais en cache) ;
+        `no-cache` + `etag` pour les fichiers statiques (revalidés, `304` si inchangés).
+        `gzipped` : version compressée déjà calculée (fichiers statiques)."""
+        compressible = ctype.startswith(COMPRESSIBLE)
+        encoded = False
+        if compressible and len(body) >= GZIP_MIN_BYTES and self._accepts_gzip():
+            body = gzipped if gzipped is not None else gzip.compress(body, compresslevel=6)
+            encoded = True
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if encoded:
+            self.send_header("Content-Encoding", "gzip")
+        if compressible:
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Cache-Control", cache)
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
@@ -1335,8 +1418,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api(self, url) -> None:
         q = parse_qs(url.query)
-        try:
+        if self.store.background:
+            # Le fil d'index tient la base à jour : une requête n'attend que le TOUT
+            # premier passage (démarrage), jamais une réindexation.
+            if not self.store.wait_ready():
+                self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "index en cours de construction, réessayez"})
+                return
+        else:
             self.store.refresh()
+        try:
             match = re.fullmatch(r"/api/activity/(\d+)", url.path)
             segment_match = re.fullmatch(r"/api/climb-segment/(\d+)", url.path)
             decision_match = re.fullmatch(r"/api/decision/([^/]+)", url.path)
@@ -1367,7 +1457,37 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.NOT_FOUND, b"introuvable", "text/plain; charset=utf-8")
             return
         ctype = CONTENT_TYPES.get(target.suffix, "application/octet-stream")
-        self._send(HTTPStatus.OK, target.read_bytes(), ctype)
+        body, etag, gzipped = static_entry(target)
+        if etag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Vary", "Accept-Encoding")
+            self.end_headers()
+            return
+        self._send(HTTPStatus.OK, body, ctype, cache="no-cache", etag=etag, gzipped=gzipped)
+
+
+_STATIC: dict = {}
+_STATIC_LOCK = threading.Lock()
+
+
+def static_entry(target: Path) -> Tuple[bytes, str, Optional[bytes]]:
+    """Contenu, ETag et version gzip d'un fichier de `web/`, recalculés seulement
+    quand le fichier change (taille/mtime) — pas à chaque requête."""
+    st = target.stat()
+    key = (str(target), st.st_mtime_ns, st.st_size)
+    with _STATIC_LOCK:
+        cached = _STATIC.get(key[0])
+        if cached and cached[0] == key:
+            return cached[1]
+    body = target.read_bytes()
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    ctype = CONTENT_TYPES.get(target.suffix, "")
+    gzipped = gzip.compress(body, compresslevel=9) if ctype.startswith(COMPRESSIBLE) else None
+    with _STATIC_LOCK:
+        _STATIC[key[0]] = (key, (body, etag, gzipped))
+    return body, etag, gzipped
 
 
 class Server(ThreadingHTTPServer):
@@ -1420,16 +1540,21 @@ def check_exposure(listen: str, extra_hosts) -> None:
 def serve(workspace: Path, port: int, db=None, memory=False, today=None,
           listen: str = LOOPBACK, extra_hosts=()) -> None:
     check_exposure(listen, extra_hosts)
-    Handler.store = Store(workspace, db, memory, today)
+    # Le premier index (≈ 10 s sur un historique complet avec FIT) se construit en
+    # arrière-plan : le serveur écoute tout de suite, la page s'affiche, et les
+    # requêtes API attendent la fin de ce passage (`Store.wait_ready`).
+    Handler.store = Store(workspace, db, memory, today, background=True)
     httpd = bind(port, listen=listen)
     actual = httpd.server_address[1]
     Handler.allowed_hosts = host_allowlist(actual, extra_hosts)
+    Handler.store.start_background()
     print(f"URL: http://127.0.0.1:{actual}/", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        Handler.store.stop_background()
         httpd.server_close()
 
 

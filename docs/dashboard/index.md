@@ -33,8 +33,12 @@ scripts/dashboard.sh --rebuild     # reconstruit l'index de zéro
 ```
 
 L'index se met à jour tout seul : un fichier écrit par un agent — la
-synchronisation du matin, un rapport, un plan — apparaît à la requête suivante (au
-plus 30 secondes), sans relancer le serveur.
+synchronisation du matin, un rapport, un plan — apparaît en 30 secondes au plus,
+sans relancer le serveur. La réindexation tourne en arrière-plan, jamais pendant
+une requête : aucune page n'attend. Un passage sans changement ne recalcule pas
+les métriques, et un passage avec changement ne recalcule que les séances touchées.
+Au démarrage, la page s'ouvre tout de suite et les données arrivent dès la fin du
+premier index (une dizaine de secondes sur un long historique avec fichiers FIT).
 
 !!! note "Après une mise à jour du moteur"
     Vos données apparaissent seules, mais le **code** du tableau de bord est chargé

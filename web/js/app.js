@@ -1611,7 +1611,11 @@ function slopeModelSection(model, band) {
 
 async function viewPerformance(params) {
   const band = params && params.get("bande") === "all" ? "all" : "endurance";
-  const [p, slope] = await Promise.all([api("performance"), api(`slope-model?band=${band}`)]);
+  // Hypothèses (~100 Ko de texte) : `/api/assumptions`, chargé ici seulement — plus
+  // dans `/api/summary`, lu à chaque ouverture du tableau de bord.
+  const [p, slope, hyp] = await Promise.all([
+    api("performance"), api(`slope-model?band=${band}`), api("assumptions").catch(() => ({ assumptions: {} })),
+  ]);
   const trail = p.sport === "trail";
   let chartHtml = empty("Pas encore d'estimation", "La VO2max effective s'estime sur les séances de course d'au moins 20 minutes, à plus de 70 % de la FC max, avec distance et FC moyenne.");
   let c = null;
@@ -1622,7 +1626,7 @@ async function viewPerformance(params) {
   const names = { 5000: "5 km", 10000: "10 km", 21097.5: "Semi-marathon", 42195: "Marathon" };
   const pred = p.predictions.map((r) => `<tr><th scope="row">${r.tag === "objective" ? `${F.esc(p.objective.name || "Objectif")} <span class="muted">${F.distance(r.distance_m, 1)}${trail && r.effort_distance_m !== Math.round(r.distance_m) ? ` · effort ${F.distance(r.effort_distance_m, 0)}` : ""}</span>` : names[r.distance_m] || F.distance(r.distance_m)}</th><td class="num">${F.clock(r.vdot_s)}</td><td class="num">${F.clock(r.riegel_s)}</td></tr>`).join("");
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
-  const assumptions = SUMMARY.assumptions || {};
+  const assumptions = hyp.assumptions || {};
   const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
   const { html: indexHtml, charts: indexCharts } = performanceIndexSection(SUMMARY.performance_index);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}

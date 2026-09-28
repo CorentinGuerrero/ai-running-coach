@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 import urllib.error
 import urllib.request
 
@@ -114,7 +115,13 @@ class TestDashboardServer(InstallAsserts):
         (self.ws / "rapports/2026-09-23_rapport.md").write_text(
             '# Bilan\n\n```arc\n{"arc": 1, "kind": "report", "date": "2026-09-23", "report_type": "weekly", "title": "Bilan test"}\n```\n\nTexte.\n',
             encoding="utf-8")
-        after = [r["title"] for r in json.loads(self.server.get("/api/reports")[1])["reports"]]
+        # La réindexation tourne en arrière-plan (jamais dans la requête) : le fichier
+        # apparaît au passage suivant du fil d'index, sans relance du serveur.
+        deadline = time.monotonic() + 15
+        after = []
+        while time.monotonic() < deadline and "Bilan test" not in after:
+            after = [r["title"] for r in json.loads(self.server.get("/api/reports")[1])["reports"]]
+            time.sleep(0.1)
         self.assertIn("Bilan test", after)
 
 
