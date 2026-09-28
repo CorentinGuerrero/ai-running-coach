@@ -180,13 +180,60 @@ scripts/setup-ntfy.sh
 ./install.sh --daily-sync
 ```
 
-Installe deux entrées cron (Linux) ou un LaunchAgent (macOS) aux heures de
-`[sync].times` dans `config/workspace.toml` (défaut `07:15` et `14:15`, à surcharger dans
-`workspace.user.toml`). Testez sans attendre :
+Deux modes de déclenchement, choisis par `[sync].mode` dans `config/workspace.user.toml`
+(relancez `./install.sh --daily-sync` après un changement) :
+
+| Mode | Déclenchement | Pour qui |
+|---|---|---|
+| `schedule` (défaut) | Le LLM tourne aux heures fixes de `[sync].times` (`07:15`, `14:15`), qu'il y ait du neuf ou non. | Intervals.icu, ou un rythme très régulier. |
+| `watch` | `scripts/garmin_watch.py` interroge Garmin toutes les `watch_interval_min` minutes **sans LLM** et ne lance la synchronisation que si une séance ou le sommeil du jour manque dans le workspace. | Garmin : réveils tardifs le week-end, séances du soir, voyages et fuseaux horaires. |
+
+Testez sans attendre :
 
 ```bash
 scripts/daily-sync.sh --dry-run   # affiche la commande
 scripts/daily-sync.sh             # exécution réelle, journal dans logs/sync-YYYY-MM-DD.log
+```
+
+#### Mode `watch` : ne payer le LLM que quand Garmin a du neuf
+
+Garmin ne propose pas de webhook aux particuliers : son
+[Connect Developer Program](https://developer.garmin.com/gc-developer-program/) est
+réservé aux entreprises et institutions. Le watcher interroge donc Garmin Connect à
+intervalle régulier, avec la librairie `garminconnect` déjà installée par `garmin-mcp` et
+les tokens de `~/.garminconnect`.
+
+```toml
+# config/workspace.user.toml
+[sync]
+mode = "watch"
+```
+
+À chaque passage :
+
+1. **Un seul appel** (`get_device_last_used`) : heure du dernier envoi de la montre.
+   Inchangée → fin du passage, zéro token.
+2. Envoi nouveau → comparaison avec le workspace : séance récente sans
+   `activities/*.md` portant son `garmin_activity_id` (`activity:<id>`), ou sommeil du
+   jour calculé sans `medical/<jour>_health.md` (`morning`, sauf `morning_check = "off"`).
+   La comparaison est refaite pendant `recheck_window_min` (90 min) : Garmin calcule le
+   score de sommeil quelques minutes **après** l'envoi.
+3. Du neuf → `daily-sync.sh --trigger morning,activity:<id>` après `settle_min` (10 min
+   depuis l'envoi), jamais moins de `min_gap_min` (30 min) entre deux runs, au plus
+   `max_runs_per_day` (6). Verrou, notifications et commit git restent ceux de
+   `daily-sync.sh`.
+
+| Garde-fou | Comportement |
+|---|---|
+| Garmin répond 429 / réseau coupé | Passages espacés : 15, 30, 60… jusqu'à 240 min. |
+| Tokens refusés | Pas de LLM ; le run de repli s'en charge et relaie l'alerte de renouvellement. |
+| Séance que l'agent n'arrive pas à persister | Abandonnée après 2 runs sans effet (journalisé), jamais de boucle. |
+| Watcher muet (cron arrêté, python introuvable) | `fallback_times` (`21:30`) : un run complet si aucun daily-sync n'a eu lieu dans la journée (watcher, session mobile ou lancement manuel : `logs/sync-<jour>.log`) ; `coach_doctor.py` passe en ⚠ après 3 intervalles sans passage. |
+
+```bash
+scripts/garmin_watch.py --dry-run   # décide et affiche, ne lance rien
+scripts/garmin_watch.py --status    # dernier passage, runs du jour, déclencheurs en attente
+tail logs/watch.log                 # événements seulement (nouveautés, runs, erreurs)
 ```
 
 Exemple de notification reçue :

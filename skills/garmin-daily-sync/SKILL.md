@@ -54,12 +54,24 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   ne JAMAIS les demander, ne JAMAIS les deviner. Les laisser absents du bloc ```arc est le
   comportement normal d'une synchronisation headless, pas un manque à signaler.
 
+- **Déclencheurs (`trigger=…`, facultatif)** : posés par `scripts/garmin_watch.py` quand la
+  surveillance (`[sync].mode = "watch"`) a vu du neuf chez Garmin — `morning` (sommeil du
+  jour calculé, bilan de santé absent) et/ou `activity:<id>` (séance dont aucun
+  `activities/*.md` ne porte ce `garmin_activity_id`). C'est un **indice de priorité, pas
+  une restriction** : la règle d'idempotence ci-dessus s'applique toujours à la fenêtre.
+  Exception unique : une date déjà persistée **n'exclut pas** une séance `activity:<id>`
+  désignée — une deuxième séance du même jour et du même type va dans
+  `activities/YYYY-MM-DD_<type>_2.md` (puis `_3`…), jamais par-dessus la première. Sans
+  cela la surveillance reverrait la même séance manquante à chaque passage.
+
 ## Déroulé
 
 1. Déléguer à l'agent **`coach`** (outil `task`, prompt en anglais + « Respond in <langue des
    documents> ») la tâche suivante :
    > Load the `garmin-sync-efficiency` skill. For each of the last `lookback_days` days
-   > (today included), check whether `activities/YYYY-MM-DD_<type>.md` and
+   > (today included) — and, first, for every `activity:<id>` listed in `trigger` (if any),
+   > even when its date already has a file: a second same-type session that day goes to
+   > `activities/YYYY-MM-DD_<type>_2.md` — check whether `activities/YYYY-MM-DD_<type>.md` and
    > `medical/YYYY-MM-DD_health.md` exist AND are already synced — **not just present**
    > (`/log`, #67, may have created either file earlier the same day with only
    > athlete-declared fields, before any sync ran: see `garmin-sync-efficiency`'s "not yet

@@ -40,7 +40,7 @@ n'apparaît jamais littéralement en sortie.)
 | `athlete_profile` | FC max / FC de repos renseignées dans `planning/Runner_Profile.md` | ℹ️ sinon — le coach utilise le RPE à la place |
 | `index_freshness` | `.arc/coach.db` à jour par rapport aux fichiers du workspace (y compris les fichiers supprimés) | ⚠️ si périmé ou si un fichier supprimé est encore indexé, ℹ️ si jamais construit |
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme | ⚠️ si non nul |
-| `daily_sync_scheduled` | Tâche cron (Linux) ou LaunchAgent (macOS) du daily-sync | ℹ️ seulement — un daily-sync non installé est un choix valide |
+| `daily_sync_scheduled` | Tâche cron (Linux) ou LaunchAgent (macOS) du daily-sync ; en mode `watch`, dernier passage de `scripts/garmin_watch.py` | ℹ️ si non installé (choix valide) ; ⚠️ si le watcher est installé mais muet depuis plus de 3 intervalles |
 | `ntfy_configured` | Notifications push configurées, si activées | ℹ️ si désactivées, ⚠️ si mal configurées |
 
 Un ❌ fait échouer la commande (code de sortie non nul). Un ⚠️ ou un ℹ️ jamais —

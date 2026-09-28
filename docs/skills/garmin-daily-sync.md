@@ -4,7 +4,7 @@
 
 ## Quand l'utiliser
 
-- Automatiquement, aux heures de `[sync].times` (voir [Le coach dans la poche](../mobile.md))
+- Automatiquement, aux heures de `[sync].times`, ou dès que Garmin a du neuf avec `[sync].mode = "watch"` (voir [Le coach dans la poche](../mobile.md#4-synchronisation-automatique))
 - À la main, pour forcer une synchronisation : `/garmin-daily-sync`
 
 ## Ce qu'il fait (et ne fait pas)
