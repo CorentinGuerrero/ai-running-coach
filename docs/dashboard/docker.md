@@ -194,6 +194,10 @@ configuration dynamique de Traefik. Avec un point d'entrée HTTPS géré par Tra
 
 La sonde `/healthz` sert au `HEALTHCHECK` de l'image ; elle ne réindexe rien.
 
+Le serveur compresse ses réponses (gzip) et fait revalider le HTML, le CSS et le JS
+par ETag (`304` quand rien n'a changé) : inutile de configurer une compression
+côté proxy. Les réponses `/api/*` restent en `Cache-Control: no-store`.
+
 ## Dépannage
 
 | Symptôme | Cause probable |

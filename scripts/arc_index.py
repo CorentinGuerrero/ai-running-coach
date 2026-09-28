@@ -1283,9 +1283,169 @@ def resolve_weight_kg_as_of(conn, day: Optional[str], athlete: dict) -> Tuple[Op
     return (profile_weight, "profile") if profile_weight else (None, None)
 
 
-def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
+class MetricsCache:
+    """Cache EN MÉMOIRE des calculs dérivés des échantillons FIT, par activité.
+
+    Utilisé par le tableau de bord (`arc_serve.Store`, processus longue durée) : sans
+    lui, chaque réindexation recalculait zones, GAP, découplage, montées, descente,
+    durabilité, modèle pente et dépense de TOUTES les séances à échantillons (~5 s
+    pour ~100 séances), même quand un seul fichier santé avait changé.
+
+    La clé est un condensé de TOUTES les entrées du calcul (agrégat du contenu des
+    échantillons, splits, bornes FC, seuils, intensité planifiée, poids…) : une entrée
+    modifiée donne une autre clé, jamais une valeur périmée. Jamais persisté, jamais
+    partagé entre processus ; les entrées non utilisées lors d'un passage sont
+    oubliées à la fin de celui-ci (`prune`), la taille reste bornée par le nombre de
+    séances. Les CLI et les tests n'en passent pas : recalcul intégral, comme avant.
+    """
+
+    def __init__(self):
+        self._entries: Dict[str, dict] = {}
+        self._used: set = set()
+        self.hits = 0
+        self.misses = 0
+
+    def begin(self) -> None:
+        self._used = set()
+        self.hits = self.misses = 0
+
+    def get(self, key: str) -> Optional[dict]:
+        value = self._entries.get(key)
+        if value is None:
+            self.misses += 1
+        else:
+            self.hits += 1
+            self._used.add(key)
+        return value
+
+    def put(self, key: str, value: dict) -> None:
+        self._entries[key] = value
+        self._used.add(key)
+
+    def prune(self) -> None:
+        self._entries = {k: v for k, v in self._entries.items() if k in self._used}
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._used = set()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=repr).encode("utf-8")).hexdigest()
+
+
+def _sample_stats(conn) -> Dict[int, list]:
+    """Empreinte du CONTENU des échantillons de chaque séance, en une requête : nombre de
+    lignes, de valeurs non nulles et sommes par colonne. Calculée sur `activity_sample`
+    lui-même (pas sur le sha de `sample_file`) : une réingestion qui normaliserait
+    autrement le même fichier (sport connu entre-temps) change donc la clé."""
+    stats = {}
+    for row in conn.execute(
+        "SELECT garmin_activity_id, COUNT(*), TOTAL(t_s), MIN(t_s), MAX(t_s), "
+        "COUNT(distance_m), TOTAL(distance_m), COUNT(altitude_m), TOTAL(altitude_m), "
+        "COUNT(hr_bpm), TOTAL(hr_bpm), COUNT(speed_ms), TOTAL(speed_ms), "
+        "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon) "
+        "FROM activity_sample GROUP BY garmin_activity_id"
+    ).fetchall():
+        stats[row[0]] = [repr(v) for v in tuple(row)[1:]]
+    return stats
+
+
+def _sample_derived_metrics(act_samples: List[dict], split_rows: List[dict], zone_bounds, seiler_thresholds,
+                            conf: dict, slope_planned_intensity: Optional[str]) -> dict:
+    """Calculs PURS dérivés des échantillons d'UNE séance (aucune écriture en base,
+    aucune dépendance aux autres séances) — mis en cache par `MetricsCache` ; les
+    écritures et l'appariement de montées entre séances (#49) restent dans
+    `compute_metrics`."""
+    out: dict = {"zone_seconds": None, "bucket_seconds": None, "gap_by_km": None}
+    if zone_bounds:
+        bounds, _method = zone_bounds
+        out["zone_seconds"] = M.time_in_zone_seconds(act_samples, bounds, S.DEFAULT_RESOLUTION_S)
+    if seiler_thresholds:
+        out["bucket_seconds"] = M.time_in_polarisation_seconds(act_samples, seiler_thresholds, S.DEFAULT_RESOLUTION_S)
+    slope_easy_hr_bpm, slope_moderate_hr_bpm = seiler_thresholds if seiler_thresholds else (None, None)
+    # GAP (#44, allure ajustée à la pente) : pente + vitesse GAP calculées une
+    # seule fois par échantillon (`gap_sample_series`), réutilisées pour
+    # l'allure globale ET par split — jamais recalculées deux fois pour la
+    # même activité (voir `arc_gap.activity_gap_pace_from_series`).
+    gap_series = G.gap_sample_series(act_samples)
+    # Modèle personnel pente -> allure (#58) : résumé PAR PANIER de CETTE
+    # activité pour chaque bande (`arc_slope_model.BANDS`), à partir de
+    # `gap_series` déjà calculée ci-dessus (grade + vitesse, jamais un second
+    # calcul de pente). `slope_planned_intensity` (2ᵉ revue de code #58,
+    # should-fix) prime sur la FC pour la bande « endurance » — résolue même
+    # sans seuils FC (`slope_easy_hr_bpm` peut être `None`, un plan seul suffit
+    # à classer l'activité, voir `arc_slope_model._endurance_selection`).
+    # TAMPONNÉ (revue de code #58, nit) plutôt qu'ajouté directement à
+    # `slope_activities` : si un calcul PLUS LOIN échoue, cette activité doit être
+    # entièrement rejetée — `compute_metrics` ne le verse qu'une fois TOUS les
+    # calculs et écritures de l'activité réussis.
+    slope_bins: Dict[str, tuple] = {}
+    for band in SL.BANDS:
+        easy_hr = slope_easy_hr_bpm if band == "endurance" else None
+        moderate_hr = slope_moderate_hr_bpm if band == "endurance" else None
+        planned = slope_planned_intensity if band == "endurance" else None
+        bin_summary, method = SL.activity_bin_summaries_and_selection(
+            gap_series, band=band, easy_hr_bpm=easy_hr, moderate_hr_bpm=moderate_hr,
+            planned_intensity=planned, resolution_s=S.DEFAULT_RESOLUTION_S)
+        if bin_summary:
+            slope_bins[band] = (bin_summary, method)
+    out["slope_bins"] = slope_bins
+    out["gap_pace"] = G.activity_gap_pace_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+    if split_rows:
+        out["gap_by_km"] = G.split_gap_paces_from_series(gap_series, split_rows, resolution_s=S.DEFAULT_RESOLUTION_S)
+    # Découplage aérobie (#45, Pa:HR) et facteur d'efficacité : réutilise
+    # `gap_series` déjà calculée ci-dessus via `decoupling_report_from_series`
+    # (jamais un second calcul de pente/GAP pour la même activité) — le sport
+    # est déjà restreint à la famille course à pied par l'appelant.
+    out["decoupling"] = DC.decoupling_report_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+    # VAM sur les montées détectées (#46) : détection PURE sur les échantillons
+    # bruts (t_s/distance_m/altitude_m/speed_ms), indépendante du GAP/de la pente
+    # fenêtrée calculée ci-dessus pour le GAP (`arc_climb.detect_climbs` a son
+    # propre lissage/segmentation, voir `arc_climb.ASSUMPTIONS`). Seuils de
+    # détection configurables par le workspace (`[metrics].climb_min_gain_m`/
+    # `climb_min_grade_pct`, critère d'acceptation de #46 : « montée minimale
+    # configurable »), résolus une fois pour toutes dans `conf` par `settings()`.
+    climb = VC.detect_climbs(act_samples, min_gain_m=conf["climb_min_gain_m"],
+                             min_avg_grade=conf["climb_min_grade"])
+    # Extrémités GPS + dérive FC par montée (#49) : propres à la séance, donc ici ;
+    # l'appariement entre séances reste dans `compute_metrics`.
+    out["climbs"] = [(c, VM.climb_endpoints(act_samples, c) or {}, VM.hr_drift_bpm_per_100m(act_samples, c))
+                     for c in climb]
+    out["vam_windows"] = VC.best_vam_windows(act_samples, climb)
+    out["best_climb_vam"] = max(
+        (c["vam_elapsed_m_h"] for c in climb if c["vam_elapsed_m_h"] is not None), default=None)
+    # Efficacité en descente par classe de pente (#47) : réutilise `gap_series`
+    # (pente + vitesse GAP par échantillon, jamais un second calcul) — la
+    # référence « plat » de CETTE séance N'EST PLUS l'allure GAP de la séance
+    # entière (`gap_pace`, ci-dessus, restée réservée à #44) : voir
+    # `arc_descent.ASSUMPTIONS["reference"]` (BLOQUANT, revue de code) — l'allure
+    # GAP globale se contamine avec l'effort des descentes à mesurer elles-mêmes,
+    # faisant varier l'efficacité d'une même descente selon le reste du parcours.
+    reference_speed, reference_source = DS.reference_gap_speed_ms(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+    out["descent_reference_speed_ms"], out["descent_reference_source"] = reference_speed, reference_source
+    # Sans référence, aucune classe n'est stockée (voir `arc_descent.descent_report`,
+    # même discipline) — jamais une ligne à `efficiency: NULL` qui laisserait croire
+    # à un calcul partiel plutôt qu'à une absence totale de résultat.
+    out["descent_classes"] = (DS.descent_speed_by_grade_class(
+        gap_series, reference_gap_speed_ms=reference_speed,
+        resolution_s=S.DEFAULT_RESOLUTION_S) if reference_speed is not None else {})
+    # Durabilité sur les sorties longues (#48) : réutilise `gap_series`. Aucun seuil
+    # de durée n'est appliqué ICI : c'est `arc_durability.durability_report_from_series`
+    # elle-même qui rend `eligible: False` avec une `reason`/`reason_code` explicites
+    # sous `arc_metrics.LONG_RUN_MIN_DURATION_S`.
+    out["durability"] = DU.durability_report_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+    return out
+
+
+def compute_metrics(conn, conf: dict, today: Optional[str] = None,
+                    metrics_cache: Optional[MetricsCache] = None) -> None:
     """Charge par séance, VO2max par séance, temps en zone FC + polarisation, puis la
-    série quotidienne matérialisée."""
+    série quotidienne matérialisée. `metrics_cache` (tableau de bord) : voir
+    `MetricsCache`."""
     athlete = conn.execute("SELECT * FROM athlete LIMIT 1").fetchone()
     athlete = dict(athlete) if athlete else {}
     zone_bounds = M.hr_zone_bounds(athlete, conf.get("hr_zones"))
@@ -1336,6 +1496,10 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
     # `vs_best_pct` de l'occurrence SUIVANTE avant de s'y ajouter elle-même.
     climb_registry = VM.ClimbSegmentIndex()
     segment_history: Dict[int, dict] = {}
+    sample_stats: Dict[int, list] = {}
+    if metrics_cache is not None:
+        metrics_cache.begin()
+        sample_stats = _sample_stats(conn)
     for row in rows:
         act = dict(row)
         load, source = M.session_load(act, athlete)
@@ -1352,8 +1516,18 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
         # non renseignée séparément au profil) fausseraient temps en zone et
         # polarisation — voir ASSUMPTIONS["hr_zones"], revue de code #43 point 5.
         if act.get("garmin_activity_id") and M.sport_family(act.get("sport")) == "run":
-            act_samples = samples(conn, act["id"])
-            if act_samples:
+            # Cache par activité (tableau de bord, `metrics_cache`) : les échantillons ne
+            # sont chargés que si l'un des deux calculs ci-dessous n'est pas déjà en cache
+            # pour EXACTEMENT les mêmes entrées. Sans cache (CLI, tests), chargement
+            # immédiat, comme avant.
+            sample_stat = sample_stats.get(act["garmin_activity_id"]) if metrics_cache is not None else None
+            act_samples = samples(conn, act["id"]) if metrics_cache is None else None
+            if metrics_cache is None:
+                has_samples = bool(act_samples)
+            else:
+                # Agrégat SQL non vide ⇔ `samples()` non vide (même table, même clé).
+                has_samples = sample_stat is not None
+            if has_samples:
                 # Défense en profondeur (revue de code #46, 3e passe, BLOQUANT) : un bug
                 # inattendu dans UN des calculs dérivés des échantillons (zones, GAP,
                 # découplage, VAM) — même déjà couvert par ses propres tests — ne doit
@@ -1395,92 +1569,58 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                 registry_mark = climb_registry.mark()
                 history_marks: Dict[int, Optional[int]] = {}
                 try:
-                    if zone_bounds:
-                        bounds, _method = zone_bounds
-                        zone_seconds = M.time_in_zone_seconds(act_samples, bounds, S.DEFAULT_RESOLUTION_S)
+                    slope_planned_intensity = planned_intensity_for(conn, act.get("date"), act.get("sport"))
+                    split_rows = [dict(r) for r in conn.execute(
+                        "SELECT km, distance_m FROM activity_split WHERE activity_id = ?", (act["id"],)).fetchall()]
+                    derived = cache_key = None
+                    if metrics_cache is not None:
+                        # Clé = TOUTES les entrées de `_sample_derived_metrics` : contenu des
+                        # échantillons, splits, bornes FC, seuils de montée, intensité planifiée.
+                        cache_key = "samples:" + _digest(
+                            [sample_stat, act.get("sport"), split_rows, zone_bounds, seiler_thresholds,
+                             conf["climb_min_gain_m"], conf["climb_min_grade"], slope_planned_intensity])
+                        derived = metrics_cache.get(cache_key)
+                    if derived is None:
+                        if act_samples is None:
+                            act_samples = samples(conn, act["id"])
+                        derived = _sample_derived_metrics(act_samples, split_rows, zone_bounds, seiler_thresholds,
+                                                          conf, slope_planned_intensity)
+                        if cache_key is not None:
+                            metrics_cache.put(cache_key, derived)
+                    if derived["zone_seconds"] is not None:
                         conn.executemany(
                             "INSERT INTO hr_zone_time (activity_id, zone, seconds) VALUES (?, ?, ?)",
-                            [(act["id"], zone, round(seconds, 1)) for zone, seconds in zone_seconds.items()],
+                            [(act["id"], zone, round(seconds, 1)) for zone, seconds in derived["zone_seconds"].items()],
                         )
-                    if seiler_thresholds:
-                        bucket_seconds = M.time_in_polarisation_seconds(
-                            act_samples, seiler_thresholds, S.DEFAULT_RESOLUTION_S)
+                    if derived["bucket_seconds"] is not None:
                         conn.executemany(
                             "INSERT INTO hr_polarisation_time (activity_id, bucket, seconds) VALUES (?, ?, ?)",
-                            [(act["id"], bucket, round(seconds, 1)) for bucket, seconds in bucket_seconds.items()],
+                            [(act["id"], bucket, round(seconds, 1))
+                             for bucket, seconds in derived["bucket_seconds"].items()],
                         )
-                    # GAP (#44, allure ajustée à la pente) : pente + vitesse GAP calculées une
-                    # seule fois par échantillon (`gap_sample_series`), réutilisées pour
-                    # l'allure globale ET par split — jamais recalculées deux fois pour la
-                    # même activité (voir `arc_gap.activity_gap_pace_from_series`).
-                    gap_series = G.gap_sample_series(act_samples)
-                    # Modèle personnel pente -> allure (#58) : résumé PAR PANIER de CETTE
-                    # activité pour chaque bande (`arc_slope_model.BANDS`), à partir de
-                    # `gap_series` déjà calculée ci-dessus (grade + vitesse, jamais un second
-                    # calcul de pente). `slope_planned_intensity` (2ᵉ revue de code #58,
-                    # should-fix) prime sur la FC pour la bande « endurance » — résolue même
-                    # sans seuils FC (`slope_easy_hr_bpm` peut être `None`, un plan seul suffit
-                    # à classer l'activité, voir `arc_slope_model._endurance_selection`).
-                    # TAMPONNÉ dans `pending_slope_bins` (revue de code #58, nit) plutôt
-                    # qu'ajouté directement à `slope_activities` : si un calcul PLUS LOIN dans
-                    # ce même `try` échoue, cette activité doit être entièrement rejetée (mêmes
-                    # champs remis à NULL, voir le `except Exception` ci-dessous) — un résumé de
-                    # panier déjà commité dans `slope_activities` serait impossible à retirer
-                    # proprement. Committé seulement juste avant la fin du bloc `try`, une fois
-                    # TOUS les calculs de l'activité réussis.
-                    slope_planned_intensity = planned_intensity_for(conn, act.get("date"), act.get("sport"))
-                    pending_slope_bins: Dict[str, tuple] = {}
-                    for band in SL.BANDS:
-                        easy_hr = slope_easy_hr_bpm if band == "endurance" else None
-                        moderate_hr = slope_moderate_hr_bpm if band == "endurance" else None
-                        planned = slope_planned_intensity if band == "endurance" else None
-                        bin_summary, method = SL.activity_bin_summaries_and_selection(
-                            gap_series, band=band, easy_hr_bpm=easy_hr, moderate_hr_bpm=moderate_hr,
-                            planned_intensity=planned, resolution_s=S.DEFAULT_RESOLUTION_S)
-                        if bin_summary:
-                            pending_slope_bins[band] = (bin_summary, method)
-                    gap_pace = G.activity_gap_pace_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+                    gap_pace = derived["gap_pace"]
                     conn.execute("UPDATE activity SET gap_pace_s_km = ? WHERE id = ?",
                                  (round(gap_pace, 2) if gap_pace is not None else None, act["id"]))
-                    split_rows = conn.execute(
-                        "SELECT km, distance_m FROM activity_split WHERE activity_id = ?", (act["id"],)).fetchall()
-                    if split_rows:
-                        gap_by_km = G.split_gap_paces_from_series(gap_series, [dict(r) for r in split_rows],
-                                                                   resolution_s=S.DEFAULT_RESOLUTION_S)
+                    if derived["gap_by_km"] is not None:
                         conn.executemany(
                             "UPDATE activity_split SET gap_pace_s_km = ? WHERE activity_id = ? AND km = ?",
-                            [(round(v, 2) if v is not None else None, act["id"], km) for km, v in gap_by_km.items()],
+                            [(round(v, 2) if v is not None else None, act["id"], km)
+                             for km, v in derived["gap_by_km"].items()],
                         )
-                    # Découplage aérobie (#45, Pa:HR) et facteur d'efficacité : réutilise
-                    # `gap_series` déjà calculée ci-dessus via `decoupling_report_from_series`
-                    # (jamais un second calcul de pente/GAP pour la même activité) — le sport
-                    # est déjà restreint à la famille course à pied par le `if` englobant,
-                    # comme pour le GAP lui-même juste au-dessus.
-                    report = DC.decoupling_report_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+                    report = derived["decoupling"]
                     conn.execute(
                         "UPDATE activity SET decoupling_pct = ?, ef_whole = ?, decoupling_reason = ? WHERE id = ?",
                         (report["decoupling_pct"], report["ef_whole"], report["reason"], act["id"]),
                     )
-                    # VAM sur les montées détectées (#46) : détection PURE sur les échantillons
-                    # bruts (t_s/distance_m/altitude_m/speed_ms), indépendante du GAP/de la pente
-                    # fenêtrée calculée ci-dessus pour le GAP (`arc_climb.detect_climbs` a son
-                    # propre lissage/segmentation, voir `arc_climb.ASSUMPTIONS`) — jamais un
-                    # second calcul de pente au sens GAP, seulement une réutilisation du lissage
-                    # d'altitude déjà partagé (`arc_elevation.smooth_moving_average`). Seuils de
-                    # détection configurables par le workspace (`[metrics].climb_min_gain_m`/
-                    # `climb_min_grade_pct`, critère d'acceptation de #46 : « montée minimale
-                    # configurable »), résolus une fois pour toutes dans `conf` par `settings()`.
-                    climb = VC.detect_climbs(act_samples, min_gain_m=conf["climb_min_gain_m"],
-                                              min_avg_grade=conf["climb_min_grade"])
-                    if climb:
+                    if derived["climbs"]:
                         # Identité de montée entre séances (#49) : pour CHAQUE montée détectée
                         # de CETTE activité, apparier (ou enregistrer comme nouveau segment),
                         # calculer la dérive FC et la progression vs occurrence(s) antérieure(s)
                         # — voir `arc_climb_match.py` pour l'algorithme complet et ses limites
-                        # assumées.
+                        # assumées. L'appariement dépend des activités PRÉCÉDENTES : il reste
+                        # donc ici, jamais dans le cache par activité.
                         climb_rows = []
-                        for c in climb:
-                            endpoints = VM.climb_endpoints(act_samples, c) or {}
+                        for c, endpoints, hr in derived["climbs"]:
                             candidate = {
                                 "start_lat": endpoints.get("start_lat"), "start_lon": endpoints.get("start_lon"),
                                 "end_lat": endpoints.get("end_lat"), "end_lon": endpoints.get("end_lon"),
@@ -1518,7 +1658,6 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                                        if prev_times else None)
                             history["occurrences"].append(
                                 {"time_elapsed_s": c["duration_elapsed_s"], "activity_id": act["id"]})
-                            hr = VM.hr_drift_bpm_per_100m(act_samples, c)
                             climb_rows.append((
                                 act["id"], c["index"], c["start_t_s"], c["end_t_s"], c["start_km"], c["end_km"],
                                 c["distance_m"], c["gain_m"], c["avg_grade"], c["grade_class"],
@@ -1534,38 +1673,22 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             climb_rows,
                         )
-                    windows = VC.best_vam_windows(act_samples, climb)
-                    best_climb_vam = max(
-                        (c["vam_elapsed_m_h"] for c in climb if c["vam_elapsed_m_h"] is not None), default=None)
+                    windows = derived["vam_windows"]
                     conn.execute(
                         "UPDATE activity SET best_vam_10min_m_h = ?, best_vam_20min_m_h = ?, "
                         "best_climb_vam_elapsed_m_h = ? WHERE id = ?",
-                        (windows["vam_best_10min_m_h"], windows["vam_best_20min_m_h"], best_climb_vam, act["id"]),
+                        (windows["vam_best_10min_m_h"], windows["vam_best_20min_m_h"], derived["best_climb_vam"],
+                         act["id"]),
                     )
-                    # Efficacité en descente par classe de pente (#47) : réutilise `gap_series`
-                    # (pente + vitesse GAP par échantillon, jamais un second calcul) — la
-                    # référence « plat » de CETTE séance N'EST PLUS l'allure GAP de la séance
-                    # entière (`gap_pace`, ci-dessus, restée réservée à #44) : voir
-                    # `arc_descent.ASSUMPTIONS["reference"]` (BLOQUANT, revue de code) — l'allure
-                    # GAP globale se contamine avec l'effort des descentes à mesurer elles-mêmes,
-                    # faisant varier l'efficacité d'une même descente selon le reste du parcours.
-                    reference_speed, reference_source = DS.reference_gap_speed_ms(
-                        gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
-                    # Sans référence, aucune classe n'est stockée (voir
-                    # `arc_descent.descent_report`, même discipline) — jamais une
-                    # ligne à `efficiency: NULL` qui laisserait croire à un calcul
-                    # partiel plutôt qu'à une absence totale de résultat.
-                    descent_classes = (DS.descent_speed_by_grade_class(
-                        gap_series, reference_gap_speed_ms=reference_speed,
-                        resolution_s=S.DEFAULT_RESOLUTION_S) if reference_speed is not None else {})
+                    reference_speed = derived["descent_reference_speed_ms"]
                     reference_pace = (1000.0 / reference_speed) if reference_speed else None
                     conn.execute(
                         "UPDATE activity SET descent_reference_gap_pace_s_km = ?, "
                         "descent_reference_source = ? WHERE id = ?",
                         (round(reference_pace, 2) if reference_pace is not None else None,
-                         reference_source, act["id"]),
+                         derived["descent_reference_source"], act["id"]),
                     )
-                    if descent_classes:
+                    if derived["descent_classes"]:
                         conn.executemany(
                             "INSERT INTO activity_descent_class (activity_id, grade_class, count, "
                             "duration_moving_s, distance_m, mean_speed_ms, mean_pace_s_km, "
@@ -1573,18 +1696,9 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                             [(act["id"], cls, v["count"], v["duration_moving_s"], v["distance_m"],
                               v["mean_speed_ms"], v["mean_pace_s_km"], v["mean_gap_speed_ms"],
                               v["mean_grade"], v["efficiency"])
-                             for cls, v in descent_classes.items()],
+                             for cls, v in derived["descent_classes"].items()],
                         )
-                    # Durabilité sur les sorties longues (#48) : réutilise `gap_series`
-                    # (jamais un second calcul pente/GAP pour la même activité) — le
-                    # sport est déjà restreint à la famille course à pied par le `if`
-                    # englobant, comme pour le GAP/le découplage/la descente ci-dessus.
-                    # Aucun seuil de durée n'est appliqué ICI avant l'appel : c'est
-                    # `arc_durability.durability_report_from_series` elle-même qui
-                    # rend `eligible: False` avec une `reason`/`reason_code` explicites
-                    # sous `arc_metrics.LONG_RUN_MIN_DURATION_S` (même discipline que
-                    # le découplage, qui a son propre seuil interne à 60 min).
-                    dur_report = DU.durability_report_from_series(gap_series, resolution_s=S.DEFAULT_RESOLUTION_S)
+                    dur_report = derived["durability"]
                     conn.execute(
                         "UPDATE activity SET durability_gap_fade_pct = ?, durability_ef_fade_pct = ?, "
                         "durability_hr_first_third_bpm = ?, durability_hr_middle_third_bpm = ?, "
@@ -1596,10 +1710,10 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                          act["id"]),
                     )
                     # Modèle pente -> allure (#58) : commit du tampon SEULEMENT ICI, tout au
-                    # bout du `try` réussi (voir le commentaire de `pending_slope_bins`
-                    # ci-dessus) — une activité qui a échoué plus haut ne contribue donc
-                    # jamais au modèle global, même partiellement.
-                    for band, (bin_summary, method) in pending_slope_bins.items():
+                    # bout du `try` réussi (voir `_sample_derived_metrics`) — une activité qui
+                    # a échoué plus haut ne contribue donc jamais au modèle global, même
+                    # partiellement.
+                    for band, (bin_summary, method) in derived["slope_bins"].items():
                         slope_activities[band].append(
                             {"activity_id": act["id"], "date": act.get("date"), "bins": bin_summary,
                              "selected_by": method})
@@ -1664,7 +1778,20 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                 # `ARC_STRICT_METRICS` que le bloc ci-dessus.
                 try:
                     weight_kg, weight_source = resolve_weight_kg_as_of(conn, act.get("date"), athlete)
-                    energy = EN.energy_from_samples(act_samples, weight_kg)
+                    # Même cache que ci-dessus, clé propre : le poids change bien plus souvent
+                    # (nouvelle pesée) que les échantillons. Enveloppé dans un dict car
+                    # `energy_from_samples` peut légitimement rendre `None`.
+                    energy_key = cached_energy = None
+                    if metrics_cache is not None:
+                        energy_key = "energy:" + _digest([sample_stat, act.get("sport"), weight_kg])
+                        cached_energy = metrics_cache.get(energy_key)
+                    if cached_energy is None:
+                        if act_samples is None:
+                            act_samples = samples(conn, act["id"])
+                        cached_energy = {"energy": EN.energy_from_samples(act_samples, weight_kg)}
+                        if energy_key is not None:
+                            metrics_cache.put(energy_key, cached_energy)
+                    energy = cached_energy["energy"]
                     if energy is None:
                         # `weight_kg` absent/non positif/implausible (voir ASSUMPTIONS["no_exception"]
                         # d'`arc_energy.py` et `resolve_weight_kg_as_of`) : une ligne est quand même
@@ -1768,6 +1895,8 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                   b["ci_high_speed_ms"], b["n_samples"], b["n_activities"], b["effective_time_s"],
                   b["run_share"]) for b in result["bins"]],
             )
+    if metrics_cache is not None:
+        metrics_cache.prune()
     conn.execute("DELETE FROM metric_day")
     dated = sorted(loads)
     if dated:
@@ -2566,8 +2695,48 @@ def _mark_week_shadowing(conn) -> None:
         conn.execute("UPDATE source_file SET issues = ? WHERE path = ?", (_j(issues), path))
 
 
-def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
-    """Indexe (incrémental) puis recalcule les métriques. Rend un résumé."""
+_CODE_DIGEST: Optional[str] = None
+
+
+def _code_digest() -> str:
+    """Condensé du code du moteur (`scripts/*.py`) : une base sur disque indexée par une
+    AUTRE version du code ne doit jamais faire sauter le recalcul des métriques."""
+    global _CODE_DIGEST
+    if _CODE_DIGEST is None:
+        h = hashlib.sha256(str(SCHEMA_VERSION).encode())
+        for path in sorted(Path(__file__).resolve().parent.glob("*.py")):
+            h.update(path.name.encode())
+            h.update(path.read_bytes())
+        _CODE_DIGEST = h.hexdigest()
+    return _CODE_DIGEST
+
+
+def metrics_fingerprint(conn, conf: dict, today: str) -> str:
+    """Empreinte de TOUT ce dont dépend `compute_metrics` : fichiers indexés (sha,
+    statut, avertissements — `_mark_week_shadowing` inclus), échantillons FIT,
+    configuration, date de référence et code du moteur. Inchangée ⇒ les tables
+    dérivées déjà en base sont exactement celles qu'un recalcul produirait."""
+    h = hashlib.sha256()
+    h.update(_code_digest().encode())
+    h.update((_j(conf) or "").encode("utf-8"))
+    h.update(today.encode())
+    for row in conn.execute("SELECT path, kind, sha256, parsed_ok, issues FROM source_file ORDER BY path"):
+        h.update(repr(tuple(row)).encode("utf-8"))
+    for row in conn.execute("SELECT path, sha256, garmin_activity_id, status FROM sample_file ORDER BY path"):
+        h.update(repr(tuple(row)).encode("utf-8"))
+    return h.hexdigest()
+
+
+def index_workspace(conn, workspace: Path, today: Optional[str] = None,
+                    metrics_cache: Optional[MetricsCache] = None) -> dict:
+    """Indexe (incrémental) puis recalcule les métriques. Rend un résumé.
+
+    `metrics_cache` (processus longue durée : le tableau de bord) active deux
+    raccourcis, sans changer le résultat : le recalcul des métriques est SAUTÉ si
+    `metrics_fingerprint` n'a pas bougé depuis le dernier calcul enregistré en base,
+    et sinon les calculs par séance déjà faits sont réutilisés (`MetricsCache`).
+    Sans lui (CLI, synchronisation, tests), recalcul intégral à chaque appel.
+    """
     conf = settings(load_config(workspace))
     seen = set()
     counts = {"indexed": 0, "unchanged": 0, "removed": 0}
@@ -2625,7 +2794,16 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
     # correction, seulement `sport` (déjà en base pour un fichier réingéré CETTE passe
     # puisque le passage Markdown ci-dessus vient de le (ré)écrire).
     counts["fit_ingestion"] = ingest_samples(conn, workspace)
-    compute_metrics(conn, conf, today)
+    fingerprint = metrics_fingerprint(conn, conf, today or date.today().isoformat())
+    known = conn.execute("SELECT value FROM meta WHERE key = 'metrics_fingerprint'").fetchone()
+    if metrics_cache is not None and known and known[0] == fingerprint:
+        counts["metrics"] = "skipped"
+    else:
+        compute_metrics(conn, conf, today, metrics_cache)
+        counts["metrics"] = "computed"
+    # Toujours réécrite après un calcul, cache ou non : une CLI qui recalcule la base
+    # partagée avec le tableau de bord la laisse cohérente pour lui.
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('metrics_fingerprint', ?)", (fingerprint,))
     # `arc_gap.ASSUMPTIONS` (#44) fusionné à celles d'`arc_metrics` : la section
     # « Hypothèses » du tableau de bord (`/api/summary` -> `web/js/app.js`) doit
     # exposer la limite connue du modèle de Minetti (surestimation des fortes
