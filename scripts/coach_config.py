@@ -19,6 +19,7 @@ Sous-commandes :
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -148,13 +149,28 @@ def _read_toml_fallback(text: str) -> dict:
 def _parse_scalar(value: str):
     value = value.strip()
     if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        return [v.strip().strip('"') for v in inner.split(",") if v.strip()] if inner else []
+        return _parse_array(value)
     if value in ("true", "false"):
         return value == "true"
     if re.fullmatch(r"-?\d+", value):
         return int(value)
     return value.strip('"')
+
+
+def _parse_array(value: str) -> list:
+    """Analyse une valeur TOML `[...]` de chaînes.
+
+    Un `split(",")` naïf coupe une chaîne contenant elle-même une virgule
+    (ex. les libellés multi-clauses de `config/setup-questions.toml`) —
+    `ast.literal_eval` respecte les guillemets, la syntaxe liste Python étant
+    un sur-ensemble compatible pour ce sous-jeu (chaînes entre guillemets
+    doubles, séparées par des virgules).
+    """
+    try:
+        return list(ast.literal_eval(value))
+    except (ValueError, SyntaxError):
+        inner = value[1:-1].strip()
+        return [v.strip().strip('"') for v in inner.split(",") if v.strip()] if inner else []
 
 
 def strip_toml_comment(line: str) -> str:
