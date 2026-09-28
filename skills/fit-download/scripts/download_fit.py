@@ -80,14 +80,20 @@ def _auto_relaunch(argv: list[str]) -> None:
     except ImportError:
         pass
 
+    # Ordre : --python (via GARMIN_PYTHON), garmin-mcp du PATH, puis l'emplacement uv
+    # par défaut — ~/.local/bin est souvent absent du PATH d'une session SSH/cron.
+    candidates: list[str] = []
+    if os.environ.get("GARMIN_PYTHON"):
+        candidates.append(os.path.expanduser(os.environ["GARMIN_PYTHON"]))
     exe = shutil.which("garmin-mcp")
     if exe:
         real = os.path.realpath(exe)  # symlink uv -> bin/garmin-mcp
-        for name in ("python3", "python"):
-            py = os.path.join(os.path.dirname(real), name)
-            if os.path.exists(py):
-                r = subprocess.run([py, os.path.abspath(__file__)] + argv)
-                sys.exit(r.returncode)
+        candidates += [os.path.join(os.path.dirname(real), n) for n in ("python3", "python")]
+    candidates.append(os.path.expanduser("~/.local/share/uv/tools/garmin-mcp/bin/python3"))
+    for py in candidates:
+        if os.path.exists(py) and os.path.realpath(py) != os.path.realpath(sys.executable):
+            r = subprocess.run([py, os.path.abspath(__file__)] + argv)
+            sys.exit(r.returncode)
 
     print(
         "ERREUR : module 'garminconnect' introuvable dans cet interpréteur.\n"
