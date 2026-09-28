@@ -105,6 +105,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `vam` | Vitesse ascensionnelle moyenne, par montée détectée et par fenêtre (#46) |
 | `descent` | Efficacité en descente |
 | `durability` | Fade d'endurance sur séance longue (> 90 min) |
+| `energy` | Dépense énergétique modèle (RE3 + marche) vs Garmin, contrôle d'écart |
 | `climb-history` | Historique d'une montée reconnue d'une séance à l'autre (`--segment`, #49) |
 | `decisions` | Journal des décisions tracées (filtrable par date, fenêtre, déclencheur, issue) |
 | `slope-model` | Modèle personnel pente → allure (#58) |

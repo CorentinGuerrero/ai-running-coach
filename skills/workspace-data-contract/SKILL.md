@@ -113,6 +113,7 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `recovery_hr_bpm` | entier | HRR à 2 min ; absent = non mesuré, pas un signal |
 | `avg_cadence_spm` | nombre | |
 | `calories_kcal` | nombre | |
+| `calories_bmr_kcal` | nombre | part métabolisme de base — copie déclarative du champ `bmr_calories` de `get_activity` (Garmin), jamais recalculée ; voir `skills/garmin-sync-efficiency/SKILL.md`. Ne peut dépasser `calories_kcal` quand les deux sont connues. Sert à un NET Garmin (`calories_kcal − calories_bmr_kcal`), comparable au NET rendu par `scripts/arc_index.py energy` — celui-là recalcule sa PROPRE dépense depuis les échantillons FIT, indépendamment de cette clé |
 | `training_effect_aerobic`, `training_effect_anaerobic` | nombre | 0-5 |
 | `rpe` | 0-10 | effort perçu déclaré — indispensable si la séance n'a pas de FC |
 | `splits_cols` | liste | en-tête des splits, voir ci-dessous |
@@ -285,7 +286,7 @@ autres sont facultatives : `distance_m` (dernier split partiel),
   "distance_m": 12300, "duration_s": 5218, "moving_duration_s": 5100,
   "elevation_gain_m": 480, "elevation_loss_m": 476,
   "avg_hr_bpm": 148, "max_hr_bpm": 171, "recovery_hr_bpm": 28, "avg_cadence_spm": 168,
-  "calories_kcal": 912, "training_effect_aerobic": 3.8, "training_effect_anaerobic": 1.2, "rpe": 6,
+  "calories_kcal": 912, "calories_bmr_kcal": 95, "training_effect_aerobic": 3.8, "training_effect_anaerobic": 1.2, "rpe": 6,
   "splits_cols": ["km", "duration_s", "elev_gain_m", "elev_loss_m", "avg_hr_bpm", "max_speed_kmh", "cadence_spm", "label"],
   "splits": [[1, 358, 3, 36, 120, 11.2, 166, "Échauffement"], [2, 372, 41, 2, 139, 10.4, 164, "Montée"]]
 }

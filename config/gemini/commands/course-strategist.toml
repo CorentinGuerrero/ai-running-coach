@@ -144,7 +144,8 @@ anciennes règles génériques ci-dessous quand un GPX est disponible :
 ```bash
 python3 scripts/arc_race_pacing.py plan \
   --gpx <fichier.gpx> --race-date <AAAA-MM-JJ> --start <HH:MM> \
-  --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue>
+  --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue> \
+  --pack-kg <poids sac/flasques/matériel porté, kg>
 ```
 
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
@@ -205,6 +206,58 @@ Persiste le tableau `segments` du script directement dans le champ
 `segments` du bloc ```arc (voir `workspace-data-contract` skill, `race_plan`)
 — jamais une réécriture manuelle qui perdrait la provenance ou les temps
 exacts calculés.
+
+**Dépense énergétique prévue par section (socle `arc_energy`) :**
+le JSON du script porte aussi `energy` (par scénario, `kcal`/`kcal_per_h`,
+`n_segments_no_speed` et `cumulative_kcal` par segment ; `available: false`
+avec `reason_code: "no_weight"` — poids introuvable — ou `"no_prediction"` —
+aucune vitesse prédite, distinct d'un poids manquant) — **`--pack-kg`** (poids
+du sac/flasques/matériel porté, 0-30 kg) est nécessaire pour un calcul fidèle :
+**demande-le TOUJOURS à l'athlète** ; faute de réponse (le runner headless n'a
+personne pour répondre à une relance), utilise le défaut du script (0 kg) et
+**dis-le explicitement** — jamais une estimation inventée à sa place, même
+présentée comme telle. `energy.available == false` (poids introuvable ou
+aucune prédiction de temps) n'empêche pas de persister le reste du plan —
+dis-le à l'athlète en une phrase plutôt que d'inventer une valeur.
+
+Cite le **kcal/h prévu par section** dans ta synthèse — respecte
+`[coaching].verbosity` : à `brief`, UN SEUL kcal/h global (le `realistic` de
+la course entière) suffit ; à `standard`/`detailed`, détaille au moins les
+sections franchement différentes (montée soutenue vs plat). Mets-le en regard
+du plan de ravitaillement de l'ÉTAPE 5 : un **déficit horaire/cumulé**
+(dépense prévue moins apports glucidiques prévus, convertis en kcal —
+facteur d'Atwater ≈ 4 kcal/g de glucides, une approximation nutritionnelle
+courante mais PAS une mesure propre à cet athlète, à dire comme telle) informe
+l'athlète SANS jamais prétendre qu'il doit être comblé intégralement — les
+réserves de glycogène et de graisses couvrent déjà une partie de l'effort ;
+reste qualitatif (« un déficit qui se creuse sur la fin, à surveiller » plutôt
+qu'un chiffre présenté comme un manque à combler) faute d'une source
+vérifiable sur la part exacte couverte par les réserves pour CET athlète.
+`energy` est un KPI DÉRIVÉ de la CLI, jamais une clé que tu ajoutes toi-même
+au bloc ```arc persisté (comme `fueling`, jamais écrit dans le plan non
+plus) — recalcule-le à la demande plutôt que de le recopier en
+JSON dans le fichier.
+
+**Calibration personnelle (`energy.calibration`)** : chaque scénario, ET
+CHAQUE SECTION à l'intérieur de ce scénario, porte `kcal_calibrated`/
+`kcal_per_h_calibrated`/`cumulative_kcal_calibrated`, à côté des valeurs
+brutes `kcal`/`kcal_per_h`/`cumulative_kcal` — `energy.calibration.status` dit
+si un facteur personnel a été appliqué
+(`{"band", "band_source", "n", "ratio_median", "ratio_iqr", "status",
+"factor"}`). Le panier (`band`, route ou trail) est résolu automatiquement
+depuis le D+/km RÉEL du GPX analysé (`band_source == "gpx"`), jamais depuis le
+profil général de l'athlète — l'athlète peut forcer ce choix via
+`--terrain road|trail` (alors `band_source == "option"`), utile si le tracé
+seul ne reflète pas la nature réelle de la course. **Si `energy.calibration.
+status == "applied"` : utilise TOUJOURS toutes les valeurs `_calibrated`**
+(chaque section, le cumul, le total, et donc le déficit horaire/cumulé face au
+ravitaillement) **— jamais un mélange de valeurs brutes et calibrées dans la
+même synthèse.** Cite `n` et le facteur (ex. « calibré sur tes N dernières
+séances, facteur ×F »). Sinon (`"insufficient"` — échantillon trop petit — ou
+`"not_needed"` — le modèle est déjà fidèle sur ce panier), utilise TOUTES les
+valeurs **brutes**, sans mentionner de calibration. Ne présente JAMAIS une
+valeur calibrée comme une mesure : c'est une correction statistique apprise
+sur l'historique Garmin/modèle de l'athlète, jamais un chiffre garanti.
 
 **Si seule une URL a été fournie (cas B, aucun GPX)** : pas de script
 disponible (aucun profil d'altitude exploitable) — reste sur les règles

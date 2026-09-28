@@ -51,6 +51,13 @@ export function sweatRate(litersPerHour, digits = 2) {
   return `${num(litersPerHour, digits)}${NBSP}l/h`;
 }
 
+// Dépense énergétique : kcal, indépendant de `[athlete].units` (pas de
+// convention impériale d'usage pour cette grandeur — voir `carbsRate`/`sweatRate`).
+export function kcal(value, digits = 0) {
+  if (value === null || value === undefined) return "—";
+  return `${num(value, digits)}${NBSP}kcal`;
+}
+
 // VAM (#46, vitesse ascensionnelle) : m/h en métrique, ft/h en impérial — même
 // conversion que `elevation()` (3,28084), appliquée ici au débit plutôt qu'à
 // une hauteur.

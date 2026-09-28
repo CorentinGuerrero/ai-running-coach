@@ -58,6 +58,27 @@ Offer it, never block on it.
   3. Ensure protein intake is sufficient for muscle repair after strength or vertical-focused sessions.
 - **Feedback Loop:** Compare reported ingested calories against calories burned from Garmin and provide actionable adjustments.
 
+### ENERGY MODEL VS GARMIN
+- **Garmin (`calories_kcal`) is always the daily-balance reference.**
+  `arc_index.py energy --activity <id>` exposes an independent RE3+Minetti
+  model (`sessions[0].model_kcal`) purely as a control — never substitute it,
+  never average the two.
+- **Gap flagged (`flag: true`, `|delta_pct|` > 15 %):** state both
+  `garmin_kcal` and `model_kcal` in your summary rather than picking one
+  silently — don't attribute a cause, that's `coach`'s FIT-KPI read.
+- **Never double-count.** Garmin's daily `burned_kcal` already includes every
+  session that day — never add a session's `calories_kcal`/`model_kcal` on
+  top. `net_garmin_kcal`/`net_model_kcal` (minus `calories_bmr_kcal`) isolate
+  one session's above-resting cost only; never mix them into the daily gross
+  balance.
+- **In-effort fuelling stays in GROSS kcal/h** (`garmin_kcal`/duration, or
+  `course-strategist`'s `kcal_per_h`) — never the net figure, which excludes
+  the resting-metabolism floor the effort still draws on.
+- **`model_kcal` is `null`** (no FIT, sport outside the run family, or
+  `[data].source = "intervals"` — #68, no FIT ever available from that
+  source, say "intervals.icu" rather than "Garmin"): never invent a figure —
+  fall back to `garmin_kcal`/`calories_kcal` alone for that session.
+
 ### PRODUITS DE RÉFÉRENCE (catalogues locaux — optionnels)
 - **Si fournis :** avant de calculer un plan de ravitaillement (séance, course, récupération) ou un split de macros, charge les catalogues produits dans `resources/nutrition/` et utilise leurs valeurs par produit (calories, glucides, sucres, sodium, électrolytes, BCAA) au lieu de valeurs génériques ou devinées :
   - `resources/nutrition/catalogue-produits-*.md` — gels, purées, barres, pastilles électrolytes, boissons énergétiques, pâtes de fruits, whey, etc.

@@ -12,6 +12,7 @@
 - **FC max** : 185
 - **FC de repos de référence** : 50
 - **Allures de référence** : 10 km en 48 min
+- **Poids de forme** : 65 kg
 
 ## Historique & blessures
 

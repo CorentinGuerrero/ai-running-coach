@@ -45,6 +45,7 @@
   --s-slope-generic: #9aa89f;
   --s-itra: #6a4c93;
   --s-utmb: #9a4a38;
+  --s-energy: #7a6a2f;
 
   /* sémantique : verdicts, météo, statuts */
   --ok: #2f7a4f;
@@ -79,7 +80,7 @@
     --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
     --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
     --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
-    --s-itra: #b39ddb; --s-utmb: #e0826b;
+    --s-itra: #b39ddb; --s-utmb: #e0826b; --s-energy: #d1bb6f;
     --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
     --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
     --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -95,7 +96,7 @@
   --s-year-0: #7cc39b; --s-year-1: #e0a45c; --s-year-2: #56665d; --s-weight: #b39ddb;
   --s-carbs: #e0a45c; --s-sweat: #6fa8dc; --s-gap: #b39ddb; --s-decoupling: #5fc2c2; --s-vam: #e0a45c; --s-descent: #6fa8dc; --s-durability: #e0826b;
   --s-slope: #7cc39b; --s-slope-band: rgba(124, 195, 155, 0.18); --s-slope-generic: #56665d;
-  --s-itra: #b39ddb; --s-utmb: #e0826b;
+  --s-itra: #b39ddb; --s-utmb: #e0826b; --s-energy: #d1bb6f;
   --ok: #6fc28f; --ok-bg: rgba(111, 194, 143, 0.12); --warn: #e0ad4f; --warn-bg: rgba(224, 173, 79, 0.13);
   --bad: #ec7f69; --bad-bg: rgba(236, 127, 105, 0.12); --yellow: #dcc04c; --orange: #e8864a;
   --cal-0: #1a241e; --cal-1: #1f3b2c; --cal-2: #2f6b4f; --cal-3: #4f9e74; --cal-4: #a3e635;
@@ -211,6 +212,11 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .facts dt { color: var(--ink-faint); font-size: 0.8rem; }
 .facts dd { margin: 0.1rem 0 0; font: 600 1.15rem/1.2 var(--text); font-variant-numeric: tabular-nums; }
 .facts dd.pos { color: var(--ok); } .facts dd.neg { color: var(--warn); }
+/* Descendant (pas seulement `dd.pos`/`dd.neg` ci-dessus) : plusieurs facts
+   (dépense énergétique, découplage, durabilité...) posent la classe sur un
+   `<span>` À L'INTÉRIEUR du `<dd>`, jamais sur le `<dd>` lui-même — sans cette
+   règle, ce `<span>` restait sans effet visuel (revue de code). */
+.facts dd .pos { color: var(--ok); } .facts dd .neg { color: var(--warn); }
 .facts--inline dd { font-size: 1rem; }
 .facts--grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: 0.9rem 1.5rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.25rem; }
 .facts--grid dd { font-size: 1rem; font-weight: 600; }
@@ -328,6 +334,7 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chart .line--utmb { stroke: var(--s-utmb); stroke-width: 2.2; }
 .chart .dot--itra { fill: var(--s-itra); }
 .chart .dot--utmb { fill: var(--s-utmb); }
+.chart .dot--energy { fill: var(--s-energy); }
 .chart .band--slope-ci { fill: var(--s-slope-band); }
 /* Panier personnel ISOLÉ (aucun voisin personnel adjacent) : `line--slope` ne le
    relie à rien (revue de code #58, nit) — ce point le rend visible quand même. */
@@ -349,6 +356,11 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
    d'œil, jamais confondue avec un point plein voisin sur le même graphique
    (revue de code #47). */
 .chart .dot--descent-fallback { fill: var(--surface); stroke: var(--s-descent); stroke-width: 1.6; }
+/* Anneau creux (même motif que `.dot--sweat`/`.dot--durability-ef`) : la série
+   route de la tendance de dépense énergétique, distincte du trail (plein).
+   Déclarée APRÈS `.chart .dot` : à spécificité égale, son `stroke` écraserait
+   sinon le contour et rendrait l'anneau invisible (revue de code). */
+.chart .dot--energy-route { fill: var(--surface); stroke: var(--s-energy); stroke-width: 1.6; }
 .chart .dot--durability-gap { fill: var(--s-durability); }
 /* Anneau creux (revue de code #48, should-fix 1 : `fill: var(--surface)`, dessiné
    APRÈS le point GAP plein, masquait totalement le point GAP dès que les deux fades
@@ -428,6 +440,8 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .key--descent-fallback { background: var(--surface); border: 1.6px solid var(--s-descent); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key--durability-gap { background: var(--s-durability); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key--durability-ef { background: var(--surface); border: 1.6px solid var(--s-durability); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
+.key--energy { background: var(--s-energy); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
+.key--energy-route { background: var(--surface); border: 1.6px solid var(--s-energy); border-radius: 50%; width: 0.5rem; height: 0.5rem; }
 .key--band { background: var(--s-band); height: 0.6rem; }
 .key--slope { background: var(--s-slope); height: 0.22rem; }
 .key--slope-generic { background: repeating-linear-gradient(to right, var(--s-slope-generic) 0 4px, transparent 4px 7px); height: 0.22rem; }

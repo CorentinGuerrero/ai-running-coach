@@ -212,6 +212,16 @@ SCHEMA = {
             "recovery_hr_bpm": "int+",
             "avg_cadence_spm": "num+",
             "calories_kcal": "num+",
+            # Part métabolisme de base : copie déclarative du champ
+            # `bmr_calories` du MCP `get_activity` (Garmin), jamais recalculée — voir
+            # `skills/garmin-sync-efficiency/SKILL.md`. Sert à dériver un net Garmin
+            # (`calories_kcal` − `calories_bmr_kcal`) comparable au résultat NET du
+            # moteur `scripts/arc_energy.py` (`scripts/arc_index.py energy`), qui lui
+            # calcule sa PROPRE dépense BRUTE depuis les échantillons FIT — jamais
+            # l'inverse (cette clé ne nourrit ni ne remplace ce calcul dérivé, voir
+            # `validate()` pour la seule règle transverse : ne peut dépasser
+            # `calories_kcal` quand les deux sont connues).
+            "calories_bmr_kcal": "num+",
             "training_effect_aerobic": "num+",
             "training_effect_anaerobic": "num+",
             "rpe": "rpe",
@@ -1015,6 +1025,14 @@ def validate(data: dict) -> tuple:
         moving, total = data.get("moving_duration_s"), data.get("duration_s")
         if _is_number(moving) and _is_number(total) and moving > total:
             errors.append("activity.moving_duration_s : ne peut dépasser duration_s")
+        bmr, calories = data.get("calories_bmr_kcal"), data.get("calories_kcal")
+        if _is_number(bmr) and _is_number(calories) and bmr > calories:
+            # Le métabolisme de base est une PART de la dépense totale de la séance
+            # (dépense énergétique modèle) : il ne peut jamais la dépasser — un `calories_bmr_kcal` >
+            # `calories_kcal` trahit presque toujours une confusion de champ côté
+            # Garmin (ex. BMR quotidien entier collé sur une activité courte),
+            # jamais une valeur physiologiquement plausible à laisser passer.
+            errors.append("activity.calories_bmr_kcal : ne peut dépasser calories_kcal")
         pre, post = data.get("weight_pre_kg"), data.get("weight_post_kg")
         if _is_number(pre) and _is_number(post) and post > pre + WEIGHT_POST_TOLERANCE_KG:
             # Pas une erreur : une pesée maison a de l'imprécision (habits, balance), et le

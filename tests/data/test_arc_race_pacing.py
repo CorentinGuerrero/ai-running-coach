@@ -486,6 +486,378 @@ class TestBuildRacePlan(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Dépense énergétique prévue par segment/scénario (voir ASSUMPTIONS["energy"])
+# ---------------------------------------------------------------------------
+
+class TestRaceEnergyForecast(unittest.TestCase):
+    def _plan(self, bins_override=None, **kwargs):
+        pts = _straight_course(_ClimbFlatDescentProfile())
+        defaults = dict(
+            fade_pct=0.0, fade_source="generic", start_time="07:00", race_date="2026-11-15",
+            segment_m=500.0, weight_kg=70.0, weight_source="health_day", pack_kg=0.0,
+            pack_kg_provided=True,
+        )
+        defaults.update(kwargs)
+        bins = PERSONAL_BINS if bins_override is None else bins_override
+        return RP.build_race_plan(pts, bins, **defaults)
+
+    def test_missing_weight_leaves_energy_unavailable_but_the_plan_valid(self):
+        plan = self._plan(weight_kg=None, weight_source=None)
+        self.assertFalse(plan["energy"]["available"])
+        self.assertEqual(plan["energy"]["reason_code"], "no_weight")
+        self.assertEqual(plan["energy"]["by_scenario"], {s: None for s in RP.SCENARIOS})
+        # Le reste du plan (segments, passages) reste calculé normalement.
+        self.assertGreater(len(plan["segments"]), 0)
+        self.assertIn("realistic", plan["totals"]["time_s"])
+
+    def test_omitted_pack_kg_warns_in_the_plan(self):
+        plan = self._plan(pack_kg=0.0, pack_kg_provided=False)
+        self.assertTrue(any("--pack-kg" in w for w in plan["warnings"]), plan["warnings"])
+
+    def test_provided_pack_kg_of_zero_does_not_warn(self):
+        plan = self._plan(pack_kg=0.0, pack_kg_provided=True)
+        self.assertFalse(any("--pack-kg" in w for w in plan["warnings"]), plan["warnings"])
+
+    def test_each_scenario_has_a_positive_kcal_total_and_per_segment_breakdown(self):
+        plan = self._plan()
+        energy = plan["energy"]
+        self.assertTrue(energy["available"])
+        self.assertEqual(energy["weight_kg"], 70.0)
+        self.assertEqual(energy["total_mass_kg"], 70.0)
+        for scenario in RP.SCENARIOS:
+            by_scenario = energy["by_scenario"][scenario]
+            self.assertIsNotNone(by_scenario)
+            self.assertGreater(by_scenario["kcal"], 0.0)
+            self.assertGreater(by_scenario["kcal_per_h"], 0.0)
+            self.assertEqual(len(by_scenario["segments"]), len(plan["segments"]))
+            self.assertEqual([s["id"] for s in by_scenario["segments"]], [s["id"] for s in plan["segments"]])
+
+    def test_cumulative_kcal_is_non_decreasing_and_matches_the_scenario_total(self):
+        plan = self._plan()
+        for scenario in RP.SCENARIOS:
+            segments = plan["energy"]["by_scenario"][scenario]["segments"]
+            cumulative = [s["cumulative_kcal"] for s in segments]
+            self.assertEqual(cumulative, sorted(cumulative))
+            self.assertAlmostEqual(cumulative[-1], plan["energy"]["by_scenario"][scenario]["kcal"], places=1)
+
+    def test_pack_kg_scales_the_forecast_linearly(self):
+        # Le modèle RE3/marche multiplie la puissance (W/kg) par la masse totale
+        # (arc_energy.ASSUMPTIONS['mass_linearity']) : à vitesse/pente identiques
+        # (même GPX, mêmes paniers), le kcal total doit croître EXACTEMENT dans
+        # le même rapport que la masse totale, jamais une approximation.
+        no_pack = self._plan(weight_kg=70.0, pack_kg=0.0)
+        with_pack = self._plan(weight_kg=70.0, pack_kg=10.0)
+        ratio = 80.0 / 70.0
+        for scenario in RP.SCENARIOS:
+            no_pack_kcal = no_pack["energy"]["by_scenario"][scenario]["kcal"]
+            with_pack_kcal = with_pack["energy"]["by_scenario"][scenario]["kcal"]
+            self.assertAlmostEqual(with_pack_kcal, no_pack_kcal * ratio, delta=0.2)
+
+    def test_slower_scenario_has_a_lower_climb_power_but_total_kcal_is_not_asserted_either_way(self):
+        # Physiquement, la puissance RE3 (W/kg) croît avec la vitesse à pente
+        # fixe (voir arc_energy) : sur le segment en côte, "safe" (le plus lent)
+        # doit avoir un kcal/h plus faible que "ambitious" — le TOTAL, lui, n'a
+        # aucun sens fixe imposé (temps plus long peut compenser), voir
+        # ASSUMPTIONS["energy"].
+        plan = self._plan()
+        climb_ids = {s["id"] for s in plan["segments"] if (s["grade_mean_pct"] or 0) > 0}
+        self.assertTrue(climb_ids)
+        for scenario_pair in (("safe", "ambitious"),):
+            slow, fast = scenario_pair
+            slow_segments = {s["id"]: s for s in plan["energy"]["by_scenario"][slow]["segments"]}
+            fast_segments = {s["id"]: s for s in plan["energy"]["by_scenario"][fast]["segments"]}
+            for seg_id in climb_ids:
+                self.assertLess(slow_segments[seg_id]["kcal_per_h"], fast_segments[seg_id]["kcal_per_h"])
+
+    def test_energy_key_is_not_part_of_the_persisted_race_plan_contract(self):
+        # Décision : `energy` est un KPI DÉRIVÉ exposé par la CLI, jamais une
+        # clé du contrat `race_plan` (comme `fueling`) — voir ASSUMPTIONS["energy"].
+        import arc_contract as C
+        self.assertNotIn("energy", C.SCHEMA["race_plan"]["optional"])
+        self.assertNotIn("energy", C.SUBSCHEMA["race_segment"]["optional"])
+
+    # -- Revue de code Opus -------------------------------------------------
+
+    def test_no_prediction_at_all_is_unavailable_and_distinct_from_no_weight(self):
+        # `bins=[]` : AUCUNE vitesse prédite pour AUCUN segment, dans AUCUN
+        # scénario (`predict_segments` rend `predicted_time_s` à `None`
+        # partout, `reason_code="no_model"`) — `energy_from_profile` rendrait
+        # alors `time_s=0.0`/`kcal=0.0` pour chaque scénario, un FAUX zéro
+        # (jamais une vraie mesure de repos). Doit être `available=False`,
+        # `reason_code="no_prediction"` — DISTINCT de `"no_weight"`, le poids
+        # est bien connu ici.
+        plan = self._plan(bins_override=[])
+        energy = plan["energy"]
+        self.assertFalse(energy["available"])
+        self.assertEqual(energy["reason_code"], "no_prediction")
+        self.assertEqual(energy["by_scenario"], {s: None for s in RP.SCENARIOS})
+        self.assertEqual(energy["weight_kg"], 70.0)
+        self.assertEqual(energy["weight_source"], "health_day")
+        # Le reste du plan reste valide (aucun temps prédit non plus, mais pas
+        # d'exception et une structure complète).
+        self.assertGreater(len(plan["segments"]), 0)
+
+    def test_scenario_with_no_speed_at_all_is_none_even_if_other_scenarios_have_one(self):
+        # Cas construit à la main (pas via un GPX) : le scénario "safe" n'a
+        # AUCUNE vitesse prédite sur AUCUN segment, "realistic"/"ambitious" en
+        # ont — `by_scenario["safe"]` doit être `None`, jamais un kcal=0 pour
+        # ce seul scénario pendant que les deux autres sont bien disponibles.
+        segments = [
+            {"id": "s01", "km_start": 0.0, "km_end": 0.5, "distance_m": 500.0,
+             "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+             "predicted_time_s": {"safe": None, "realistic": 200, "ambitious": 150}},
+        ]
+        result = RP.race_energy_forecast(segments, segments, weight_kg=70.0, weight_source="profile")
+        self.assertTrue(result["available"])
+        self.assertIsNone(result["by_scenario"]["safe"])
+        self.assertIsNotNone(result["by_scenario"]["realistic"])
+        self.assertIsNotNone(result["by_scenario"]["ambitious"])
+
+    def test_partial_no_speed_segments_are_counted_but_do_not_invalidate_the_scenario(self):
+        # Un segment sur deux sans vitesse prédite pour CE scénario (distance
+        # comptée, énergie non) : `n_segments_no_speed` doit le dire, sans
+        # rendre le scénario indisponible ni sous-estimer silencieusement.
+        segments = [
+            {"id": "s01", "km_start": 0.0, "km_end": 0.5, "distance_m": 500.0,
+             "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+             "predicted_time_s": {"safe": 200, "realistic": 150, "ambitious": 120}},
+            {"id": "s02", "km_start": 0.5, "km_end": 1.0, "distance_m": 500.0,
+             "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+             "predicted_time_s": {"safe": None, "realistic": None, "ambitious": None}},
+        ]
+        result = RP.race_energy_forecast(segments, segments, weight_kg=70.0, weight_source="profile")
+        self.assertTrue(result["available"])
+        for scenario in RP.SCENARIOS:
+            by_scenario = result["by_scenario"][scenario]
+            self.assertEqual(by_scenario["n_segments_no_speed"], 1)
+            self.assertGreater(by_scenario["kcal"], 0.0)
+            no_speed_segs = [s for s in by_scenario["segments"] if s["reason_code"] == "no_speed"]
+            self.assertEqual(len(no_speed_segs), 1)
+            self.assertEqual(no_speed_segs[0]["kcal"], 0.0)
+
+    def test_fully_available_scenario_reports_zero_segments_no_speed(self):
+        plan = self._plan()
+        for scenario in RP.SCENARIOS:
+            self.assertEqual(plan["energy"]["by_scenario"][scenario]["n_segments_no_speed"], 0)
+
+    def test_reattached_profile_gives_a_different_energy_than_the_flat_average_grade(self):
+        # Segment vallonné (+12 %/-12 % tous les 375 m sur 750 m, comme
+        # `TestRollingTerrainIntegration`) : pente MOYENNE nulle (« plat »),
+        # mais le modèle RE3 ne compense JAMAIS le coût d'une montée par le
+        # gain symétrique d'une descente à la même pente — le profil
+        # réattaché (`_segments_with_profile`) DOIT donc donner un kcal
+        # différent (plus élevé) qu'un calcul sur la seule pente moyenne (0 %,
+        # traité comme un vrai plat). Preuve directe que le `_profile` compte
+        # réellement dans `race_energy_forecast`, pas seulement dans le temps
+        # prédit (déjà couvert par `TestRollingTerrainIntegration`).
+        predicted_time_s = {"safe": 300, "realistic": 250, "ambitious": 200}
+        rolling_segment = {
+            "id": "s01", "km_start": 0.0, "km_end": 0.75, "distance_m": 750.0,
+            "grade_mean_pct": 0.0, "elevation_gain_m": 45.0, "elevation_loss_m": 45.0,
+            "predicted_time_s": dict(predicted_time_s),
+        }
+        raw_with_profile = [{**rolling_segment, "_profile": [(375.0, 0.12), (375.0, -0.12)]}]
+        raw_flat_average = [dict(rolling_segment)]  # pas de `_profile` -> repli pente moyenne (0 %)
+
+        with_profile = RP.race_energy_forecast([rolling_segment], raw_with_profile,
+                                                weight_kg=70.0, weight_source="profile")
+        flat_average = RP.race_energy_forecast([rolling_segment], raw_flat_average,
+                                                weight_kg=70.0, weight_source="profile")
+        for scenario in RP.SCENARIOS:
+            self.assertGreater(with_profile["by_scenario"][scenario]["kcal"],
+                                flat_average["by_scenario"][scenario]["kcal"])
+
+
+# ---------------------------------------------------------------------------
+# Calibration personnelle appliquée à la dépense PRÉVUE (jamais aux mesures)
+# ---------------------------------------------------------------------------
+
+class TestRaceEnergyCalibration(unittest.TestCase):
+    SEGMENT = {
+        "id": "s01", "km_start": 0.0, "km_end": 0.5, "distance_m": 500.0,
+        "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+        "predicted_time_s": {"safe": 300, "realistic": 200, "ambitious": 150},
+    }
+    # Deux segments (pentes différentes) pour que la calibration PAR SEGMENT
+    # (issue distincte de la calibration par scénario) porte une preuve sur
+    # plus d'un point — un seul segment ne distinguerait pas un bug qui
+    # calibrerait seulement le TOTAL du scénario d'un bug qui calibrerait
+    # aussi chaque segment individuellement.
+    SEGMENTS_TWO = [
+        {"id": "s01", "km_start": 0.0, "km_end": 0.5, "distance_m": 500.0,
+         "grade_mean_pct": 0.0, "elevation_gain_m": 0.0, "elevation_loss_m": 0.0,
+         "predicted_time_s": {"safe": 300, "realistic": 200, "ambitious": 150}},
+        {"id": "s02", "km_start": 0.5, "km_end": 1.2, "distance_m": 700.0,
+         "grade_mean_pct": 8.0, "elevation_gain_m": 56.0, "elevation_loss_m": 0.0,
+         "predicted_time_s": {"safe": 500, "realistic": 380, "ambitious": 300}},
+    ]
+
+    def test_no_calibration_argument_defaults_to_insufficient_and_leaves_values_unchanged(self):
+        """`calibration=None` (appelant qui n'a pas encore ce paramètre) replie
+        sur un panier `insufficient` — `kcal_calibrated` STRICTEMENT ÉGAL à
+        `kcal` (facteur 1.0), jamais une exception."""
+        result = RP.race_energy_forecast([self.SEGMENT], [self.SEGMENT], weight_kg=70.0,
+                                          weight_source="profile")
+        self.assertEqual(result["calibration"], {"band": None, "band_source": None, "n": 0,
+                                                   "ratio_median": None, "ratio_iqr": None,
+                                                   "status": "insufficient", "factor": 1.0})
+        for scenario in RP.SCENARIOS:
+            by_scenario = result["by_scenario"][scenario]
+            self.assertEqual(by_scenario["kcal_calibrated"], by_scenario["kcal"])
+            self.assertEqual(by_scenario["kcal_per_h_calibrated"], by_scenario["kcal_per_h"])
+
+    def test_applied_calibration_scales_kcal_and_kcal_per_h_against_a_run_without_calibration(self):
+        """Un panier `applied` (facteur 1.15) doit rendre EXACTEMENT le kcal
+        BRUT d'un run SANS calibration (`calibration=None`), multiplié par le
+        facteur — comparaison RÉELLE à un second appel de la fonction, jamais
+        une simple relecture de `by_scenario["kcal"]` du MÊME appel (qui ne
+        prouverait rien de plus que l'arithmétique interne)."""
+        calibration = {"n": 20, "ratio_median": 1.15, "ratio_iqr": 0.05, "status": "applied", "factor": 1.15}
+        without = RP.race_energy_forecast([self.SEGMENT], [self.SEGMENT], weight_kg=70.0,
+                                           weight_source="profile")
+        with_calibration = RP.race_energy_forecast([self.SEGMENT], [self.SEGMENT], weight_kg=70.0,
+                                                     weight_source="profile", calibration_band="trail",
+                                                     calibration_band_source="gpx", calibration=calibration)
+        self.assertEqual(with_calibration["calibration"], {"band": "trail", "band_source": "gpx", **calibration})
+        for scenario in RP.SCENARIOS:
+            raw = without["by_scenario"][scenario]
+            calibrated = with_calibration["by_scenario"][scenario]
+            # Le BRUT est identique entre les deux appels (la calibration ne modifie jamais
+            # le calcul brut lui-même) — la seule différence est l'ajout des champs `_calibrated`.
+            self.assertEqual(calibrated["kcal"], raw["kcal"])
+            self.assertGreater(calibrated["kcal"], 0.0)
+            self.assertAlmostEqual(calibrated["kcal_calibrated"], round(raw["kcal"] * 1.15, 1), places=1)
+            self.assertAlmostEqual(calibrated["kcal_per_h_calibrated"],
+                                    round(raw["kcal_per_h"] * 1.15, 1), places=1)
+
+    def test_not_needed_status_keeps_calibrated_values_equal_to_raw(self):
+        """`status="not_needed"` (facteur 1.0, modèle déjà fidèle) : les
+        valeurs calibrées restent STRICTEMENT ÉGALES aux brutes — jamais une
+        différence silencieuse pour un facteur qui vaut justement 1.0."""
+        calibration = {"n": 20, "ratio_median": 1.02, "ratio_iqr": 0.03, "status": "not_needed", "factor": 1.0}
+        result = RP.race_energy_forecast([self.SEGMENT], [self.SEGMENT], weight_kg=70.0,
+                                          weight_source="profile", calibration_band="route",
+                                          calibration=calibration)
+        for scenario in RP.SCENARIOS:
+            by_scenario = result["by_scenario"][scenario]
+            self.assertEqual(by_scenario["kcal_calibrated"], by_scenario["kcal"])
+            self.assertEqual(by_scenario["kcal_per_h_calibrated"], by_scenario["kcal_per_h"])
+
+    def test_calibration_field_is_present_even_when_weight_is_missing(self):
+        """`available=False` (poids introuvable) : `calibration` reste présent
+        (un agent peut vouloir savoir si une calibration existerait,
+        indépendamment du reste du plan)."""
+        calibration = {"n": 20, "ratio_median": 1.15, "ratio_iqr": 0.05, "status": "applied", "factor": 1.15}
+        result = RP.race_energy_forecast([self.SEGMENT], [self.SEGMENT], weight_kg=None,
+                                          weight_source=None, calibration_band="trail",
+                                          calibration_band_source="option", calibration=calibration)
+        self.assertFalse(result["available"])
+        self.assertEqual(result["calibration"], {"band": "trail", "band_source": "option", **calibration})
+
+    def test_build_race_plan_forwards_calibration_band_and_factor(self):
+        """`build_race_plan` transmet `calibration_band`/`calibration_band_source`/
+        `calibration` jusqu'à `plan.energy` sans second calcul — bout en bout
+        avec un vrai GPX."""
+        pts = _straight_course(_ClimbFlatDescentProfile())
+        calibration = {"n": 20, "ratio_median": 0.9, "ratio_iqr": 0.02, "status": "applied", "factor": 0.9}
+        plan = RP.build_race_plan(
+            pts, PERSONAL_BINS, fade_pct=0.0, fade_source="generic", start_time="07:00",
+            race_date="2026-11-15", segment_m=500.0, weight_kg=70.0, weight_source="health_day",
+            pack_kg=0.0, pack_kg_provided=True, calibration_band="route",
+            calibration_band_source="gpx", calibration=calibration)
+        self.assertEqual(plan["energy"]["calibration"],
+                          {"band": "route", "band_source": "gpx", **calibration})
+        realistic = plan["energy"]["by_scenario"]["realistic"]
+        self.assertAlmostEqual(realistic["kcal_calibrated"], round(realistic["kcal"] * 0.9, 1), places=1)
+
+    def test_each_segment_carries_its_own_calibrated_fields(self):
+        """`kcal_calibrated`/`kcal_per_h_calibrated`/`cumulative_kcal_calibrated`
+        au niveau SEGMENT (correctif de revue de code) — pas seulement au
+        niveau scénario. Le facteur (0,8, ici volontairement < 1) doit
+        multiplier CHAQUE segment individuellement, et le cumul calibré doit
+        être égal au cumul BRUT multiplié par ce même facteur (linéarité)."""
+        calibration = {"n": 20, "ratio_median": 0.8, "ratio_iqr": 0.02, "status": "applied", "factor": 0.8}
+        without = RP.race_energy_forecast(self.SEGMENTS_TWO, self.SEGMENTS_TWO, weight_kg=70.0,
+                                           weight_source="profile")
+        result = RP.race_energy_forecast(self.SEGMENTS_TWO, self.SEGMENTS_TWO, weight_kg=70.0,
+                                          weight_source="profile", calibration_band="trail",
+                                          calibration_band_source="option", calibration=calibration)
+        for scenario in RP.SCENARIOS:
+            raw_segments = without["by_scenario"][scenario]["segments"]
+            segments = result["by_scenario"][scenario]["segments"]
+            self.assertEqual(len(segments), 2)
+            for raw_seg, seg in zip(raw_segments, segments):
+                self.assertAlmostEqual(seg["kcal_calibrated"], round(raw_seg["kcal"] * 0.8, 1), places=1)
+                self.assertAlmostEqual(seg["cumulative_kcal_calibrated"],
+                                        round(raw_seg["cumulative_kcal"] * 0.8, 1), places=1)
+                if raw_seg["kcal_per_h"] is not None:
+                    # Tolérance 0.1 (pas `places=1` exact) : `raw_seg["kcal_per_h"]` est déjà
+                    # arrondi côté BRUT, alors que la valeur calibrée est calculée puis arrondie
+                    # depuis la valeur NON arrondie en interne — un double-arrondi en cascade
+                    # peut légitimement différer d'un dixième, ce n'est pas un bug.
+                    self.assertAlmostEqual(seg["kcal_per_h_calibrated"],
+                                            round(raw_seg["kcal_per_h"] * 0.8, 1), delta=0.15)
+            # Le DERNIER cumul calibré doit correspondre au TOTAL calibré du scénario.
+            self.assertAlmostEqual(segments[-1]["cumulative_kcal_calibrated"],
+                                    result["by_scenario"][scenario]["kcal_calibrated"], places=1)
+
+
+class TestResolveCalibrationBand(unittest.TestCase):
+    """`resolve_calibration_band` — panier de calibration dérivé DU PARCOURS
+    (D+/km réel du GPX analysé), jamais de `[sport].primary` (profil général
+    de l'athlète, correctif de revue de code, BLOQUANT)."""
+
+    def test_flat_gpx_resolves_to_route(self):
+        """D+/km nettement sous `TRAIL_GAIN_M_PER_KM` (15 m/km) -> route,
+        `band_source="gpx"`."""
+        band, source = RP.resolve_calibration_band(10_000.0, 20.0, None)  # 2 m/km
+        self.assertEqual(band, "route")
+        self.assertEqual(source, "gpx")
+
+    def test_hilly_gpx_resolves_to_trail(self):
+        """D+/km nettement au-dessus du seuil -> trail, `band_source="gpx"`."""
+        band, source = RP.resolve_calibration_band(10_000.0, 500.0, None)  # 50 m/km
+        self.assertEqual(band, "trail")
+        self.assertEqual(source, "gpx")
+
+    def test_exactly_at_threshold_is_trail(self):
+        """Exactement au seuil (`>=`, pas `>`) -> trail."""
+        band, _source = RP.resolve_calibration_band(1000.0, RP.TRAIL_GAIN_M_PER_KM, None)  # 1 km, seuil pile
+        self.assertEqual(band, "trail")
+
+    def test_explicit_terrain_option_overrides_the_gpx_even_when_contradictory(self):
+        """`--terrain road` sur un GPX manifestement vallonné (trail au sens du
+        D+/km) doit quand même forcer `route`, `band_source="option"` —
+        l'athlète prime TOUJOURS sur la dérivation automatique."""
+        band, source = RP.resolve_calibration_band(10_000.0, 500.0, "road")
+        self.assertEqual(band, "route")
+        self.assertEqual(source, "option")
+
+    def test_explicit_trail_option_overrides_a_flat_gpx(self):
+        band, source = RP.resolve_calibration_band(10_000.0, 20.0, "trail")
+        self.assertEqual(band, "trail")
+        self.assertEqual(source, "option")
+
+    def test_missing_distance_falls_back_to_route_without_crashing(self):
+        """GPX sans distance exploitable : repli sûr sur `route`, jamais une
+        `ZeroDivisionError`."""
+        band, source = RP.resolve_calibration_band(None, 500.0, None)
+        self.assertEqual(band, "route")
+        self.assertEqual(source, "gpx")
+        band, source = RP.resolve_calibration_band(0.0, 500.0, None)
+        self.assertEqual(band, "route")
+
+    def test_never_derived_from_sport_primary_profile_setting(self):
+        """Preuve directe du correctif : la fonction n'accepte même PAS de
+        paramètre `primary`/`conf` — impossible de lui faire consulter le
+        profil général de l'athlète, seul le GPX et l'option explicite
+        comptent."""
+        import inspect
+        params = list(inspect.signature(RP.resolve_calibration_band).parameters)
+        self.assertEqual(params, ["distance_m", "elevation_gain_m", "terrain_option"])
+
+
+# ---------------------------------------------------------------------------
 # Terrain vallonné : intégration point par point (revue de code #59, blocant)
 # ---------------------------------------------------------------------------
 
@@ -739,6 +1111,34 @@ class TestCutoffFormats(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Résolveurs CLI (`_resolve_*`) — conn SQLite en mémoire, sans fichiers réels
 # ---------------------------------------------------------------------------
+
+class TestValidatePackKg(unittest.TestCase):
+    def test_none_falls_back_to_the_default(self):
+        self.assertEqual(RP._validate_pack_kg(None), RP.DEFAULT_PACK_KG)
+
+    def test_in_range_value_is_returned_unchanged(self):
+        self.assertEqual(RP._validate_pack_kg(5.0), 5.0)
+        self.assertEqual(RP._validate_pack_kg(RP.PACK_KG_MIN), RP.PACK_KG_MIN)
+        self.assertEqual(RP._validate_pack_kg(RP.PACK_KG_MAX), RP.PACK_KG_MAX)
+
+    def test_negative_value_is_rejected(self):
+        with self.assertRaises(ValueError):
+            RP._validate_pack_kg(-1.0)
+
+    def test_value_above_the_ceiling_is_rejected(self):
+        with self.assertRaises(ValueError):
+            RP._validate_pack_kg(RP.PACK_KG_MAX + 0.1)
+
+    def test_nan_is_rejected(self):
+        with self.assertRaises(ValueError):
+            RP._validate_pack_kg(float("nan"))
+
+    def test_infinity_is_rejected(self):
+        with self.assertRaises(ValueError):
+            RP._validate_pack_kg(float("inf"))
+        with self.assertRaises(ValueError):
+            RP._validate_pack_kg(float("-inf"))
+
 
 class TestResolvers(unittest.TestCase):
     def _conn(self):

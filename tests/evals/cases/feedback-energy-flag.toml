@@ -1,0 +1,96 @@
+# Ligne « Dépense : Garmin X kcal · modèle Y
+# kcal (±Z %) » + alerte quand l'écart dépasse le seuil (15 %,
+# `arc_energy.DELTA_ALERT_PCT`), dans le retour de séance du coach.
+#
+# Fixture `feedback-energy-flag/` : copie de `feedback-with-fit/` (même plan
+# de semaine relatif déclarant la sortie d'avant-hier en « endurance », même
+# `activities/fit/99000001.json` synthétique à vérité connue — 26 852,6 m,
+# 0 m de D+, aucune donnée d'altitude, `tests.lib.synthetic.sample_session`),
+# avec un profil qui déclare un poids (68 kg, `Poids de forme`) — nécessaire
+# à `scripts/arc_index.py energy` pour résoudre une masse. `[stub.garmin.
+# get_activity]` remplace la réponse par défaut (vide) par un détail
+# d'activité CURATÉ (forme snake_case réelle du paquet installé `garmin_mcp`,
+# vérifiée dans `garmin_mcp/activity_management.py:203-229` — `id`, `name`,
+# `type`, `duration_seconds`, `moving_duration_seconds`, `distance_meters`,
+# `elevation_gain_meters`, `avg_hr_bpm`, `max_hr_bpm`, `calories`,
+# `bmr_calories` — jamais la forme brute camelCase de `get_activities`, un
+# outil différent). `distance_meters`/`elevation_gain_meters`/`type` sont
+# ALIGNÉS sur le FIT réellement ingéré (26 852,6 m, 0 m de D+, course à plat).
+# LIMITE ASSUMÉE (revue de code) : `get_activities` n'est PAS surchargé (un
+# stub est statique, sans date relative) et rend toujours la réponse par
+# défaut de `feedback-with-fit` (trail, 24 800 m, 890 m de D+) — l'agent voit
+# donc deux valeurs Garmin divergentes. Un diagnostic « dénivelé » est dès
+# lors une cause plausible légitime, acceptée par la 3e regex ci-dessous.
+# `calories` (2600 kcal) reste
+# délibérément TRÈS au-dessus du modèle indépendant recalculé depuis les
+# mêmes échantillons FIT (`arc_energy.energy_from_samples` sur ce fichier, à
+# 68 kg : 1804,15 kcal, vérifié directement en local avant d'écrire ce cas —
+# pas une estimation à la louche) : écart = (1804,15 − 2600) / 2600 × 100 =
+# -30,6 %, bien au-delà du seuil de 15 % quelle que soit la légère variation
+# possible d'un calcul à l'autre. `bmr_calories` (90) permet aussi de
+# vérifier que le coach persiste `calories_bmr_kcal`.
+#
+# `tools_called` force explicitement l'appel à `get_activity` (le détail, pas
+# seulement la liste `get_activities`) : sans lui, aucune donnée `calories`
+# n'existe côté Garmin pour cette activité (le stub par défaut rend un détail
+# vide) et le cas ne prouverait rien sur la ligne de dépense.
+id = "feedback-energy-flag"
+prompt = "Fais-moi un retour sur ma séance d'avant-hier, celle prévue en endurance dans mon plan de la semaine."
+fixture = "feedback-energy-flag"
+
+[config.health]
+morning_check = "off"
+
+[stub.garmin.get_activity]
+file = "activity-detail-99000001-high-calories.json"
+
+[expect]
+tools_called = ["get_activities", "get_activity"]
+files_with_arc_block = ["activities/*.md"]
+
+# Trois regex LIÉES (revue de code) — plus strictes qu'une simple co-occurrence
+# lâche de mots-clés n'importe où dans la réponse :
+# 1. Les deux valeurs kcal (Garmin ET modèle) doivent apparaître, dans un
+#    ordre ou l'autre.
+# 2. Le POURCENTAGE d'écart doit être lié aux kcal du modèle (« modèle …
+#    1803 kcal … −31 % ») avec le signe moins obligatoire — « modèle 1803 kcal.
+#    30 % du temps en zone 3 » ne doit JAMAIS suffire (ce FIT porte justement
+#    30 % en zone 3) ; magnitude 30 ou 31 (arrondi de -30,6 %).
+# 3. La ligne d'alerte doit lier un MOT D'ALERTE explicite (écart/alerte/
+#    diverg…) à au moins une cause plausible, à moins de 180 caractères l'un
+#    de l'autre — une simple mention de « poids » à côté de « modèle » SANS
+#    aucun mot d'alerte (ex. « modèle (poids 68 kg) 1803 kcal », qui ne fait
+#    que rappeler l'hypothèse de calcul) ne doit PAS suffire.
+must_match = [
+  '(?is)(garmin.{0,150}kcal.{0,200}mod[eè]le.{0,150}kcal|mod[eè]le.{0,150}kcal.{0,200}garmin.{0,150}kcal)',
+  '(?is)mod[eè]le.{0,40}\d[\d\s\u00a0\u202f.,]*kcal.{0,80}[-−]\s?3[01]([.,]\d)?\s*%',
+  '(?is)((?:[ée]cart|alerte|diverg\w*).{0,180}(?:capteur|optique|chaleur|d[ée]riv[e]?\s*(?:cardiaque|card)|marche|poids|d[ée]nivel\w*)|(?:capteur|optique|chaleur|d[ée]riv[e]?\s*(?:cardiaque|card)|marche|poids|d[ée]nivel\w*).{0,180}(?:[ée]cart|alerte|diverg\w*))',
+]
+# Garde-fou (comme `feedback-with-fit`) : les données SONT disponibles ici
+# (FIT ingéré, poids connu) — un agent qui prétendrait le modèle indisponible
+# serait une régression du garde-fou inverse, pas une réponse prudente.
+must_not_match = [
+  'mod[eè]le.{0,40}(indisponible|non\s+disponible|pas\s+de\s+mod[eè]le)',
+]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "calories_kcal"
+equals = 2600
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "calories_bmr_kcal"
+equals = 90
+
+# L'index dérivé recalcule sa propre estimation modèle depuis les mêmes
+# échantillons FIT (indépendamment de ce que le coach a écrit) : confirme que
+# le calcul est bien réalisable pour cette séance et reste dans la fourchette
+# vérifiée en local (1804,15 kcal), avant application du seuil d'alerte.
+[[expect.sqlite_query]]
+sql = """
+SELECT model_kcal FROM activity_energy
+WHERE activity_id = (SELECT id FROM activity WHERE garmin_activity_id = 99000001)
+"""
+min = 1500
+max = 2100

@@ -1328,7 +1328,34 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 24)
+        self.assertEqual(I.SCHEMA_VERSION, 25)
+
+    def test_schema_version_25_adds_energy_table_and_bmr_column(self):
+        """Dépense énergétique modèle : `activity` gagne `calories_bmr_kcal` (REAL)
+        et une nouvelle table `activity_energy` — une base construite par une
+        version d'AVANT ce schéma doit être reconstruite avec les deux, sinon
+        `store()`/`compute_metrics` échoueraient avec « no such column »/
+        « no such table »."""
+        db_path = self.tmp / "legacy.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '24');"
+            "CREATE TABLE activity (id INTEGER PRIMARY KEY, source_path TEXT, date TEXT, "
+            "garmin_activity_id INTEGER);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        self.assertEqual(
+            conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0],
+            str(I.SCHEMA_VERSION))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(activity)").fetchall()}
+        self.assertIn("calories_bmr_kcal", columns)
+        energy_columns = {row[1] for row in conn.execute("PRAGMA table_info(activity_energy)").fetchall()}
+        self.assertIn("model_kcal", energy_columns)
+        self.assertIn("weight_source", energy_columns)
+        conn.close()
 
     def test_schema_version_24_adds_intervals_activity_id_column(self):
         """#68 : `activity` gagne `intervals_activity_id` (TEXT) — une base
