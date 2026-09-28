@@ -57,6 +57,7 @@ flowchart TB
 - Le **push des séances dans le calendrier Garmin Connect**
 - L'analyse **météo** avant chaque validation
 - La **récupération cardiaque (HRR)** dans chaque analyse de séance
+- La **dépense énergétique** modèle vs Garmin dans chaque retour de séance (Garmin reste la référence)
 - La coordination des autres agents
 
 [→ Détails de l'agent coach](agents/coach.md)
@@ -72,6 +73,7 @@ flowchart TB
 - Analyse du **parcours** (GPX ou URL)
 - Points d'eau et ravitaillement (OpenStreetMap)
 - **Allures par segment**, depuis le modèle personnel pente → allure de l'athlète (`scripts/arc_race_pacing.py`), en **3 scénarios** (ambitieux, réaliste, sécurité)
+- **Dépense énergétique prévue par section** (kcal/h, cumul), en regard du plan de ravitaillement
 - Plan de **nutrition** et **hydratation** en course
 - Préparation **météo** et **matériel**
 - Téléversement du **GPX enrichi** vers Garmin (points d'eau en waypoints)
@@ -111,7 +113,7 @@ flowchart TB
 - Le **taux de sudation** (dérivé des pesées avant/après séance)
 - Le **débrief post-course** : suit les écarts de glucides/h relevés vs objectif/plafond
 - Recharge en glycogène après les séances intenses
-- Comparaison apports / dépenses (calories Garmin)
+- Comparaison apports / dépenses (calories Garmin, référence par défaut ; le modèle indépendant n'est qu'un contrôle, jamais un double comptage)
 
 [→ Détails de l'agent nutritionniste](agents/nutritionist.md)
 

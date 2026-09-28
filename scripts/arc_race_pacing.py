@@ -160,6 +160,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_contract as C  # noqa: E402
 import arc_elevation as EL  # noqa: E402
+import arc_energy as EN  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
 from coach_setup import workspace_root  # noqa: E402 (revue de code #107 : même résolution que arc_index.py/arc_guardrails.py, jamais un simple Path(".") qui ignore ARC_WORKSPACE/le pointeur)
@@ -291,6 +292,20 @@ CUTOFF_MARGIN_OK_S = 30 * 60
 # la minute la plus proche — jamais l'inverse, jamais les deux à la seconde.
 SEGMENT_ROUND_S = 1
 PASSAGE_ROUND_S = 60
+
+# Poids du sac/flasques/matériel porté (#61) — voir
+# `ASSUMPTIONS["energy"]`. Défaut `0.0` si `--pack-kg` n'est jamais fourni :
+# AUCUNE valeur « typique » n'est inventée sans source vérifiable, un
+# avertissement explicite invite l'appelant à le renseigner à la place.
+DEFAULT_PACK_KG = 0.0
+# Bornes de validation de `--pack-kg` (revue de code) — approximation du
+# projet, PAS une limite physiologique précise : `PACK_KG_MAX` (30 kg) écarte
+# une saisie manifestement fausse (confusion kg/lb, poids CORPOREL saisi par
+# erreur à la place du sac) sans prétendre encadrer ce qu'un athlète peut
+# raisonnablement porter. Jamais une valeur non finie (NaN/infini), qui
+# fausserait silencieusement la masse totale et donc tout le calcul d'énergie.
+PACK_KG_MIN = 0.0
+PACK_KG_MAX = 30.0
 
 
 def _round_passage(seconds: float) -> int:
@@ -532,6 +547,87 @@ ASSUMPTIONS = {
         "dont les points touchent plusieurs provenances est lui-même `\"mixed\"`) — le critère "
         "d'acceptation #59 (« le plan indique la provenance par segment ») est vérifiable directement "
         "sur `segments[].source`, ce résumé n'est qu'un agrégat pratique pour l'affichage."
+    ),
+    "energy": (
+        "Dépense énergétique PRÉVUE par segment et par scénario (#61, socle "
+        "`arc_energy.energy_from_profile`, #60) — un CONTRÔLE/OUTIL DE PRÉVISION indépendant "
+        "(décision validée avec l'utilisateur avant #60), jamais une clé du contrat `race_plan` "
+        "persisté : comme `python3 scripts/arc_index.py fueling` (jamais écrit dans le bloc "
+        "```arc``` d'un plan de course non plus), `plan.energy` est un KPI DÉRIVÉ recalculable à la "
+        "demande depuis le GPX/le modèle personnel — `course-strategist` en tire ce qu'il veut "
+        "mettre en PROSE dans le plan persisté (kcal/h, déficit horaire face au ravitaillement), "
+        "jamais une nouvelle clé `arc_contract`/`workspace-data-contract` pour ce chantier.\n\n"
+        "**Masse** : poids de l'athlète résolu À LA DATE DE LA COURSE (`--race-date`, sinon la date "
+        "du jour/`--today`) par `arc_index.resolve_weight_kg_as_of` — LE MÊME résolveur que "
+        "`activity_energy` (#60), jamais une seconde implémentation de cette priorité pesée "
+        "santé/nutrition puis profil — PLUS `--pack-kg` (sac/flasques/matériel porté, kg). Défaut "
+        "`DEFAULT_PACK_KG` (0.0) si `--pack-kg` est omis — AUCUNE valeur « typique » (« un sac de "
+        "trail pèse en général... ») n'est inventée sans source vérifiable — avec un avertissement "
+        "explicite (`plan.warnings`) invitant à le renseigner pour un calcul plus fidèle. Poids "
+        "introuvable (aucune pesée santé/nutrition ni profil plausible à cette date) -> "
+        "`energy.available=False`, `energy.reason_code='no_weight'` — le RESTE du plan (segments, "
+        "passages, barrières horaires) reste valide et calculé normalement, un poids manquant ne "
+        "doit jamais faire échouer tout le plan.\n\n"
+        "**Profil point par point réattaché** : `predict_segments` retire délibérément `_profile` "
+        "de son export public (voir sa docstring) — sans lui, `energy_from_profile` ne pourrait "
+        "intégrer la puissance QUE sur la vitesse moyenne du segment entier (limite documentée dans "
+        "`arc_energy.ASSUMPTIONS['race_pacing_integration']`). `_segments_with_profile` réattache "
+        "donc le `_profile` conservé par `segment_course` (AVANT que `predict_segments` ne le "
+        "retire) à chaque segment prédit, PAR IDENTIFIANT (`s01`, `s02`… stables et alignés entre "
+        "les deux listes, issues du MÊME appel à `segment_course`) : la pente locale varie ainsi "
+        "point par point dans le calcul d'énergie (voir `ASSUMPTIONS['rolling_terrain']`) — seule "
+        "la VITESSE reste celle, moyenne, du couple scénario/segment (limite connue et acceptée, "
+        "documentée côté `arc_energy`, pas reproduite en double ici).\n\n"
+        "**Par scénario** : les trois scénarios (`safe`/`realistic`/`ambitious`) ont chacun leur "
+        "propre vitesse par segment (`predicted_time_s[scenario]`) — `energy_from_profile` est donc "
+        "appelé TROIS FOIS (un appel par scénario), jamais une seule fois sur une vitesse moyenne "
+        "qui masquerait l'écart de kcal/h attendu entre scénarios. Un scénario plus LENT (« safe ») "
+        "a un kcal/h plus faible que « ambitious » sur un même segment en côte (la puissance RE3 "
+        "croît avec la vitesse), mais son temps total plus long peut compenser tout ou partie de "
+        "cette baisse sur le total kcal de la course entière — AUCUN sens fixe n'est imposé ici sur "
+        "le total (contrairement au temps, où « safe » est toujours plus long) : les tests "
+        "vérifient la cohérence PHYSIQUE de la formule (kcal/h toujours plus faible à vitesse plus "
+        "faible sur une même pente), pas une intuition non vérifiée sur le total.\n\n"
+        "**Cumul** : `cumulative_kcal` par segment (somme courante dans l'ORDRE du parcours) — sert "
+        "à `course-strategist` pour mettre un plan de ravitaillement PAR SECTION en regard d'un "
+        "déficit horaire/cumulé, sans lui imposer de refaire cette somme lui-même.\n\n"
+        "**Aucune vitesse prédite du tout (revue de code)** : un scénario dont AUCUN segment n'a de "
+        "vitesse prédite (`predicted_time_s[scenario]` à `None` partout, ex. `intensity_source` sans "
+        "aucune référence plate personnelle NI générique) rendrait sinon `time_s=0.0`/`kcal=0.0` côté "
+        "`arc_energy.energy_from_profile` — un ZÉRO FAUX, jamais distingué d'un vrai « rien à "
+        "dépenser ». `race_energy_forecast` traite donc `time_s <= 0` comme AUCUNE prédiction pour ce "
+        "scénario (`by_scenario[scenario] = None`, même si d'autres scénarios, eux, ont une "
+        "prédiction) ; si LES TROIS scénarios sont dans ce cas, `energy.available=False` avec "
+        "`reason_code=\"no_prediction\"` — DISTINCT de `\"no_weight\"` : ici c'est la prédiction de "
+        "temps qui manque, jamais le poids, qui lui est bien connu. Un scénario PARTIELLEMENT prédit "
+        "(certains segments avec vitesse, d'autres sans) reste disponible : `n_segments_no_speed` "
+        "compte, PAR SCÉNARIO, les segments sans contribution énergétique (distance comptée, kcal "
+        "non) — jamais une sous-estimation silencieuse du kcal total.\n\n"
+        "**`--pack-kg` validé, pas seulement clampé (revue de code)** : `PACK_KG_MIN`/`PACK_KG_MAX` "
+        "(0-30 kg, approximation du projet — écarte une saisie manifestement fausse, ex. confusion "
+        "kg/lb ou poids CORPOREL saisi par erreur, sans prétendre encadrer ce qu'un athlète peut "
+        "raisonnablement porter) et une valeur non finie (NaN/infini) sont REJETÉS avec une erreur "
+        "CLI explicite (`_validate_pack_kg`), jamais acceptés silencieusement pour ne pas fausser la "
+        "masse totale et donc tout le calcul.\n\n"
+        "**Arrêts ravito EXCLUS du calcul d'énergie (limite connue, revue de code)** : "
+        "`compute_passages`/`DEFAULT_AID_STATION_STOP_S` ajoutent le temps d'arrêt aux ravitos "
+        "UNIQUEMENT aux temps de PASSAGE cumulés (barrières horaires) — `race_energy_forecast` ne "
+        "reçoit que les `segments` du parcours, jamais les arrêts ravito, et n'ajoute donc AUCUN kcal "
+        "pour le temps passé à l'arrêt (même le métabolisme debout, `arc_energy.STANDING_POWER_W_KG`, "
+        "n'est PAS compté pendant un arrêt ravito). Le kcal total prévu est donc une SOUS-ESTIMATION "
+        "connue et non corrigée pour une course à ravitos nombreux/longs — jamais présentée comme une "
+        "mesure exacte du besoin énergétique total de la journée de course.\n\n"
+        "**`heat_factor` : limite connue, non corrigée (revue de code)** : `heat_time_factor` "
+        "RALENTIT la vitesse effective (`effective_speed = base_speed / heat_factor`, voir "
+        "`predict_segments`) sans ajouter aucun coût métabolique supplémentaire propre à la chaleur "
+        "(sudation accrue, effort cardiovasculaire de thermorégulation — aucune source vérifiable "
+        "n'est citée dans ce projet pour chiffrer ce surcoût). Une vitesse plus lente à pente "
+        "identique donne, dans le modèle RE3, une puissance (donc un kcal/h) PLUS FAIBLE — le kcal/h "
+        "prévu BAISSE donc sous la chaleur alors que le coût énergétique RÉEL d'un effort par forte "
+        "chaleur est plus élevé (thermorégulation, fréquence cardiaque plus haute à vitesse égale). "
+        "Ce n'est PAS corrigé ici : `plan.energy` reste un contrôle/une prévision utile pour l'ordre "
+        "de grandeur et la RÉPARTITION par section, jamais une mesure fine du surcoût thermique — à "
+        "dire explicitement si l'athlète pose la question par forte chaleur prévue."
     ),
 }
 
@@ -1063,6 +1159,164 @@ def provenance_summary(segments: Sequence[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Dépense énergétique prévue par segment/scénario (#61, voir ASSUMPTIONS["energy"])
+# ---------------------------------------------------------------------------
+
+def _segments_with_profile(predicted_segments: Sequence[dict], raw_segments: Sequence[dict]) -> List[dict]:
+    """Réattache le profil pente/distance point par point (`_profile`, retiré par
+    `predict_segments` de son export public) à chaque segment PRÉDIT, par
+    IDENTIFIANT (`s01`, `s02`… stables, voir `ASSUMPTIONS["segmentation"]`) —
+    les deux listes proviennent du MÊME appel à `segment_course`, jamais
+    reconstituées séparément. Consommé par `race_energy_forecast` pour que
+    `arc_energy.energy_from_profile` intègre la puissance sur CHAQUE
+    sous-intervalle plutôt que sur la seule vitesse moyenne du segment — voir
+    `ASSUMPTIONS["energy"]` et `arc_energy.ASSUMPTIONS['race_pacing_integration']`
+    pour la limite connue (vitesse moyenne, pente locale). Un segment prédit
+    sans correspondance dans `raw_segments` (ne devrait pas arriver, mêmes
+    identifiants générés par le même appel) garde simplement `distance_m`/
+    `grade_mean_pct` comme seul intervalle (repli de `_segment_intervals`,
+    jamais une exception)."""
+    raw_by_id = {seg["id"]: seg for seg in raw_segments}
+    out = []
+    for seg in predicted_segments:
+        merged = dict(seg)
+        raw = raw_by_id.get(seg["id"])
+        if raw is not None:
+            merged["profile"] = raw.get("_profile")
+        out.append(merged)
+    return out
+
+
+def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict], *,
+                          weight_kg: Optional[float], weight_source: Optional[str],
+                          pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True) -> dict:
+    """Dépense énergétique BRUTE prévue de la course, par segment ET par scénario
+    — voir `ASSUMPTIONS["energy"]` pour la méthode complète (masse, profil
+    réattaché, indépendance des trois scénarios, non-persistance dans le
+    contrat `race_plan`).
+
+    `weight_kg`/`weight_source` : résolus par l'appelant (CLI) via
+    `arc_index.resolve_weight_kg_as_of` — cette fonction reste pure (aucun
+    accès disque), comme `build_race_plan`. `pack_kg` : poids du sac/matériel
+    (kg), ajouté LINÉAIREMENT au poids de l'athlète (`arc_energy` multiplie la
+    puissance W/kg par la masse totale, voir `arc_energy.ASSUMPTIONS
+    ['mass_linearity']`) — un doublement de `pack_kg` double exactement sa
+    contribution au kcal total, toutes choses égales par ailleurs.
+    `pack_kg_provided=False` (CLI : `--pack-kg` omis) ajoute un avertissement
+    invitant à le renseigner, sans empêcher le calcul (repli à `pack_kg=0.0`).
+
+    `weight_kg` absent ou non positif -> `{"available": False,
+    "reason_code": "no_weight", ...}`, TOUS les champs par scénario à `None`
+    — jamais une exception, jamais un plan entier invalidé pour un poids
+    manquant.
+
+    Poids CONNU mais AUCUNE vitesse prédite pour AUCUN scénario (revue de
+    code : ex. `intensity_source`/modèle sans référence plate du tout, tous
+    les segments en `reason_code="no_speed"`, ce qui rendrait sinon
+    `time_s=0.0`/`kcal=0.0` — un kcal=0 FAUX, jamais distingué d'un vrai
+    « rien à dépenser ») -> `{"available": False, "reason_code":
+    "no_prediction", ...}`, distinct de `"no_weight"` : ici c'est la
+    PRÉDICTION de temps qui manque, jamais le poids.
+
+    Rend `{"available", "reason", "reason_code", "weight_kg", "weight_source",
+    "pack_kg", "total_mass_kg", "by_scenario", "warnings"}` — `by_scenario`
+    porte une entrée par scénario (`SCENARIOS`), `None` pour un scénario SANS
+    AUCUNE vitesse prédite (même si d'autres scénarios, eux, en ont), sinon
+    `{"kcal", "kcal_per_h", "segments", "n_segments_no_speed"}` avec
+    `segments[].{"id", "kcal", "kcal_per_h", "cumulative_kcal",
+    "reason_code"}` (cumul dans l'ORDRE du parcours) — `n_segments_no_speed`
+    compte les segments de CE scénario sans vitesse prédite (distance comptée,
+    énergie non : cas PARTIEL, jamais une sous-estimation silencieuse), `0` si
+    tous les segments du scénario ont une vitesse. `warnings` : à fusionner
+    par l'appelant dans `plan.warnings` (jamais un second canal
+    d'avertissement séparé pour l'athlète)."""
+    warnings: List[str] = []
+    if not pack_kg_provided:
+        warnings.append(
+            "--pack-kg non renseigné : poids du sac/flasques/matériel supposé nul (0 kg) pour la "
+            "dépense énergétique prévue — indiquez le poids réel porté pour un calcul plus fidèle "
+            "(voir ASSUMPTIONS['energy']).")
+    safe_pack_kg = max(0.0, pack_kg)
+    if weight_kg is None or weight_kg <= 0:
+        return {
+            "available": False,
+            "reason": ("poids de l'athlète introuvable à la date de la course (aucune pesée "
+                       "santé/nutrition ni profil plausible) : dépense énergétique prévue non "
+                       "calculée, le reste du plan reste valide"),
+            "reason_code": "no_weight",
+            "weight_kg": None, "weight_source": None,
+            "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": None,
+            "by_scenario": {s: None for s in SCENARIOS},
+            "warnings": warnings,
+        }
+
+    total_mass_kg = weight_kg + safe_pack_kg
+    enriched = _segments_with_profile(segments, raw_segments)
+    by_scenario: Dict[str, Optional[dict]] = {}
+    for scenario in SCENARIOS:
+        result = EN.energy_from_profile(enriched, total_mass_kg, scenario=scenario)
+        # Revue de code : `result` non `None` ne suffit PAS — un scénario SANS
+        # AUCUNE vitesse prédite (ex. `no_flat_reference`, tous les segments en
+        # `reason_code="no_speed"`) rend `time_s=0.0`/`kcal=0.0` (voir
+        # `arc_energy.energy_from_profile`), ce qui rendrait `available=True`
+        # avec 0 kcal — un kcal=0 FAUX (pas une vraie mesure de repos), jamais
+        # distingué d'un vrai « rien à dépenser ». `time_s <= 0` (ou aucun
+        # segment) est donc traité comme AUCUNE prédiction pour ce scénario,
+        # jamais un zéro silencieux.
+        if result is None or not result.get("segments") or result.get("time_s", 0.0) <= 0:
+            by_scenario[scenario] = None
+            continue
+        n_segments_no_speed = sum(1 for seg in result["segments"] if seg.get("reason_code") == "no_speed")
+        cumulative_kcal = 0.0
+        seg_out = []
+        for seg in result["segments"]:
+            cumulative_kcal += seg["kcal"]
+            seg_out.append({
+                "id": seg["id"],
+                "kcal": round(seg["kcal"], 1),
+                "kcal_per_h": round(seg["kcal_per_h"], 1) if seg["kcal_per_h"] is not None else None,
+                "cumulative_kcal": round(cumulative_kcal, 1),
+                "reason_code": seg["reason_code"],
+            })
+        by_scenario[scenario] = {
+            "kcal": round(result["kcal"], 1),
+            "kcal_per_h": round(result["kcal_per_h"], 1) if result["kcal_per_h"] is not None else None,
+            "segments": seg_out,
+            # Cas PARTIEL (revue de code) : certains segments de CE scénario
+            # n'ont aucune vitesse prédite (distance comptée dans `kcal`/
+            # `kcal_per_h`, mais sans contribution énergétique) — jamais une
+            # sous-estimation silencieuse, `0` si tous les segments ont une
+            # vitesse.
+            "n_segments_no_speed": n_segments_no_speed,
+        }
+
+    if all(v is None for v in by_scenario.values()):
+        # Poids CONNU mais AUCUNE vitesse prédite pour AUCUN scénario (ex.
+        # `no_flat_reference` : pas de référence plate personnelle du tout) —
+        # distinct de `no_weight` : ici c'est la PRÉDICTION de temps qui manque,
+        # jamais le poids. Le reste du plan (segments, passages horaires) reste
+        # valide et calculé normalement.
+        return {
+            "available": False,
+            "reason": ("aucune vitesse prédite pour aucun segment, dans aucun scénario (pas de "
+                       "modèle personnel ni générique exploitable) : dépense énergétique prévue non "
+                       "calculable, le reste du plan reste valide"),
+            "reason_code": "no_prediction",
+            "weight_kg": round(weight_kg, 1), "weight_source": weight_source,
+            "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": round(total_mass_kg, 1),
+            "by_scenario": {s: None for s in SCENARIOS},
+            "warnings": warnings,
+        }
+
+    return {
+        "available": True, "reason": None, "reason_code": None,
+        "weight_kg": round(weight_kg, 1), "weight_source": weight_source,
+        "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": round(total_mass_kg, 1),
+        "by_scenario": by_scenario, "warnings": warnings,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Ravitaillements, temps de passage, barrières
 # ---------------------------------------------------------------------------
 
@@ -1265,9 +1519,15 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      flat_reference_speed_ms: Optional[float] = None, band: str = DEFAULT_BAND,
                      official_distance_m: Optional[float] = None,
                      start_time: str = "07:00", race_date: Optional[str] = None,
-                     segment_m: float = DEFAULT_SEGMENT_M) -> dict:
+                     segment_m: float = DEFAULT_SEGMENT_M,
+                     weight_kg: Optional[float] = None, weight_source: Optional[str] = None,
+                     pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
+
+    `weight_kg`/`weight_source`/`pack_kg`/`pack_kg_provided` (#61) : voir
+    `ASSUMPTIONS["energy"]`/`race_energy_forecast` — résolus par l'appelant
+    (CLI), jamais par cette fonction (qui reste pure).
 
     Lève `ValueError` si `start_time` n'est pas un `HH:MM` valide (revue de
     code #59, nit : jamais un repli silencieux sur 07:00)."""
@@ -1350,6 +1610,10 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         if aid_passage.get("note"):
             warnings.append(aid_passage["note"])
 
+    energy = race_energy_forecast(segments, raw_segments, weight_kg=weight_kg, weight_source=weight_source,
+                                   pack_kg=pack_kg, pack_kg_provided=pack_kg_provided)
+    warnings.extend(energy.pop("warnings"))
+
     total_distance_m = sum(seg["distance_m"] for seg in segments)
     total_gain_m = sum(seg["elevation_gain_m"] for seg in segments)
     total_loss_m = sum(seg["elevation_loss_m"] for seg in segments)
@@ -1366,6 +1630,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         "aid_station_passages": passages["aid_station_passages"],
         "cutoffs": cutoffs,
         "provenance_summary": provenance_summary(segments),
+        "energy": energy,
         "band": band,
         "flat_reference_speed_ms": (round(flat_reference_speed_ms, 3) if flat_reference_speed_ms else None),
         "intensity_factor": round(intensity_factor, 4),
@@ -1594,6 +1859,24 @@ def _load_aid_stations(path: Optional[str]) -> List[dict]:
     return data
 
 
+def _validate_pack_kg(value: Optional[float]) -> float:
+    """Valide `--pack-kg` — voir `ASSUMPTIONS["energy"]` et `PACK_KG_MIN`/
+    `PACK_KG_MAX`. `None` (option omise) -> `DEFAULT_PACK_KG`, jamais une
+    exception. Lève `ValueError` (message nommant la valeur reçue, même
+    discipline que `_parse_hhmm`) sur une valeur non finie (NaN/infini) ou
+    hors de `[PACK_KG_MIN, PACK_KG_MAX]` — jamais une valeur qui fausserait
+    silencieusement la masse totale et donc tout le calcul d'énergie."""
+    if value is None:
+        return DEFAULT_PACK_KG
+    if not math.isfinite(value):
+        raise ValueError(f"--pack-kg : valeur finie attendue, « {value} » reçue.")
+    if not (PACK_KG_MIN <= value <= PACK_KG_MAX):
+        raise ValueError(
+            f"--pack-kg : valeur entre {PACK_KG_MIN:g} et {PACK_KG_MAX:g} kg attendue, « {value:g} » "
+            "reçue (poids du sac/flasques/matériel porté, jamais un poids corporel).")
+    return value
+
+
 def _read_temp_max_c(args) -> Optional[float]:
     if args.temp_max_c is not None:
         return float(args.temp_max_c)
@@ -1637,6 +1920,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                      help="température maximale prévue le jour de la course (°C)")
     ap.add_argument("--weather-file", dest="weather_file",
                      help="fichier météo persisté (kind=weather) : temp_max_c lu depuis son bloc ```arc")
+    ap.add_argument("--pack-kg", type=float, dest="pack_kg",
+                     help=f"poids du sac/flasques/matériel porté (kg, {PACK_KG_MIN:g}-{PACK_KG_MAX:g}), "
+                          "pour la dépense énergétique prévue (#61) — défaut 0.0 si omis, avec un "
+                          "avertissement dans la sortie (voir ASSUMPTIONS['energy'])")
     return ap
 
 
@@ -1678,6 +1965,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         _resolve_intensity_factor(conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
 
+    # Poids de l'athlète à la date de la COURSE (#61) — MÊME résolveur que
+    # `activity_energy` (#60), voir ASSUMPTIONS["energy"] : jamais une seconde
+    # implémentation de la priorité santé/nutrition/profil.
+    athlete_row = conn.execute("SELECT * FROM athlete LIMIT 1").fetchone()
+    athlete = dict(athlete_row) if athlete_row else {}
+    energy_day = args.race_date or today_date.isoformat()
+    weight_kg, weight_source = IDX.resolve_weight_kg_as_of(conn, energy_day, athlete)
+    pack_kg_provided = args.pack_kg is not None
+    try:
+        pack_kg = _validate_pack_kg(args.pack_kg)
+    except ValueError as exc:
+        print(f"ERREUR : {exc}", file=sys.stderr)
+        return 1
+
     try:
         plan = build_race_plan(
             pts, bins, aid_stations=aid_stations, fade_pct=fade_pct, fade_source=fade_source,
@@ -1686,7 +1987,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             intensity_notes=intensity_notes, safe_scenario_factor=safe_scenario_factor,
             flat_reference_speed_ms=flat_reference_speed_ms, band=args.band,
             official_distance_m=args.official_distance_m,
-            start_time=args.start, race_date=args.race_date, segment_m=args.segment_m)
+            start_time=args.start, race_date=args.race_date, segment_m=args.segment_m,
+            weight_kg=weight_kg, weight_source=weight_source,
+            pack_kg=pack_kg, pack_kg_provided=pack_kg_provided)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1

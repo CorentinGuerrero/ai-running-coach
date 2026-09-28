@@ -32,12 +32,26 @@
 # de sa provenance réelle : « plat » proche de « personnel » (le plat central
 # est le seul segment personnel de la fixture), « montée »/« descente » proche
 # de « générique » (aucune donnée personnelle sur ces pentes).
+#
+# Dépense énergétique par section (#61, étape 3/5 de l'épopée #21) : le profil
+# de cette fixture déclare désormais un poids (65 kg, `Poids de forme`) —
+# `scripts/arc_race_pacing.py plan` peut donc calculer `energy` (kcal/h par
+# segment/scénario) plutôt que de rendre `available: false`. Le prompt ne
+# fournit PAS de poids de sac : l'agent doit le demander, et à défaut de
+# réponse (le runner `claude -p` n'a personne pour répondre à une relance)
+# utiliser le défaut `--pack-kg` 0 kg et le DIRE explicitement — jamais une
+# estimation inventée (revue de code, `agents/course-strategist.md`). `energy`
+# n'étant PAS persisté dans le contrat `race_plan` (décision #61, comme
+# `fueling`), la seule vérification possible est la mention en prose d'un
+# kcal/H (pas un simple « kcal », qui matcherait aussi un gel de 100 kcal au
+# ravito) attaché à une section du parcours, jamais un `arc_field`.
 id = "race-plan-personal-model"
 prompt = """Construis le plan de course pour mon objectif actif (voir planning/active_objective.md), \
 à partir du fichier GPX ./course.gpx à la racine du workspace. Calcule les allures par segment avec \
 le script scripts/arc_race_pacing.py (épopée #59) plutôt qu'à la main, et dis-moi explicitement quels \
 segments du parcours reposent sur mon historique personnel et lesquels sont estimés génériquement, \
-faute de données sur cette pente. Sauvegarde le plan sous planning/plan-collines-fictives.md, puis \
+faute de données sur cette pente. Indique aussi la dépense énergétique prévue par section (kcal/h) \
+face à mon plan de ravitaillement. Sauvegarde le plan sous planning/plan-collines-fictives.md, puis \
 téléverse le GPX enrichi sur Garmin comme le prévoit ton étape 8."""
 fixture = "race-plan-personal-model"
 
@@ -46,6 +60,7 @@ tools_called = ["upload_course"]
 must_match = [
   "(?is)plat.{0,200}personnel",
   "(?is)(mont|desc).{0,200}g[ée]n[ée]rique",
+  '(?is)(?:kcal\s*/\s*h|kcal\s*par\s*heure).{0,150}(mont[ée]e|descente|segment|section|plat)|(mont[ée]e|descente|segment|section|plat).{0,150}(?:kcal\s*/\s*h|kcal\s*par\s*heure)',
 ]
 
 # Le plan persisté porte des segments avec une provenance EXPLICITE (jamais une

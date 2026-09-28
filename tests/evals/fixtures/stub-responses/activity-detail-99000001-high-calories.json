@@ -1,0 +1,14 @@
+{
+  "id": 99000001,
+  "name": "Sortie longue",
+  "type": "running",
+  "duration_seconds": 9660.0,
+  "moving_duration_seconds": 9660.0,
+  "distance_meters": 26852.6,
+  "elevation_gain_meters": 0.0,
+  "avg_hr_bpm": 141,
+  "max_hr_bpm": 168,
+  "recovery_hr_bpm": 28,
+  "calories": 2600,
+  "bmr_calories": 90
+}

@@ -68,6 +68,24 @@ bloc ```arc `race_plan` (voir
 socle du débrief post-course segment par segment (`scripts/arc_race_debrief.py`,
 #61 : voir [l'agent Coach](coach.md)).
 
+## Dépense énergétique prévue par section (#61)
+
+La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,
+kcal/h et cumul par segment, pour chacun des trois scénarios) — un contrôle/
+outil de PRÉVISION indépendant, calculé depuis le même moteur RE3 + Minetti
+que le contrôle post-séance de l'agent `coach` (`scripts/arc_energy.py`,
+#60). `--pack-kg` (poids du sac/flasques/matériel porté) est nécessaire pour
+un résultat fidèle — l'agent le demande à l'athlète, ou dit explicitement
+qu'il l'estime faute de réponse ; sans lui, le calcul suppose 0 kg et le
+signale dans `warnings`. Un poids d'athlète introuvable
+(`energy.available == false`) n'invalide jamais le reste du plan. L'agent met
+le kcal/h prévu par section en regard du plan de ravitaillement (étape 5) pour
+signaler un déficit horaire/cumulé, sans jamais prétendre qu'il doit être
+comblé intégralement — qualitatif faute d'une source vérifiable sur la part
+couverte par les réserves de l'athlète. `energy` reste un KPI DÉRIVÉ exposé
+par la CLI, jamais une clé du contrat `race_plan` persisté (même statut que
+`scripts/arc_index.py fueling`).
+
 ## Fichier source
 
 `agents/course-strategist.md` · moteur : `scripts/arc_race_pacing.py`

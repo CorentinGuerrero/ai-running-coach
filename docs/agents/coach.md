@@ -127,6 +127,19 @@ l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 - **Interprétation contextuelle** : le HRR dépend fortement de l'intensité — à comparer uniquement à des séances d'effort équivalent
 - **Champ absent ≠ signal** : un champ manquant signifie généralement que l'athlète a validé l'activité trop tôt (Garmin a besoin de ~2 min immobile après l'arrêt)
 
+### Dépense énergétique modèle vs Garmin (#61)
+
+Chaque retour de séance running/trail/hiking/walking porte une ligne « Dépense :
+Garmin X kcal · modèle Y kcal (±Z %) » (`scripts/arc_index.py energy`) — Garmin
+reste **toujours** la référence, le modèle indépendant (RE3 + Minetti) n'est
+qu'un contrôle. Un écart de plus de 15 % ajoute une ligne d'alerte avec des
+causes plausibles (capteur FC optique, chaleur, dérive cardiaque, marche mal
+détectée, poids périmé), jamais présentées comme certaines. Sans FIT
+exploitable pour la séance (aucune donnée, sport hors course à pied, ou
+`[data].source = "intervals"`, #68 — aucun FIT disponible depuis cette
+source), le coach ne l'invente pas : au mieux une demi-ligne expliquant
+pourquoi, ou rien du tout en réponse brève.
+
 ### Planification météo
 
 - **Déclencheur obligatoire** : chaque validation hebdomadaire et quotidienne doit inclure une section météo

@@ -21,6 +21,13 @@ L'agent **nutritionist** optimise la nutrition pour l'entraînement trail.
 - Compare les **calories ingérées** (rapports manuels de l'utilisateur) avec les **calories brûlées** Garmin
 - Fournit des ajustements actionnables
 
+### Modèle de dépense énergétique vs Garmin (#61)
+
+- **Garmin reste toujours la référence** du bilan quotidien — `scripts/arc_index.py energy` n'est qu'un contrôle indépendant, jamais substitué à `calories_kcal` Garmin.
+- **Écart > 15 %** : l'agent cite les deux valeurs (Garmin et modèle) dans son bilan plutôt que de trancher silencieusement en faveur de l'une.
+- **Jamais de double comptage** : le `burned_kcal` quotidien Garmin inclut déjà les séances du jour — l'agent ne lui ajoute jamais les kcal d'une séance par-dessus.
+- **Ravitaillement en course** : le débit énergétique pendant l'effort se raisonne en kcal/h **brutes**, jamais en net (qui exclut le métabolisme de base que le corps continue de couvrir pendant l'effort).
+
 ### Plafond glucides/h et sudation (#41)
 
 - **Plafond réaliste, pas un chiffre générique** : avant de fixer un objectif de glucides/h pour une sortie longue, `python3 scripts/arc_index.py fueling` renvoie le meilleur débit réellement observé à l'entraînement (running/trail > 90 min, 12 dernières semaines), plafonné à 90 g/h sauf si l'athlète l'a déjà personnellement dépassé. L'objectif du plan ne dépasse jamais ce plafond sans confirmation explicite de l'athlète.
