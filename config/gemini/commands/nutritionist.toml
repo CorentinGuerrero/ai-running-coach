@@ -58,7 +58,7 @@ Offer it, never block on it.
   3. Ensure protein intake is sufficient for muscle repair after strength or vertical-focused sessions.
 - **Feedback Loop:** Compare reported ingested calories against calories burned from Garmin and provide actionable adjustments.
 
-### ENERGY MODEL VS GARMIN (#61, epic #21)
+### ENERGY MODEL VS GARMIN
 - **Garmin (`calories_kcal`) is always the daily-balance reference.**
   `arc_index.py energy --activity <id>` exposes an independent RE3+Minetti
   model (`sessions[0].model_kcal`) purely as a control — never substitute it,

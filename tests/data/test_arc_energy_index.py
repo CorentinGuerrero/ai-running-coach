@@ -1,6 +1,6 @@
-"""Palier D — dépense énergétique modèle : intégration index/CLI/contrat (#60,
-épopée #21, étape 2). Le moteur pur lui-même (`arc_energy.py`) est couvert par
-`tests/data/test_arc_energy.py` (étape 1) — ce fichier couvre l'ÉTAPE 2 :
+"""Palier D — dépense énergétique modèle : intégration index/CLI/contrat.
+Le moteur pur lui-même (`arc_energy.py`) est couvert par
+`tests/data/test_arc_energy.py` — ce fichier couvre :
 
 - table `activity_energy` (jointure par `activity_id` INTERNE, comme
   `activity_descent_class`/`activity_climb`, jamais `garmin_activity_id`) —
@@ -23,6 +23,10 @@
   arrondi à 1 décimale des kcal/pourcentages, séance sans `garmin_activity_id`
   (`reason_code="no_garmin_id"`) dans le listing par défaut ;
 - contrat `calories_bmr_kcal` (valide, négatif, > calories_kcal).
+- `activity_energy_report_by_id` (id interne inconnu, séance sans
+  `garmin_activity_id`) et `energy_trend` (regroupement route/trail, marche/
+  randonnée hors des deux paniers, fenêtre vide, un seul point, bornes de la
+  fenêtre glissante) — base en mémoire, mêmes fixtures que ci-dessus.
 """
 
 from __future__ import annotations
@@ -32,9 +36,11 @@ import io
 import json
 import os
 import shutil
+import statistics
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -190,7 +196,7 @@ class TestActivityEnergyTable(Workspace):
         self.assertIsNone(self.energy_row(act["id"]))
 
     def test_walking_sport_is_eligible(self):
-        """Le moteur gère la marche (#60) : `walking` doit obtenir une ligne,
+        """Le moteur gère la marche : `walking` doit obtenir une ligne,
         comme running/trail/hiking."""
         self.write_profile_weight(70)
         self.write_activity(self.GARMIN_ID, sport="walking",
@@ -353,7 +359,7 @@ class TestResolveWeightKgAsOf(Workspace):
         self.assertIsNone(source)
 
     def test_profile_weight_in_pounds_is_converted_to_kg(self):
-        """#60, revue de code : un profil imperial peut porter le poids en livres
+        """Revue de code : un profil imperial peut porter le poids en livres
         (« 154 lb ») — converti par `arc_legacy.parse_weight_kg`, jamais lu tel
         quel comme des kg (ce qui donnerait un poids plus de deux fois trop
         lourd)."""
@@ -367,7 +373,7 @@ class TestResolveWeightKgAsOf(Workspace):
 
 class TestParseWeightKg(unittest.TestCase):
     """`arc_legacy.parse_weight_kg` : seule l'unité du PREMIER nombre compte
-    (revue #60 — une mention « lb » ailleurs dans la puce ne convertit rien)."""
+    (revue de code — une mention « lb » ailleurs dans la puce ne convertit rien)."""
 
     def test_mixed_units_keep_first_number_unit(self):
         import arc_legacy as L  # noqa: E402
@@ -595,7 +601,7 @@ class TestEnergyCli(Workspace):
 
 
 # ---------------------------------------------------------------------------
-# Try/except SÉPARÉ (#60, revue de code) : GAP/VAM/descente/durabilité d'un
+# Try/except SÉPARÉ (revue de code) : GAP/VAM/descente/durabilité d'un
 # côté, énergie de l'autre — un échec de l'un ne doit jamais affecter l'autre.
 # ---------------------------------------------------------------------------
 
@@ -625,7 +631,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
         original = I.G.gap_sample_series
 
         def _boom(*args, **kwargs):
-            raise RuntimeError("bug injecté par le test (#60)")
+            raise RuntimeError("bug injecté par le test")
 
         I.G.gap_sample_series = _boom
         try:
@@ -635,7 +641,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
         finally:
             I.G.gap_sample_series = original
 
-        self.assertIn("bug injecté par le test (#60)", stderr.getvalue())
+        self.assertIn("bug injecté par le test", stderr.getvalue())
         act = self.activity_row(self.GARMIN_ID)
         # GAP/découplage/etc. : bien remis à NULL (comportement INCHANGÉ de ce bloc).
         self.assertIsNone(act["gap_pace_s_km"])
@@ -657,7 +663,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
         original = I.EN.energy_from_samples
 
         def _boom(*args, **kwargs):
-            raise RuntimeError("bug injecté par le test (#60), côté énergie")
+            raise RuntimeError("bug injecté par le test, côté énergie")
 
         I.EN.energy_from_samples = _boom
         try:
@@ -667,7 +673,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
         finally:
             I.EN.energy_from_samples = original
 
-        self.assertIn("bug injecté par le test (#60), côté énergie", stderr.getvalue())
+        self.assertIn("bug injecté par le test, côté énergie", stderr.getvalue())
         act = self.activity_row(self.GARMIN_ID)
         # GAP/découplage/etc. : NON affectés par ce crash côté énergie.
         self.assertIsNotNone(act["gap_pace_s_km"])
@@ -685,7 +691,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
         original = I.EN.energy_from_samples
 
         def _boom(*args, **kwargs):
-            raise RuntimeError("bug injecté par le test (#60)")
+            raise RuntimeError("bug injecté par le test")
 
         os.environ["ARC_STRICT_METRICS"] = "1"
         I.EN.energy_from_samples = _boom
@@ -697,7 +703,7 @@ class TestEnergyTryExceptIsIndependentFromGapBlock(Workspace):
 
 
 # ---------------------------------------------------------------------------
-# Contrat : `calories_bmr_kcal` (#60).
+# Contrat : `calories_bmr_kcal`.
 # ---------------------------------------------------------------------------
 
 
@@ -732,6 +738,141 @@ class TestContractCaloriesBmrKcal(unittest.TestCase):
         modules de test."""
         skill = (REPO / "skills" / "workspace-data-contract" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("calories_bmr_kcal", skill)
+
+
+# ---------------------------------------------------------------------------
+# `activity_energy_report_by_id` — dépense d'UNE séance par id INTERNE
+# (`/api/activity/<id>.energy`, tableau de bord local).
+# ---------------------------------------------------------------------------
+
+
+class TestActivityEnergyReportById(Workspace):
+    def test_unknown_activity_id_reports_unknown_activity(self):
+        """`activity_id` sans ligne `activity` correspondante — aucun accès disque,
+        rend le même jeu de clés que toute autre séance (`_energy_session_dict`),
+        jamais une exception ni une clé manquante."""
+        self.index()
+        report = I.activity_energy_report_by_id(self.conn, 999999)
+        self.assertIsNone(report["model_kcal"])
+        self.assertEqual(report["reason_code"], "unknown_activity")
+        self.assertEqual(report["reason"], "activité introuvable")
+
+    def test_activity_without_garmin_id_reports_no_garmin_id(self):
+        """Séance synchronisée depuis Intervals.icu (#68, `intervals_activity_id`
+        au lieu de `garmin_activity_id`) : aucun FIT n'a jamais pu être ingéré —
+        `reason_code="no_garmin_id"`, jamais confondu avec `"no_samples"` (même
+        distinction que `_energy_reason_for_missing_row`)."""
+        self.write_activity_no_garmin_id("i12345678", calories_kcal=500)
+        self.index()
+        row = self.conn.execute(
+            "SELECT id FROM activity WHERE date = '2026-09-20'").fetchone()
+        report = I.activity_energy_report_by_id(self.conn, row["id"])
+        self.assertIsNone(report["model_kcal"])
+        self.assertEqual(report["reason_code"], "no_garmin_id")
+        self.assertEqual(report["garmin_kcal"], 500)
+
+    def test_matches_activity_energy_report_by_garmin_id(self):
+        """Même résultat que `activity_energy_report` (id GARMIN, pour la CLI) sur
+        la MÊME séance — les deux délèguent à `_energy_session_for_activity_row`,
+        jamais un second calcul du delta/flag."""
+        garmin_id = 90000000900
+        self.write_profile_weight(70)
+        self.write_activity(garmin_id, calories_kcal=450)
+        self.write_fit(garmin_id, _flat_run_records())
+        self.index()
+        by_garmin = I.activity_energy_report(self.conn, garmin_id)
+        row = self.activity_row(garmin_id)
+        by_id = I.activity_energy_report_by_id(self.conn, row["id"])
+        self.assertEqual(by_garmin, by_id)
+
+
+# ---------------------------------------------------------------------------
+# `energy_trend` — tendance modèle vs Garmin (`/api/energy-trend`, tableau de
+# bord local) : fenêtre glissante, regroupement route/trail.
+# ---------------------------------------------------------------------------
+
+
+class TestEnergyTrend(Workspace):
+    def _flat_activity(self, garmin_id, day, sport, calories_kcal, weight_kg=70):
+        self.write_profile_weight(weight_kg)
+        self.write_activity(garmin_id, day=day, sport=sport, calories_kcal=calories_kcal,
+                            duration_s=1800, distance_m=5400)
+        self.write_fit(garmin_id, _flat_run_records(duration_s=1800, speed_ms=3.0))
+
+    def test_empty_window_returns_no_sessions_and_none_medians(self):
+        """Aucune séance dans la fenêtre : `sessions`/`sessions_n`/`measured_n`
+        vides plutôt qu'une exception, `delta_median_pct` à `None` des deux
+        côtés — jamais 0, qui laisserait croire à un accord parfait mesuré."""
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        self.assertEqual(trend["sessions"], [])
+        self.assertEqual(trend["sessions_n"], 0)
+        self.assertEqual(trend["measured_n"], 0)
+        self.assertIsNone(trend["delta_median_pct"]["route"])
+        self.assertIsNone(trend["delta_median_pct"]["trail"])
+
+    def test_route_and_trail_are_separate_buckets(self):
+        """Deux séances `running` et une `trail` : la médiane route ne mélange
+        jamais le trail (et réciproquement) — vérifié par recalcul indépendant
+        de la médiane à partir des `delta_pct` réellement rendus, jamais une
+        valeur physique attendue à l'avance (le modèle lui-même est couvert par
+        `tests/data/test_arc_energy.py`)."""
+        self._flat_activity(90000001001, "2026-09-01", "running", calories_kcal=400)
+        self._flat_activity(90000001002, "2026-09-02", "running", calories_kcal=420)
+        self._flat_activity(90000001003, "2026-09-03", "trail", calories_kcal=500)
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route_sessions = [s for s in trend["sessions"] if s["sport"] == "running"]
+        trail_sessions = [s for s in trend["sessions"] if s["sport"] == "trail"]
+        self.assertEqual(len(route_sessions), 2)
+        self.assertEqual(len(trail_sessions), 1)
+        for s in route_sessions + trail_sessions:
+            self.assertIsNotNone(s["delta_pct"])
+        expected_route = round(statistics.median([s["delta_pct"] for s in route_sessions]), 1)
+        expected_trail = round(trail_sessions[0]["delta_pct"], 1)
+        self.assertEqual(trend["delta_median_pct"]["route"], expected_route)
+        self.assertEqual(trend["delta_median_pct"]["trail"], expected_trail)
+
+    def test_hiking_is_counted_but_excluded_from_route_trail_medians(self):
+        """Randonnée : éligible au calcul (`ENERGY_ELIGIBLE_SPORTS`), présente dans
+        `sessions`/`measured_n`, mais HORS des deux paniers de médiane — aucune
+        référence de validation connue pour ce sport (voir
+        `ENERGY_TREND_ROUTE_TRAIL_BUCKET`)."""
+        self._flat_activity(90000001004, "2026-09-01", "hiking", calories_kcal=350)
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        self.assertEqual(trend["sessions_n"], 1)
+        self.assertEqual(trend["measured_n"], 1)
+        self.assertIsNotNone(trend["sessions"][0]["delta_pct"])
+        self.assertIsNone(trend["delta_median_pct"]["route"])
+        self.assertIsNone(trend["delta_median_pct"]["trail"])
+
+    def test_single_point_median_equals_its_own_value(self):
+        """Médiane d'un seul point : elle-même, jamais `None` ni une moyenne
+        dégénérée."""
+        self._flat_activity(90000001005, "2026-09-10", "running", calories_kcal=410)
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        self.assertEqual(len(trend["sessions"]), 1)
+        self.assertEqual(trend["delta_median_pct"]["route"], round(trend["sessions"][0]["delta_pct"], 1))
+
+    def test_window_boundaries_are_inclusive_start_and_end(self):
+        """Fenêtre de `weeks=2` (14 j) se terminant à `today` INCLUS : une séance
+        la veille du début de fenêtre est exclue, une séance au premier jour ET
+        une séance datée `today` sont toutes deux incluses — jamais une borne
+        décalée d'un jour dans un sens ou l'autre."""
+        today = date.fromisoformat("2026-09-25")
+        start = today - timedelta(days=13)
+        before_start = start - timedelta(days=1)
+        self._flat_activity(90000001006, before_start.isoformat(), "running", calories_kcal=400)
+        self._flat_activity(90000001007, start.isoformat(), "running", calories_kcal=400)
+        self._flat_activity(90000001008, today.isoformat(), "running", calories_kcal=400)
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, today, weeks=2)
+        dates = {s["date"] for s in trend["sessions"]}
+        self.assertNotIn(before_start.isoformat(), dates)
+        self.assertIn(start.isoformat(), dates)
+        self.assertIn(today.isoformat(), dates)
 
 
 if __name__ == "__main__":

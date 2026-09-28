@@ -21,7 +21,7 @@ L'agent **nutritionist** optimise la nutrition pour l'entraînement trail.
 - Compare les **calories ingérées** (rapports manuels de l'utilisateur) avec les **calories brûlées** Garmin
 - Fournit des ajustements actionnables
 
-### Modèle de dépense énergétique vs Garmin (#61)
+### Modèle de dépense énergétique vs Garmin
 
 - **Garmin reste toujours la référence** du bilan quotidien — `scripts/arc_index.py energy` n'est qu'un contrôle indépendant, jamais substitué à `calories_kcal` Garmin.
 - **Écart > 15 %** : l'agent cite les deux valeurs (Garmin et modèle) dans son bilan plutôt que de trancher silencieusement en faveur de l'une.

@@ -212,7 +212,7 @@ SCHEMA = {
             "recovery_hr_bpm": "int+",
             "avg_cadence_spm": "num+",
             "calories_kcal": "num+",
-            # Part métabolisme de base (#60, épopée #21) : copie déclarative du champ
+            # Part métabolisme de base : copie déclarative du champ
             # `bmr_calories` du MCP `get_activity` (Garmin), jamais recalculée — voir
             # `skills/garmin-sync-efficiency/SKILL.md`. Sert à dériver un net Garmin
             # (`calories_kcal` − `calories_bmr_kcal`) comparable au résultat NET du
@@ -1028,7 +1028,7 @@ def validate(data: dict) -> tuple:
         bmr, calories = data.get("calories_bmr_kcal"), data.get("calories_kcal")
         if _is_number(bmr) and _is_number(calories) and bmr > calories:
             # Le métabolisme de base est une PART de la dépense totale de la séance
-            # (#60) : il ne peut jamais la dépasser — un `calories_bmr_kcal` >
+            # (dépense énergétique modèle) : il ne peut jamais la dépasser — un `calories_bmr_kcal` >
             # `calories_kcal` trahit presque toujours une confusion de champ côté
             # Garmin (ex. BMR quotidien entier collé sur une activité courte),
             # jamais une valeur physiologiquement plausible à laisser passer.

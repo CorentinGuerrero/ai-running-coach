@@ -486,7 +486,7 @@ class TestBuildRacePlan(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Dépense énergétique prévue par segment/scénario (#61, voir ASSUMPTIONS["energy"])
+# Dépense énergétique prévue par segment/scénario (voir ASSUMPTIONS["energy"])
 # ---------------------------------------------------------------------------
 
 class TestRaceEnergyForecast(unittest.TestCase):
@@ -570,13 +570,13 @@ class TestRaceEnergyForecast(unittest.TestCase):
                 self.assertLess(slow_segments[seg_id]["kcal_per_h"], fast_segments[seg_id]["kcal_per_h"])
 
     def test_energy_key_is_not_part_of_the_persisted_race_plan_contract(self):
-        # Décision #61 : `energy` est un KPI DÉRIVÉ exposé par la CLI, jamais une
+        # Décision : `energy` est un KPI DÉRIVÉ exposé par la CLI, jamais une
         # clé du contrat `race_plan` (comme `fueling`) — voir ASSUMPTIONS["energy"].
         import arc_contract as C
         self.assertNotIn("energy", C.SCHEMA["race_plan"]["optional"])
         self.assertNotIn("energy", C.SUBSCHEMA["race_segment"]["optional"])
 
-    # -- Revue de code Opus (étape 3/5) ------------------------------------
+    # -- Revue de code Opus -------------------------------------------------
 
     def test_no_prediction_at_all_is_unavailable_and_distinct_from_no_weight(self):
         # `bins=[]` : AUCUNE vitesse prédite pour AUCUN segment, dans AUCUN

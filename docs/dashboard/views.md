@@ -262,6 +262,24 @@ disponibles à partir du seul résumé Markdown d'une séance :
   séance individuelle affiche le fade GAP (et le fade EF) comme un fait de
   séance, aux côtés du découplage aérobie.
 
+- **La dépense énergétique** : écart modèle vs Garmin (%) par séance éligible
+  (famille course à pied, échantillon FIT ingéré **et** poids connu à la date
+  de la séance — le modèle exige les deux, contrairement à la VAM ou à
+  l'efficacité en descente ci-dessus), sur la fenêtre choisie. **Route** et
+  **trail** sont deux séries distinctes (plein pour le trail, creux pour la
+  route — même codage visuel que la durabilité, fade GAP plein/fade EF
+  creux) : leurs biais mesurés diffèrent (voir `scripts/arc_energy.py::
+  ASSUMPTIONS`/[Marques et métriques](../marques.md) : route ±6 %, trail
+  +3/+5 % sur 7 séances réelles de validation) — randonnée et marche restent
+  hors de ce graphique et du calcul de médiane, sans référence de validation
+  connue, mais comptent quand même dans le nombre de séances affiché en
+  dessous. Une bande grisée ±15 % (`arc_energy.DELTA_ALERT_PCT`, le même seuil
+  que sur la fiche d'une séance) situe l'écart mesuré ; un repère à 0 % marque
+  l'égalité parfaite. En dessous, l'écart **médian**, séparément pour la route
+  et le trail. Ce graphique sert **uniquement** à suivre la fidélité du modèle
+  dans le temps : Garmin reste la référence par défaut partout ailleurs
+  (nutrition, rapports), jamais remise en cause ici.
+
 - **Segments de montée** (#49, #50) : une même montée, reconnue d'une séance à
   l'autre (position GPS quand le FIT en porte, sinon profil distance/D+/pente,
   voir `scripts/arc_climb_match.py`) — un tableau, une ligne par segment avec au
@@ -275,15 +293,16 @@ disponibles à partir du seul résumé Markdown d'une séance :
 
 | Alimentée par | Calcul |
 |---|---|
-| `activities/fit/*.json` (échantillons ingérés) | temps en zone FC → polarisation 80/20 ; GAP → découplage aérobie/EF ; montées détectées → VAM ; classes de pente descendante → efficacité en descente ; premier/dernier tiers → durabilité (fade GAP/EF) ; position GPS des montées (si présente dans le FIT) → identité de montée entre séances (#49) |
+| `activities/fit/*.json` (échantillons ingérés) | temps en zone FC → polarisation 80/20 ; GAP → découplage aérobie/EF ; montées détectées → VAM ; classes de pente descendante → efficacité en descente ; premier/dernier tiers → durabilité (fade GAP/EF) ; segments ~50 m + pente → dépense énergétique modèle ; position GPS des montées (si présente dans le FIT) → identité de montée entre séances (#49) |
 
-**Si la vue est vide** : aucune de ces cinq sections n'apparaît tant qu'aucune
+**Si la vue est vide** : aucune de ces six sections n'apparaît tant qu'aucune
 activité n'a d'échantillons FIT ingérés — la vue l'explique alors en une seule
-fois (plutôt que cinq sections vides côte à côte) et renvoie au skill
+fois (plutôt que six sections vides côte à côte) et renvoie au skill
 `fit-download` (`skills/fit-download/SKILL.md`) pour synchroniser les fichiers
 FIT depuis Garmin. Une section peut aussi rester absente individuellement (pas
 de séance à échantillons cette fenêtre, aucune sortie longue, aucun segment
-reconnu deux fois) sans que les autres en soient affectées.
+reconnu deux fois, aucun poids connu aux dates des séances à échantillons pour
+la dépense énergétique) sans que les autres en soient affectées.
 
 ## Santé
 
@@ -495,10 +514,34 @@ de fréquence cardiaque et d'effort perçu, un astérisque.
   la section avec un message explicite plutôt que la masquer (contrairement aux
   montées, l'absence est ici TOUJOURS documentée — critère d'acceptation de #47).
 - **« Détail avancé »** (#50) : sur une séance de la famille course à pied sans
-  **AUCUN** échantillon FIT ingéré, zones FC, montées et descente disparaissent au
-  profit d'une **note unique** — jamais trois sections vides côte à côte disant
-  chacune, à sa façon, « pas d'échantillons FIT » — qui garde les bornes de zones
-  effectives (utiles même sans FIT) et renvoie vers le skill `fit-download`.
+  **AUCUN** échantillon FIT ingéré, zones FC, montées, descente et dépense
+  énergétique modèle disparaissent au profit d'une **note unique** — jamais
+  quatre sections vides côte à côte disant chacune, à sa façon, « pas
+  d'échantillons FIT » — qui garde les bornes de zones effectives (utiles même
+  sans FIT) et renvoie vers le skill `fit-download`.
+- **La dépense énergétique** : **Garmin** (`calories_kcal`, la référence —
+  utilisée partout ailleurs, nutrition comprise) et le **modèle indépendant**
+  (équation RE3 de course + marche de Minetti, résultat brut, métabolisme de
+  base inclus) côte à côte, avec leur écart — mis en évidence (« Écart
+  notable ») au-delà de ±15 % (`arc_energy.DELTA_ALERT_PCT`, seuil unique
+  repris partout, y compris par la tendance de [Analyse](#analyse)). En
+  dessous, la part net (hors métabolisme de base) des deux côtés quand
+  `calories_bmr_kcal` (`bmr_calories` du MCP Garmin) est connue — sinon une
+  note discrète explique l'absence de BMR Garmin, jamais un chiffre
+  silencieusement faux. La décomposition par nature de terrain (plat, montée,
+  descente, marche, arrêt), en temps et en kcal, complète le modèle —
+  catégories à zéro masquées, jamais une ligne à « 0 min · 0 kcal » qui
+  laisserait croire à une mesure. Réservée aux sports de la famille course à
+  pied ; dans tous les autres cas sans modèle calculable (pas de poids connu à
+  la date de la séance, séance synchronisée depuis Intervals.icu sans
+  identifiant Garmin, #68), Garmin reste affiché seul quand connu, avec la
+  raison exacte en clair, en français — jamais un « NaN » ni une section vide
+  muette. Sur une séance SANS AUCUN échantillon FIT, cette section se réduit au
+  seul fait Garmin : la raison n'est dite qu'une fois, par la note « Détail
+  avancé » qui la mentionne déjà (jamais un texte répété deux fois sur la même
+  page). Le modèle est un **contrôle indépendant**, jamais un remplacement de
+  Garmin ; voir aussi la stratégie de course, qui l'utilise en **prévision**
+  (kcal/h par section, dans le plan de ravitaillement).
 - **L'analyse complète du coach**, rendue telle qu'il l'a écrite, tableaux compris ;
   le chemin du fichier source est rappelé en bas.
 

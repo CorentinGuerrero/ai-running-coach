@@ -68,13 +68,13 @@ bloc ```arc `race_plan` (voir
 socle du débrief post-course segment par segment (`scripts/arc_race_debrief.py`,
 #61 : voir [l'agent Coach](coach.md)).
 
-## Dépense énergétique prévue par section (#61)
+## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,
 kcal/h et cumul par segment, pour chacun des trois scénarios) — un contrôle/
 outil de PRÉVISION indépendant, calculé depuis le même moteur RE3 + Minetti
-que le contrôle post-séance de l'agent `coach` (`scripts/arc_energy.py`,
-#60). `--pack-kg` (poids du sac/flasques/matériel porté) est nécessaire pour
+que le contrôle post-séance de l'agent `coach` (`scripts/arc_energy.py`).
+`--pack-kg` (poids du sac/flasques/matériel porté) est nécessaire pour
 un résultat fidèle — l'agent le demande à l'athlète, ou dit explicitement
 qu'il l'estime faute de réponse ; sans lui, le calcul suppose 0 kg et le
 signale dans `warnings`. Un poids d'athlète introuvable

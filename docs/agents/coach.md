@@ -127,7 +127,7 @@ l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 - **Interprétation contextuelle** : le HRR dépend fortement de l'intensité — à comparer uniquement à des séances d'effort équivalent
 - **Champ absent ≠ signal** : un champ manquant signifie généralement que l'athlète a validé l'activité trop tôt (Garmin a besoin de ~2 min immobile après l'arrêt)
 
-### Dépense énergétique modèle vs Garmin (#61)
+### Dépense énergétique modèle vs Garmin
 
 Chaque retour de séance running/trail/hiking/walking porte une ligne « Dépense :
 Garmin X kcal · modèle Y kcal (±Z %) » (`scripts/arc_index.py energy`) — Garmin

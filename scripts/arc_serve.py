@@ -566,7 +566,19 @@ def api_activity(store: Store, activity_id: int):
             "climbs": api_activity_climbs(store, activity_id),
             "descent": api_activity_descent(store, activity_id),
             "durability": api_activity_durability(store, activity_id),
+            "energy": api_activity_energy(store, activity_id),
             "body_html": render_markdown(I.C.body_after_block(body))}
+
+
+def api_activity_energy(store: Store, activity_id: int) -> dict:
+    """Dépense énergétique modèle vs Garmin d'UNE séance, pour
+    `/api/activity/<id>.energy` — délègue ENTIÈREMENT à
+    `I.activity_energy_report_by_id` (même fonction que la CLI `arc_index.py
+    energy`/`/api/energy-trend`, jamais un second calcul du delta/flag).
+    Garmin reste la référence par défaut partout ailleurs (nutrition, rapports) ;
+    ce bloc sert uniquement à afficher le modèle indépendant en contrôle."""
+    with store.lock:
+        return I.activity_energy_report_by_id(store.conn, activity_id)
 
 
 def api_activity_climbs(store: Store, activity_id: int) -> dict:
@@ -1028,6 +1040,19 @@ def api_slope_model(store: Store, q: dict) -> dict:
         return I.slope_model_report(store.conn, band)
 
 
+def api_energy_trend(store: Store, q: dict) -> dict:
+    """Tendance de la dépense énergétique modèle vs Garmin :
+    `/api/energy-trend`. Additive : ne touche à aucune route existante. Délègue
+    ENTIÈREMENT à `I.energy_trend` (même fonction que `/api/activity/<id>.energy`
+    et la CLI `arc_index.py energy`, jamais un second calcul du delta/flag)."""
+    today = _today(store)
+    weeks_raw = q.get("weeks", [""])[0]
+    weeks = int(weeks_raw) if weeks_raw.isdigit() else I.ENERGY_TREND_WEEKS
+    weeks = max(4, min(52, weeks))
+    with store.lock:
+        return I.energy_trend(store.conn, today, weeks)
+
+
 def api_files(store: Store, q: dict) -> dict:
     return {"items": store.backfill()}
 
@@ -1246,7 +1271,7 @@ ROUTES = {
     "/api/calendar": api_calendar, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
     "/api/decoupling": api_decoupling, "/api/vam": api_vam, "/api/descent": api_descent,
     "/api/durability": api_durability, "/api/slope-model": api_slope_model, "/api/files": api_files,
-    "/api/trail-shape": api_trail_shape,
+    "/api/trail-shape": api_trail_shape, "/api/energy-trend": api_energy_trend,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
 }

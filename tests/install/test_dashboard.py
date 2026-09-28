@@ -151,7 +151,8 @@ class TestDashboardAnalysisView(InstallAsserts):
         """Chaque endpoint consommé par `viewAnalyse` (`web/js/app.js`) répond 200 sur
         un workspace à échantillons FIT, `climb-segments` compris (#49)."""
         for path in ("/api/load?weeks=26", "/api/decoupling?weeks=26", "/api/vam?weeks=26",
-                     "/api/descent?weeks=26", "/api/durability?weeks=26", "/api/climb-segments"):
+                     "/api/descent?weeks=26", "/api/durability?weeks=26", "/api/climb-segments",
+                     "/api/energy-trend?weeks=26"):
             status, body, _ = self.server.get(path)
             self.assertEqual(status, 200, path)
             json.loads(body)  # une réponse JSON valide, quelle que soit sa forme
@@ -169,6 +170,26 @@ class TestDashboardAnalysisView(InstallAsserts):
             self.assertIn(key, seg)
         for leaked in ("lat", "lon", "latitude", "longitude"):
             self.assertNotIn(leaked, seg, "aucune coordonnée GPS ne doit être exposée")
+
+    def test_energy_trend_endpoint_has_expected_shape(self):
+        """`/api/energy-trend` rend au moins une séance avec un `model_kcal`
+        calculable sur un workspace à échantillons FIT ET poids connu
+        (`tests.lib.synthetic.build` en écrit un jour sur cinq) — jamais un second
+        calcul du delta/flag (voir `arc_index.energy_trend`, réutilise
+        `_energy_session_for_activity_row`, même fonction que `/api/activity/<id>.
+        energy`)."""
+        status, body, _ = self.server.get("/api/energy-trend?weeks=26")
+        self.assertEqual(status, 200)
+        trend = json.loads(body)
+        for key in ("model_id", "window_weeks", "delta_alert_pct", "sessions", "sessions_n",
+                    "measured_n", "delta_median_pct"):
+            self.assertIn(key, trend)
+        measured = [s for s in trend["sessions"] if s.get("model_kcal") is not None]
+        self.assertGreater(len(measured), 0, "workspace --with-samples : au moins une dépense "
+                           "énergétique modèle calculable attendue")
+        for s in measured:
+            self.assertIn("delta_pct", s)
+            self.assertIn("flag", s)
 
 
 class TestDashboardAnalysisViewEmptyState(InstallAsserts):
@@ -208,6 +229,7 @@ class TestDashboardAnalysisViewEmptyState(InstallAsserts):
         descent = json.loads(self.server.get("/api/descent?weeks=26")[1])
         durability = json.loads(self.server.get("/api/durability?weeks=26")[1])
         segments = json.loads(self.server.get("/api/climb-segments")[1])["segments"]
+        energy = json.loads(self.server.get("/api/energy-trend?weeks=26")[1])
 
         self.assertFalse(any(w.get("polarisation") for w in polarisation_weeks),
                          "aucune semaine ne devrait avoir de polarisation sans échantillons FIT")
@@ -222,6 +244,12 @@ class TestDashboardAnalysisViewEmptyState(InstallAsserts):
         self.assertFalse(any(p.get("gap_fade_pct") is not None for p in durability["points"]),
                          "aucun fade GAP n'est attendu sans échantillons FIT, même si des sorties longues existent")
         self.assertEqual(segments, [], "aucun segment de montée sans échantillons FIT")
+        # `model_kcal` dépend des échantillons FIT (`arc_energy.
+        # energy_from_samples`, voir `arc_index.compute_metrics`) au même titre que
+        # les quatre tendances ci-dessus — jamais calculable sans eux, quel que soit
+        # le poids connu par ailleurs.
+        self.assertFalse(any(s.get("model_kcal") is not None for s in energy["sessions"]),
+                         "aucune dépense énergétique modèle attendue sans échantillons FIT")
 
 
 class TestDashboardHealthMorningCheck(InstallAsserts):

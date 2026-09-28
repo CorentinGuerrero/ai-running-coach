@@ -207,7 +207,7 @@ Persiste le tableau `segments` du script directement dans le champ
 — jamais une réécriture manuelle qui perdrait la provenance ou les temps
 exacts calculés.
 
-**Dépense énergétique prévue par section (#61, socle `arc_energy`/#60) :**
+**Dépense énergétique prévue par section (socle `arc_energy`) :**
 le JSON du script porte aussi `energy` (par scénario, `kcal`/`kcal_per_h`,
 `n_segments_no_speed` et `cumulative_kcal` par segment ; `available: false`
 avec `reason_code: "no_weight"` — poids introuvable — ou `"no_prediction"` —

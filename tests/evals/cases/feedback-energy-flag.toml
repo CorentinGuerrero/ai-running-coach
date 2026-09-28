@@ -1,4 +1,4 @@
-# #61 (étape 3/5, épopée #21) — ligne « Dépense : Garmin X kcal · modèle Y
+# Ligne « Dépense : Garmin X kcal · modèle Y
 # kcal (±Z %) » + alerte quand l'écart dépasse le seuil (15 %,
 # `arc_energy.DELTA_ALERT_PCT`), dans le retour de séance du coach.
 #

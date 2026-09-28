@@ -56,7 +56,7 @@ def parse_fr_number(text) -> Optional[float]:
     return float(raw.replace(",", "."))
 
 
-# Conversion livre -> kg (#60, revue de code) : `[athlete].units = "imperial"`
+# Conversion livre -> kg (revue de code) : `[athlete].units = "imperial"`
 # n'empêche pas l'athlète d'écrire son poids en livres dans un libellé de puce
 # (profil, ou une vieille fiche santé/nutrition au format bullets hérité) —
 # 1 lb = 0.45359237 kg EXACT (définition internationale de la livre avoirdupois,
@@ -68,7 +68,7 @@ def parse_weight_kg(text: Optional[str]) -> Optional[float]:
     """Poids en kg depuis un libellé de puce libre (`_pick`) — profil
     (`parse_profile`) ou fiche santé/nutrition au format bullets hérité
     (`legacy_health`/`legacy_nutrition`) : SEULE fonction du module qui convertit
-    un poids, pour que les trois appelants restent d'accord (#60, revue de code).
+    un poids, pour que les trois appelants restent d'accord (revue de code).
     Détection par le TEXTE du libellé lui-même (« lb »/« lbs », insensible à la
     casse, limite de mot pour ne jamais confondre avec un autre mot commençant
     par ces lettres) — PAS par `[athlete].units` (ce module n'a pas accès à la
@@ -77,13 +77,13 @@ def parse_weight_kg(text: Optional[str]) -> Optional[float]:
     quel, jamais deviné depuis `[athlete].units` seul. Sans cette conversion, un
     poids en livres serait silencieusement traité comme des kg (154 lb -> "154",
     lu comme 154 kg au lieu de ~70 kg) — une confusion qui fausserait TOUT calcul
-    dérivé du poids, dont la dépense énergétique modèle (#60,
-    `arc_index.resolve_weight_kg_as_of`)."""
+    dérivé du poids, dont la dépense énergétique modèle
+    (`arc_index.resolve_weight_kg_as_of`)."""
     value = parse_fr_number(text)
     if value is None:
         return None
     # Seule l'unité qui suit le PREMIER nombre compte : « 72 kg (159 lb) » ou
-    # « 72 kg — objectif 150 lbs » restent 72 kg (revue #60, faux positifs).
+    # « 72 kg — objectif 150 lbs » restent 72 kg (revue de code, faux positifs).
     first = re.search(r"(\d+(?:[.,]\d+)?)\s*(kg|lbs?)?\b", str(text), re.IGNORECASE)
     if first and first.group(2) and first.group(2).lower().startswith("lb"):
         return round(value * LB_TO_KG, 2)
@@ -545,9 +545,9 @@ def legacy_health(text: str, filename: str, morning_check: str = "full") -> Dict
     }
     for key, labels in fields.items():
         raw = _pick(bullets, *labels)
-        # `weight_kg` : conversion livre -> kg éventuelle (#60, revue de code,
-        # `parse_weight_kg`) — les autres champs numériques n'ont pas d'unité
-        # ambiguë ici, `parse_fr_number` seul suffit.
+        # `weight_kg` : conversion livre -> kg éventuelle (`parse_weight_kg`) —
+        # les autres champs numériques n'ont pas d'unité ambiguë ici,
+        # `parse_fr_number` seul suffit.
         value = parse_weight_kg(raw) if key == "weight_kg" else parse_fr_number(raw)
         if value is not None:
             out[key] = value if key == "weight_kg" else _int(value)
@@ -685,10 +685,9 @@ def legacy_nutrition(text: str, filename: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {"arc": 0, "kind": "nutrition", "date": filename_date(filename)}
     for key, labels in fields.items():
         raw = _pick(bullets, *labels)
-        # `weight_kg` : conversion livre -> kg éventuelle (#60, revue de code,
-        # `parse_weight_kg`) — les autres champs numériques n'ont pas d'unité
-        # ambiguë ici (hydratation gérée à part ci-dessous), `parse_fr_number`
-        # seul suffit.
+        # `weight_kg` : conversion livre -> kg éventuelle (`parse_weight_kg`) —
+        # les autres champs numériques n'ont pas d'unité ambiguë ici
+        # (hydratation gérée à part ci-dessous), `parse_fr_number` seul suffit.
         value = parse_weight_kg(raw) if key == "weight_kg" else parse_fr_number(raw)
         if value is not None:
             out[key] = value

@@ -113,7 +113,7 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `recovery_hr_bpm` | entier | HRR à 2 min ; absent = non mesuré, pas un signal |
 | `avg_cadence_spm` | nombre | |
 | `calories_kcal` | nombre | |
-| `calories_bmr_kcal` | nombre | part métabolisme de base — copie déclarative du champ `bmr_calories` de `get_activity` (Garmin), jamais recalculée ; voir `skills/garmin-sync-efficiency/SKILL.md`. Ne peut dépasser `calories_kcal` quand les deux sont connues. Sert à un NET Garmin (`calories_kcal − calories_bmr_kcal`), comparable au NET rendu par `scripts/arc_index.py energy` (#60) — celui-là recalcule sa PROPRE dépense depuis les échantillons FIT, indépendamment de cette clé |
+| `calories_bmr_kcal` | nombre | part métabolisme de base — copie déclarative du champ `bmr_calories` de `get_activity` (Garmin), jamais recalculée ; voir `skills/garmin-sync-efficiency/SKILL.md`. Ne peut dépasser `calories_kcal` quand les deux sont connues. Sert à un NET Garmin (`calories_kcal − calories_bmr_kcal`), comparable au NET rendu par `scripts/arc_index.py energy` — celui-là recalcule sa PROPRE dépense depuis les échantillons FIT, indépendamment de cette clé |
 | `training_effect_aerobic`, `training_effect_anaerobic` | nombre | 0-5 |
 | `rpe` | 0-10 | effort perçu déclaré — indispensable si la séance n'a pas de FC |
 | `splits_cols` | liste | en-tête des splits, voir ci-dessous |

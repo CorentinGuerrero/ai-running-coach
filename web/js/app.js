@@ -669,9 +669,10 @@ async function viewForm(params) {
  * hashes vers `#/analyse?semaines=…&descente=…` plutôt que de les casser. */
 async function viewAnalyse(params) {
   const weeks = Number(params.get("semaines")) || 12;
-  const [load, decoupling, vam, descent, durability, segments] = await Promise.all([
+  const [load, decoupling, vam, descent, durability, segments, energy] = await Promise.all([
     api(`load?weeks=${weeks}`), api(`decoupling?weeks=${weeks}`), api(`vam?weeks=${weeks}`),
     api(`descent?weeks=${weeks}`), api(`durability?weeks=${weeks}`), api("climb-segments"),
+    api(`energy-trend?weeks=${weeks}`),
   ]);
   const periods = [[12, "3 mois"], [26, "6 mois"], [52, "1 an"]].map(([w, l]) =>
     `<a class="seg ${w === weeks ? "is-on" : ""}" aria-current="${w === weeks ? "true" : "false"}" href="#/analyse?semaines=${w}">${l}</a>`).join("");
@@ -680,6 +681,7 @@ async function viewAnalyse(params) {
   const { html: vamHtml, chart: vamChart, points: vamPoints } = vamSection(vam);
   const { html: descentHtml, chart: descentChart, points: descentPoints } = descentTrendSection(descent, weeks, params.get("descente"));
   const { html: durabilityHtml, chart: durabilityChart, points: durabilityPoints } = durabilitySection(durability);
+  const { html: energyHtml, chart: energyChart, points: energyPoints } = energyTrendSection(energy);
   const segmentsHtml = climbSegmentsSection(segments.segments);
   // Revue de code #50, should-fix 1 : la présence d'échantillons FIT se décide sur
   // les DONNÉES elles-mêmes, jamais sur le HTML rendu — `durabilitySection` reste
@@ -693,14 +695,15 @@ async function viewAnalyse(params) {
     || vam.points.some((p) => p.best_climb_vam_elapsed_m_h != null)
     || Object.keys(descent.classes || {}).length > 0
     || durability.points.some((p) => p.gap_fade_pct != null)
-    || (segments.segments || []).length > 0;
+    || (segments.segments || []).length > 0
+    || (energy.sessions || []).some((s) => s.model_kcal != null);
   if (!hasFitSamples) {
     main.innerHTML = header("Analyse", "Tendances calculées à partir des échantillons FIT (montre GPS) ingérés.")
       + empty("Pas encore d'échantillons FIT", "Ces tendances (polarisation des zones FC, découplage aérobie, VAM, "
-        + "efficacité en descente, durabilité, historique des montées) exigent des échantillons FIT ingérés "
-        + "(<code>activities/fit/*.json</code>), pas seulement le résumé d'une séance. Chargez le skill "
-        + "<code>fit-download</code> (voir <code>skills/fit-download/SKILL.md</code>) pour les récupérer "
-        + "depuis Garmin, puis relancez l'indexation.");
+        + "efficacité en descente, durabilité, dépense énergétique, historique des montées) exigent des "
+        + "échantillons FIT ingérés (<code>activities/fit/*.json</code>), pas seulement le résumé d'une séance. "
+        + "Chargez le skill <code>fit-download</code> (voir <code>skills/fit-download/SKILL.md</code>) pour les "
+        + "récupérer depuis Garmin, puis relancez l'indexation.");
     return;
   }
   main.innerHTML = `${header("Analyse", `Tendances calculées à partir des échantillons FIT ingérés. <a href="#/performance">Hypothèses des modèles</a>`)}
@@ -710,6 +713,7 @@ async function viewAnalyse(params) {
     ${vamHtml}
     ${descentHtml}
     ${durabilityHtml}
+    ${energyHtml}
     ${segmentsHtml}`;
   wirePolarisationChart(load.polarisation_weeks);
   if (decouplingChart) {
@@ -740,6 +744,16 @@ async function viewAnalyse(params) {
       const hrParts = [p.hr_first_third_bpm, p.hr_middle_third_bpm, p.hr_last_third_bpm]
         .map((v) => (v != null ? F.num(v) : "—")).join("/");
       readout($("#r-durability"), `<strong>${F.dayLong(p.date)}</strong> · ${F.esc(p.name || F.SPORT[p.sport] || p.sport)} · fade GAP ${p.gap_fade_pct != null ? `${p.gap_fade_pct > 0 ? "+" : ""}${F.num(p.gap_fade_pct, 1)} %` : "—"}${p.ef_fade_pct != null ? ` · fade EF ${p.ef_fade_pct > 0 ? "+" : ""}${F.num(p.ef_fade_pct, 1)} %` : ""} · FC 1er/milieu/dernier ${hrParts} bpm`);
+    });
+  }
+  if (energyChart) {
+    attachCursor($("#c-energy"), energyChart, (i) => {
+      const p = energyPoints[i];
+      const flagTxt = p.flag ? " · écart notable" : "";
+      // Sport TOUJOURS affiché ici (`F.SPORT[p.sport]`, jamais seulement en repli
+      // du nom comme les autres tendances) : c'est justement ce qui distingue les
+      // deux séries du graphique (trail plein / route creux, voir `energyTrendSection`).
+      readout($("#r-energy"), `<strong>${F.dayLong(p.date)}</strong> · ${F.esc(F.SPORT[p.sport] || p.sport)}${p.name ? ` · ${F.esc(p.name)}` : ""} · Garmin ${F.kcal(p.garmin_kcal)} · modèle ${F.kcal(p.model_kcal)} · écart ${p.delta_pct > 0 ? "+" : ""}${F.num(p.delta_pct, 1)} %${flagTxt}`);
     });
   }
 }
@@ -1108,6 +1122,7 @@ async function viewSession(id) {
     ${splitsHtml}
     ${noFitSamples ? "" : climbsSection(d.climbs)}
     ${noFitSamples ? "" : descentSection(d.descent)}
+    ${energySection(d.energy, noFitSamples)}
     <section class="band prose"><h2>Analyse du coach</h2>${d.body_html || "<p class=\"muted\">Pas de texte.</p>"}<p class="muted source">Source : <code>${F.esc(a.source_path)}</code></p></section>`;
 }
 
@@ -1292,6 +1307,94 @@ function descentSection(descent) {
     ${descent.reference_gap_pace_s_km != null ? `<p class="legend legend--small">Référence (allure GAP, ${F.esc(refSource || "source inconnue")}) : ${F.paceFromSecPerKm(descent.reference_gap_pace_s_km)}</p>` : ""}</section>`;
 }
 
+/** Section « Dépense énergétique » de la page séance : Garmin (`calories_kcal`,
+ * référence par défaut PARTOUT AILLEURS — nutrition, rapports) et le modèle
+ * indépendant (RE3 course + marche de Minetti, brut — métabolisme de base
+ * inclus, voir `scripts/arc_energy.py::ASSUMPTIONS`/`docs/marques.md`) côte à
+ * côte, avec leur écart. `energy` vient de `/api/activity/<id>.energy`
+ * (`arc_serve.py::api_activity_energy`, qui délègue ENTIÈREMENT à
+ * `arc_index.activity_energy_report_by_id` — même fonction que la CLI `arc_index.py
+ * energy` et `/api/energy-trend` : le delta et le drapeau `flag` (écart notable,
+ * |écart| > `arc_energy.DELTA_ALERT_PCT`, 15 %) sont déjà calculés côté serveur,
+ * jamais recalculés ici).
+ *
+ * Masquée pour les sports hors de la famille course à pied
+ * (`reason_code === "not_run_family"`, même discipline que `climbsSection`/
+ * `descentSection` ci-dessus : la section n'a structurellement jamais pu
+ * s'appliquer). `noFitSamples` (calculé par l'appelant, `viewSession`) évite de
+ * DOUBLER la note consolidée de `noFitSamplesNote` (revue de code) : quand elle
+ * s'affiche déjà (séance de la famille course à pied sans AUCUN échantillon
+ * FIT), cette section se réduit au seul fait Garmin, sans répéter la raison.
+ * Dans tous les AUTRES cas SANS `model_kcal` (pas d'identifiant Garmin —
+ * séance Intervals.icu, #68 ; pas de poids connu à la date de la séance),
+ * Garmin reste affiché seul quand connu, avec une raison explicite en français
+ * — jamais un « NaN » ni une section vide muette. */
+function energySection(energy, noFitSamples) {
+  if (!energy || energy.reason_code === "not_run_family") return "";
+  const hasGarmin = energy.garmin_kcal != null;
+  if (energy.model_kcal == null) {
+    if (noFitSamples && energy.reason_code === "no_samples") {
+      // La raison (absence d'échantillons FIT) est déjà dite UNE fois par
+      // `noFitSamplesNote` — jamais un second texte identique ici.
+      return hasGarmin ? `<section class="band"><h2>Dépense énergétique</h2>
+        <dl class="facts facts--inline"><div><dt>Garmin (référence)</dt><dd>${F.kcal(energy.garmin_kcal)}</dd></div></dl></section>` : "";
+    }
+    const reasonText = ENERGY_REASON_LABEL[energy.reason_code] || energy.reason;
+    const msg = reasonText
+      ? F.esc(reasonText).replace(/^./, (c) => c.toUpperCase())
+      : "Dépense énergétique modèle non calculable pour cette séance.";
+    return `<section class="band"><h2>Dépense énergétique</h2>
+      <dl class="facts facts--inline"><div><dt>Garmin (référence)</dt><dd>${hasGarmin ? F.kcal(energy.garmin_kcal) : "non mesuré"}</dd></div></dl>
+      ${note(msg)}</section>`;
+  }
+  const flagged = energy.flag === true;
+  const deltaHtml = hasGarmin
+    ? `<span class="${flagged ? "neg" : ""}">${energy.delta_pct > 0 ? "+" : ""}${F.num(energy.delta_pct, 1)} %</span>${flagged ? ` <span class="chip chip--verdict-amber">Écart notable</span>` : ""}`
+    : `<span class="muted" title="Garmin n'a pas mesuré la dépense de cette séance">—</span>`;
+  const breakdown = energy.breakdown || {};
+  const breakdownRows = ENERGY_BREAKDOWN_ORDER.filter((cat) => breakdown[cat]
+    && ((breakdown[cat].kcal != null && breakdown[cat].kcal !== 0) || (breakdown[cat].seconds != null && breakdown[cat].seconds !== 0)));
+  const weightLabel = ENERGY_WEIGHT_SOURCE_LABEL[energy.weight_source] || energy.weight_source;
+  return `<section class="band"><h2>Dépense énergétique</h2>
+    <p class="muted">Garmin (<code>calories_kcal</code>) reste la référence par défaut partout ailleurs
+      (nutrition, rapports) ; le modèle indépendant n'est qu'un contrôle, jamais un remplacement.
+      <a href="#/performance">Hypothèses des modèles</a></p>
+    <dl class="facts facts--inline">
+      <div><dt>Garmin (référence)</dt><dd>${hasGarmin ? F.kcal(energy.garmin_kcal) : "non mesuré"}</dd></div>
+      <div><dt>Modèle</dt><dd>${F.kcal(energy.model_kcal)}</dd></div>
+      <div><dt>Écart</dt><dd>${deltaHtml}</dd></div>
+      ${energy.bmr_kcal != null ? `<div><dt>Net (hors métabolisme de base)</dt><dd>Garmin ${energy.net_garmin_kcal != null ? F.kcal(energy.net_garmin_kcal) : "—"} · Modèle ${F.kcal(energy.net_model_kcal)}</dd></div>` : ""}
+    </dl>
+    ${energy.bmr_kcal == null ? `<p><small class="muted">BMR Garmin non disponible pour cette séance : la part nette (hors métabolisme de base) ne peut pas être calculée.</small></p>` : ""}
+    ${breakdownRows.length ? `<div class="table-wrap"><table class="data data--compact"><thead><tr>
+      <th scope="col">Segment</th><th scope="col" class="num">Temps</th><th scope="col" class="num">kcal</th></tr></thead>
+      <tbody>${breakdownRows.map((cat) => `<tr><td>${ENERGY_BREAKDOWN_LABEL[cat]}</td><td class="num">${F.duration(breakdown[cat].seconds, { seconds: true })}</td><td class="num">${breakdown[cat].kcal != null ? F.num(breakdown[cat].kcal) : "—"}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${energy.weight_kg != null ? `<p class="legend legend--small">Poids utilisé pour le modèle : ${F.weight(energy.weight_kg)} <small class="muted">(${F.esc(weightLabel || "source inconnue")})</small></p>` : ""}</section>`;
+}
+
+// Libellés français, indexés sur `reason_code` — jamais une raison technique
+// (nom de module, de table, de story) affichée telle quelle à l'athlète (revue
+// de code : `no_garmin_id`/`no_row` mentionnaient `garminconnect`/
+// `activity_energy` dans le texte serveur, du jargon interne). `reason` (texte
+// serveur, `arc_index._energy_reason_for_missing_row`) reste le repli si un
+// `reason_code` futur n'a pas encore son libellé ici.
+const ENERGY_REASON_LABEL = {
+  no_garmin_id: "séance sans donnée Garmin (par exemple synchronisée depuis une autre source) : le modèle a besoin "
+    + "des mesures fines de la montre, indisponibles ici.",
+  no_samples: "aucun échantillon FIT ingéré pour cette séance.",
+  no_row: "dépense énergétique modèle indisponible pour cette séance.",
+  no_weight: "aucun poids connu à la date de cette séance (santé, nutrition ou profil).",
+  internal_error: "calcul impossible pour cette séance (erreur interne).",
+};
+
+// Ordre/libellés des segments du modèle — dupliqués ici volontairement (pas de
+// dépendance runtime entre le serveur Python et le JS statique, même motif que
+// `GRADE_CLASS_ORDER`/`DESCENT_GRADE_CLASS_ORDER` ci-dessus) : à tenir à jour si
+// `arc_energy.BREAKDOWN_CATEGORIES` change côté serveur.
+const ENERGY_BREAKDOWN_ORDER = ["flat", "uphill", "downhill", "walk", "stopped"];
+const ENERGY_BREAKDOWN_LABEL = { flat: "Plat", uphill: "Montée", downhill: "Descente", walk: "Marche", stopped: "Arrêt" };
+const ENERGY_WEIGHT_SOURCE_LABEL = { health_day: "santé", nutrition_day: "nutrition", profile: "profil" };
+
 /** Section « Zones FC » de la page séance (#43) : temps en zone en barre empilée
  * (SVG, jamais de style en ligne — CSP `style-src 'self'`) + légende. `hz` vient de
  * `/api/activity/<id>.hr_zones` (voir `arc_serve.py::api_activity_hr_zones`), et est
@@ -1333,9 +1436,9 @@ function noFitSamplesNote(hz) {
     ? `<p class="muted">Bornes (${F.esc(methodLabel)}) : ${hrZoneBoundsLabel(hz.bounds_bpm)}.</p>`
     : (hz && hz.reason ? note(F.esc(hz.reason)) : "");
   return `<section class="band"><h2>Détail avancé</h2>${boundsLine}
-    ${note("Aucun échantillon FIT ingéré pour cette séance : temps en zone, GAP par tour, montées (VAM) et "
-      + "efficacité en descente ne peuvent pas être calculés. Synchronisez le fichier FIT (skill "
-      + "<code>fit-download</code>) puis relancez l'indexation pour les activer.")}</section>`;
+    ${note("Aucun échantillon FIT ingéré pour cette séance : temps en zone, GAP par tour, montées (VAM), "
+      + "efficacité en descente et dépense énergétique modèle ne peuvent pas être calculés. Synchronisez le "
+      + "fichier FIT (skill <code>fit-download</code>) puis relancez l'indexation pour les activer.")}</section>`;
 }
 
 function hrZoneSection(hz) {
@@ -1982,6 +2085,72 @@ function durabilitySection(trend) {
     <dl class="facts facts--inline">
       <div><dt>Sorties longues (${trend.window_weeks} sem.)</dt><dd>${F.num(trend.long_runs)} <small class="muted">dont ${trend.measured_n} éligible${trend.measured_n > 1 ? "s" : ""}</small></dd></div>
       <div><dt>Fade GAP moyen</dt><dd>${trend.avg_gap_fade_pct != null ? `${trend.avg_gap_fade_pct > 0 ? "+" : ""}${F.num(trend.avg_gap_fade_pct, 1)} %<small class="muted"> sur ${trend.measured_n} sortie${trend.measured_n > 1 ? "s" : ""}</small>` : "—"}</dd></div>
+    </dl></section>`;
+  return { html, chart, points };
+}
+
+/** Section « Dépense énergétique » de la vue Analyse : écart modèle vs Garmin
+ * (%) par séance éligible (famille course à pied, échantillon FIT ingéré ET
+ * poids connu à la date — voir `arc_energy.ASSUMPTIONS`), sur la fenêtre de la
+ * vue. `trend` vient de `/api/energy-trend` (`arc_serve.py::api_energy_trend`,
+ * qui délègue ENTIÈREMENT à `arc_index.energy_trend` — même fonction que
+ * `/api/activity/<id>.energy` : le delta est déjà calculé côté serveur, jamais
+ * recalculé ici).
+ *
+ * Bande grisée ±`trend.delta_alert_pct` (`arc_energy.DELTA_ALERT_PCT`, servie par
+ * l'API — JAMAIS une valeur recopiée en dur ici, contrairement à
+ * `ENERGY_BREAKDOWN_ORDER` ci-dessus : un seuil numérique qui divergerait entre
+ * le serveur et l'affichage serait trompeur, alors qu'un ORDRE de libellés ne
+ * peut que rester incomplet au pire) : au-delà, l'écart est notable — un signal
+ * de contrôle du modèle, jamais un verdict sur la séance elle-même. Garmin reste
+ * la référence par défaut PARTOUT AILLEURS (nutrition, rapports) ; ce graphique
+ * sert uniquement à suivre la fidélité du modèle dans le temps.
+ *
+ * Route et trail sont deux séries DISTINCTES (plein pour le trail, creux pour la
+ * route — même motif que `durabilitySection`, EF creux/GAP plein) : les deux
+ * biais mesurés par la validation de référence diffèrent (route ±6 %, trail
+ * +3/+5 %, voir `arc_energy.ASSUMPTIONS`/`docs/marques.md`) — les confondre sous
+ * un même point masquerait cette différence. Randonnée/marche (aussi éligibles,
+ * `arc_index.ENERGY_ELIGIBLE_SPORTS`) restent HORS de ce graphique comme du
+ * calcul de médiane, sans référence de validation connue pour les distinguer
+ * visuellement à leur tour — comptées quand même dans `sessions_n`/`measured_n`
+ * ci-dessous, qui ne dépendent pas des points réellement tracés.
+ *
+ * Abscisses espacées par indice (même motif que `fuelingSection`/
+ * `decouplingSection` ci-dessus) : une séance éligible dépend d'un échantillon
+ * FIT ingéré ET d'un poids connu à sa date, deux conditions qui la rendent trop
+ * irrégulière pour un axe temporel continu lisible. */
+function energyTrendSection(trend) {
+  const points = (trend.sessions || []).filter((s) => s.delta_pct != null && (s.sport === "trail" || s.sport === "running"));
+  if (!points.length) return { html: "", chart: null, points: [] };
+  const dates = points.map((p) => p.date);
+  const band = trend.delta_alert_pct;
+  const chart = timeChart(dates, [
+    { type: "band", lo: dates.map(() => -band), hi: dates.map(() => band), cls: "band-fill" },
+    { type: "dots", values: points.map((p) => (p.sport === "trail" ? p.delta_pct : null)), cls: "dot dot--energy" },
+    { type: "dots", values: points.map((p) => (p.sport === "running" ? p.delta_pct : null)), cls: "dot dot--energy-route" },
+  ], [
+    // `hline` va dans `marks` (3e argument), jamais dans `layers` (2e) — voir le
+    // correctif de #47 sur `decouplingSection`/`descentTrendSection`.
+    { type: "hline", value: 0, cls: "mark mark--zero", label: "0 %" },
+  ], {
+    height: 200, y: { zero: true }, label: "Écart modèle vs Garmin sur la dépense énergétique",
+    yFormat: (v) => `${F.num(v, 0)} %`,
+  });
+  const median = trend.delta_median_pct || {};
+  const medianTxt = (v) => (v != null ? `${v > 0 ? "+" : ""}${F.num(v, 1)} %` : "—");
+  const html = `<section class="band"><h2>Dépense énergétique (modèle vs Garmin)</h2>
+    <p class="muted">Garmin (<code>calories_kcal</code>) reste la référence partout ailleurs (nutrition,
+      rapports) ; ce graphique suit la fidélité du modèle indépendant (RE3 course + marche de Minetti)
+      dans le temps — un écart mis en évidence au-delà de ±${F.num(band)} % (bande grisée) n'est jamais
+      un verdict sur la séance, seulement un signal de contrôle du modèle.
+      <a href="#/performance">Hypothèses des modèles</a></p>
+    <p class="legend"><span class="legend__item"><span class="key key--band"></span>Repère ±${F.num(band)} %</span> <span class="legend__item"><span class="key key--energy"></span>${F.SPORT.trail}</span> <span class="legend__item"><span class="key key--energy-route"></span>${F.SPORT.running}</span></p>
+    <div class="chart-host" id="c-energy">${chart.svg}</div><p class="readout" id="r-energy"></p>
+    <dl class="facts facts--inline">
+      <div><dt>Séances (${trend.window_weeks} sem.)</dt><dd>${F.num(trend.sessions_n)} <small class="muted">dont ${F.num(trend.measured_n)} avec un écart calculable</small></dd></div>
+      <div><dt>Écart médian route</dt><dd>${medianTxt(median.route)}</dd></div>
+      <div><dt>Écart médian trail</dt><dd>${medianTxt(median.trail)}</dd></div>
     </dl></section>`;
   return { html, chart, points };
 }

@@ -1,4 +1,4 @@
-"""Palier D — dépense énergétique brute d'une séance course/marche (#60).
+"""Palier D — dépense énergétique brute d'une séance course/marche.
 
 Familles de tests :
 - `arc_energy.re3_power_w_kg` : valeurs de référence de l'équation RE3
@@ -517,7 +517,7 @@ class TestRealRacePacingPipeline(unittest.TestCase):
         """Enchaînement RÉEL, sans mock : `arc_race_pacing.parse_gpx` ->
         `segment_course` (garde `_profile`) -> `predict_segments` (rend
         `predicted_time_s`, RETIRE `_profile`) -> l'appelant recombine les
-        deux (comme devra le faire `course-strategist`, #61) ->
+        deux (comme le fait `course-strategist`, `scripts/arc_race_pacing.py`) ->
         `energy_from_profile`. Prouve que le format de sortie RÉEL de
         `predict_segments` est bien consommable, pas seulement un format
         `{distance_m, grade, speed_ms}` idéalisé."""

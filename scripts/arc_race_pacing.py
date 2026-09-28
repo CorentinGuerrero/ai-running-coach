@@ -293,7 +293,7 @@ CUTOFF_MARGIN_OK_S = 30 * 60
 SEGMENT_ROUND_S = 1
 PASSAGE_ROUND_S = 60
 
-# Poids du sac/flasques/matériel porté (#61) — voir
+# Poids du sac/flasques/matériel porté (dépense énergétique prévue) — voir
 # `ASSUMPTIONS["energy"]`. Défaut `0.0` si `--pack-kg` n'est jamais fourni :
 # AUCUNE valeur « typique » n'est inventée sans source vérifiable, un
 # avertissement explicite invite l'appelant à le renseigner à la place.
@@ -549,9 +549,9 @@ ASSUMPTIONS = {
         "sur `segments[].source`, ce résumé n'est qu'un agrégat pratique pour l'affichage."
     ),
     "energy": (
-        "Dépense énergétique PRÉVUE par segment et par scénario (#61, socle "
-        "`arc_energy.energy_from_profile`, #60) — un CONTRÔLE/OUTIL DE PRÉVISION indépendant "
-        "(décision validée avec l'utilisateur avant #60), jamais une clé du contrat `race_plan` "
+        "Dépense énergétique PRÉVUE par segment et par scénario, socle "
+        "`arc_energy.energy_from_profile` — un CONTRÔLE/OUTIL DE PRÉVISION indépendant "
+        "(décision validée avec l'utilisateur), jamais une clé du contrat `race_plan` "
         "persisté : comme `python3 scripts/arc_index.py fueling` (jamais écrit dans le bloc "
         "```arc``` d'un plan de course non plus), `plan.energy` est un KPI DÉRIVÉ recalculable à la "
         "demande depuis le GPX/le modèle personnel — `course-strategist` en tire ce qu'il veut "
@@ -559,7 +559,7 @@ ASSUMPTIONS = {
         "jamais une nouvelle clé `arc_contract`/`workspace-data-contract` pour ce chantier.\n\n"
         "**Masse** : poids de l'athlète résolu À LA DATE DE LA COURSE (`--race-date`, sinon la date "
         "du jour/`--today`) par `arc_index.resolve_weight_kg_as_of` — LE MÊME résolveur que "
-        "`activity_energy` (#60), jamais une seconde implémentation de cette priorité pesée "
+        "`activity_energy`, jamais une seconde implémentation de cette priorité pesée "
         "santé/nutrition puis profil — PLUS `--pack-kg` (sac/flasques/matériel porté, kg). Défaut "
         "`DEFAULT_PACK_KG` (0.0) si `--pack-kg` est omis — AUCUNE valeur « typique » (« un sac de "
         "trail pèse en général... ») n'est inventée sans source vérifiable — avec un avertissement "
@@ -1159,7 +1159,7 @@ def provenance_summary(segments: Sequence[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Dépense énergétique prévue par segment/scénario (#61, voir ASSUMPTIONS["energy"])
+# Dépense énergétique prévue par segment/scénario (voir ASSUMPTIONS["energy"])
 # ---------------------------------------------------------------------------
 
 def _segments_with_profile(predicted_segments: Sequence[dict], raw_segments: Sequence[dict]) -> List[dict]:
@@ -1525,7 +1525,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
-    `weight_kg`/`weight_source`/`pack_kg`/`pack_kg_provided` (#61) : voir
+    `weight_kg`/`weight_source`/`pack_kg`/`pack_kg_provided` (dépense énergétique prévue) : voir
     `ASSUMPTIONS["energy"]`/`race_energy_forecast` — résolus par l'appelant
     (CLI), jamais par cette fonction (qui reste pure).
 
@@ -1922,7 +1922,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                      help="fichier météo persisté (kind=weather) : temp_max_c lu depuis son bloc ```arc")
     ap.add_argument("--pack-kg", type=float, dest="pack_kg",
                      help=f"poids du sac/flasques/matériel porté (kg, {PACK_KG_MIN:g}-{PACK_KG_MAX:g}), "
-                          "pour la dépense énergétique prévue (#61) — défaut 0.0 si omis, avec un "
+                          "pour la dépense énergétique prévue — défaut 0.0 si omis, avec un "
                           "avertissement dans la sortie (voir ASSUMPTIONS['energy'])")
     return ap
 
@@ -1965,8 +1965,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         _resolve_intensity_factor(conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
 
-    # Poids de l'athlète à la date de la COURSE (#61) — MÊME résolveur que
-    # `activity_energy` (#60), voir ASSUMPTIONS["energy"] : jamais une seconde
+    # Poids de l'athlète à la date de la COURSE — MÊME résolveur que
+    # `activity_energy`, voir ASSUMPTIONS["energy"] : jamais une seconde
     # implémentation de la priorité santé/nutrition/profil.
     athlete_row = conn.execute("SELECT * FROM athlete LIMIT 1").fetchone()
     athlete = dict(athlete_row) if athlete_row else {}

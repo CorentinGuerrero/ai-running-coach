@@ -33,7 +33,7 @@
 # est le seul segment personnel de la fixture), « montée »/« descente » proche
 # de « générique » (aucune donnée personnelle sur ces pentes).
 #
-# Dépense énergétique par section (#61, étape 3/5 de l'épopée #21) : le profil
+# Dépense énergétique par section : le profil
 # de cette fixture déclare désormais un poids (65 kg, `Poids de forme`) —
 # `scripts/arc_race_pacing.py plan` peut donc calculer `energy` (kcal/h par
 # segment/scénario) plutôt que de rendre `available: false`. Le prompt ne
@@ -41,7 +41,7 @@
 # réponse (le runner `claude -p` n'a personne pour répondre à une relance)
 # utiliser le défaut `--pack-kg` 0 kg et le DIRE explicitement — jamais une
 # estimation inventée (revue de code, `agents/course-strategist.md`). `energy`
-# n'étant PAS persisté dans le contrat `race_plan` (décision #61, comme
+# n'étant PAS persisté dans le contrat `race_plan` (décision, comme
 # `fueling`), la seule vérification possible est la mention en prose d'un
 # kcal/H (pas un simple « kcal », qui matcherait aussi un gel de 100 kcal au
 # ravito) attaché à une section du parcours, jamais un `arc_field`.

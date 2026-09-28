@@ -258,7 +258,7 @@ field null — that means "not indexed yet, go write the MD and re-run", never
 | Descent efficiency | `descent` | Trail/hilly | Trend-only, flat-reference, never a hard norm |
 | Durability (fade) | `durability` | Duration > 90 min | Mountain/technical runs often ineligible |
 | Climb history | `climb-history` | A recognised climb (`segment_id` from `vam`) | `id` unstable across `--rebuild` |
-| Energy expenditure | `energy` | Every run/trail/hiking/walking session with FIT samples | Independent control model — Garmin is ALWAYS the reference, never overridden by it (#61) |
+| Energy expenditure | `energy` | Every run/trail/hiking/walking session with FIT samples | Independent control model — Garmin is ALWAYS the reference, never overridden by it |
 
 **Never invent a value.** A non-null `reason`/`reason_code` (`applicable` too
 on vam/descent/durability/climb-history) means "not applicable" — relay it in
@@ -277,7 +277,7 @@ not the 5 displayed HR zones, whose "zone 3" boundary isn't comparable across
 Cite decoupling's caveat every time (a controlled-protocol threshold applied
 to an ordinary outdoor session) — never present 5 % as clinically validated.
 
-**Energy line (#61, epic #21 — same slot as the other FIT KPIs above, same
+**Energy line (same slot as the other FIT KPIs above, same
 style):** every run/trail/hiking/walking session return states one line
 `Dépense : Garmin X kcal · modèle Y kcal (±Z %)` from `energy --activity
 <garmin_activity_id>` — read `garmin_kcal`/`model_kcal`/`delta_pct`/`flag`/

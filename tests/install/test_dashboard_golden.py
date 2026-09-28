@@ -119,7 +119,7 @@ def _fixed_hr_bpm(t: int) -> float:
     return 150.0 if t < _HALF_BOUNDARY_S else 155.0
 
 
-def _write_fixed_fit_samples(ws: Path, today: str) -> None:
+def _write_fixed_fit_samples(ws: Path, today: str) -> int:
     """Écrit `activities/fit/<garmin_activity_id>.json` À LA MAIN (jamais le
     générateur aléatoire `tests.lib.synthetic.sample_session`) pour l'activité datée
     `today` du workspace golden (#43, revue de code, nit) : sans ce fichier, AUCUNE
@@ -156,6 +156,52 @@ def _write_fixed_fit_samples(ws: Path, today: str) -> None:
     fit_dir.mkdir(parents=True, exist_ok=True)
     (fit_dir / f"{garmin_id}.json").write_text(
         json.dumps({"activity_id": garmin_id, "records": records}), encoding="utf-8")
+    return garmin_id
+
+
+# Part métabolisme de base ajoutée à l'activité golden : voir
+# `_add_calories_bmr_kcal` ci-dessous. Valeur arbitraire mais PLAUSIBLE (une heure
+# et quart d'effort, ~480 kcal de métabolisme de base sur la même fenêtre) et
+# strictement inférieure au `model_kcal`/`calories_kcal` verrouillés par
+# `_fixed_hr_bpm`/`_fixed_altitude_m` ci-dessus (net > 0 des deux côtés).
+FIXED_BMR_KCAL = 480.0
+
+
+def _add_calories_bmr_kcal(ws: Path, garmin_activity_id: int, bmr_kcal: float) -> None:
+    """Ajoute `calories_bmr_kcal` (clé optionnelle du contrat, voir
+    `workspace-data-contract`) au bloc ```arc``` de l'activité dont le
+    `garmin_activity_id` est CELUI du fichier FIT déjà écrit par
+    `_write_fixed_fit_samples` (revue de code : jamais `sorted(glob(f"{today}_*.md"))
+    [0]` — si plusieurs activités partageaient la même date, un tri alphabétique de
+    noms de fichier ne garantirait pas de retomber sur celle qui a réellement reçu
+    le FIT). Sans cette clé, AUCUNE activité du workspace synthétique ne la porte
+    (`tests.lib.synthetic.build` ne l'écrit jamais), donc le chemin NET de la
+    dépense énergétique modèle (`net_garmin_kcal`/`net_model_kcal`, `reason_code`
+    autre que `"no_bmr"`) ne serait jamais verrouillé par ce golden. Édition
+    MINIMALE et DÉTERMINISTE du fichier déjà écrit par `synthetic.build`/`_write`
+    (même bloc ```` ```arc ```` que `tests.lib.synthetic._block`) : insère la clé
+    dans le JSON existant, jamais un second fichier ni une activité supplémentaire
+    — ne touche à aucune autre activité du workspace (`calories_bmr_kcal` reste
+    absente partout ailleurs, comme avant, ce qui verrouille AUSSI le chemin
+    `"no_bmr"` pour toutes les autres séances)."""
+    path = None
+    for candidate in sorted((ws / "activities").glob("*.md")):
+        text = candidate.read_text(encoding="utf-8")
+        match = re.search(r'"garmin_activity_id":\s*(\d+)', text)
+        if match and int(match.group(1)) == garmin_activity_id:
+            path = candidate
+            break
+    if path is None:
+        raise AssertionError(f"aucune activité avec garmin_activity_id={garmin_activity_id} dans le "
+                             "workspace golden — `_add_calories_bmr_kcal` doit être ajustée")
+    text = path.read_text(encoding="utf-8")
+    fence = re.search(r"```arc\n(.*?)\n```", text, re.S)
+    if not fence:
+        raise AssertionError(f"bloc ```arc``` introuvable dans {path}")
+    data = json.loads(fence.group(1))
+    data["calories_bmr_kcal"] = bmr_kcal
+    new_block = "```arc\n" + json.dumps(data, ensure_ascii=False, indent=1) + "\n```"
+    path.write_text(text[:fence.start()] + new_block + text[fence.end():], encoding="utf-8")
 
 
 def _endpoint_urls(server: Server) -> dict:
@@ -257,7 +303,8 @@ class GoldenCase:
         self.addCleanup(self.sb.__exit__, None, None, None)
         self.ws = build(self.sb.root / "ws", days=DAYS, sport=self.sport, seed=SEED,
                         today=datetime.date.fromisoformat(TODAY))
-        _write_fixed_fit_samples(self.ws, TODAY)
+        garmin_id = _write_fixed_fit_samples(self.ws, TODAY)
+        _add_calories_bmr_kcal(self.ws, garmin_id, FIXED_BMR_KCAL)
         self.server = Server(self.sb, ["python3", str(self.sb.repo / "scripts/arc_serve.py"),
                                        "--workspace", str(self.ws), "--port", "0", "--today", TODAY])
         self.addCleanup(self.server.stop)

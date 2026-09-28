@@ -25,7 +25,7 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py decisions [--date D | --days N] [--trigger T] [--outcome O] [--active]
                                                                         # journal des décisions, en JSON (#54)
     arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
-                                                                        # dépense modèle vs Garmin, en JSON (#60)
+                                                                        # dépense modèle vs Garmin, en JSON
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
 compris) : elle réindexe puis rend le point du jour de `arc_metrics.hrv_baseline_series`
@@ -151,7 +151,7 @@ décision »). Sans filtre de date, rend tout l'historique. Consommée par le ta
 de bord (#55, encart « Pourquoi aujourd'hui ? » + journal filtrable) et par
 `/garmin-daily-sync` (#56, ligne « Pourquoi » du bloc `resume`).
 
-`energy` (#60, épopée #21) rend la dépense énergétique modèle (RE3 course + marche de
+`energy` rend la dépense énergétique modèle (RE3 course + marche de
 Minetti, `scripts/arc_energy.py`) d'une ou plusieurs séances, EN REGARD de
 `calories_kcal` Garmin (référence par défaut partout — ce calcul reste un CONTRÔLE
 INDÉPENDANT, jamais un remplacement, voir `arc_energy.py`) : `garmin_kcal`,
@@ -206,6 +206,7 @@ import json
 import os
 import re
 import sqlite3
+import statistics
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -253,7 +254,7 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # reste un entier) pour les activités synchronisées depuis `[data].source =
 # "intervals"`. Sans ce bump, une base déjà construite par une version
 # antérieure n'a pas la colonne et l'insertion échouerait avec « no such column ».
-# #60 (épopée #21, étape 2) : `activity` gagne `calories_bmr_kcal` (copie déclarative
+# Dépense énergétique modèle vs Garmin : `activity` gagne `calories_bmr_kcal` (copie déclarative
 # du champ `bmr_calories` Garmin, voir `arc_contract.py`) et une nouvelle table
 # `activity_energy` (dépense énergétique modèle RE3 + marche, `scripts/arc_energy.py`,
 # recalculée en entier à chaque `compute_metrics` comme `activity_descent_class`/
@@ -722,7 +723,7 @@ CREATE TABLE activity_descent_class (
     mean_speed_ms REAL, mean_pace_s_km REAL, mean_gap_speed_ms REAL, mean_grade REAL, efficiency REAL
 );
 CREATE INDEX activity_descent_class_activity ON activity_descent_class(activity_id);
--- Dépense énergétique modèle RE3 + marche (#60, épopée #21, `arc_energy.py`), UNE ligne
+-- Dépense énergétique modèle RE3 + marche (`arc_energy.py`), UNE ligne
 -- par activité éligible (id INTERNE `activity_id`, comme `activity_descent_class`/
 -- `activity_climb`/`hr_zone_time` ci-dessus — JAMAIS `garmin_activity_id` : la ligne est
 -- recréée en entier à chaque `compute_metrics`, sans purge par fichier, un `activity_id`
@@ -1191,7 +1192,7 @@ def planned_intensity_for(conn, date: Optional[str], sport: Optional[str]) -> Op
 def _round1(value: Optional[float]) -> Optional[float]:
     """`round(value, 1)`, `None` si `value` est `None` — même précision que les
     autres KPI dérivés stockés (`hr_zone_time.seconds`, `round(seconds, 1)`) pour
-    `activity_energy` (#60, revue de code) : kcal/secondes à 1 décimale, jamais la
+    `activity_energy` (dépense énergétique modèle) : kcal/secondes à 1 décimale, jamais la
     précision flottante brute du calcul dans la base ni dans le JSON du CLI."""
     return None if value is None else round(value, 1)
 
@@ -1201,7 +1202,7 @@ def _plausible_weight_kg(value: Optional[float]) -> Optional[float]:
     plage que la validation du contrat pour `weight_kg`/`weight_pre_kg`/
     `weight_post_kg`), `None` sinon — jamais un poids aberrant (0 kg, une faute de
     frappe à 3 chiffres en trop, un export en livres non converti) utilisé comme
-    s'il était plausible (revue de code #60) : une valeur hors plage est traitée
+    s'il était plausible (revue de code) : une valeur hors plage est traitée
     EXACTEMENT comme une valeur absente, l'appelant (`resolve_weight_kg_as_of`)
     retombe alors sur la source suivante, jamais sur `weight_kg=0` avec une raison
     « aucun poids connu » qui serait un mensonge (une valeur A bien été trouvée,
@@ -1213,7 +1214,7 @@ def _plausible_weight_kg(value: Optional[float]) -> Optional[float]:
 
 
 def resolve_weight_kg_as_of(conn, day: Optional[str], athlete: dict) -> Tuple[Optional[float], Optional[str]]:
-    """Poids (kg) à utiliser pour la dépense énergétique modèle (#60, épopée #21) d'une
+    """Poids (kg) à utiliser pour la dépense énergétique modèle d'une
     séance datée `day` — voir la section « `energy` » du docstring du module pour le
     contexte d'ensemble. Résolution, PAR ORDRE DE PRIORITÉ :
 
@@ -1636,7 +1637,7 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None) -> None:
                         ("calcul impossible (erreur interne)", "calcul impossible (erreur interne)",
                          "internal_error", act["id"]),
                     )
-                # Dépense énergétique modèle RE3 + marche (#60, épopée #21) : try/except SÉPARÉ
+                # Dépense énergétique modèle RE3 + marche : try/except SÉPARÉ
                 # du bloc GAP/VAM/descente/durabilité ci-dessus (revue de code) — un bug dans
                 # UN calcul ne doit jamais empêcher l'AUTRE : un détecteur de montée qui lève ne
                 # doit pas priver la séance de sa ligne `activity_energy`, et une exception ici
@@ -2063,7 +2064,7 @@ def activity_gap_report(conn, garmin_activity_id: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Dépense énergétique modèle vs Garmin (#60, épopée #21).
+# Dépense énergétique modèle vs Garmin.
 # ---------------------------------------------------------------------------
 
 # Séances éligibles au calcul (`activity_energy`, `arc_energy.py` gère aussi la
@@ -2088,7 +2089,7 @@ def _energy_breakdown_from_row(row: dict) -> Dict[str, Dict[str, Optional[float]
 
 
 def _energy_session_dict(act: dict, energy_row: Optional[dict]) -> dict:
-    """Un point de la sortie `energy` (#60) à partir d'une ligne `activity` et de
+    """Un point de la sortie `energy` à partir d'une ligne `activity` et de
     sa ligne `activity_energy` correspondante (`None` si l'activité n'a AUCUNE
     ligne — hors famille course à pied ou sans FIT, voir
     `_energy_reason_for_missing_row`, appelée par l'appelant AVANT cette
@@ -2181,7 +2182,7 @@ def _energy_session_for_activity_row(conn, act: dict) -> dict:
 
 
 def activity_energy_report(conn, garmin_activity_id: int) -> dict:
-    """Détail de dépense énergétique modèle vs Garmin (#60) d'UNE séance, par
+    """Détail de dépense énergétique modèle vs Garmin d'UNE séance, par
     `garmin_activity_id` — pour la CLI (`arc_index.py energy --activity`) et les
     agents en headless. Rend TOUJOURS le même jeu de clés (voir
     `_energy_session_dict`), `reason`/`reason_code` explicites si `model_kcal`
@@ -2201,9 +2202,10 @@ def activity_energy_report(conn, garmin_activity_id: int) -> dict:
 def energy_report(conn, *, activity: Optional[int] = None, day: Optional[str] = None,
                    since: Optional[str] = None, limit: int = ENERGY_DEFAULT_LIMIT,
                    assumptions: bool = False) -> dict:
-    """Dépense énergétique modèle vs Garmin (#60) d'un ensemble de séances — pour
-    la CLI (`arc_index.py energy`) et pour les agents en headless (étape 3, non
-    implémentée ici). Un SEUL des trois sélecteurs (`activity`/`day`/`since`) à
+    """Dépense énergétique modèle vs Garmin d'un ensemble de séances — pour
+    la CLI (`arc_index.py energy`) et pour les agents en headless (voir aussi
+    `scripts/arc_race_pacing.py` pour la PRÉVISION par section d'un plan de
+    course, un calcul distinct). Un SEUL des trois sélecteurs (`activity`/`day`/`since`) à
     la fois — la CLI (`main`) rejette explicitement leur combinaison plutôt que
     de laisser une précédence silencieuse tromper un appelant headless, comme
     `--date`/`--days` pour `decisions`. Sans sélecteur : les `limit` dernières
@@ -2251,6 +2253,94 @@ def energy_report(conn, *, activity: Optional[int] = None, day: Optional[str] = 
     out["assumptions_summary"] = None if assumptions else EN.SUMMARY
     out["sessions"] = sessions
     return out
+
+
+def activity_energy_report_by_id(conn, activity_id: int) -> dict:
+    """Comme `activity_energy_report` mais par identifiant INTERNE de l'activité
+    (`activity.id`), pour `/api/activity/<id>` (tableau de bord local) —
+    l'API paramétrée route par cet id-là, jamais par `garmin_activity_id` (une
+    séance synchronisée depuis Intervals.icu, #68, n'en a d'ailleurs aucun).
+    Délègue ENTIÈREMENT à `_energy_session_for_activity_row` (même fonction que
+    `energy_report`/`activity_energy_report`) : aucun second calcul du
+    delta/flag ici, seule la clause `WHERE` change."""
+    act = conn.execute(
+        "SELECT id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
+        "WHERE id = ?", (activity_id,)).fetchone()
+    if act is None:
+        empty = _energy_session_dict({}, None)
+        empty["reason"] = "activité introuvable"
+        empty["reason_code"] = "unknown_activity"
+        return empty
+    return _energy_session_for_activity_row(conn, dict(act))
+
+
+# Fenêtre de la tendance de dépense énergétique : 12 semaines
+# glissantes, même largeur que les autres tendances dérivées des échantillons FIT
+# (découplage #45, VAM #46, descente #47, durabilité #48) — pas de raison connue
+# d'en choisir une différente pour un KPI qui dépend de la même donnée d'entrée
+# (`activity_sample`) et du même filtre d'éligibilité (famille course à pied).
+ENERGY_TREND_WEEKS = 12
+
+# Regroupement route/trail de l'écart médian : les deux sports mesurés par la
+# validation de référence (voir `arc_energy.ASSUMPTIONS`/`docs/marques.md`) —
+# route ±6 %, trail +3/+5 % vs Garmin, des biais DIFFÉRENTS qu'un écart médian
+# toutes séances confondues masquerait. Randonnée et marche (aussi éligibles au
+# calcul, `ENERGY_ELIGIBLE_SPORTS`) restent hors des deux paniers : la
+# validation ne les couvre pas, un écart médian sur ces sports n'aurait aucune
+# base de comparaison connue — elles apparaissent quand même dans `sessions`,
+# seulement absentes de `delta_median_pct`.
+ENERGY_TREND_ROUTE_TRAIL_BUCKET = {"running": "route", "trail": "trail"}
+
+
+def energy_trend(conn, today: date, weeks: int = ENERGY_TREND_WEEKS) -> dict:
+    """Tendance de la dépense énergétique modèle vs Garmin sur les
+    `weeks` dernières semaines glissantes se terminant à `today` inclus — pour
+    `/api/energy-trend` (tableau de bord local). RÉUTILISE
+    `_energy_session_for_activity_row` (même fonction que `energy_report` et
+    `activity_energy_report_by_id`/`/api/activity/<id>.energy`) : aucun second
+    calcul du delta/flag ici, seuls la fenêtre et le regroupement route/trail
+    sont propres à cette fonction.
+
+    TOUTES les séances ÉLIGIBLES (`ENERGY_ELIGIBLE_SPORTS`) de la fenêtre
+    apparaissent dans `sessions`, y compris celles sans `model_kcal` calculable
+    (`reason`/`reason_code` explicites, comme partout ailleurs dans ce module) —
+    un consommateur qui veut seulement les points traçables (nuage de points,
+    graphique de tendance) doit lui-même filtrer sur `delta_pct is not None`,
+    jamais cette fonction à sa place (elle ne doit pas décider pour l'appelant
+    ce qui compte comme « une séance qui compte »).
+
+    `delta_median_pct` : médiane SIGNÉE (jamais la valeur absolue — un biais
+    systématique dans un seul sens est une information différente d'un écart
+    dispersé des deux côtés) de `delta_pct`, séparément pour `route` et `trail`
+    (voir `ENERGY_TREND_ROUTE_TRAIL_BUCKET`) — `None` si aucune séance mesurable
+    de ce panier dans la fenêtre, jamais 0 (qui laisserait croire à un accord
+    parfait mesuré)."""
+    start = today - timedelta(days=weeks * 7 - 1)
+    cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+    placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
+    rows = conn.execute(
+        f"SELECT {cols} FROM activity WHERE date >= ? AND date <= ? AND sport IN ({placeholders}) "
+        "ORDER BY date, start_time, garmin_activity_id, id",
+        (start.isoformat(), today.isoformat(), *ENERGY_ELIGIBLE_SPORTS)).fetchall()
+    sessions = [_energy_session_for_activity_row(conn, dict(row)) for row in rows]
+    by_bucket: Dict[str, List[float]] = {"route": [], "trail": []}
+    for s in sessions:
+        bucket = ENERGY_TREND_ROUTE_TRAIL_BUCKET.get(s["sport"])
+        if bucket and s["delta_pct"] is not None:
+            by_bucket[bucket].append(s["delta_pct"])
+    return {
+        "model_id": EN.MODEL_ID,
+        "window_weeks": weeks,
+        "delta_alert_pct": EN.DELTA_ALERT_PCT,
+        "sessions": sessions,
+        "sessions_n": len(sessions),
+        "measured_n": sum(1 for s in sessions if s["delta_pct"] is not None),
+        "delta_median_pct": {
+            "route": _round1(statistics.median(by_bucket["route"])) if by_bucket["route"] else None,
+            "trail": _round1(statistics.median(by_bucket["trail"])) if by_bucket["trail"] else None,
+        },
+        "assumptions_summary": EN.SUMMARY,
+    }
 
 
 def weekly_polarisation(conn, weeks: int, today: date) -> List[dict]:
@@ -2478,10 +2568,16 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None) -> dict:
     # préfixées `slope_model_` — même raison que `decoupling_*`/`vam_*`/`descent_*`/
     # `durability_*` ci-dessus (collision possible, ex. "model", "fallback").
     slope_model_assumptions = {f"slope_model_{key}": value for key, value in SL.ASSUMPTIONS.items()}
+    # `arc_energy.ASSUMPTIONS` (dépense énergétique modèle vs Garmin) fusionné à
+    # PART lui aussi, sous des clés préfixées `energy_` — même raison que
+    # `decoupling_*`/`vam_*`/`descent_*`/`durability_*`/`slope_model_*` ci-dessus
+    # (collision possible, ex. "model", "no_exception").
+    energy_assumptions = {f"energy_{key}": value for key, value in EN.ASSUMPTIONS.items()}
     for key, value in (("settings", _j(conf)),
                        ("assumptions", _j({**M.ASSUMPTIONS, **G.ASSUMPTIONS, **decoupling_assumptions,
                                            **vam_assumptions, **descent_assumptions,
-                                           **durability_assumptions, **slope_model_assumptions})),
+                                           **durability_assumptions, **slope_model_assumptions,
+                                           **energy_assumptions})),
                        ("today", today or date.today().isoformat())):
         conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
     conn.commit()
@@ -3549,7 +3645,7 @@ def main(argv=None) -> int:
         if args.activity is not None and args.selector:
             raise ConfigError("commande « energy » : passez garmin_activity_id soit en argument "
                                "positionnel, soit via --activity, jamais les deux à la fois.")
-        # Un SEUL sélecteur à la fois (#60) — même discipline que `--date`/`--days` pour
+        # Un SEUL sélecteur à la fois — même discipline que `--date`/`--days` pour
         # `decisions` : jamais une précédence silencieuse entre --activity/--date/--since.
         garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
         selectors_used = sum(1 for v in (garmin_id, args.date, args.since) if v is not None)

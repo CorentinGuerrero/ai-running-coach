@@ -1331,9 +1331,9 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertEqual(I.SCHEMA_VERSION, 25)
 
     def test_schema_version_25_adds_energy_table_and_bmr_column(self):
-        """#60 (épopée #21, étape 2) : `activity` gagne `calories_bmr_kcal` (REAL)
+        """Dépense énergétique modèle : `activity` gagne `calories_bmr_kcal` (REAL)
         et une nouvelle table `activity_energy` — une base construite par une
-        version d'AVANT #60 doit être reconstruite avec les deux, sinon
+        version d'AVANT ce schéma doit être reconstruite avec les deux, sinon
         `store()`/`compute_metrics` échoueraient avec « no such column »/
         « no such table »."""
         db_path = self.tmp / "legacy.db"

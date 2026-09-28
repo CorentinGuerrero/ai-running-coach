@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Dépense énergétique brute d'une séance course à pied — modèle RE3 + marche
-(#60, épopée #21).
+"""Dépense énergétique brute d'une séance course à pied — modèle RE3 + marche.
 
 ## Pourquoi un contrôle indépendant, pas un remplacement de Garmin
 
@@ -16,7 +15,7 @@ Il sert deux usages, décidés avec l'utilisateur avant cette histoire :
    RIEN lui-même vers un rapport ou une alerte affichée — c'est aux étapes
    suivantes (CLI, agents) d'en faire quelque chose.
 2. **Outil de PRÉVISION** : `energy_from_profile` sert de brique à
-   `course-strategist` (#61 planifié) pour estimer, AVANT la course, la
+   `course-strategist` pour estimer, AVANT la course, la
    dépense d'un plan de course par segment. Il est conçu pour consommer la
    SORTIE RÉELLE d'`arc_race_pacing.predict_segments` (`predicted_time_s` par
    scénario), pas seulement un format `{distance_m, grade, speed_ms}`
@@ -140,24 +139,23 @@ que `arc_elevation.smooth_moving_average`, réutilisé tel quel), la PUISSANCE
 elle-même restant calculée sur la vitesse RÉELLE (non lissée) de l'échantillon
 — voir `ASSUMPTIONS["classification_smoothing"]`.
 
-## API pure, réutilisable — pensée pour les épopées suivantes
+## API pure, réutilisable
 
 - `re3_power_w_kg(speed_ms, grade)` / `walk_power_w_kg(speed_ms, grade)` :
   puissance brute (W/kg) d'un régime donné — **linéaires en masse**,
   l'appelant multiplie par `weight_kg` (voir `ASSUMPTIONS["mass_linearity"]`,
-  utile à une étape future qui ajouterait le poids d'un sac/de flasques).
+  utile pour ajouter le poids d'un sac/de flasques sans toucher au module).
 - `energy_from_samples(samples, weight_kg, ...)` : dépense MESURÉE d'une
   séance déjà réalisée, à partir de ses échantillons normalisés
-  (`arc_samples.normalise_records`) — brique de la future table dérivée
-  `activity_energy` (étape 2, non implémentée ici).
+  (`arc_samples.normalise_records`) — brique de la table dérivée
+  `activity_energy` (`scripts/arc_index.py::compute_metrics`).
 - `energy_from_profile(segments, weight_kg, ...)` : dépense PRÉVUE d'un plan
   de course — accepte le format simple `{distance_m, grade, speed_ms}`, le
   profil point par point `_profile`/`profile` (format
   `arc_race_pacing.segment_course`), ET la sortie RÉELLE de
   `arc_race_pacing.predict_segments` (`predicted_time_s` par scénario, voir
-  `ASSUMPTIONS["race_pacing_integration"]`) — brique de la future intégration
-  à `course-strategist` (étape 3, non implémentée ici, SEULE l'API est
-  vérifiée compatible par un test bout-en-bout).
+  `ASSUMPTIONS["race_pacing_integration"]`) — brique de l'intégration à
+  `course-strategist` (`scripts/arc_race_pacing.py`, agent `course-strategist`).
 - `delta_pct(model_kcal, garmin_kcal)` / `delta_flag(delta)` : écart
   modèle-vs-Garmin et seuil de signalement (`DELTA_ALERT_PCT`, 15 % —
   décision validée avec l'utilisateur), constante nommée UNIQUE (jamais un
@@ -274,10 +272,10 @@ DELTA_ALERT_PCT = 15.0
 # estimation de dépense énergétique de plan de course.
 DEFAULT_SCENARIO = "realistic"
 
-# Identifiant de version du modèle, pour la traçabilité (#60) : toute
+# Identifiant de version du modèle, pour la traçabilité : toute
 # évolution future des coefficients/seuils DOIT incrémenter ce suffixe, pour
-# qu'une dépense déjà calculée et persistée (étape 2) reste distinguable
-# d'une dépense recalculée avec un modèle révisé. Incrémenté en /2 (revue de
+# qu'une dépense déjà calculée et persistée (`activity_energy.model_id`) reste
+# distinguable d'une dépense recalculée avec un modèle révisé. Incrémenté en /2 (revue de
 # code, 1ʳᵉ passe) : `STANDING_POWER_W_KG` (1,4 -> 1,44), bornage de pente par
 # régime, bande de plat, lissage de classification et intégration temporelle
 # réelle changent tous le résultat numérique d'une même séance.
@@ -382,7 +380,7 @@ ASSUMPTIONS = {
         "La RE3 comme le polynôme marche sont LINÉAIRES en masse (puissance en W/kg, multipliée "
         "par `weight_kg` une seule fois) : `energy_from_profile` accepte `weight_kg` comme un "
         "simple paramètre scalaire, jamais une constante figée dans le module, précisément pour "
-        "qu'un appelant futur (#61, sac/flasques de course) puisse y ajouter la masse portée sans "
+        "qu'un appelant futur (sac/flasques de course) puisse y ajouter la masse portée sans "
         "toucher à ce module — passer `weight_kg + poids_sac_kg` suffit, le modèle physique reste "
         "inchangé."
     ),
@@ -823,7 +821,7 @@ def energy_from_profile(segments: Sequence[dict], weight_kg: Optional[float], *,
     `weight_kg` absent ou non positif -> `None` (voir
     `ASSUMPTIONS["no_exception"]`) — la masse est un simple PARAMÈTRE, jamais
     une constante figée ici (voir `ASSUMPTIONS["mass_linearity"]`) : un
-    appelant futur (#61) peut y ajouter le poids d'un sac/de flasques sans
+    appelant futur peut y ajouter le poids d'un sac/de flasques sans
     modifier ce module. `segments` vide -> résultat à zéro avec `reason`.
 
     Rend un dict `{"segments": [...], "kcal", "time_s", "kcal_per_h",
