@@ -240,6 +240,27 @@ au bloc ```arc persisté (comme `fueling`, jamais écrit dans le plan non
 plus) — recalcule-le à la demande plutôt que de le recopier en
 JSON dans le fichier.
 
+**Calibration personnelle (`energy.calibration`)** : chaque scénario, ET
+CHAQUE SECTION à l'intérieur de ce scénario, porte `kcal_calibrated`/
+`kcal_per_h_calibrated`/`cumulative_kcal_calibrated`, à côté des valeurs
+brutes `kcal`/`kcal_per_h`/`cumulative_kcal` — `energy.calibration.status` dit
+si un facteur personnel a été appliqué
+(`{"band", "band_source", "n", "ratio_median", "ratio_iqr", "status",
+"factor"}`). Le panier (`band`, route ou trail) est résolu automatiquement
+depuis le D+/km RÉEL du GPX analysé (`band_source == "gpx"`), jamais depuis le
+profil général de l'athlète — l'athlète peut forcer ce choix via
+`--terrain road|trail` (alors `band_source == "option"`), utile si le tracé
+seul ne reflète pas la nature réelle de la course. **Si `energy.calibration.
+status == "applied"` : utilise TOUJOURS toutes les valeurs `_calibrated`**
+(chaque section, le cumul, le total, et donc le déficit horaire/cumulé face au
+ravitaillement) **— jamais un mélange de valeurs brutes et calibrées dans la
+même synthèse.** Cite `n` et le facteur (ex. « calibré sur tes N dernières
+séances, facteur ×F »). Sinon (`"insufficient"` — échantillon trop petit — ou
+`"not_needed"` — le modèle est déjà fidèle sur ce panier), utilise TOUTES les
+valeurs **brutes**, sans mentionner de calibration. Ne présente JAMAIS une
+valeur calibrée comme une mesure : c'est une correction statistique apprise
+sur l'historique Garmin/modèle de l'athlète, jamais un chiffre garanti.
+
 **Si seule une URL a été fournie (cas B, aucun GPX)** : pas de script
 disponible (aucun profil d'altitude exploitable) — reste sur les règles
 générales ci-dessous, et dis-le à l'athlète (« pas de GPX -> allures

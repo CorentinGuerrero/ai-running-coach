@@ -1841,6 +1841,30 @@
     "/api/energy-trend": {
       "body": {
         "assumptions_summary": "Modèle re3-walk/2 : équation RE3 (course) + polynôme marche de Minetti (marche), résultat BRUT comparable à calories_kcal Garmin — Garmin reste la référence, ce calcul est un CONTRÔLE INDÉPENDANT (seuil de signalement |Δ| > 15 %) et un outil de PRÉVISION, jamais un remplacement. Voir --assumptions pour le détail complet des hypothèses.",
+        "calibration": {
+          "buckets": {
+            "route": {
+              "factor": 1.0,
+              "n": 0,
+              "ratio_iqr": null,
+              "ratio_median": null,
+              "status": "insufficient"
+            },
+            "trail": {
+              "factor": 1.0,
+              "n": 1,
+              "ratio_iqr": null,
+              "ratio_median": 0.943,
+              "status": "insufficient"
+            }
+          },
+          "factor_max": 1.2,
+          "factor_min": 0.8,
+          "min_n": 15,
+          "model_id": "re3-walk/2",
+          "not_needed_band_pct": 5.0,
+          "window_weeks": 26
+        },
         "delta_alert_pct": 15.0,
         "delta_median_pct": {
           "route": null,
@@ -6700,6 +6724,7 @@
           "durability_usable_running": "Indépendamment de la couverture FC ci-dessus, le premier ET le dernier tiers doivent chacun conserver au moins 10 minutes de temps RÉELLEMENT COURU exploitable (FC et GAP présents, hors pente forte et marche) — une DURÉE ABSOLUE, jamais une part relative, même discipline que `arc_decoupling.ASSUMPTIONS['usable_running']` (#45) : une sortie de montagne où la pente forte/la marche occupent une portion importante d'un tiers reste éligible tant qu'il reste assez de course exploitable en minutes.",
           "durability_warmup": "Les 10 premières minutes ÉCOULÉES (arrêts compris dans ce décompte) sont exclues EN PREMIER, puis le reste est partagé en TROIS portions ÉGALES de temps de mouvement — même protocole et même justification que `arc_decoupling.ASSUMPTIONS['warmup']` (#45) : la FC met plusieurs minutes à atteindre son régime de croisière, l'inclure fausserait la mesure du premier tiers à la baisse (dérive apparente sous-estimée).",
           "effort_km": "Km-effort ITRA : pour les activités de la famille course (`SPORT_FAMILY` = \"run\" : running, trail, hiking, walking — cyclisme exclu), effort_km = distance_km + D+_m / 100. Absence de D+ : 0 m utilisé. Absence de distance : l'activité n'est pas comptée. Somme hebdomadaire calculée sur les valeurs brutes puis arrondie une seule fois (pas la somme de valeurs déjà arrondies par activité). Distinct de l'« équivalence plat » (`trail_equivalence`, D+ × 1,75) utilisée pour les prédictions.",
+          "energy_calibration": "Calibration PERSONNELLE, appliquée UNIQUEMENT aux PRÉVISIONS (`arc_race_pacing.race_energy_forecast`), JAMAIS aux séances déjà mesurées (`activity_energy`/`energy_report`/`energy_trend` restent le calcul BRUT du modèle, sans aucune correction — une mesure reste une mesure). Ratio Garmin/modèle médian par panier route/trail (`arc_index.energy_calibration`, randonnée/marche hors des deux paniers, même regroupement qu'`ENERGY_TREND_ROUTE_TRAIL_BUCKET`), sur une fenêtre glissante de CALIBRATION_WINDOW_WEEKS (26 semaines, INDÉPENDANTE de la fenêtre plus courte d'`energy_trend`). Exclusion des ratios ABERRANTS RELATIVE à la médiane BRUTE du panier (`CALIBRATION_OUTLIER_RELATIVE_BAND_PCT`, 15 % — voir `calibration_band_report`) — JAMAIS au `flag` par séance (`arc_energy.delta_flag`, réservé à l'alerte PAR SÉANCE ABSOLUE) : exclure sur `flag` bride mathématiquement le ratio médian atteignable à environ [1/1.15, 1.15] et fait tomber à tort en `\"insufficient\"` un biais RÉEL et cohérent de 12-20 % du panier entier (correctif de revue de code, BLOQUANT). `n < CALIBRATION_MIN_N` (15, compté APRÈS exclusion des aberrantes) -> `status=\"insufficient\"`, facteur 1.0 (jamais appliqué faute d'échantillon). Médiane à CALIBRATION_NOT_NEEDED_BAND_PCT % (5 %) ou moins de 1.0 -> `status=\"not_needed\"`, facteur 1.0 (calibrer sur du bruit de mesure serait une fausse précision). Sinon `status=\"applied\"`, facteur = la médiane elle-même, BORNÉE à [CALIBRATION_FACTOR_MIN, CALIBRATION_FACTOR_MAX] (0.8-1.2, approximation du projet : un ratio hors de cette plage signale plus probablement un poids erroné/une séance mal taguée qu'un vrai biais du modèle). Le facteur MULTIPLIE le kcal BRUT (ratio Garmin/modèle : un facteur > 1 signifie que le modèle SOUS-estime Garmin sur ce panier) pour rendre `kcal_calibrated`/`kcal_per_h_calibrated`/`cumulative_kcal_calibrated`, PAR SCÉNARIO ET PAR SEGMENT (facteur scalaire unique, application uniforme exacte par linéarité), TOUJOURS à CÔTÉ des valeurs brutes, jamais à leur place — `status` insufficient/not_needed -> valeurs calibrées STRICTEMENT ÉGALES aux brutes, jamais une différence silencieuse pour un facteur qui vaut justement 1.0.",
           "energy_classification_smoothing": "La décision de régime (arrêt/marche/course) se fait sur une vitesse LISSÉE sur SPEED_SMOOTH_TAPS échantillons voisins (`arc_elevation.smooth_moving_average`, même mécanisme que le lissage d'altitude), jamais sur la vitesse instantanée brute : un bruit de quelques cm/s autour de WALK_SPEED_MS (1,8 m/s) ferait sinon basculer un même passage entre régimes d'un échantillon à l'autre (discontinuité de puissance ≈ 5,9 -> 8,3 W/kg sur le plat à ce seuil). La PUISSANCE elle-même reste calculée sur la vitesse RÉELLE (non lissée) de l'échantillon — seule la CATÉGORIE (et donc le régime/la formule appliquée) dépend du lissage. Approximation de projet : un lissage par NOMBRE d'échantillons voisins (temporel), pas une fenêtre de distance ~50 m équivalente à `SEGMENT_M` comme pour la pente — les deux mécanismes ne sont PAS mathématiquement équivalents, seulement du même ordre de grandeur à une allure d'endurance typique.",
           "energy_delta_alert": "`DELTA_ALERT_PCT` (15 %) définit le SEUIL utilisé par `delta_flag` pour signaler un écart entre la dépense recalculée ici et `calories_kcal` Garmin — décision validée avec l'utilisateur, constante nommée UNIQUE (une seule source de vérité, jamais un seuil en dur ailleurs dans le moteur). Ce module ne pousse RIEN lui-même vers un rapport ou une alerte affichée : `delta_flag` rend un booléen, c'est à l'appelant (étapes suivantes, CLI/agents) de décider quoi en faire. Un écart au-delà peut signaler un capteur défaillant ou une séance mal taguée — jamais une preuve que Garmin ou le modèle a tort en particulier : les deux sont des estimations, la comparaison est un signal, pas un verdict.",
           "energy_flat_band": "Une pente dont la valeur absolue est sous FLAT_GRADE_BAND (0,02, approximation du projet) est classée « flat » en régime course, jamais « uphill »/« downhill » pour un bruit de mesure de quelques dixièmes de point — sans cette bande, `grade == 0.0` exactement n'arrive presque jamais sur une route réelle (bruit GPS/baro), rendant la catégorie « flat » de la décomposition quasiment toujours vide, même sur un profil objectivement plat.",

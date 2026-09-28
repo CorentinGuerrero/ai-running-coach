@@ -2119,12 +2119,58 @@ function durabilitySection(trend) {
  * Abscisses espacées par indice (même motif que `fuelingSection`/
  * `decouplingSection` ci-dessus) : une séance éligible dépend d'un échantillon
  * FIT ingéré ET d'un poids connu à sa date, deux conditions qui la rendent trop
- * irrégulière pour un axe temporel continu lisible. */
+ * irrégulière pour un axe temporel continu lisible.
+ *
+ * Ligne de faits « Calibration personnelle » : statut par panier route/trail
+ * (`trend.calibration.buckets`, `arc_index.energy_calibration`) — appliquée
+ * UNIQUEMENT aux PRÉVISIONS de course (`arc_race_pacing`), JAMAIS à ce graphique
+ * lui-même (qui reste le delta BRUT modèle/Garmin). Sur SA PROPRE fenêtre
+ * (`trend.calibration.window_weeks`, 26 semaines par défaut), INDÉPENDANTE de
+ * `trend.window_weeks` (celle du graphique, souvent plus courte, choisie par
+ * l'athlète) — jamais confondues dans le libellé affiché. */
 function energyTrendSection(trend) {
   const points = (trend.sessions || []).filter((s) => s.delta_pct != null && (s.sport === "trail" || s.sport === "running"));
-  if (!points.length) return { html: "", chart: null, points: [] };
-  const dates = points.map((p) => p.date);
   const band = trend.delta_alert_pct;
+  // Calibration personnelle (prévisions UNIQUEMENT, jamais ce graphique lui-même — voir
+  // `arc_energy.ASSUMPTIONS["calibration"]`) : ligne de FAITS sobre, un statut par panier,
+  // jamais une action à faire par l'athlète (la calibration s'applique d'elle-même dans
+  // `arc_race_pacing`, rien à configurer ici). `trend.calibration` porte sa PROPRE fenêtre
+  // (`arc_energy.CALIBRATION_WINDOW_WEEKS`, 26 semaines), INDÉPENDANTE de `trend.window_weeks`
+  // (celle de CE graphique, souvent plus courte, choisie par l'athlète) — jamais confondues dans
+  // le libellé. Affichée MÊME quand la fenêtre COURTE du graphique (`points`) est vide : les deux
+  // fenêtres sont indépendantes, une calibration sur 26 semaines peut très bien exister alors que
+  // les 8/12 dernières semaines choisies pour LE GRAPHIQUE n'ont aucune séance mesurable.
+  const CALIBRATION_STATUS_LABEL = {
+    insufficient: "échantillon insuffisant", not_needed: "non nécessaire", applied: "appliquée",
+  };
+  const calibrationTxt = (bucket) => {
+    if (!bucket) return "—";
+    const label = CALIBRATION_STATUS_LABEL[bucket.status] || bucket.status;
+    const factor = bucket.status === "applied" ? ` · facteur ${F.num(bucket.factor, 2)}` : "";
+    return `${label}${factor} <small class="muted">(n=${F.num(bucket.n)})</small>`;
+  };
+  const calibration = trend.calibration || {};
+  const calibrationBuckets = calibration.buckets || {};
+  const hasCalibrationData = ["route", "trail"].some((b) => (calibrationBuckets[b] || {}).n > 0);
+  const calibrationHtml = `<p class="legend">Calibration personnelle des prévisions de course
+      (${F.num(calibration.window_weeks)} sem.) — route : ${calibrationTxt(calibrationBuckets.route)} ·
+      trail : ${calibrationTxt(calibrationBuckets.trail)} <a href="#/performance">détail</a></p>`;
+
+  if (!points.length) {
+    // Fenêtre COURTE du graphique vide : pas de courbe possible, mais la ligne de
+    // calibration (fenêtre longue, indépendante) reste affichée si elle a quelque chose
+    // à dire — jamais masquée par l'absence de points récents à tracer.
+    if (!hasCalibrationData) return { html: "", chart: null, points: [] };
+    const html = `<section class="band"><h2>Dépense énergétique (modèle vs Garmin)</h2>
+      <p class="muted">Garmin (<code>calories_kcal</code>) reste la référence partout ailleurs
+        (nutrition, rapports) ; aucune séance mesurable sur la fenêtre choisie ici, mais la
+        calibration personnelle des prévisions (fenêtre plus longue, indépendante) reste
+        disponible ci-dessous.</p>
+      ${calibrationHtml}</section>`;
+    return { html, chart: null, points: [] };
+  }
+
+  const dates = points.map((p) => p.date);
   const chart = timeChart(dates, [
     { type: "band", lo: dates.map(() => -band), hi: dates.map(() => band), cls: "band-fill" },
     { type: "dots", values: points.map((p) => (p.sport === "trail" ? p.delta_pct : null)), cls: "dot dot--energy" },
@@ -2151,7 +2197,8 @@ function energyTrendSection(trend) {
       <div><dt>Séances (${trend.window_weeks} sem.)</dt><dd>${F.num(trend.sessions_n)} <small class="muted">dont ${F.num(trend.measured_n)} avec un écart calculable</small></dd></div>
       <div><dt>Écart médian route</dt><dd>${medianTxt(median.route)}</dd></div>
       <div><dt>Écart médian trail</dt><dd>${medianTxt(median.trail)}</dd></div>
-    </dl></section>`;
+    </dl>
+    ${calibrationHtml}</section>`;
   return { html, chart, points };
 }
 

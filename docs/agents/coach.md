@@ -129,6 +129,9 @@ l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 
 ### Dépense énergétique modèle vs Garmin
 
+Voir [Dépense énergétique modèle](../energie.md) pour une explication complète
+du modèle, de sa validation et de ses limites.
+
 Chaque retour de séance running/trail/hiking/walking porte une ligne « Dépense :
 Garmin X kcal · modèle Y kcal (±Z %) » (`scripts/arc_index.py energy`) — Garmin
 reste **toujours** la référence, le modèle indépendant (RE3 + Minetti) n'est

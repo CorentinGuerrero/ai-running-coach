@@ -37,6 +37,29 @@ Télécharge les fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassa
 3. **Analyser** le FIT avec `session-parts-analyzer` (`analyze_session_parts.py --fit ... --part climb|stride|...`) ou `course-comparison` (`compare_course.py --fit-dir`).
 4. **Persister** l'analyse (dérive, profil) dans le MD de l'activité dans la langue des documents (`config/workspace.toml` → `[language].documents`, défaut FRANÇAIS) — ne jamais dump le JSON brut en chat.
 
+## Rattraper l'historique pour la dépense énergétique modèle
+
+Le [modèle de dépense énergétique](../../docs/energie.md) (`scripts/arc_energy.py`,
+table dérivée `activity_energy`) se calcule automatiquement pour toute séance
+dont le FIT est déjà ingéré (`activities/fit/<garmin_activity_id>.json`) — il
+ne manque donc **que** pour les séances plus anciennes dont le FIT n'a jamais
+été téléchargé. Procédure détaillée : [docs/skills/fit-download.md — Rattraper
+l'historique](../../docs/skills/fit-download.md#rattraper-lhistorique-pour-la-depense-energetique-modele).
+
+En bref, pour un agent qui exécute ce rattrapage :
+
+```bash
+python3 skills/fit-download/scripts/download_fit.py --from-dir activities/ --json
+python3 scripts/arc_index.py energy  # réindexe (n'importe quelle sous-commande le fait)
+```
+
+`--json` est indispensable (sans lui, seul le `.fit` brut est écrit, jamais la
+copie normalisée qu'`arc_index.py` ingère) ; une séance déjà rattrapée (sa
+copie normalisée `activities/fit/<id>.json` existe déjà) est sautée
+automatiquement, même avec `--json` — relancer cette commande sur un
+historique déjà (partiellement) rattrapé ne re-télécharge donc que ce qui
+manque encore, jamais tout l'historique à chaque fois.
+
 ## Détails techniques
 
 - `download_activity(activity_id, dl_fmt=ORIGINAL)` → gère le zip auto (dézippe à la volée).

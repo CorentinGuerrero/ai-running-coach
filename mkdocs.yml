@@ -86,6 +86,7 @@ nav:
       - Migrer vos fichiers: dashboard/migration.md
       - Machine coach & mode headless: dashboard/headless.md
       - Derrière un reverse proxy (Docker): dashboard/docker.md
+  - Dépense énergétique modèle: energie.md
   - Agents:
       - Vue d'ensemble: agents.md
       - Coach: agents/coach.md

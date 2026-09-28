@@ -26,6 +26,8 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
                                                                         # journal des décisions, en JSON (#54)
     arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
                                                                         # dépense modèle vs Garmin, en JSON
+    arc_index.py energy --calibration [--weeks N]                     # calibration personnelle (ratio
+                                                                        # Garmin/modèle par panier route/trail)
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
 compris) : elle réindexe puis rend le point du jour de `arc_metrics.hrv_baseline_series`
@@ -186,6 +188,15 @@ Réponse toujours accompagnée de `model_id` et, par défaut, `assumptions_summa
 lignes, `arc_energy.SUMMARY`) — `--assumptions` bascule sur `assumptions`
 (`arc_energy.ASSUMPTIONS` en entier, plusieurs Ko) pour l'agent qui veut vérifier une
 hypothèse précise, jamais les deux en même temps.
+
+`energy --calibration` rend un rapport DIFFÉRENT : la calibration personnelle du
+modèle (`energy_calibration`, voir `arc_energy.ASSUMPTIONS["calibration"]`) — ratio
+médian Garmin/modèle par panier route/trail sur `--weeks` dernières semaines (défaut
+`arc_energy.CALIBRATION_WINDOW_WEEKS`, 26), INCOMPATIBLE avec `--activity`/`--date`/
+`--since`/`--limit`/`--assumptions` (aucun sens pour ce rapport-ci). Appliquée
+UNIQUEMENT aux prévisions (`arc_race_pacing`), JAMAIS à ce listing de séances
+mesurées : `energy`/`energy --calibration` restent deux calculs INDÉPENDANTS, jamais
+l'un ne recalibre l'autre.
 
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
@@ -2340,6 +2351,80 @@ def energy_trend(conn, today: date, weeks: int = ENERGY_TREND_WEEKS) -> dict:
             "trail": _round1(statistics.median(by_bucket["trail"])) if by_bucket["trail"] else None,
         },
         "assumptions_summary": EN.SUMMARY,
+        # Statut de calibration par panier (voir `energy_calibration` ci-dessous) — sur SA PROPRE
+        # fenêtre (`arc_energy.CALIBRATION_WINDOW_WEEKS`, 26 semaines), INDÉPENDANTE de `weeks`
+        # (fenêtre de CE graphique de tendance, souvent plus courte) : la calibration doit rester
+        # stable d'un appel à l'autre du même tableau de bord, qu'importe la fenêtre affichée par
+        # l'athlète (8/12/26 semaines...) — jamais recalculée sur une fenêtre trop courte pour
+        # atteindre `CALIBRATION_MIN_N` juste parce que la vue affiche 8 semaines ce jour-là.
+        "calibration": energy_calibration(conn, today),
+    }
+
+
+def energy_calibration(conn, today: date, weeks: int = EN.CALIBRATION_WINDOW_WEEKS) -> dict:
+    """Calibration personnelle du modèle de dépense énergétique — ratio médian
+    Garmin/modèle par panier route/trail, sur les `weeks` dernières semaines
+    glissantes se terminant à `today` inclus (défaut `arc_energy.
+    CALIBRATION_WINDOW_WEEKS`, 26 — INDÉPENDANT de `ENERGY_TREND_WEEKS`,
+    12, plus court : voir `energy_trend`, qui appelle CETTE fonction avec sa
+    fenêtre propre plutôt que celle, plus courte, de la tendance affichée).
+    Pour la CLI (`arc_index.py energy --calibration`) et pour `/api/energy-
+    trend` (tableau de bord local, champ `calibration`).
+
+    Appliquée UNIQUEMENT aux PRÉVISIONS (`arc_race_pacing.
+    race_energy_forecast`), JAMAIS aux séances déjà mesurées — voir
+    `arc_energy.ASSUMPTIONS["calibration"]` pour la méthode complète (bornage
+    du facteur, statuts, fenêtre).
+
+    Panier route/trail : `ENERGY_TREND_ROUTE_TRAIL_BUCKET` (même regroupement
+    qu'`energy_trend`, randonnée/marche hors des deux paniers — aucune
+    validation de référence connue pour ces sports). **Aucune exclusion sur
+    `flag` ici** (correctif de revue de code, BLOQUANT) : `flag`
+    (`arc_energy.delta_flag`, écart ABSOLU modèle/Garmin > `DELTA_ALERT_PCT`
+    d'UNE séance) est réservé à l'alerte affichée sur cette séance précise —
+    l'exclure du calcul de calibration bride mathématiquement le ratio médian
+    atteignable et fait tomber à tort en `insufficient` un biais RÉEL et
+    cohérent du panier entier (chaque séance dépasserait alors le seuil PAR
+    SÉANCE, alors que rien n'est aberrant dans le panier lui-même). TOUS les
+    ratios calculables du panier (Garmin ET modèle connus) sont donc transmis
+    tels quels à `arc_energy.calibration_band_report`, qui applique SA PROPRE
+    exclusion des aberrantes — RELATIVE à la médiane du panier
+    (`CALIBRATION_OUTLIER_RELATIVE_BAND_PCT`), un mécanisme différent et
+    indépendant. RÉUTILISE `_energy_session_for_activity_row` (même fonction
+    qu'`energy_report`/`energy_trend`/`activity_energy_report_by_id`) pour le
+    delta de chaque séance : aucun second calcul du ratio ici.
+
+    Rend `{"model_id", "window_weeks", "min_n", "not_needed_band_pct",
+    "factor_min", "factor_max", "buckets": {"route": {...}, "trail": {...}}}`
+    — chaque panier via `arc_energy.calibration_band_report` (`n`,
+    `ratio_median`, `ratio_iqr`, `status`, `factor`)."""
+    start = today - timedelta(days=weeks * 7 - 1)
+    cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+    placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
+    rows = conn.execute(
+        f"SELECT {cols} FROM activity WHERE date >= ? AND date <= ? AND sport IN ({placeholders}) "
+        "ORDER BY date, start_time, garmin_activity_id, id",
+        (start.isoformat(), today.isoformat(), *ENERGY_ELIGIBLE_SPORTS)).fetchall()
+    ratios_by_bucket: Dict[str, List[float]] = {"route": [], "trail": []}
+    for row in rows:
+        act = dict(row)
+        bucket = ENERGY_TREND_ROUTE_TRAIL_BUCKET.get(act["sport"])
+        if bucket is None:
+            continue
+        session = _energy_session_for_activity_row(conn, act)
+        model_kcal = session.get("model_kcal")
+        garmin_kcal = session.get("garmin_kcal")
+        if not model_kcal or garmin_kcal is None:
+            continue  # modèle non calculable ou Garmin absent : ratio non défini pour cette séance
+        ratios_by_bucket[bucket].append(garmin_kcal / model_kcal)
+    return {
+        "model_id": EN.MODEL_ID,
+        "window_weeks": weeks,
+        "min_n": EN.CALIBRATION_MIN_N,
+        "not_needed_band_pct": EN.CALIBRATION_NOT_NEEDED_BAND_PCT,
+        "factor_min": EN.CALIBRATION_FACTOR_MIN,
+        "factor_max": EN.CALIBRATION_FACTOR_MAX,
+        "buckets": {bucket: EN.calibration_band_report(ratios) for bucket, ratios in ratios_by_bucket.items()},
     }
 
 
@@ -3471,9 +3556,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "« energy » : temps en zone, GAP, découplage, montées/VAM, efficacité en "
                              "descente, durabilité ou dépense énergétique d'une séance (garmin_activity_id)")
     parser.add_argument("--weeks", type=int, metavar="N",
-                        help="commande « zones »/« decoupling »/« vam »/« descent »/« durability » : "
-                             "polarisation ou tendance sur les N dernières semaines (défaut 8 pour "
-                             "« zones », 12 pour « decoupling »/« vam »/« descent »/« durability »)")
+                        help="commande « zones »/« decoupling »/« vam »/« descent »/« durability »/"
+                             "« energy --calibration » : polarisation ou tendance sur les N dernières "
+                             "semaines (défaut 8 pour « zones », 12 pour « decoupling »/« vam »/"
+                             "« descent »/« durability », 26 pour « energy --calibration »)")
     parser.add_argument("--segment", type=int, metavar="SEGMENT_ID",
                         help="commande « climb-history » : historique complet d'un segment (#49)")
     parser.add_argument("--with-gps", action="store_true",
@@ -3495,6 +3581,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--assumptions", action="store_true",
                         help="commande « energy » : rend arc_energy.ASSUMPTIONS en entier au lieu du "
                              "résumé court par défaut (assumptions_summary)")
+    parser.add_argument("--calibration", action="store_true",
+                        help="commande « energy » : rend la calibration personnelle du modèle "
+                             "(ratio médian Garmin/modèle par panier route/trail, arc_index.py "
+                             "energy_calibration) au lieu du listing de séances — incompatible avec "
+                             "--activity/--date/--since/--limit/--assumptions ; --weeks override la "
+                             "fenêtre (défaut arc_energy.CALIBRATION_WINDOW_WEEKS, 26)")
     parser.add_argument("--trigger", choices=C.DECISION_TRIGGER,
                         help="commande « decisions » : ne garde que les décisions de ce déclencheur")
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
@@ -3638,6 +3730,22 @@ def main(argv=None) -> int:
         print(json.dumps(durability_trend(conn, today_date, args.weeks), ensure_ascii=False))
         return 0
     if args.command == "energy":
+        if args.calibration:
+            # `--calibration` rend un rapport DIFFÉRENT (calibration personnelle du
+            # modèle, `energy_calibration`) — incompatible avec tout sélecteur/
+            # --limit/--assumptions, qui n'auraient aucun sens ici (jamais une
+            # précédence silencieuse, même discipline que --limit + sélecteur
+            # ci-dessous). `--weeks` reste le SEUL argument partagé, pour overrider
+            # la fenêtre par défaut (`arc_energy.CALIBRATION_WINDOW_WEEKS`, 26).
+            if any(v is not None for v in (args.activity, args.date, args.since, args.limit)) \
+                    or args.selector or args.assumptions:
+                raise ConfigError("commande « energy --calibration » : incompatible avec "
+                                   "--activity/--date/--since/--limit/--assumptions ou l'argument "
+                                   "positionnel — seul --weeks (fenêtre) s'applique.")
+            today_date = date.fromisoformat(args.today) if args.today else date.today()
+            weeks = args.weeks if args.weeks and args.weeks > 0 else EN.CALIBRATION_WINDOW_WEEKS
+            print(json.dumps(energy_calibration(conn, today_date, weeks), ensure_ascii=False))
+            return 0
         # Positionnel ET --activity en même temps (revue de code) : ambigu, jamais
         # une précédence silencieuse (contrairement aux autres sous-commandes, où
         # le positionnel n'est qu'un ALIAS de --activity et les deux ne sont

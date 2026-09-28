@@ -278,7 +278,14 @@ disponibles à partir du seul résumé Markdown d'une séance :
   l'égalité parfaite. En dessous, l'écart **médian**, séparément pour la route
   et le trail. Ce graphique sert **uniquement** à suivre la fidélité du modèle
   dans le temps : Garmin reste la référence par défaut partout ailleurs
-  (nutrition, rapports), jamais remise en cause ici.
+  (nutrition, rapports), jamais remise en cause ici. Une dernière ligne de
+  faits sobre affiche le **statut de la calibration personnelle** par panier
+  (« échantillon insuffisant », « non nécessaire » ou « appliquée » + facteur,
+  voir [Dépense énergétique — la calibration personnelle](../energie.md#la-calibration-personnelle))
+  — sur sa propre fenêtre de 26 semaines, indépendante de celle choisie pour
+  ce graphique ; cette calibration ne s'applique qu'aux **prévisions** de
+  course du stratège, jamais à ce graphique lui-même ni aux séances déjà
+  mesurées.
 
 - **Segments de montée** (#49, #50) : une même montée, reconnue d'une séance à
   l'autre (position GPS quand le FIT en porte, sinon profil distance/D+/pente,

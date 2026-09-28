@@ -27,6 +27,11 @@ Le moteur pur lui-même (`arc_energy.py`) est couvert par
   `garmin_activity_id`) et `energy_trend` (regroupement route/trail, marche/
   randonnée hors des deux paniers, fenêtre vide, un seul point, bornes de la
   fenêtre glissante) — base en mémoire, mêmes fixtures que ci-dessus.
+- `energy_calibration` (calibration personnelle, PRÉVISIONS uniquement) :
+  seuil `CALIBRATION_MIN_N`, statuts `insufficient`/`not_needed`/`applied`,
+  exclusion des séances `flag`, paniers route/trail indépendants, randonnée
+  hors des deux, fenêtre par défaut/override, `calibration` exposé par
+  `energy_trend`.
 """
 
 from __future__ import annotations
@@ -599,6 +604,34 @@ class TestEnergyCli(Workspace):
             I.main(["energy", str(self.GARMIN_ID), "--activity", str(self.GARMIN_ID),
                     "--workspace", str(self.ws), "--memory"])
 
+    def test_cli_calibration_flag_returns_the_calibration_report(self):
+        self.index()
+        code, out = self._run_cli(["energy", "--calibration", "--weeks", "12",
+                                    "--workspace", str(self.ws), "--memory"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out["window_weeks"], 12)
+        self.assertEqual(out["min_n"], EN.CALIBRATION_MIN_N)
+        self.assertIn("route", out["buckets"])
+        self.assertIn("trail", out["buckets"])
+
+    def test_cli_calibration_rejects_activity_selector(self):
+        self.index()
+        with self.assertRaises(I.ConfigError):
+            I.main(["energy", "--calibration", "--activity", str(self.GARMIN_ID),
+                    "--workspace", str(self.ws), "--memory"])
+
+    def test_cli_calibration_rejects_assumptions_flag(self):
+        self.index()
+        with self.assertRaises(I.ConfigError):
+            I.main(["energy", "--calibration", "--assumptions",
+                    "--workspace", str(self.ws), "--memory"])
+
+    def test_cli_calibration_rejects_limit(self):
+        self.index()
+        with self.assertRaises(I.ConfigError):
+            I.main(["energy", "--calibration", "--limit", "5",
+                    "--workspace", str(self.ws), "--memory"])
+
 
 # ---------------------------------------------------------------------------
 # Try/except SÉPARÉ (revue de code) : GAP/VAM/descente/durabilité d'un
@@ -873,6 +906,163 @@ class TestEnergyTrend(Workspace):
         self.assertNotIn(before_start.isoformat(), dates)
         self.assertIn(start.isoformat(), dates)
         self.assertIn(today.isoformat(), dates)
+
+
+# ---------------------------------------------------------------------------
+# `energy_calibration` — calibration personnelle du modèle (PRÉVISIONS
+# uniquement, voir `arc_energy.ASSUMPTIONS["calibration"]`).
+# ---------------------------------------------------------------------------
+
+
+class TestEnergyCalibration(Workspace):
+    def _route_session(self, garmin_id, day, ratio, weight_kg=70, sport="running"):
+        """Séance plate (`_flat_run_records`), `calories_kcal` ajusté APRÈS un
+        premier passage pour obtenir EXACTEMENT `garmin_kcal / model_kcal ==
+        ratio` — jamais une valeur de `calories_kcal` devinée à la main, le
+        modèle physique lui-même reste couvert par `tests/data/test_arc_energy.py`."""
+        self.write_profile_weight(weight_kg)
+        self.write_activity(garmin_id, day=day, sport=sport, calories_kcal=1,
+                             duration_s=1800, distance_m=5400)
+        self.write_fit(garmin_id, _flat_run_records(duration_s=1800, speed_ms=3.0))
+        self.index(today="2026-09-25")
+        act = self.activity_row(garmin_id)
+        model_kcal = self.energy_row(act["id"])["model_kcal"]
+        self.write_activity(garmin_id, day=day, sport=sport,
+                             calories_kcal=round(model_kcal * ratio, 2),
+                             duration_s=1800, distance_m=5400)
+
+    def _days(self, n, start="2026-08-01"):
+        first = date.fromisoformat(start)
+        return [(first + timedelta(days=i)).isoformat() for i in range(n)]
+
+    def test_below_min_n_is_insufficient(self):
+        """`CALIBRATION_MIN_N - 1` séances route (14) : sous le seuil, même
+        avec un biais net (ratio 1.10, hors bande mais SOUS le seuil de
+        signalement `DELTA_ALERT_PCT`, donc jamais `flag`) —
+        `status="insufficient"`, facteur 1.0."""
+        n = EN.CALIBRATION_MIN_N - 1
+        for i, day in enumerate(self._days(n)):
+            self._route_session(90000003000 + i, day, ratio=1.10)
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route = report["buckets"]["route"]
+        self.assertEqual(route["n"], n)
+        self.assertEqual(route["status"], "insufficient")
+        self.assertEqual(route["factor"], 1.0)
+
+    def test_applied_with_enough_sessions_and_a_clear_bias(self):
+        """`CALIBRATION_MIN_N` séances route à ratio 1.10 (10 %, hors bande de
+        5 %) : `status="applied"`, facteur ≈ 1.10 (la médiane elle-même)."""
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N)):
+            self._route_session(90000003100 + i, day, ratio=1.10)
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route = report["buckets"]["route"]
+        self.assertEqual(route["n"], EN.CALIBRATION_MIN_N)
+        self.assertEqual(route["status"], "applied")
+        self.assertAlmostEqual(route["factor"], 1.10, delta=0.01)
+
+    def test_not_needed_when_median_is_already_close_to_one(self):
+        """Même effectif suffisant, mais ratio 1.02 (2 %, sous la bande de
+        5 %) : le modèle est déjà fidèle, `status="not_needed"`, facteur 1.0."""
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N)):
+            self._route_session(90000003200 + i, day, ratio=1.02)
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route = report["buckets"]["route"]
+        self.assertEqual(route["status"], "not_needed")
+        self.assertEqual(route["factor"], 1.0)
+
+    def test_outlier_sessions_are_excluded_relative_to_the_bucket_median(self):
+        """`CALIBRATION_MIN_N` séances propres à ratio 1.10, PLUS trois séances
+        très aberrantes (ratio 2.0) : les trois aberrantes ne comptent NI dans
+        `n` NI dans la médiane — exclues par `arc_energy.calibration_band_report`
+        RELATIVEMENT à la médiane brute du panier (`CALIBRATION_OUTLIER_
+        RELATIVE_BAND_PCT`), PAS par leur `flag` individuel (correctif de
+        revue de code, BLOQUANT — `energy_calibration` ne filtre plus jamais
+        sur `flag`, voir sa docstring) : un capteur manifestement défaillant ne
+        doit jamais influencer la calibration des autres séances, mais ce
+        n'est plus `flag` qui le décide ici."""
+        days = self._days(EN.CALIBRATION_MIN_N + 3)
+        for i, day in enumerate(days[:EN.CALIBRATION_MIN_N]):
+            self._route_session(90000003300 + i, day, ratio=1.10)
+        for i, day in enumerate(days[EN.CALIBRATION_MIN_N:]):
+            self._route_session(90000003400 + i, day, ratio=2.0)  # aberrante, loin de la médiane du panier
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route = report["buckets"]["route"]
+        self.assertEqual(route["n"], EN.CALIBRATION_MIN_N)
+        self.assertAlmostEqual(route["factor"], 1.10, delta=0.01)
+
+    def test_a_real_bucket_wide_bias_is_never_excluded_by_the_per_session_flag(self):
+        """Correctif de revue de code (BLOQUANT) : `CALIBRATION_MIN_N` séances
+        à ratio 1.20 — CHAQUE séance serait individuellement `flag=True`
+        (|écart| ≈ 16,7 % > `DELTA_ALERT_PCT`, 15 %), mais le panier ENTIER
+        est cohérent (aucune séance aberrante par rapport aux autres) :
+        `energy_calibration` doit rendre `status="applied"`, `n` = TOUTES les
+        séances (aucune exclusion), facteur ≈ 1.20 — jamais `insufficient`
+        comme le faisait l'ancien mécanisme (exclusion sur `flag`, qui aurait
+        exclu les `CALIBRATION_MIN_N` séances et rendu n=0)."""
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N)):
+            self._route_session(90000003800 + i, day, ratio=1.20)
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        route = report["buckets"]["route"]
+        self.assertEqual(route["status"], "applied")
+        self.assertEqual(route["n"], EN.CALIBRATION_MIN_N)
+        self.assertAlmostEqual(route["factor"], 1.20, delta=0.01)
+
+    def test_route_and_trail_are_separate_buckets(self):
+        """Route et trail calibrés INDÉPENDAMMENT, comme `energy_trend` — un
+        biais route ne doit jamais influencer le panier trail."""
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N)):
+            self._route_session(90000003500 + i, day, ratio=1.10, sport="running")
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N, start="2026-08-01")):
+            self._route_session(90000003600 + i, day, ratio=0.90, sport="trail")
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        self.assertEqual(report["buckets"]["route"]["status"], "applied")
+        self.assertAlmostEqual(report["buckets"]["route"]["factor"], 1.10, delta=0.01)
+        self.assertEqual(report["buckets"]["trail"]["status"], "applied")
+        self.assertAlmostEqual(report["buckets"]["trail"]["factor"], 0.90, delta=0.01)
+
+    def test_hiking_is_never_counted_in_either_bucket(self):
+        """Randonnée : éligible au calcul du modèle, mais HORS des deux
+        paniers de calibration (même restriction qu'`energy_trend` — aucune
+        validation de référence connue pour ce sport)."""
+        for i, day in enumerate(self._days(EN.CALIBRATION_MIN_N)):
+            self._route_session(90000003700 + i, day, ratio=1.30, sport="hiking")
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        self.assertEqual(report["buckets"]["route"]["n"], 0)
+        self.assertEqual(report["buckets"]["trail"]["n"], 0)
+
+    def test_empty_window_is_insufficient_for_both_buckets(self):
+        """Aucune séance dans la fenêtre : les deux paniers `insufficient`,
+        `n=0` — jamais une exception."""
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"), weeks=12)
+        for bucket in ("route", "trail"):
+            self.assertEqual(report["buckets"][bucket]["n"], 0)
+            self.assertEqual(report["buckets"][bucket]["status"], "insufficient")
+
+    def test_default_window_is_the_calibration_constant(self):
+        """Sans `weeks` explicite, la fenêtre par défaut est
+        `arc_energy.CALIBRATION_WINDOW_WEEKS` (26) — INDÉPENDANTE de
+        `ENERGY_TREND_WEEKS` (12, plus courte)."""
+        self.index(today="2026-09-25")
+        report = I.energy_calibration(self.conn, date.fromisoformat("2026-09-25"))
+        self.assertEqual(report["window_weeks"], EN.CALIBRATION_WINDOW_WEEKS)
+
+    def test_energy_trend_carries_a_calibration_field(self):
+        """`/api/energy-trend` (`energy_trend`) porte un champ `calibration`
+        (statut de calibration par panier) — sur SA PROPRE fenêtre par défaut
+        (26 semaines), jamais celle, plus courte, de la tendance affichée."""
+        self.index(today="2026-09-25")
+        trend = I.energy_trend(self.conn, date.fromisoformat("2026-09-25"), weeks=2)
+        self.assertIn("calibration", trend)
+        self.assertEqual(trend["calibration"]["window_weeks"], EN.CALIBRATION_WINDOW_WEEKS)
+        self.assertEqual(trend["calibration"]["buckets"]["route"]["status"], "insufficient")
 
 
 if __name__ == "__main__":

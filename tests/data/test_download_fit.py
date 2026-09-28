@@ -236,5 +236,69 @@ class TestWriteRecordsJsonSportExtraction(unittest.TestCase):
         self.assertEqual(raw, [{"heart_rate": 120, "distance": 5.0}])
 
 
+class TestShouldSkipDownload(unittest.TestCase):
+    """Correctif rattrapage historique (revue de code) : `--json` ne doit sauter une
+    séance déjà présente que si sa copie NORMALISÉE canonique
+    (`<out_dir>/fit/<id>.json`, celle qu'`arc_index.py` ingère réellement) existe
+    déjà — jamais sur le seul `.fit` brut, qu'un téléchargement antérieur SANS
+    `--json` a pu laisser seul derrière lui."""
+
+    def _paths(self, tmp, aid=42):
+        out_dir = Path(tmp)
+        dst = out_dir / f"{aid}.fit"
+        return out_dir, dst
+
+    def test_missing_fit_is_never_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=False))
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=True))
+
+    def test_existing_fit_without_json_flag_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            dst.write_bytes(b"FIT")
+            self.assertTrue(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=False))
+
+    def test_existing_fit_with_json_flag_but_no_canonical_copy_is_not_skipped(self):
+        """Cas du bug corrigé : un `.fit` déjà présent (téléchargé sans `--json` la
+        première fois) ne doit PAS être sauté quand `--json` est maintenant demandé —
+        la copie normalisée qu'`arc_index.py` ingère n'existe pas encore."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            dst.write_bytes(b"FIT")
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=True))
+
+    def test_existing_fit_with_json_flag_and_canonical_copy_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            dst.write_bytes(b"FIT")
+            fit_dir = out_dir / "fit"
+            fit_dir.mkdir()
+            (fit_dir / "42.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=True))
+
+    def test_canonical_copy_alone_is_enough_with_json_flag(self):
+        """Les `.fit` bruts supprimés (lourds, jetables) mais `fit/<id>.json`
+        conservé : `--json` ne re-télécharge rien (revue de code)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            fit_dir = out_dir / "fit"
+            fit_dir.mkdir()
+            (fit_dir / "42.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=True))
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=False, want_json=False))
+
+    def test_overwrite_never_skips_regardless_of_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir, dst = self._paths(tmp)
+            dst.write_bytes(b"FIT")
+            fit_dir = out_dir / "fit"
+            fit_dir.mkdir()
+            (fit_dir / "42.json").write_text("{}", encoding="utf-8")
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=True, want_json=True))
+            self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=True, want_json=False))
+
+
 if __name__ == "__main__":
     unittest.main()

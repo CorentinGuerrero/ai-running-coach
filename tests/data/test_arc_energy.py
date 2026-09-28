@@ -581,6 +581,146 @@ class TestDeltaPct(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Calibration personnelle (prévisions uniquement) — `calibration_band_report`.
+# ---------------------------------------------------------------------------
+
+class TestCalibrationBandReport(unittest.TestCase):
+    def test_below_min_n_is_insufficient_even_with_a_clear_bias(self):
+        """14 ratios (juste sous `CALIBRATION_MIN_N`, 15), tous à 1.30 : un
+        biais net et sans dispersion, mais l'échantillon reste trop petit —
+        `status="insufficient"`, facteur 1.0 (jamais appliqué), MAIS
+        `ratio_median`/`ratio_iqr` restent rendus (diagnostic utile même sous
+        le seuil). Aucune valeur aberrante ici (toutes identiques) : `n`
+        reste le nombre de ratios reçus."""
+        ratios = [1.30] * (NRG.CALIBRATION_MIN_N - 1)
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["n"], 14)
+        self.assertEqual(result["status"], "insufficient")
+        self.assertEqual(result["factor"], 1.0)
+        self.assertAlmostEqual(result["ratio_median"], 1.30, places=3)
+        self.assertEqual(result["ratio_iqr"], 0.0)
+
+    def test_median_within_band_is_not_needed(self):
+        """15 ratios, médiane à 1.03 (3 %, sous `CALIBRATION_NOT_NEEDED_BAND_PCT`,
+        5 %) : le modèle est déjà fidèle sur ce panier, `status="not_needed"`,
+        facteur 1.0 — jamais 1.03 (calibrer sur du bruit serait une fausse
+        précision)."""
+        ratios = [1.03] * NRG.CALIBRATION_MIN_N
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["status"], "not_needed")
+        self.assertEqual(result["factor"], 1.0)
+        self.assertAlmostEqual(result["ratio_median"], 1.03, places=3)
+
+    def test_median_outside_band_is_applied_at_the_median_value(self):
+        """15 ratios à 1.10 (10 %, hors bande) : `status="applied"`, facteur =
+        la médiane elle-même (dans la plage prudente, aucun bornage requis
+        ici)."""
+        ratios = [1.10] * NRG.CALIBRATION_MIN_N
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["status"], "applied")
+        self.assertAlmostEqual(result["factor"], 1.10, places=3)
+
+    def test_factor_is_clamped_to_the_prudent_range(self):
+        """Un ratio médian extrême (1.5, largement hors [0.8, 1.2]) donne un
+        facteur BORNÉ à `CALIBRATION_FACTOR_MAX` (1.2), jamais extrapolé —
+        même chose côté bas avec 0.5 -> `CALIBRATION_FACTOR_MIN` (0.8)."""
+        high = NRG.calibration_band_report([1.5] * NRG.CALIBRATION_MIN_N)
+        self.assertEqual(high["status"], "applied")
+        self.assertEqual(high["factor"], NRG.CALIBRATION_FACTOR_MAX)
+        low = NRG.calibration_band_report([0.5] * NRG.CALIBRATION_MIN_N)
+        self.assertEqual(low["status"], "applied")
+        self.assertEqual(low["factor"], NRG.CALIBRATION_FACTOR_MIN)
+
+    def test_empty_ratios_is_insufficient_with_none_stats(self):
+        """Aucun ratio du tout (panier sans séance éligible dans la fenêtre) :
+        `status="insufficient"`, `n=0`, `ratio_median`/`ratio_iqr` à `None`
+        (jamais 0.0, qui laisserait croire à un accord parfait mesuré)."""
+        result = NRG.calibration_band_report([])
+        self.assertEqual(result, {"n": 0, "ratio_median": None, "ratio_iqr": None,
+                                   "status": "insufficient", "factor": 1.0})
+
+    def test_single_ratio_has_no_iqr(self):
+        """Un seul ratio (n=1, de toute façon insuffisant) : `ratio_iqr` reste
+        `None` (aucun quartile calculable sur un point), jamais 0.0."""
+        result = NRG.calibration_band_report([1.10])
+        self.assertEqual(result["n"], 1)
+        self.assertIsNone(result["ratio_iqr"])
+        self.assertAlmostEqual(result["ratio_median"], 1.10, places=3)
+
+    def test_iqr_reflects_real_dispersion(self):
+        """Un panier dispersé mais SANS aberrante au sens de la bande relative
+        (ratios de 0.95 à 1.25, médiane 1.10 — écart relatif max 13,6 %, sous
+        `CALIBRATION_OUTLIER_RELATIVE_BAND_PCT`, 15 %) doit rendre un IQR
+        strictement positif SANS qu'aucun ratio ne soit exclu — pas seulement
+        une médiane, une vraie mesure de dispersion, cohérente avec
+        `statistics.quantiles`."""
+        ratios = [0.95, 0.95, 1.0, 1.0, 1.05, 1.05, 1.1, 1.1, 1.1, 1.15, 1.15,
+                  1.2, 1.2, 1.25, 1.25]
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["n"], 15)  # aucune exclusion : toutes sous la bande relative
+        self.assertGreater(result["ratio_iqr"], 0.0)
+
+    # -------------------------------------------------------------------
+    # Correctif de revue de code (BLOQUANT) : exclusion RELATIVE à la médiane
+    # du panier, jamais au `flag` par séance (|écart| > DELTA_ALERT_PCT).
+    # -------------------------------------------------------------------
+
+    def test_a_real_consistent_bias_is_applied_despite_every_session_being_individually_flagged(self):
+        """Reproduit le bug corrigé : ~20 séances à ratio 1,20 ± bruit — CHAQUE
+        séance individuelle dépasserait le seuil d'alerte PAR SÉANCE
+        (`arc_energy.delta_flag`, |écart| > 15 %, delta_pct ≈ -16,7 % à ratio
+        1,20), mais le PANIER ENTIER est cohérent (aucune aberrante) : doit
+        rester `status="applied"`, `n` proche de 20 (aucune exclusion), facteur
+        ≈ 1,2 — jamais `insufficient` à cause d'un filtre sur `flag`."""
+        import random
+        rng = random.Random(20260928)
+        ratios = [1.20 + rng.uniform(-0.02, 0.02) for _ in range(20)]
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(result["n"], 20)
+        self.assertAlmostEqual(result["factor"], 1.20, delta=0.02)
+
+    def test_a_minority_of_outliers_is_excluded_from_a_consistent_majority(self):
+        """20 séances cohérentes à ratio ≈ 1,20, PLUS 2 séances clairement
+        aberrantes (ratio 2,0, ex. capteur FC manifestement défaillant) : les 2
+        aberrantes sont EXCLUES (n=20, pas 22), le facteur final reste proche
+        de 1,2 — jamais tiré vers le haut par les 2 aberrantes."""
+        import random
+        rng = random.Random(20260929)
+        ratios = [1.20 + rng.uniform(-0.02, 0.02) for _ in range(20)] + [2.0, 2.0]
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(result["n"], 20)
+        self.assertAlmostEqual(result["factor"], 1.20, delta=0.02)
+
+    def test_ratio_1_35_is_bounded_to_the_factor_max(self):
+        """Panier cohérent à ratio 1,35 (hors [0,8 ; 1,2], mais AUCUNE
+        aberrante entre elles — toutes proches de la même valeur) : le facteur
+        est BORNÉ à `CALIBRATION_FACTOR_MAX` (1,2), jamais 1,35."""
+        ratios = [1.35] * NRG.CALIBRATION_MIN_N
+        result = NRG.calibration_band_report(ratios)
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(result["n"], NRG.CALIBRATION_MIN_N)
+        self.assertEqual(result["factor"], NRG.CALIBRATION_FACTOR_MAX)
+
+    def test_flagging_by_absolute_delta_would_have_wrongly_produced_insufficient(self):
+        """Preuve DIRECTE que l'ancien mécanisme (exclusion par `flag`, |écart|
+        > 15 %) aurait fait tomber ce panier en `insufficient` : à ratio 1,20,
+        `arc_energy.delta_pct` vaut environ -16,7 % (|·| > `DELTA_ALERT_PCT`) —
+        chaque séance serait donc `flag=True` et TOUTES auraient été exclues
+        par l'ancien filtre (n=0). Le nouveau mécanisme (relatif à la médiane
+        du panier) ne les exclut PAS : c'est justement le comportement attendu
+        documenté par le correctif."""
+        ratio = 1.20
+        # model_kcal=100 (arbitraire), garmin_kcal=100*ratio -> delta_pct = (model-garmin)/garmin*100
+        delta_pct = (100.0 - 100.0 * ratio) / (100.0 * ratio) * 100.0
+        self.assertTrue(NRG.delta_flag(delta_pct))  # chaque séance serait individuellement "flag"
+        result = NRG.calibration_band_report([ratio] * NRG.CALIBRATION_MIN_N)
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(result["n"], NRG.CALIBRATION_MIN_N)  # jamais exclu malgré le flag individuel
+
+
+# ---------------------------------------------------------------------------
 # Non-régression : séances synthétiques de `tests.lib.synthetic`
 # ---------------------------------------------------------------------------
 

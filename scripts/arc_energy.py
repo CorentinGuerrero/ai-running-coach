@@ -166,11 +166,70 @@ l'ingestion dérivée (table `activity_energy`) et le CLI (`arc_index.py
 energy`) viendront dans une étape séparée — voir le docstring de
 `arc_samples.py` pour la même séparation de responsabilités (moteur pur vs
 ingestion/CLI).
+
+## Calibration personnelle — PRÉVISIONS uniquement, jamais les mesures
+
+`calibration_band_report(ratios)` calcule, à partir d'une liste de ratios
+`garmin_kcal / model_kcal` déjà filtrée par l'appelant SUR LE SEUL panier
+(route/trail — voir `arc_index.energy_calibration`, qui reste seule
+responsable de la requête SQLite et du filtrage par panier, ce module ne sait
+rien d'une séance ni d'un sport) — MAIS PAS sur `flag` (voir plus bas), un
+facteur de correction personnel : `n`, la médiane du ratio, sa dispersion
+(IQR, écart interquartile), et un statut :
+
+- `insufficient` (`n < CALIBRATION_MIN_N`, 15 — approximation du projet,
+  aucune base statistique publiée pour ce seuil précis) : facteur `1.0`,
+  jamais appliqué faute d'un échantillon suffisant.
+- `not_needed` (médiane à `CALIBRATION_NOT_NEEDED_BAND_PCT` % (5 %) ou moins de
+  1.0) : le modèle est déjà fidèle sur ce panier, facteur `1.0` — une
+  calibration qui ne ferait que reproduire du bruit de mesure serait pire
+  qu'inutile (fausse précision).
+- `applied` (médiane hors de cette bande, ET `n` suffisant) : facteur = la
+  médiane elle-même, BORNÉE à `[CALIBRATION_FACTOR_MIN, CALIBRATION_FACTOR_MAX]`
+  (0.8-1.2 — approximation du projet documentée : un facteur hors de cette
+  plage signalerait plus probablement un problème de saisie/poids qu'un vrai
+  biais du modèle, jamais extrapolé au-delà).
+
+**Exclusion des aberrantes, RELATIVE à la médiane du panier — jamais au
+`flag` par séance** (correctif de revue de code, BLOQUANT) : exclure les
+séances dont `arc_energy.delta_flag` vaut `True` (écart ABSOLU modèle/Garmin
+> `DELTA_ALERT_PCT`, 15 %) AVANT de calculer le ratio bride mathématiquement
+le ratio médian atteignable à environ `[1/1.15, 1.15]` — un biais RÉEL et
+cohérent de 12-20 % (chaque séance dépasse alors le seuil PAR SÉANCE, mais
+le panier entier n'a rien d'aberrant) tombait à tort en `insufficient`, les
+bornes 0.8-1.2 devenant inatteignables. `calibration_band_report` calcule
+donc lui-même une PREMIÈRE médiane sur TOUS les ratios reçus, puis exclut
+UNIQUEMENT ceux dont l'écart relatif à cette médiane dépasse
+`CALIBRATION_OUTLIER_RELATIVE_BAND_PCT` (15 %, approximation du projet,
+mécanisme VOLONTAIREMENT DIFFÉRENT de `DELTA_ALERT_PCT` même s'ils partagent
+le même ordre de grandeur) — la médiane/l'IQR/le facteur FINAUX sont
+recalculés sur les ratios RETENUS. `arc_energy.delta_flag`/`DELTA_ALERT_PCT`
+restent réservés à l'alerte affichée sur UNE séance individuelle, jamais
+réutilisés pour la calibration d'un panier entier.
+
+Le ratio est **Garmin / modèle** (jamais l'inverse) : un facteur > 1 signifie
+que le modèle SOUS-estime Garmin sur ce panier (le kcal brut doit être
+MULTIPLIÉ par le facteur pour s'en rapprocher), un facteur < 1 qu'il le
+SUR-estime — voir `arc_race_pacing.race_energy_forecast`, seul consommateur
+prévu de ce facteur, qui l'applique en multipliant `kcal`/`kcal_per_h` PAR
+SCÉNARIO ET PAR SEGMENT (`kcal_calibrated`, `kcal_per_h_calibrated`,
+`cumulative_kcal_calibrated`), à CÔTÉ des valeurs brutes, jamais à leur
+place — le facteur étant un scalaire UNIQUE par scénario, l'appliquer
+uniformément à chaque segment reste exact (linéarité, voir
+`ASSUMPTIONS["mass_linearity"]` pour le même principe côté masse).
+
+**Jamais appliquée à une séance déjà mesurée** (`activity_energy`/
+`energy_report`/`energy_trend` restent le calcul BRUT du modèle, sans aucune
+correction) : la calibration est un outil de PRÉVISION (corriger une future
+estimation à partir de l'historique de l'athlète), jamais une réécriture
+rétroactive d'une mesure déjà faite — une mesure reste une mesure, même
+imparfaite.
 """
 
 from __future__ import annotations
 
 import math
+import statistics
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -264,6 +323,48 @@ DEFAULT_RESOLUTION_S = 5.0
 # l'utilisateur, constante nommée UNIQUE (une seule source de vérité, jamais
 # un seuil en dur ailleurs).
 DELTA_ALERT_PCT = 15.0
+
+# Taille d'échantillon minimale (nombre de séances) pour appliquer une
+# calibration personnelle (voir la section « Calibration personnelle » du
+# docstring du module) — approximation du projet, aucune base statistique
+# publiée identifiée pour ce seuil précis, choisi assez petit pour rester
+# atteignable sur une fenêtre de calibration réaliste (CALIBRATION_WINDOW_WEEKS),
+# assez grand pour ne pas calibrer sur 2-3 séances bruitées.
+CALIBRATION_MIN_N = 15
+
+# Bande (%) autour de 1.0 (ratio Garmin/modèle) sous laquelle la calibration
+# est jugée « pas nécessaire » (`status="not_needed"`, facteur laissé à 1.0)
+# plutôt qu'appliquée — approximation du projet : reproduire du bruit de
+# mesure par un facteur de calibration serait une fausse précision, pas une
+# vraie correction.
+CALIBRATION_NOT_NEEDED_BAND_PCT = 5.0
+
+# Bande (%) d'exclusion des ratios ABERRANTS, RELATIVE à la médiane BRUTE de
+# TOUS les ratios du panier (jamais au `flag` par séance, voir
+# `calibration_band_report` — correctif de revue de code, BLOQUANT : exclure
+# sur `flag` bride le ratio médian atteignable à environ [1/1.15, 1.15] et fait
+# tomber en `insufficient` un biais réel et cohérent, chaque séance dépassant
+# le seuil d'alerte PAR SÉANCE alors que le panier entier n'a rien d'aberrant).
+# Approximation du projet, même ordre de grandeur que `DELTA_ALERT_PCT` mais un
+# mécanisme VOLONTAIREMENT DIFFÉRENT et INDÉPENDANT : celui-ci exclut une
+# MINORITÉ de ratios qui s'écarte du gros du panier (ex. un capteur clairement
+# défaillant, ratio 2.0 au milieu d'un panier à 1.10-1.30), jamais tout un
+# panier dont la médiane s'écarte franchement de 1.0.
+CALIBRATION_OUTLIER_RELATIVE_BAND_PCT = 15.0
+
+# Plage prudente (fraction) dans laquelle le facteur de calibration est borné
+# quand il est appliqué — approximation du projet : un ratio médian hors de
+# cette plage signalerait plus probablement un poids erroné/une séance mal
+# taguée qu'un vrai biais du modèle sur ce panier, jamais extrapolé au-delà.
+CALIBRATION_FACTOR_MIN = 0.8
+CALIBRATION_FACTOR_MAX = 1.2
+
+# Fenêtre glissante (semaines) de la calibration personnelle — INDÉPENDANTE de
+# `ENERGY_TREND_WEEKS` (12, `arc_index.py`, plus courte, pensée pour un
+# graphique de tendance récent) : 26 semaines (~6 mois), approximation du
+# projet, pour suivre l'évolution de la forme/du capteur de l'athlète sans
+# être trop sensible aux quelques dernières séances seules.
+CALIBRATION_WINDOW_WEEKS = 26
 
 # Scénario par défaut consommé depuis `arc_race_pacing.predict_segments`
 # (clé de `predicted_time_s`/`SCENARIOS`) — "realistic" est le scénario
@@ -427,6 +528,36 @@ ASSUMPTIONS = {
         "suivantes, CLI/agents) de décider quoi en faire. Un écart au-delà peut signaler un capteur "
         "défaillant ou une séance mal taguée — jamais une preuve que Garmin ou le modèle a tort en "
         "particulier : les deux sont des estimations, la comparaison est un signal, pas un verdict."
+    ),
+    "calibration": (
+        f"Calibration PERSONNELLE, appliquée UNIQUEMENT aux PRÉVISIONS "
+        f"(`arc_race_pacing.race_energy_forecast`), JAMAIS aux séances déjà mesurées "
+        f"(`activity_energy`/`energy_report`/`energy_trend` restent le calcul BRUT du modèle, sans "
+        f"aucune correction — une mesure reste une mesure). Ratio Garmin/modèle médian par panier "
+        f"route/trail (`arc_index.energy_calibration`, randonnée/marche hors des deux paniers, même "
+        f"regroupement qu'`ENERGY_TREND_ROUTE_TRAIL_BUCKET`), sur une fenêtre glissante de "
+        f"CALIBRATION_WINDOW_WEEKS ({CALIBRATION_WINDOW_WEEKS:.0f} semaines, INDÉPENDANTE de la "
+        f"fenêtre plus courte d'`energy_trend`). Exclusion des ratios ABERRANTS RELATIVE à la "
+        f"médiane BRUTE du panier (`CALIBRATION_OUTLIER_RELATIVE_BAND_PCT`, 15 % — voir "
+        f"`calibration_band_report`) — JAMAIS au `flag` par séance (`arc_energy.delta_flag`, "
+        f"réservé à l'alerte PAR SÉANCE ABSOLUE) : exclure sur `flag` bride mathématiquement le "
+        f"ratio médian atteignable à environ [1/1.15, 1.15] et fait tomber à tort en "
+        f"`\"insufficient\"` un biais RÉEL et cohérent de 12-20 % du panier entier (correctif de "
+        f"revue de code, BLOQUANT). `n < CALIBRATION_MIN_N` ({CALIBRATION_MIN_N:.0f}, compté APRÈS "
+        f"exclusion des aberrantes) -> `status=\"insufficient\"`, facteur 1.0 (jamais appliqué faute "
+        f"d'échantillon). Médiane à CALIBRATION_NOT_NEEDED_BAND_PCT % "
+        f"({CALIBRATION_NOT_NEEDED_BAND_PCT:.0f} %) ou moins de 1.0 -> `status=\"not_needed\"`, "
+        f"facteur 1.0 (calibrer sur du bruit de mesure serait une fausse précision). Sinon "
+        f"`status=\"applied\"`, facteur = la médiane elle-même, BORNÉE à [CALIBRATION_FACTOR_MIN, "
+        f"CALIBRATION_FACTOR_MAX] ({CALIBRATION_FACTOR_MIN:.1f}-{CALIBRATION_FACTOR_MAX:.1f}, "
+        f"approximation du projet : un ratio hors de cette plage signale plus probablement un poids "
+        f"erroné/une séance mal taguée qu'un vrai biais du modèle). Le facteur MULTIPLIE le kcal "
+        f"BRUT (ratio Garmin/modèle : un facteur > 1 signifie que le modèle SOUS-estime Garmin sur "
+        f"ce panier) pour rendre `kcal_calibrated`/`kcal_per_h_calibrated`/"
+        f"`cumulative_kcal_calibrated`, PAR SCÉNARIO ET PAR SEGMENT (facteur scalaire unique, "
+        f"application uniforme exacte par linéarité), TOUJOURS à CÔTÉ des valeurs brutes, jamais à "
+        f"leur place — `status` insufficient/not_needed -> valeurs calibrées STRICTEMENT ÉGALES aux "
+        f"brutes, jamais une différence silencieuse pour un facteur qui vaut justement 1.0."
     ),
 }
 
@@ -893,3 +1024,103 @@ def delta_flag(delta_pct_value: Optional[float]) -> Optional[bool]:
     if delta_pct_value is None:
         return None
     return abs(delta_pct_value) > DELTA_ALERT_PCT
+
+
+# ---------------------------------------------------------------------------
+# Calibration personnelle (prévisions uniquement) — voir la section dédiée du
+# docstring du module et ASSUMPTIONS["calibration"].
+# ---------------------------------------------------------------------------
+
+def _median_and_iqr(values: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Médiane et écart interquartile (méthode `"inclusive"`, cohérente avec
+    une médiane calculée sur le MÊME jeu de valeurs — voir la documentation de
+    `statistics.quantiles`) — `(None, None)` si `values` est vide, IQR `None`
+    (pas seulement 0.0, qui laisserait croire à une dispersion mesurée nulle)
+    si un seul point ne permet aucun quartile."""
+    if not values:
+        return None, None
+    median = statistics.median(values)
+    if len(values) < 2:
+        return median, None
+    q1, _, q3 = statistics.quantiles(values, n=4, method="inclusive")
+    return median, q3 - q1
+
+
+def calibration_band_report(ratios: Sequence[float], *, min_n: int = CALIBRATION_MIN_N,
+                             band_pct: float = CALIBRATION_NOT_NEEDED_BAND_PCT,
+                             outlier_band_pct: float = CALIBRATION_OUTLIER_RELATIVE_BAND_PCT,
+                             factor_min: float = CALIBRATION_FACTOR_MIN,
+                             factor_max: float = CALIBRATION_FACTOR_MAX) -> dict:
+    """Calibration personnelle d'UN panier (route OU trail), à partir des
+    ratios `garmin_kcal / model_kcal` de TOUTES les séances mesurables du
+    panier sur la fenêtre — déjà filtrés par l'appelant SUR LE SEUL panier
+    (route ou trail, voir `arc_index.energy_calibration`, seul appelant prévu),
+    mais PAS sur `flag` (voir ci-dessous, correctif de revue de code). Fonction
+    PURE, aucune connaissance d'un sport ou d'une date : `ratios` est une
+    simple liste de nombres.
+
+    **Exclusion des aberrantes, RELATIVE à la médiane BRUTE du panier — jamais
+    au `flag` par séance** (correctif de revue de code, BLOQUANT) : une
+    version antérieure excluait les séances dont `arc_energy.delta_flag`
+    valait `True` (écart modèle/Garmin ABSOLU > `DELTA_ALERT_PCT`, 15 %) avant
+    même de calculer un ratio — ce qui bride MATHÉMATIQUEMENT le ratio médian
+    au panier `[0.870, 1.176]` environ (`1 / 1.15` à `1.15`), rendant les
+    bornes `[factor_min, factor_max]` (0.8-1.2) inatteignables et faisant
+    tomber en `"insufficient"` un biais RÉEL et cohérent de 12-20 % (chaque
+    séance individuelle dépasse alors le seuil d'alerte PAR SÉANCE, mais le
+    panier tout entier n'a RIEN d'aberrant : c'est justement ce que la
+    calibration doit détecter). `arc_energy.delta_flag`/`DELTA_ALERT_PCT`
+    restent RÉSERVÉS à l'alerte affichée sur une séance individuelle — jamais
+    réutilisés ici. Le filtre appliqué ICI est différent : une PREMIÈRE
+    médiane est calculée sur `ratios` en ENTIER, puis seuls les ratios dont
+    l'écart RELATIF à CETTE médiane dépasse `outlier_band_pct` (15 %,
+    approximation du projet — voir `ASSUMPTIONS["calibration"]`) sont exclus
+    (typiquement une séance à capteur clairement défaillant, ex. ratio 2.0 au
+    milieu d'un panier à 1.10-1.30) ; la médiane/IQR/facteur FINALS sont
+    recalculés sur les ratios restants. Une majorité cohérente (même loin de
+    1.0) n'est ainsi JAMAIS exclue par elle-même — seule une MINORITÉ qui
+    s'écarte du gros du panier l'est.
+
+    Rend `{"n", "ratio_median", "ratio_iqr", "status", "factor"}` :
+    - `n` : nombre de ratios RETENUS après exclusion des aberrantes (taille de
+      l'échantillon réellement utilisé pour la médiane/le facteur) — jamais le
+      nombre de ratios reçus en entrée si des aberrantes ont été exclues.
+    - `ratio_median`/`ratio_iqr` : médiane et dispersion (IQR) du ratio parmi
+      les ratios RETENUS, arrondies à 3 décimales — `None` si `ratios` est
+      vide (`ratio_iqr` aussi `None` avec un seul ratio retenu, voir
+      `_median_and_iqr`) ; rendues MÊME quand `status="insufficient"`
+      (diagnostic utile même sous le seuil, voir `n < min_n`), jamais
+      masquées.
+    - `status` : `"insufficient"` (`n < min_n`), `"not_needed"` (médiane à
+      `band_pct` % ou moins de 1.0), ou `"applied"` (sinon).
+    - `factor` : `1.0` pour `"insufficient"`/`"not_needed"` (jamais appliqué
+      faute d'échantillon suffisant, ou parce que le modèle est déjà fidèle
+      sur ce panier), sinon la médiane BORNÉE à `[factor_min, factor_max]` —
+      jamais extrapolée au-delà (voir `ASSUMPTIONS["calibration"]`)."""
+    if not ratios:
+        return {"n": 0, "ratio_median": None, "ratio_iqr": None, "status": "insufficient", "factor": 1.0}
+    raw_median = statistics.median(ratios)
+    if raw_median > 0:
+        kept = [r for r in ratios if abs(r / raw_median - 1.0) <= outlier_band_pct / 100.0]
+    else:
+        kept = list(ratios)  # médiane brute non positive : filet de sécurité, jamais de division par zéro
+    if not kept:
+        # Cas dégénéré (ex. deux ratios très écartés, tous deux hors de la bande relative
+        # à leur propre médiane) : mieux vaut TOUT garder que rendre un panier vide, qui
+        # masquerait des données réellement présentes derrière un `status="insufficient"`
+        # à `n=0` trompeur.
+        kept = list(ratios)
+
+    n = len(kept)
+    median, iqr = _median_and_iqr(kept)
+    ratio_median = round(median, 3) if median is not None else None
+    ratio_iqr = round(iqr, 3) if iqr is not None else None
+    if n < min_n:
+        return {"n": n, "ratio_median": ratio_median, "ratio_iqr": ratio_iqr,
+                "status": "insufficient", "factor": 1.0}
+    if abs(median - 1.0) * 100.0 <= band_pct:
+        return {"n": n, "ratio_median": ratio_median, "ratio_iqr": ratio_iqr,
+                "status": "not_needed", "factor": 1.0}
+    factor = max(factor_min, min(factor_max, median))
+    return {"n": n, "ratio_median": ratio_median, "ratio_iqr": ratio_iqr,
+            "status": "applied", "factor": round(factor, 3)}

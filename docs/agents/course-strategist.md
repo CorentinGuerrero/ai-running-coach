@@ -86,6 +86,22 @@ couverte par les réserves de l'athlète. `energy` reste un KPI DÉRIVÉ exposé
 par la CLI, jamais une clé du contrat `race_plan` persisté (même statut que
 `scripts/arc_index.py fueling`).
 
+**Calibration personnelle** : chaque scénario, et chaque section à
+l'intérieur de ce scénario, porte à côté des valeurs brutes
+(`kcal`/`kcal_per_h`/`cumulative_kcal`) leurs équivalents
+`kcal_calibrated`/`kcal_per_h_calibrated`/`cumulative_kcal_calibrated` — un
+facteur personnel (`energy.calibration`, `{"band", "band_source", "n",
+"ratio_median", "ratio_iqr", "status", "factor"}`) appris sur l'écart
+Garmin/modèle mesuré de l'athlète. Le panier (route ou trail) est choisi
+depuis le D+/km réel du GPX analysé (`band_source == "gpx"`), ou forcé
+explicitement par `--terrain road|trail` (`band_source == "option"`) — jamais
+depuis le profil général de l'athlète, voir [Dépense énergétique — la
+calibration personnelle](../energie.md#la-calibration-personnelle). L'agent
+utilise TOUTES les valeurs calibrées (jamais un mélange avec les brutes)
+uniquement quand `status == "applied"` (échantillon suffisant, écart non
+négligeable) ; sinon toutes les valeurs brutes — jamais présentées comme une
+mesure quand calibrées.
+
 ## Fichier source
 
 `agents/course-strategist.md` · moteur : `scripts/arc_race_pacing.py`

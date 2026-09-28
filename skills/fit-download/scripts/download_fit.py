@@ -20,6 +20,12 @@ Options:
   --overwrite    Ré-télécharge même si le fichier existe
   --python PATH  Interpréteur contenant garminconnect (auto-détecté sinon)
 
+Sans `--overwrite`, une séance déjà téléchargée est sautée — avec `--json`, ce
+saut porte sur la copie NORMALISÉE canonique (`<out_dir>/fit/<id>.json`), pas
+sur le seul `.fit` brut (voir `_should_skip_download`) : relancer cette commande
+avec `--from-dir --json` sur un historique déjà rattrapé ne re-télécharge donc
+que les séances qui n'ont pas encore leur copie normalisée.
+
 Avec `--json`, en plus du dump brut `fitparse` (`<id>.records.json`, à des fins de
 diagnostic/analyse fine — `skills/session-parts-analyzer`), une copie **normalisée**
 est écrite au chemin canonique `activities/fit/<id>.json` (voir `scripts/arc_samples.py`
@@ -245,6 +251,27 @@ def _activity_id_from_arc(text: str):
     return value if isinstance(value, int) else None
 
 
+def _should_skip_download(dst: Path, out_dir: Path, activity_id: int, *,
+                           overwrite: bool, want_json: bool) -> bool:
+    """`True` si `activity_id` peut être sauté (déjà téléchargé) — jamais un simple
+    `dst.exists()` (le `.fit` brut) quand `--json` est demandé : une version
+    antérieure re-téléchargeait ALORS SYSTÉMATIQUEMENT chaque séance déjà présente
+    dès que `--json` était passé (revue de code, correctif rattrapage historique) —
+    coûteux et inutile sur un historique de centaines de séances déjà rattrapées.
+    Avec `--json`, on saute aussi UNIQUEMENT si la copie **normalisée** canonique
+    (`<out_dir>/fit/<activity_id>.json`, celle qu'`arc_index.py` ingère réellement,
+    voir `_write_canonical_samples`) existe déjà — le `.fit` brut seul ne suffit pas
+    (une exécution antérieure SANS `--json` n'a jamais produit cette copie).
+    Avec `--json`, la copie normalisée suffit : si l'athlète a supprimé les `.fit`
+    bruts (lourds, jetables) en gardant `fit/<id>.json`, rien n'est re-téléchargé.
+    `overwrite=True` ne saute jamais, quel que soit l'état des fichiers."""
+    if overwrite:
+        return False
+    if want_json:
+        return (out_dir / "fit" / f"{activity_id}.json").exists()
+    return dst.exists()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Télécharge des fichiers FIT Garmin (bypass MCP) via garminconnect + tokens locaux."
@@ -289,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = 0
     for aid in ids:
         dst = out_dir / f"{aid}.fit"
-        if dst.exists() and not args.overwrite and not args.json:
+        if _should_skip_download(dst, out_dir, aid, overwrite=args.overwrite, want_json=args.json):
             print(f"skip {aid} (existe) — --overwrite pour forcer")
             continue
         try:

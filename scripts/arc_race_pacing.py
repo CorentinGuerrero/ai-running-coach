@@ -627,7 +627,31 @@ ASSUMPTIONS = {
         "chaleur est plus élevé (thermorégulation, fréquence cardiaque plus haute à vitesse égale). "
         "Ce n'est PAS corrigé ici : `plan.energy` reste un contrôle/une prévision utile pour l'ordre "
         "de grandeur et la RÉPARTITION par section, jamais une mesure fine du surcoût thermique — à "
-        "dire explicitement si l'athlète pose la question par forte chaleur prévue."
+        "dire explicitement si l'athlète pose la question par forte chaleur prévue.\n\n"
+        "**Calibration personnelle (`plan.energy.calibration`)** : `arc_index.energy_calibration` "
+        "(voir `arc_energy.ASSUMPTIONS['calibration']`) rend, par panier route/trail, un ratio médian "
+        "Garmin/modèle appris sur l'historique RÉEL de l'athlète — appliqué ICI, sur les valeurs "
+        "PRÉVUES uniquement (jamais sur une séance déjà mesurée, `activity_energy` reste le calcul "
+        "BRUT). Le panier (route OU trail) est choisi depuis LE PARCOURS analysé, PAS depuis le "
+        "profil de l'athlète (`resolve_calibration_band`, correctif de revue de code, BLOQUANT : une "
+        "version antérieure utilisait `conf['sport']['primary']`, le profil GÉNÉRAL de l'athlète — un "
+        "plan préparé pour une course de nature différente de ce profil habituel aurait alors calibré "
+        "sur le MAUVAIS panier) : sans `--terrain`, dérivé du D+/km RÉEL de CE GPX "
+        "(`TRAIL_GAIN_M_PER_KM`, 15 m/km, **approximation du projet**, aucun seuil publié identifié) "
+        "-> `band_source=\"gpx\"` ; `--terrain road|trail` (choix EXPLICITE de l'athlète, qui peut "
+        "savoir des choses que le tracé seul ne dit pas) prime TOUJOURS quand fourni -> "
+        "`band_source=\"option\"`. `kcal_calibrated`/`kcal_per_h_calibrated`/"
+        "`cumulative_kcal_calibrated` sont ajoutés À CÔTÉ de `kcal`/`kcal_per_h`/`cumulative_kcal` "
+        "bruts, PAR SCÉNARIO ET PAR SEGMENT (`by_scenario[scenario]` et chaque "
+        "`by_scenario[scenario]['segments'][i]`), JAMAIS à leur place — le facteur, SCALAIRE UNIQUE "
+        "par scénario, s'applique UNIFORMÉMENT segment par segment (exact PAR LINÉARITÉ, jamais une "
+        "fausse précision locale). `status` `insufficient`/`not_needed` (échantillon insuffisant, ou "
+        "modèle déjà fidèle sur ce panier) donne des valeurs calibrées STRICTEMENT ÉGALES aux brutes "
+        "(facteur 1.0), jamais une fausse différence. `plan.energy.calibration` (`{\"band\", "
+        "\"band_source\", \"n\", \"ratio_median\", \"ratio_iqr\", \"status\", \"factor\"}`) est "
+        "TOUJOURS présent quand `energy.available=True`, même `status=\"insufficient\"` — un agent "
+        "qui veut savoir SI une calibration a été appliquée lit ce seul champ, jamais une comparaison "
+        "manuelle brut/calibré."
     ),
 }
 
@@ -1187,9 +1211,28 @@ def _segments_with_profile(predicted_segments: Sequence[dict], raw_segments: Seq
     return out
 
 
+def _default_calibration_bucket() -> dict:
+    """Repli quand aucune calibration n'a été résolue par l'appelant (`calibration=None`,
+    ex. un test qui n'y a jamais pensé) — MÊME forme qu'un panier
+    `arc_energy.calibration_band_report` réellement `insufficient` (`n=0`,
+    facteur 1.0) : jamais une exception, jamais une clé absente."""
+    return {"n": 0, "ratio_median": None, "ratio_iqr": None, "status": "insufficient", "factor": 1.0}
+
+
+def _apply_calibration(kcal: float, kcal_per_h: Optional[float], factor: float) -> Tuple[float, Optional[float]]:
+    """`(kcal, kcal_per_h)` MULTIPLIÉS par `factor` (voir `arc_energy.
+    ASSUMPTIONS['calibration']` : le facteur est LINÉAIRE, comme la masse,
+    voir `arc_energy.ASSUMPTIONS['mass_linearity']`) — `kcal_per_h` reste
+    `None` s'il l'était déjà (jamais une division par zéro inventée)."""
+    return kcal * factor, (kcal_per_h * factor if kcal_per_h is not None else None)
+
+
 def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict], *,
                           weight_kg: Optional[float], weight_source: Optional[str],
-                          pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True) -> dict:
+                          pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True,
+                          calibration_band: Optional[str] = None,
+                          calibration_band_source: Optional[str] = None,
+                          calibration: Optional[dict] = None) -> dict:
     """Dépense énergétique BRUTE prévue de la course, par segment ET par scénario
     — voir `ASSUMPTIONS["energy"]` pour la méthode complète (masse, profil
     réattaché, indépendance des trois scénarios, non-persistance dans le
@@ -1205,6 +1248,18 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
     `pack_kg_provided=False` (CLI : `--pack-kg` omis) ajoute un avertissement
     invitant à le renseigner, sans empêcher le calcul (repli à `pack_kg=0.0`).
 
+    `calibration_band`/`calibration_band_source`/`calibration` (voir
+    `ASSUMPTIONS["energy"]`, section « Calibration personnelle ») : résolus
+    par l'appelant (CLI) via `resolve_calibration_band` +
+    `arc_index.energy_calibration` — cette fonction reste pure (aucun accès
+    disque, aucun appel réseau), comme le reste du module. `calibration_band`/
+    `calibration_band_source` sont de simples LIBELLÉS (`"route"`/`"trail"`/
+    `None`, `"gpx"`/`"option"`/`None`) portés tels quels dans la sortie,
+    jamais réinterprétés ici. `calibration=None` (appelant qui n'a pas encore
+    ce paramètre, ex. un test antérieur à cette calibration) replie sur
+    `_default_calibration_bucket()` (`status="insufficient"`, facteur 1.0) —
+    jamais une exception.
+
     `weight_kg` absent ou non positif -> `{"available": False,
     "reason_code": "no_weight", ...}`, TOUS les champs par scénario à `None`
     — jamais une exception, jamais un plan entier invalidé pour un poids
@@ -1219,17 +1274,33 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
     PRÉDICTION de temps qui manque, jamais le poids.
 
     Rend `{"available", "reason", "reason_code", "weight_kg", "weight_source",
-    "pack_kg", "total_mass_kg", "by_scenario", "warnings"}` — `by_scenario`
-    porte une entrée par scénario (`SCENARIOS`), `None` pour un scénario SANS
-    AUCUNE vitesse prédite (même si d'autres scénarios, eux, en ont), sinon
-    `{"kcal", "kcal_per_h", "segments", "n_segments_no_speed"}` avec
-    `segments[].{"id", "kcal", "kcal_per_h", "cumulative_kcal",
-    "reason_code"}` (cumul dans l'ORDRE du parcours) — `n_segments_no_speed`
+    "pack_kg", "total_mass_kg", "calibration", "by_scenario", "warnings"}` —
+    `calibration` (`{"band", "band_source", "n", "ratio_median", "ratio_iqr",
+    "status", "factor"}`) TOUJOURS présent, même `available=False` (un agent
+    peut vouloir savoir si une calibration existerait, indépendamment du reste
+    du plan). `by_scenario` porte une entrée par scénario (`SCENARIOS`), `None`
+    pour un scénario SANS AUCUNE vitesse prédite (même si d'autres scénarios,
+    eux, en ont), sinon `{"kcal", "kcal_per_h", "kcal_calibrated",
+    "kcal_per_h_calibrated", "segments", "n_segments_no_speed"}` —
+    `kcal_calibrated`/`kcal_per_h_calibrated` sont `kcal`/`kcal_per_h`
+    MULTIPLIÉS par `calibration["factor"]` (1.0, donc STRICTEMENT ÉGAUX aux
+    valeurs brutes, si `status` est `insufficient`/`not_needed`) — TOUJOURS
+    présents À CÔTÉ des valeurs brutes, jamais à leur place — avec
+    `segments[].{"id", "kcal", "kcal_per_h", "kcal_calibrated",
+    "kcal_per_h_calibrated", "cumulative_kcal", "cumulative_kcal_calibrated",
+    "reason_code"}` (cumuls dans l'ORDRE du parcours) — le facteur de
+    calibration est un SCALAIRE UNIQUE par scénario (appris sur tout le panier
+    route/trail, jamais par segment) : l'appliquer UNIFORMÉMENT à chaque
+    segment (`kcal_calibrated`/`cumulative_kcal_calibrated`, PAR LINÉARITÉ,
+    voir `ASSUMPTIONS["mass_linearity"]` pour le même principe côté masse)
+    reste exact, ce n'est PAS une fausse précision locale — `n_segments_no_speed`
     compte les segments de CE scénario sans vitesse prédite (distance comptée,
     énergie non : cas PARTIEL, jamais une sous-estimation silencieuse), `0` si
     tous les segments du scénario ont une vitesse. `warnings` : à fusionner
     par l'appelant dans `plan.warnings` (jamais un second canal
     d'avertissement séparé pour l'athlète)."""
+    resolved_calibration = dict(calibration) if calibration is not None else _default_calibration_bucket()
+    calibration_out = {"band": calibration_band, "band_source": calibration_band_source, **resolved_calibration}
     warnings: List[str] = []
     if not pack_kg_provided:
         warnings.append(
@@ -1246,6 +1317,7 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
             "reason_code": "no_weight",
             "weight_kg": None, "weight_source": None,
             "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": None,
+            "calibration": calibration_out,
             "by_scenario": {s: None for s in SCENARIOS},
             "warnings": warnings,
         }
@@ -1268,19 +1340,39 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
             continue
         n_segments_no_speed = sum(1 for seg in result["segments"] if seg.get("reason_code") == "no_speed")
         cumulative_kcal = 0.0
+        cumulative_kcal_calibrated = 0.0
         seg_out = []
         for seg in result["segments"]:
             cumulative_kcal += seg["kcal"]
+            # Facteur SCALAIRE UNIQUE par scénario (appris sur tout le panier route/
+            # trail) appliqué UNIFORMÉMENT à chaque segment ET à son cumul (correctif
+            # de revue de code) — exact PAR LINÉARITÉ (même principe que la masse,
+            # voir ASSUMPTIONS["mass_linearity"]), jamais une fausse précision locale :
+            # un même facteur constant multiplié terme à terme donne un cumul calibré
+            # IDENTIQUE au cumul brut multiplié par ce facteur.
+            seg_kcal_calibrated, seg_kcal_per_h_calibrated = _apply_calibration(
+                seg["kcal"], seg["kcal_per_h"], resolved_calibration["factor"])
+            cumulative_kcal_calibrated += seg_kcal_calibrated
             seg_out.append({
                 "id": seg["id"],
                 "kcal": round(seg["kcal"], 1),
                 "kcal_per_h": round(seg["kcal_per_h"], 1) if seg["kcal_per_h"] is not None else None,
+                "kcal_calibrated": round(seg_kcal_calibrated, 1),
+                "kcal_per_h_calibrated": (round(seg_kcal_per_h_calibrated, 1)
+                                          if seg_kcal_per_h_calibrated is not None else None),
                 "cumulative_kcal": round(cumulative_kcal, 1),
+                "cumulative_kcal_calibrated": round(cumulative_kcal_calibrated, 1),
                 "reason_code": seg["reason_code"],
             })
+        kcal_rounded = round(result["kcal"], 1)
+        kcal_per_h_rounded = round(result["kcal_per_h"], 1) if result["kcal_per_h"] is not None else None
+        kcal_calibrated, kcal_per_h_calibrated = _apply_calibration(
+            kcal_rounded, kcal_per_h_rounded, resolved_calibration["factor"])
         by_scenario[scenario] = {
-            "kcal": round(result["kcal"], 1),
-            "kcal_per_h": round(result["kcal_per_h"], 1) if result["kcal_per_h"] is not None else None,
+            "kcal": kcal_rounded,
+            "kcal_per_h": kcal_per_h_rounded,
+            "kcal_calibrated": round(kcal_calibrated, 1),
+            "kcal_per_h_calibrated": round(kcal_per_h_calibrated, 1) if kcal_per_h_calibrated is not None else None,
             "segments": seg_out,
             # Cas PARTIEL (revue de code) : certains segments de CE scénario
             # n'ont aucune vitesse prédite (distance comptée dans `kcal`/
@@ -1304,6 +1396,7 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
             "reason_code": "no_prediction",
             "weight_kg": round(weight_kg, 1), "weight_source": weight_source,
             "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": round(total_mass_kg, 1),
+            "calibration": calibration_out,
             "by_scenario": {s: None for s in SCENARIOS},
             "warnings": warnings,
         }
@@ -1312,6 +1405,7 @@ def race_energy_forecast(segments: Sequence[dict], raw_segments: Sequence[dict],
         "available": True, "reason": None, "reason_code": None,
         "weight_kg": round(weight_kg, 1), "weight_source": weight_source,
         "pack_kg": round(safe_pack_kg, 2), "total_mass_kg": round(total_mass_kg, 1),
+        "calibration": calibration_out,
         "by_scenario": by_scenario, "warnings": warnings,
     }
 
@@ -1521,13 +1615,19 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      start_time: str = "07:00", race_date: Optional[str] = None,
                      segment_m: float = DEFAULT_SEGMENT_M,
                      weight_kg: Optional[float] = None, weight_source: Optional[str] = None,
-                     pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True) -> dict:
+                     pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True,
+                     calibration_band: Optional[str] = None,
+                     calibration_band_source: Optional[str] = None,
+                     calibration: Optional[dict] = None) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
-    `weight_kg`/`weight_source`/`pack_kg`/`pack_kg_provided` (dépense énergétique prévue) : voir
-    `ASSUMPTIONS["energy"]`/`race_energy_forecast` — résolus par l'appelant
-    (CLI), jamais par cette fonction (qui reste pure).
+    `weight_kg`/`weight_source`/`pack_kg`/`pack_kg_provided`/`calibration_band`/
+    `calibration_band_source`/`calibration` (dépense énergétique prévue,
+    calibration personnelle) : voir `ASSUMPTIONS["energy"]`/
+    `race_energy_forecast` — résolus par l'appelant (CLI, via
+    `resolve_calibration_band` pour les deux premiers), jamais par cette
+    fonction (qui reste pure).
 
     Lève `ValueError` si `start_time` n'est pas un `HH:MM` valide (revue de
     code #59, nit : jamais un repli silencieux sur 07:00)."""
@@ -1611,7 +1711,9 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             warnings.append(aid_passage["note"])
 
     energy = race_energy_forecast(segments, raw_segments, weight_kg=weight_kg, weight_source=weight_source,
-                                   pack_kg=pack_kg, pack_kg_provided=pack_kg_provided)
+                                   pack_kg=pack_kg, pack_kg_provided=pack_kg_provided,
+                                   calibration_band=calibration_band,
+                                   calibration_band_source=calibration_band_source, calibration=calibration)
     warnings.extend(energy.pop("warnings"))
 
     total_distance_m = sum(seg["distance_m"] for seg in segments)
@@ -1707,6 +1809,47 @@ def _flat_equivalent_m(distance_m: Optional[float], elevation_gain_m: Optional[f
     if primary == "trail" and elevation_gain_m:
         flat_m += elevation_gain_m * M.TRAIL_FLAT_M_PER_M_DPLUS
     return flat_m
+
+
+# D+ (m) par km du GPX ANALYSÉ au-delà duquel un parcours est traité « trail »
+# pour choisir le panier de calibration énergétique (`arc_index.
+# energy_calibration`) — approximation du projet, aucun seuil publié identifié
+# pour cette distinction précise. Correctif de revue de code (BLOQUANT) :
+# une version antérieure dérivait ce panier de `[sport].primary` (le PROFIL
+# de l'athlète, config générale) — un plan de course POUR une course de road
+# préparé par un trailer (ou l'inverse) aurait alors calibré sur le MAUVAIS
+# panier. Le panier doit refléter LE PARCOURS de CETTE course précise, jamais
+# le profil général de l'athlète.
+TRAIL_GAIN_M_PER_KM = 15.0
+
+
+def resolve_calibration_band(distance_m: Optional[float], elevation_gain_m: Optional[float],
+                              terrain_option: Optional[str]) -> Tuple[str, str]:
+    """`(band, band_source)` pour choisir le panier de calibration personnelle
+    (route/trail, `arc_index.energy_calibration`) — voir `ASSUMPTIONS["energy"]`,
+    section « Calibration personnelle ».
+
+    `terrain_option` (CLI `--terrain road|trail`, choix EXPLICITE de
+    l'athlète) prime TOUJOURS quand fourni -> `band_source="option"` — jamais
+    remis en cause par le GPX, l'athlète peut savoir des choses que le tracé
+    seul ne dit pas (ex. un parcours essentiellement plat mais couru en
+    conditions « trail », sentier régulier sans road significative).
+
+    Sans `--terrain`, dérivé du D+/km RÉEL du GPX analysé (`band_source=
+    "gpx"`) — JAMAIS de `[sport].primary` (correctif de revue de code,
+    BLOQUANT : le panier doit refléter LE PARCOURS de CETTE course, pas le
+    profil général de l'athlète, voir `TRAIL_GAIN_M_PER_KM`) :
+    `elevation_gain_m / (distance_m / 1000) >= TRAIL_GAIN_M_PER_KM` (15 m/km,
+    approximation du projet) -> `"trail"`, sinon `"route"`. `distance_m`
+    absente ou non positive (GPX sans distance exploitable) replie sur
+    `"route"` (jamais de division par zéro) — reste `band_source="gpx"`, la
+    valeur elle-même n'étant alors qu'un repli sûr, pas une vraie dérivation."""
+    if terrain_option in ("road", "trail"):
+        return ("trail" if terrain_option == "trail" else "route"), "option"
+    if not distance_m or distance_m <= 0:
+        return "route", "gpx"
+    gain_per_km = (elevation_gain_m or 0.0) / (distance_m / 1000.0)
+    return ("trail" if gain_per_km >= TRAIL_GAIN_M_PER_KM else "route"), "gpx"
 
 
 def _riegel_time_s(time_s: float, distance_m: float, target_m: float, exponent: float,
@@ -1924,6 +2067,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                      help=f"poids du sac/flasques/matériel porté (kg, {PACK_KG_MIN:g}-{PACK_KG_MAX:g}), "
                           "pour la dépense énergétique prévue — défaut 0.0 si omis, avec un "
                           "avertissement dans la sortie (voir ASSUMPTIONS['energy'])")
+    ap.add_argument("--terrain", choices=("road", "trail"), default=None,
+                     help="panier de calibration énergétique personnelle (route/trail, "
+                          "voir ASSUMPTIONS['energy']) — force le choix explicitement ; sans cette "
+                          "option, dérivé du D+/km RÉEL de ce GPX (TRAIL_GAIN_M_PER_KM), jamais du "
+                          "profil général de l'athlète ([sport].primary)")
     return ap
 
 
@@ -1973,6 +2121,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     energy_day = args.race_date or today_date.isoformat()
     weight_kg, weight_source = IDX.resolve_weight_kg_as_of(conn, energy_day, athlete)
     pack_kg_provided = args.pack_kg is not None
+
+    # Calibration personnelle (voir ASSUMPTIONS["energy"], « Calibration personnelle ») :
+    # panier route/trail dérivé DU PARCOURS (D+/km RÉEL de CE GPX,
+    # `resolve_calibration_band`/`TRAIL_GAIN_M_PER_KM`) — correctif de revue de code,
+    # BLOQUANT : jamais `[sport].primary` (profil GÉNÉRAL de l'athlète, qui peut très
+    # bien préparer une course de nature différente de son profil habituel), sauf
+    # override explicite `--terrain`.
+    calibration_band, calibration_band_source = resolve_calibration_band(
+        gpx_distance_m, gpx_elevation_gain_m, args.terrain)
+    calibration_report = IDX.energy_calibration(conn, today_date)
+    calibration = calibration_report["buckets"].get(calibration_band)
     try:
         pack_kg = _validate_pack_kg(args.pack_kg)
     except ValueError as exc:
@@ -1989,7 +2148,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             official_distance_m=args.official_distance_m,
             start_time=args.start, race_date=args.race_date, segment_m=args.segment_m,
             weight_kg=weight_kg, weight_source=weight_source,
-            pack_kg=pack_kg, pack_kg_provided=pack_kg_provided)
+            pack_kg=pack_kg, pack_kg_provided=pack_kg_provided,
+            calibration_band=calibration_band, calibration_band_source=calibration_band_source,
+            calibration=calibration)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
