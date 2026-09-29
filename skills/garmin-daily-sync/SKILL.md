@@ -113,18 +113,20 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    ingère aussi les échantillons FIT déposés à l'étape 2 (`activity_sample`, aucune action
    supplémentaire requise).
 3b. **Alerte d'usure des chaussures (#132) — une seule fois par franchissement, sans état.**
-   Si l'étape 1 a créé ou fusionné au moins une séance running/trail/hiking, prendre la date
-   LA PLUS ANCIENNE de ces séances et lancer
-   `python3 scripts/arc_index.py gear --since <cette date>`. Pour chaque paire du JSON qui porte
-   `crossed_since: true`, ajouter le segment « Chaussures : <nom> a atteint son seuil
-   (<distance_m/1000> km) » à la ligne `Alerte :` unique (concaténé avec ` ; `, jamais une ligne
-   de plus). Méthode : `crossed_since` n'est vrai que si le cumul HORS séances datées de `--since`
-   était encore SOUS le seuil et que le cumul avec elles l'atteint — c'est donc la séance
-   synchronisée dans CE run qui a franchi le seuil ; au run suivant (`--since` plus récent) la
-   paire est déjà au-dessus et n'est plus signalée, sans fichier d'état. Limite documentée : une
-   activité ancienne rattrapée après coup (date antérieure aux séances du run) ne déclenche pas
-   l'alerte. Aucune paire franchie, ou aucune séance de ce type = rien à ajouter. Échec de la
-   commande : ignorer silencieusement (non bloquant, jamais `ERREUR :`).
+   Dresser la liste des séances running/trail/hiking **synchronisées pour la première fois dans
+   CE run** : fichier d'activité créé à l'étape 1, ou fichier « pas encore synchronisé »
+   (`/log`, #67) qui reçoit ses premiers champs Garmin. Une séance dont le fichier portait déjà
+   ses données Garmin (simple re-fusion, second passage le même jour) n'en fait **jamais** partie.
+   Lancer `python3 scripts/arc_index.py gear --activities <id1>,<id2>,…` avec, pour chacune, son
+   `garmin_activity_id` (ou `intervals_activity_id`, ou à défaut le chemin `activities/….md`).
+   Pour chaque paire du JSON qui porte `crossed_in_run: true`, ajouter le segment
+   « Chaussures : <nom> a atteint son seuil (<distance_m/1000> km) » à la ligne `Alerte :`
+   unique (concaténé avec ` ; `, jamais une ligne de plus). Méthode : `crossed_in_run` n'est vrai
+   que si le cumul HORS ces séances était encore SOUS le seuil et que le cumul avec elles
+   l'atteint — le franchissement est identifié par la séance, pas par une date : un second
+   passage (le soir, ou une re-fusion) ne repasse pas ces identifiants et ne ré-émet rien, sans
+   fichier d'état. Aucune séance de ce type, ou aucune paire franchie = rien à ajouter. Échec de
+   la commande : ignorer silencieusement (non bloquant, jamais `ERREUR :`).
 4. **Garde-fou r5, bilan rouge (#52/#53) — jamais d'écriture de plan ni de push ici.** Si
    un `medical/YYYY-MM-DD_health.md` persisté à l'étape 1 porte `verdict: "red"`, chercher
    dans `planning/` une semaine (`kind: week`) dont une séance de qualité (intensité

@@ -202,7 +202,10 @@ méthode complète. En résumé :
 - `départ N km` (#132) : ajouté au cumul (`start_m` dans la table `gear`,
   `distance_m` de `gear_mileage` = activités + départ), donc compté dans le
   seuil d'alerte, la prévision et `near_threshold` ; conservé pour une paire
-  `(retirée)`. Jamais négatif (une valeur négative ou illisible est ignorée),
+  `(retirée)`. Seule la forme `[~]N [km|mi]` est lue (« départ usine 2025 » ou une
+  valeur négative restent du texte libre ignoré) ; point et virgule sont toujours
+  décimaux (`1.200 km` = 1,2 km), l'espace sépare les milliers ; l'unité peut être
+  collée (`186mi`) ;
   `départ 0 km` est valide. Le corriger par chat (« mes Pegasus ont en fait ~300
   km ») = réécrire ce SEUL segment de la puce (départ = total déclaré − km déjà
   comptés par les activités, plancher 0), jamais les activités passées.
@@ -212,9 +215,12 @@ méthode complète. En résumé :
   `retire_forecast_weeks` (semaines, 0,1 près) et `retire_forecast_date`
   (toujours future). Clés OMISES sans usage sur 28 jours, pour une paire retirée
   ou déjà au seuil (`alert` : « seuil dépassé »). `near_threshold: true` dès 90 %
-  du seuil. `arc_index.py gear --since AAAA-MM-JJ` ajoute `crossed_since: true`
-  quand les séances datées de ce jour ou après font franchir le seuil — base de
-  l'alerte unique du `garmin-daily-sync`, sans fichier d'état. Méthode et limites :
+  du seuil. `arc_index.py gear --activities ID[,ID…]` (garmin_activity_id,
+  intervals_activity_id ou chemin du fichier des séances synchronisées dans CE run) ajoute
+  `crossed_in_run: true` à la paire dont elles font franchir le seuil — base de
+  l'alerte unique du `garmin-daily-sync` (par séance, pas par date : un second
+  passage le même jour ne ré-émet rien), sans fichier d'état. Avec `--today`
+  dans le passé, le cumul ignore les séances postérieures. Méthode et limites :
   `arc_metrics.ASSUMPTIONS["gear_mileage"]`.
 - Deux puces qui dérivent le même `gear_id` (même modèle racheté sans `id:`
   pour les distinguer) : la première garde le slug nu, les suivantes reçoivent

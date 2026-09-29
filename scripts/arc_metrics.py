@@ -524,11 +524,16 @@ ASSUMPTIONS = {
                  "retirée, seuil déjà atteint (`alert`, le texte dit alors « seuil dépassé »). Approximation "
                  "linéaire : ne tient pas compte d'un bloc de repos, d'une préparation de course ou d'un "
                  "changement de rotation ; `near_threshold` (clé présente seulement si vraie) = cumul ≥ 90 % "
-                 "du seuil sans l'avoir atteint. Alerte « une seule fois » (`since`) : `crossed_since` (clé "
-                 "présente seulement si `since` est fourni) vaut vrai si le cumul HORS séances datées "
-                 "≥ `since` était sous le seuil et que le cumul total l'atteint — l'activité synchronisée "
-                 "dans ce run est celle qui a franchi le seuil ; sans état persistant, une activité "
-                 "antidatée rattrapée après coup (date < `since`) ne déclenche pas l'alerte.",
+                 "du seuil sans l'avoir atteint. Alerte « une seule fois » (`run_refs`, #132) : `crossed_in_run` "
+                 "(clé présente seulement si `run_refs` est fourni) vaut vrai si le cumul HORS les séances "
+                 "désignées (par `garmin_activity_id`, `intervals_activity_id` ou chemin du fichier) était "
+                 "sous le seuil et que le cumul total l'atteint : la séance qui franchit le seuil est "
+                 "identifiée par son identifiant, jamais par sa date — une seconde synchronisation le même "
+                 "jour, ou la fusion d'une séance déjà synchronisée (que l'appelant ne passe pas), ne "
+                 "ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` "
+                 "quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans "
+                 "la prévision), et le séparateur décimal du départ est toujours le point ou la virgule "
+                 "(« 1.200 km » = 1,2 km ; espace = milliers).",
     "hr_zones": "Zones FC, temps en zone et polarisation 80/20 (#43) : des APPROXIMATIONS d'entraînement, "
                 "jamais une mesure physiologique directe (pas de test d'effort, pas de lactate, pas de "
                 "seuils ventilatoires mesurés) — voir plus bas pour la polarisation, la plus approximative "
@@ -1654,7 +1659,7 @@ def durability_trend(activities: List[dict], day: date, window_weeks: int = DURA
 
 
 def gear_mileage(activities: List[dict], gear_defs: List[dict],
-                 today: Optional[date] = None, since: Optional[str] = None) -> dict:
+                 today: Optional[date] = None, run_refs: Optional[Iterable[str]] = None) -> dict:
     """Kilométrage cumulé par chaussure (#40). Voir `ASSUMPTIONS["gear_mileage"]`
     pour la méthode complète (attribution, chaussure par défaut, `gear_id` inconnu,
     date `depuis` filtrant l'attribution PAR DÉFAUT seulement, priorité
@@ -1668,7 +1673,8 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
     `start_date`, `threshold_m`, `default`, `retired`, `start_m`, `usage`,
     `collision_base`).
     `today` (#132) : jour de référence de la prévision de retraite — sans lui, aucune
-    prévision. `since` (AAAA-MM-JJ, #132) : ajoute `crossed_since` (voir ASSUMPTIONS).
+    prévision. `run_refs` (#132) : identifiants des séances synchronisées dans CE run (clé `refs` de chaque
+    activité : garmin_activity_id, intervals_activity_id, chemin) ; ajoute `crossed_in_run`.
 
     Rend `{"shoes": [...], "unknown": [...], "warnings": [...]}` : `shoes` couvre
     TOUTE chaussure déclarée dans le profil, y compris à 0 m (l'athlète voit sa
@@ -1693,13 +1699,16 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
 
     totals: Dict[str, float] = {}
     recent: Dict[str, float] = {}     # 28 derniers jours (prévision)
-    since_m: Dict[str, float] = {}    # séances datées >= `since` (alerte à franchissement)
+    run_set = {str(r) for r in run_refs} if run_refs else set()
+    run_m: Dict[str, float] = {}      # séances de CE run (alerte à franchissement)
     for act in activities:
         if act.get("sport") not in GEAR_WEAR_SPORTS:
             continue
         distance = act.get("distance_m")
         if not distance:
             continue
+        if today_iso and act.get("date") and act["date"] > today_iso:
+            continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
         gear_id = act.get("gear_id")
         if not gear_id:
             if not default_id:
@@ -1711,8 +1720,8 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
         day = act.get("date")
         if window_start and day and window_start <= day <= today_iso:
             recent[gear_id] = recent.get(gear_id, 0.0) + distance
-        if since and day and day >= since:
-            since_m[gear_id] = since_m.get(gear_id, 0.0) + distance
+        if run_set and run_set & {str(r) for r in (act.get("refs") or [])}:
+            run_m[gear_id] = run_m.get(gear_id, 0.0) + distance
 
     shoes = []
     warnings = []
@@ -1741,10 +1750,10 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
             shoe["recent_28d_m"] = round(recent_m)
             shoe["retire_forecast_date"] = (today + timedelta(days=max(1, math.ceil(days)))).isoformat()
             shoe["retire_forecast_weeks"] = round(days / 7, 1)
-        if since:
-            before = distance_m - round(since_m.get(gear_id, 0.0))
+        if run_set:
+            before = distance_m - round(run_m.get(gear_id, 0.0))
             if (not retired) and before < threshold_m <= distance_m:
-                shoe["crossed_since"] = True
+                shoe["crossed_in_run"] = True
         shoes.append(shoe)
         collision_base = g.get("collision_base")
         if collision_base:

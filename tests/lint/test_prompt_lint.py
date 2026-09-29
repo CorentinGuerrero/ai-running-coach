@@ -317,8 +317,8 @@ class TestGearAlertsWiring(unittest.TestCase):
 
     def test_daily_sync_alerts_once_per_crossing(self):
         text = self.SYNC.read_text(encoding="utf-8")
-        self.assertIn("arc_index.py gear --since", text)
-        self.assertIn("crossed_since", text)
+        self.assertIn("arc_index.py gear --activities", text)
+        self.assertIn("crossed_in_run", text)
         self.assertIn("une seule fois", text)
 
     def test_week_skill_mentions_pairs_over_or_near_threshold(self):

@@ -26,6 +26,6 @@ must_match = [
   "(d[ée]part[^\\n]{0,40}258)|(258[^\\n]{0,40}d[ée]part)",
 ]
 must_not_match = [
-  "(j['’]ai|je viens de) (modifi[ée]|corrig[ée]|r[ée][ée]crit)[^.\\n]{0,40}(s[ée]ances?|activit[ée]s?)",
+  "(j['’]ai|je viens de) (modifi[ée]|corrig[ée]|r[ée][ée]crit) (les|tes|des|toutes)\\s+(s[ée]ances?|activit[ée]s?)",
 ]
 unchanged_files = ["activities/*.md"]

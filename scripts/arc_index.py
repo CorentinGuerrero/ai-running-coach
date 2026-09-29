@@ -3085,14 +3085,15 @@ def heat_acclimation_today(conn, conf: dict, today: date) -> dict:
     return M.heat_acclimation(activities, weather_rows, today, conf["heat_threshold_c"], window_days)
 
 
-def gear_mileage(conn, today: Optional[date] = None, since: Optional[str] = None) -> dict:
+def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None) -> dict:
     """Kilométrage par chaussure (#40) — pour la CLI et pour les agents en headless
     (`coach`, rapport hebdomadaire). N'est pas soumis à `[health].morning_check` :
     ne dépend d'aucune donnée de santé, seulement du profil et des activités.
 
     #132 : départ (`start_m`) compris dans le cumul ; prévision de retraite calculée
-    contre `today` (défaut : la date du jour, comme les autres KPI) ; `since`
-    (AAAA-MM-JJ) ajoute `crossed_since` — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]`."""
+    contre `today` (défaut : la date du jour, comme les autres KPI) ; `run_refs`
+    (garmin_activity_id, intervals_activity_id ou chemin de fichier des séances du run)
+    ajoute `crossed_in_run` — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]`."""
     gear_defs = [dict(r) for r in conn.execute(
         "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
         "start_m, usage FROM gear")]
@@ -3100,9 +3101,13 @@ def gear_mileage(conn, today: Optional[date] = None, since: Optional[str] = None
         # `date` : indispensable à `M.gear_mileage` pour filtrer l'attribution par
         # défaut par `depuis` (revue PR #85, blocker 1) — jamais utilisée pour
         # exclure une activité à `gear_id` explicite.
-        "SELECT sport, distance_m, gear_id, date FROM activity WHERE gear_id IS NOT NULL OR sport IN "
+        "SELECT sport, distance_m, gear_id, date, garmin_activity_id, intervals_activity_id, source_path "
+        "FROM activity WHERE gear_id IS NOT NULL OR sport IN "
         f"({', '.join('?' for _ in M.GEAR_WEAR_SPORTS)})", M.GEAR_WEAR_SPORTS).fetchall()]
-    return M.gear_mileage(activities, gear_defs, today or date.today(), since)
+    for a in activities:
+        a["refs"] = [str(v) for v in (a.pop("garmin_activity_id"), a.pop("intervals_activity_id"),
+                                       a.pop("source_path")) if v is not None]
+    return M.gear_mileage(activities, gear_defs, today or date.today(), run_refs)
 
 
 def performance_index(conn, today: Optional[date] = None) -> dict:
@@ -3760,9 +3765,11 @@ def build_parser() -> argparse.ArgumentParser:
                              "terminant à --today (défaut : toutes les décisions connues)")
     parser.add_argument("--since", metavar="AAAA-MM-JJ",
                         help="commande « energy » : toutes les séances éligibles depuis cette date "
-                             "(incluse), ordre chronologique — incompatible avec --activity/--date ; "
-                             "commande « gear » : ajoute `crossed_since` (paire dont le seuil est franchi "
-                             "par les séances datées >= cette date, #132)")
+                             "(incluse), ordre chronologique — incompatible avec --activity/--date")
+    parser.add_argument("--activities", metavar="ID[,ID…]",
+                        help="commande « gear » (#132) : séances synchronisées dans CE run "
+                             "(garmin_activity_id, intervals_activity_id ou chemin du fichier, séparés par "
+                             "des virgules) — ajoute `crossed_in_run` à la paire dont elles franchissent le seuil")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="commande « energy » : nombre de dernières séances éligibles à rendre "
                              "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
@@ -3831,8 +3838,9 @@ def main(argv=None) -> int:
         print(json.dumps(heat_acclimation_today(conn, conf, today_date), ensure_ascii=False))
         return 0
     if args.command == "gear":
+        run_refs = [r.strip() for r in args.activities.split(",") if r.strip()] if args.activities else None
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        print(json.dumps(gear_mileage(conn, today_date, args.since), ensure_ascii=False))
+        print(json.dumps(gear_mileage(conn, today_date, run_refs), ensure_ascii=False))
         return 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

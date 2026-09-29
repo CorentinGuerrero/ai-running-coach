@@ -3,7 +3,7 @@
 ## Course visée
 
 - **Nom** : Trail des Collines
-- **Date** : 2026-06-13
+- **Date** : {{TODAY+84}}
 - **Distance** : 52 km
 - **Dénivelé positif** : 2 400 m
 - **Lieu** : Tournai

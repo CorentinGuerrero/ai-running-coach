@@ -743,7 +743,14 @@ _GEAR_SEGMENT_SPLIT_RE = re.compile(
     r"\s*:\s*(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:)", re.I)
 _GEAR_DEFAULT_RE = re.compile(r"\(\s*par\s*d[ée]faut\s*\)", re.I)
 _GEAR_RETIRED_RE = re.compile(r"\(\s*retir[ée]e?\s*\)", re.I)
-_GEAR_MILES_RE = re.compile(r"\bmi(?:les?)?\b", re.I)
+# « 186mi » (unité collée au nombre) compte : seul un préfixe alphabétique (« min ») l'exclut.
+_GEAR_MILES_RE = re.compile(r"(?<![a-z])mi(?:les?)?\b", re.I)
+# Segment « départ » : UNIQUEMENT « [~] <nombre> [km|mi|mile(s)] » — toute autre forme
+# (« départ usine 2025 », « départ en rotation le 12/03 ») reste du texte libre ignoré.
+# Séparateur de milliers = espace ; un point ou une virgule est TOUJOURS décimal
+# (« 1.200 km » = 1,2 km, jamais 1 200 km).
+_GEAR_START_VALUE_RE = re.compile(
+    r"^~?\s*(\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?)\s*(km|mi(?:les?)?)?\s*$", re.I)
 
 
 def _gear_section(text: str) -> Optional[str]:
@@ -840,7 +847,9 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
     `start_m` (#132) : segment « départ N km » (ou « N mi »/« miles », × 1609,344) — le
     kilométrage déjà parcouru AVANT le suivi (paire d'occasion, usage antérieur à
     l'installation), ajouté au cumul par `arc_metrics.gear_mileage` ; 0 est une valeur
-    valide (« départ 0 km »), une valeur négative ou illisible est ignorée (clé omise).
+    valide (« départ 0 km »). Seule la forme « [~]N [km|mi] » est acceptée : toute autre
+    (« départ usine 2025 », valeur négative ou illisible) est du texte libre ignoré (clé
+    omise). Un point/une virgule est toujours décimal (« 1.200 km » = 1,2 km).
     `usage` (#132, facultatif) : rôle libre en minuscules (« usage: course », « trail »,
     « route », « récup ») — lu par le coach pour suggérer une paire, jamais par un KPI.
 
@@ -879,9 +888,11 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
                     factor = 1609.344 if _GEAR_MILES_RE.search(value) else 1000.0
                     threshold_m = round(number * factor)
             elif kind == "start_mileage":
-                number = parse_fr_number(value)
-                if number is not None and number >= 0:
-                    factor = 1609.344 if _GEAR_MILES_RE.search(value) else 1000.0
+                m_start = _GEAR_START_VALUE_RE.match(value.strip())
+                if m_start:
+                    number = parse_fr_number(m_start.group(1))
+                    unit = (m_start.group(2) or "").lower()
+                    factor = 1609.344 if unit.startswith("mi") else 1000.0
                     start_m = round(number * factor)
             elif kind == "usage":
                 usage = value.strip().lower() or None
