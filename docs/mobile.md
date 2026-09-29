@@ -338,6 +338,26 @@ posée qui diffère est **remplacée avec un avertissement** « ancien → nouve
 façon de revenir ; un rerun d'`install.sh` sans `--llm` n'y touche jamais. Aucun rechargement
 du cron : `daily-sync.sh` relit le runner à chaque exécution.
 
+`--llm anthropic` garde le runner `claude` mais bascule la synchronisation de l'**abonnement**
+vers la **clé API facturée au token** : l'installation l'affiche (« abonnement → clé API
+facturée au token ») et `[sync].daily_budget_eur` plafonne la dépense.
+
+### Limites du runner `opencode`
+
+Le run de synchronisation `opencode` tourne avec des permissions volontairement étroites
+(config générée dans `.arc/sync/opencode.json`) :
+
+- **Pas de passerelle leanproxy.** Les outils appelés à travers `leanproxy_invoke_tool` échappent
+  aux permissions par outil ; la config refuse donc `leanproxy_*` en bloc, ce qui couperait aussi
+  toute lecture Garmin. Avec un `.mcp.json` qui ne déclare que la passerelle, `daily-sync.sh`
+  **échoue tout de suite** avec une notification « opencode + leanproxy non pris en charge pour
+  la synchronisation » (au lieu de ne rien synchroniser en silence), et
+  `coach_doctor.py --check llm_config` l'affiche en avertissement. Utilisez le **mode direct**
+  (installation sans `--use-leanproxy`) ou le runner `claude`.
+- **Ni bash ni accès web.** Sous `opencode`, la synchronisation ne peut lancer aucun script :
+  les étapes qui en dépendent (prévisions météo, `arc_index.py energy` — ligne de dépense
+  modèle) sont **sautées**. Le reste (activités, sommeil, HRV, fichiers au contrat) fonctionne.
+
 ### La clé API
 
 La clé n'est **jamais** dans le TOML ni dans votre profil de shell : elle vit dans

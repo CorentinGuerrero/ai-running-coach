@@ -123,6 +123,50 @@ class TestApprovalStore(TmpCase):
         self.assertEqual(store.reopen_orphans(), 1)
         self.assertEqual(store.get(rec["id"])["status"], "pending")
 
+    def test_annulation_a_son_propre_statut(self):
+        store = self.make()
+        rec, tokens = self.create(store)
+        result, done = store.resolve(rec["id"], "cancelled")
+        self.assertEqual((result, done["status"]), ("ok", "cancelled"))
+        self.assertEqual(store.verify_token(tokens["deny"], "deny")[0], "used")
+
+    def test_expiration_notifiee_par_toutes_les_voies(self):
+        seen = []
+        for voie in ("get", "list", "resolve", "verify", "expire_due"):
+            store = self.make()
+            store.on_expired = lambda records, seen=seen: seen.extend(r["id"] for r in records)
+            rec, tokens = self.create(store, ttl=100)
+            store.mark_pending(rec["id"])
+            self.clock.now += 101
+            seen.clear()
+            if voie == "get":
+                store.get(rec["id"])
+            elif voie == "list":
+                store.list()
+            elif voie == "resolve":
+                store.resolve(rec["id"], "allow")
+            elif voie == "verify":
+                store.verify_token(tokens["allow"], "allow")
+            else:
+                store.expire_due()
+            self.assertEqual(seen, [rec["id"]], voie)
+            store.get(rec["id"])
+            self.assertEqual(seen, [rec["id"]], f"{voie} : notifiée une seule fois")
+            (self.dir / "approvals.json").unlink()
+
+    def test_approbation_tardive_marquee_a_reprendre(self):
+        store = self.make()
+        rec, _ = self.create(store)
+        store.mark_pending(rec["id"])
+        self.assertEqual(store.resolve(rec["id"], "allow")[1]["resume"], "queued")
+        self.assertEqual([r["id"] for r in store.queued_resumes()], [rec["id"]])
+        store.set_resume(rec["id"], "failed", status="unexecuted")
+        self.assertEqual(store.queued_resumes(), [])
+        self.assertEqual(store.get(rec["id"])["status"], "unexecuted")
+        # une approbation en cours de tour (waiting) n'a rien à reprendre
+        other, _ = self.create(store)
+        self.assertNotIn("resume", store.resolve(other["id"], "allow")[1])
+
     def test_identifiants_invalides_ne_touchent_pas_le_disque(self):
         store = self.make()
         self.assertIsNone(store.get("../../etc/passwd"))

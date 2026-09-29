@@ -15,7 +15,7 @@ from arc_chat_backend import payload_hash  # noqa: E402
 from arc_chat_policy import Policy  # noqa: E402
 
 
-class PolicyTest(unittest.TestCase):
+class PolicyBase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -26,6 +26,8 @@ class PolicyTest(unittest.TestCase):
     def d(self, tool, tool_input=None, **kw):
         return self.policy.decide(tool, tool_input or {}, **kw)
 
+
+class PolicyTest(PolicyBase):
     def test_fichier_versionne_charge(self):
         self.assertIn("planning", self.policy.write_dirs)
         self.assertIn("wttr.in", self.policy.fetch_domains)
@@ -123,7 +125,133 @@ class PolicyTest(unittest.TestCase):
         real = tomllib.loads(text)
         for section in ("fs", "shell", "web", "mcp"):
             for key, value in real[section].items():
+                if key == "scripts":                      # tableaux imbriqués : clé de section complète en repli
+                    for script, table in value.items():
+                        self.assertEqual(parsed[f'shell.scripts."{script}"'], table, script)
+                    continue
                 self.assertEqual(parsed[section][key], value, f"{section}.{key}")
+
+
+class ShellBypassTest(PolicyBase):
+    """Revue : chemins absolus, `~`, options porteuses de chemin, `\\`, jokers."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_anciennes_commandes_toujours_permises(self):
+        for command in ("python3 scripts/arc_index.py energy", "python3 scripts/arc_index.py energy --days 7",
+                        "python3 scripts/arc_index.py --validate activities/x.md",
+                        "python3 scripts/arc_log.py --input planning/in.json --output activities/out.json",
+                        "python3 scripts/arc_race_pacing.py plan --gpx planning/course.gpx --pack-kg 3",
+                        "python3 scripts/arc_index.py samples 123 --with-gps"):
+            self.assertEqual(self.sh(command), "allow", command)
+
+    def test_chemins_absolus_et_tilde_refuses(self):
+        for command in (
+                "python3 scripts/arc_log.py --output /any/path",
+                "python3 scripts/arc_log.py --output=/any/path",
+                "python3 scripts/arc_log.py --input ~/.garminconnect/oauth1_token.json",
+                "python3 scripts/arc_index.py --db ~/.zshrc",
+                "python3 scripts/arc_index.py --db /etc/x",
+                "python3 scripts/arc_index.py --validate /etc/passwd",
+                "python3 scripts/arc_index.py /etc/passwd",
+                "python3 scripts/arc_race_pacing.py plan --gpx /etc/passwd",
+                "python3 scripts/arc_race_pacing.py plan --gpx planning/a.gpx --weather-file /etc/hosts",
+                "python3 scripts/coach_doctor.py --tokens-dir ~/.garminconnect",
+                "python3 scripts/coach_doctor.py",
+                "python3 scripts/arc_index.py --workspace /tmp"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_antislash_et_jokers_refuses(self):
+        for command in ("python3 scripts/arc_index.py\\ x", "python3 scripts/arc_index.py energy\\ ",
+                        "python3 scripts/arc_index.py --validate config/workspace.user.t*",
+                        "python3 scripts/arc_index.py --validate config/*.toml",
+                        "python3 scripts/arc_index.py --validate {a,b}", "python3 scripts/arc_index.py --validate ~"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_option_inconnue_refusee(self):
+        for command in ("python3 scripts/arc_log.py --evil x", "python3 scripts/arc_index.py --python /bin/sh",
+                        "python3 scripts/arc_log.py -o planning/x.json", "python3 scripts/download_fit.py --python x",
+                        "python3 scripts/arc_log.py --output"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_sorties_uniquement_dans_les_dossiers_de_donnees(self):
+        self.assertEqual(self.sh("python3 scripts/arc_log.py --output activities/o.json"), "allow")
+        for command in ("python3 scripts/arc_log.py --output scripts/arc_chat.py",
+                        "python3 scripts/arc_log.py --output config/workspace.toml",
+                        "python3 scripts/arc_log.py --output .arc/chat/approvals.json",
+                        "python3 scripts/arc_log.py --output planning/../scripts/x.py",
+                        "python3 scripts/arc_log.py --output out.json",
+                        "python3 scripts/arc_index.py --db .arc/coach.db",
+                        "python3 scripts/arc_index.py --db planning/.env"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_lecture_de_secrets_ou_hors_workspace_refusee(self):
+        for command in ("python3 scripts/arc_log.py --input config/workspace.user.toml",
+                        "python3 scripts/arc_log.py --input .arc/chat/approvals.json",
+                        "python3 scripts/arc_log.py --input ../secret.json",
+                        "python3 scripts/arc_index.py --validate .garminconnect/oauth1_token.json",
+                        "python3 scripts/arc_index.py workspace.user.toml"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_lien_symbolique_sortant_refuse(self):
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        (outside / "s.json").write_text("{}", encoding="utf-8")
+        (self.ws / "planning" / "lien.json").symlink_to(outside / "s.json")
+        self.assertEqual(self.sh("python3 scripts/arc_log.py --input planning/lien.json"), "deny")
+
+
+class WebFetchBypassTest(PolicyBase):
+    def test_contournements_de_domaine_refuses(self):
+        for url in ("https://evil.com\\.wttr.in/x", "https://wttr.in@evil.com/", "https://wttr.in.evil.com/",
+                    "https://evilwttr.in/", "https://wttr.in%2eevil.com/", "https://%77ttr.in/",
+                    "https://wttr.in:8443/x", "https://wttr.in:99999/", "ftp://wttr.in/", "//wttr.in/x",
+                    "https://wttr.in\\@evil.com/", "https://wttr.іn/x", "https://xn--wttr-in-x.evil/",
+                    "https://wttr.in./", " https://wttr.in/", "https://wttr.in/ x", "https:wttr.in",
+                    "https://user:pw@wttr.in/", "https://wttr.in.@evil.com/"):
+            self.assertEqual(self.d("web.fetch", {"url": url}), "deny", repr(url))
+
+    def test_domaines_valides(self):
+        for url in ("https://wttr.in/Lyon?format=j1", "http://wttr.in/Lyon", "https://WTTR.in/x",
+                    "https://fr.wttr.in/x", "https://wttr.in:443/x", "https://wttr.in?x=1",
+                    "https://nominatim.openstreetmap.org/search?q=Besan%C3%A7on"):
+            self.assertEqual(self.d("web.fetch", {"url": url}), "allow", url)
+
+
+class FsListGlobTest(PolicyBase):
+    def test_glob_visant_un_secret_refuse(self):
+        (self.ws / "config").mkdir()
+        (self.ws / "config" / "workspace.user.toml").write_text("x", encoding="utf-8")
+        for tool_input in ({"path": "config", "glob": "workspace.user.toml"},
+                           {"glob": "config/workspace.user.toml"},
+                           {"path": "config", "glob": "*.toml"},
+                           {"path": "config", "glob": "*"},
+                           {"glob": "**/*.toml"},
+                           {"glob": "**"},
+                           {"glob": "*"},
+                           {"glob": "**/workspace.user.*"},
+                           {"glob": "*.{md,toml}"},
+                           {"glob": ["*.md", "workspace.user.toml"]},
+                           {"glob": "workspace.user.to?l"},
+                           {"glob": ".garminconnect/*"},
+                           {"glob": ".g*/oauth*"},
+                           {"glob": "*/*.toml"},
+                           {"glob": ".e*"}, {"glob": "*.env"}, {"glob": "*.token"}, {"glob": "*.pem"},
+                           {"glob": "/etc/*"}, {"glob": "../*"}, {"glob": ".arc/**"}):
+            self.assertEqual(self.d("fs.list", tool_input), "deny", tool_input)
+
+    def test_glob_inoffensif_autorise(self):
+        (self.ws / "activities").mkdir()
+        for tool_input in ({"glob": "*.md"}, {"path": "activities", "glob": "*"}, {"glob": "planning/*.md"},
+                           {"glob": "**/*.md"}, {"glob": ["*.md", "*.json"]}, {"glob": "*.{md,json}"},
+                           {"path": "activities", "glob": "2026-*.md", "pattern": "workspace.user.toml"}):
+            self.assertEqual(self.d("fs.list", tool_input), "allow", tool_input)
+
+    def test_secret_reel_dans_un_dossier_de_donnees_detecte(self):
+        (self.ws / "planning" / "x.token").write_text("x", encoding="utf-8")
+        self.assertEqual(self.d("fs.list", {"path": "planning", "glob": "*"}), "deny")
+        self.assertEqual(self.d("fs.list", {"glob": "planning/*"}), "deny")
 
 
 if __name__ == "__main__":

@@ -723,10 +723,38 @@ detect_auth_failure() {
     return 1
 }
 
+# Passerelle leanproxy SEULE dans .mcp.json (aucun serveur direct garmin/intervals) ?
+# Sous opencode, les outils appelés à travers la passerelle (leanproxy_invoke_tool)
+# échappent aux permissions par outil : la config générée refuse donc leanproxy_*
+# entièrement, ce qui empêcherait toute lecture Garmin. On échoue vite plutôt que de
+# synchroniser « à vide ».
+mcp_gateway_only() {
+    [[ -f "$MCP_CONFIG" ]] || return 1
+    python3 -c '
+import json, sys
+try:
+    servers = json.load(open(sys.argv[1], encoding="utf-8")).get("mcpServers") or {}
+except (OSError, ValueError, AttributeError):
+    sys.exit(1)
+sys.exit(0 if "leanproxy" in servers and not {"garmin", "intervals"} & set(servers) else 1)
+' "$MCP_CONFIG"
+}
+
 main() {
     build_command
     log "Synchronisation $SOURCE_LABEL — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)${TRIGGER:+, déclencheurs : $TRIGGER}"
     log "Workspace : $ARC_WORKSPACE (moteur : $ARC_ENGINE_ROOT)"
+
+    if [[ "$RUNNER" == "opencode" ]] && mcp_gateway_only; then
+        local gateway_msg="opencode + leanproxy non pris en charge pour la synchronisation — utilisez le mode direct (./install.sh sans --use-leanproxy) ou le runner claude."
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            warn "$gateway_msg"
+        else
+            err "$gateway_msg"
+            notify "🚫 Sync $SOURCE_LABEL — opencode + leanproxy non pris en charge" 4 "no_entry,warning" "$gateway_msg"
+            exit 1
+        fi
+    fi
 
     local key_missing=0
     load_llm_env || key_missing=1

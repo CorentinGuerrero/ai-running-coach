@@ -32,7 +32,7 @@ http:
     arc-chat-approve:
       rule: >-
         Host(`coach.example.com`) &&
-        PathRegexp(`^/api/chat/approve/[A-Za-z0-9_-]+/(allow|deny)$`) &&
+        PathRegexp(`^/api/chat/approve/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/(allow|deny)$`) &&
         Method(`POST`)
       entryPoints: [websecure]
       priority: 300

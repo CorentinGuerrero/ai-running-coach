@@ -88,8 +88,9 @@ class ChatCase(unittest.TestCase):
         cfg = dict(C.CHAT_DEFAULTS)
         cfg.update({"enabled": True, "backend": "mock", "approval_wait_s": 5, "ntfy_delay_s": 0,
                     "rate_limit_per_min": 0, "mock_slow_s": 5})
+        factory = over.pop("backend_factory", MockBackend)
         cfg.update(over)
-        httpd, service = C.make_server(self.ws, cfg, MockBackend(self.ws, cfg), notif or {"provider": "none"}, port=0)
+        httpd, service = C.make_server(self.ws, cfg, factory(self.ws, cfg), notif or {"provider": "none"}, port=0)
         threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
 
         def stop():
@@ -315,7 +316,10 @@ class TestApprovals(ChatCase):
         self.post(f"/api/chat/sessions/{sid}/interrupt")
         self.assertTrue(box["finished"].wait(3))
         self.assertEqual(box["events"][-1][0], "done")
-        self.assertEqual(self.get(f"/api/chat/approvals/{aid}")[2]["status"], "denied")
+        self.assertEqual(self.get(f"/api/chat/approvals/{aid}")[2]["status"], "cancelled")
+        log = self.get(f"/api/chat/sessions/{sid}")[2]["events"]
+        resolved = [e["data"] for e in log if e["type"] == "approval_resolved"]
+        self.assertEqual(resolved[-1], {"approval_id": aid, "decision": "cancelled"})
 
     def test_pending_puis_reprise_asynchrone(self):
         self.start(approval_wait_s=0.3)
@@ -371,7 +375,10 @@ class TestNtfyQuickApprove(ChatCase):
         self.addCleanup(self.ntfy.close)
 
     def start_ntfy(self, **over):
-        notif = {"provider": "ntfy", "ntfy_url": self.ntfy.url, "ntfy_topic": "coach-test", "ntfy_token_file": ""}
+        token_file = self.ws / "ntfy.token"
+        token_file.write_text("tk-test\n", encoding="utf-8")
+        notif = {"provider": "ntfy", "ntfy_url": self.ntfy.url, "ntfy_topic": "coach-test",
+                 "ntfy_token_file": str(token_file) if over.pop("with_token_file", True) else ""}
         cfg = {"public_url": "https://coach.example.com", "approval_wait_s": 0.3, "ntfy_token_ttl_s": 60}
         cfg.update(over)
         return self.start(notif=notif, **cfg)
@@ -395,7 +402,7 @@ class TestNtfyQuickApprove(ChatCase):
         self.assertEqual(message["path"], "/coach-test")
         self.assertEqual(message["body"], "Jeudi 1er octobre : footing EF 45 min")
         self.assertIn("confirmation demandée", message["headers"]["Title"])
-        self.assertNotIn("Authorization", message["headers"])
+        self.assertEqual(message["headers"]["Authorization"], "Bearer tk-test")
         actions = message["headers"]["Actions"]
         self.assertIn(f"view, Ouvrir, https://coach.example.com/chat.html#approval={aid}", actions)
         self.assertEqual(set(tokens), {"allow", "deny"})

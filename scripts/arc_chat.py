@@ -67,6 +67,8 @@ MAX_BODY_BYTES = 64 * 1024
 MAX_TEXT_CHARS = 8000
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,40}$")
 ISO = "%Y-%m-%dT%H:%M:%SZ"
+APPROVE_PER_IP_PER_MIN = 30          # route à jeton : essais par minute et par adresse cliente
+APPROVE_GLOBAL_PER_MIN = 120         # plafond global, toutes adresses confondues
 
 # Valeurs par défaut de `[chat]` (config/workspace.toml peut les surcharger ; ce
 # tableau garde le service utilisable même si la section n'y est pas encore).
@@ -132,6 +134,12 @@ def load_chat_config(workspace: Path, sections: Optional[dict] = None) -> dict:
     for key, value in raw.items():
         cfg[key] = _coerce(CHAT_DEFAULTS[key], value) if key in CHAT_DEFAULTS else value
     return cfg
+
+
+def load_language(workspace: Path, sections: Optional[dict] = None) -> str:
+    """Langue des documents : `[language].documents` (défaut « fr »), pas `[chat]`."""
+    raw = (sections if sections is not None else _merged_sections(workspace)).get("language", {})
+    return str(raw.get("documents") or "fr").strip().lower() or "fr"
 
 
 def load_notifications(workspace: Path, sections: Optional[dict] = None) -> dict:
@@ -259,6 +267,18 @@ def authenticate(cfg: dict, peer_ip: str, headers, exempt_identity: bool = False
     if cfg["allowed_users"] and user not in cfg["allowed_users"]:
         return None, 403, "Utilisateur non autorisé."
     return user, 0, ""
+
+
+def client_ip(cfg: dict, peer_ip: str, headers) -> str:
+    """Adresse cliente pour la limite de débit : derrière le proxy de confiance, la dernière
+    entrée de `X-Forwarded-For` (celle qu'il a ajoutée) ; sinon l'adresse du pair."""
+    if cfg.get("auth") == "proxy" and ip_in(peer_ip, cfg.get("trusted_proxies", [])):
+        forwarded = (headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+    return peer_ip
 
 
 def check_csrf(headers, token_route: bool = False) -> Optional[str]:
@@ -423,14 +443,20 @@ class ApprovalStore:
     """`approvals.json` : propositions en attente, décisions, jetons ntfy (hachés uniquement).
 
     Statuts : `waiting` (le tour attend), `pending` (le tour est terminé, la proposition reste
-    ouverte), puis `allowed`, `denied`, `expired`. Un jeton est `<id>.<secret>` ; seul
-    `sha256(id|hash_charge|secret)` est conservé, et les DEUX jetons (appliquer/refuser) sont
-    brûlés à la première décision, quelle que soit sa voie.
+    ouverte), puis `allowed`, `denied`, `expired`, `cancelled` (tour interrompu pendant l'attente)
+    ou `unexecuted` (approuvée mais la reprise n'a pas pu l'exécuter). Un jeton est
+    `<id>.<secret>` ; seul `sha256(id|hash_charge|secret)` est conservé, et les DEUX jetons
+    (appliquer/refuser) sont brûlés à la première décision, quelle que soit sa voie.
+
+    `on_expired(liste)` est appelé (hors verrou) par QUICONQUE fait expirer des propositions
+    — lecture, liste, décision, vérification de jeton ou balayage — pour que l'événement
+    `approval_resolved: expired` atteigne toujours le journal de la session.
     """
 
-    def __init__(self, path: Path, clock=time.time):
+    def __init__(self, path: Path, clock=time.time, on_expired=None):
         self.path = path
         self.clock = clock
+        self.on_expired = on_expired
         self._lock = threading.RLock()
 
     def _load(self) -> dict:
@@ -490,6 +516,11 @@ class ApprovalStore:
                     expired.append(dict(rec, id=aid))
             if expired:
                 self._save(data)
+        if expired and self.on_expired is not None:
+            try:
+                self.on_expired(expired)
+            except Exception:                                        # noqa: BLE001 — jamais bloquant
+                log("rappel d'expiration : erreur\n" + traceback.format_exc())
         return expired
 
     @staticmethod
@@ -510,7 +541,12 @@ class ApprovalStore:
             return True
 
     def resolve(self, approval_id: str, decision: str) -> tuple:
-        """(résultat, enregistrement) ; résultat : ok | unknown | closed | expired."""
+        """(résultat, enregistrement) ; résultat : ok | unknown | closed | expired.
+
+        `decision` : allow | deny | cancelled (tour interrompu). Une approbation tardive (la
+        proposition était `pending`) est marquée `resume = "queued"` : elle reste à exécuter
+        tant que la reprise de la session n'a pas abouti (voir `set_resume`).
+        """
         self.expire_due()
         with self._lock:
             data = self._load()
@@ -520,9 +556,29 @@ class ApprovalStore:
             if rec["status"] not in OPEN_STATUSES:
                 return ("expired" if rec["status"] == "expired" else "closed"), dict(rec, id=approval_id)
             previous = rec["status"]
-            self._close(rec, "allowed" if decision == "allow" else "denied")
+            self._close(rec, {"allow": "allowed", "cancelled": "cancelled"}.get(decision, "denied"))
+            if decision == "allow" and previous == "pending":
+                rec["resume"] = "queued"
             self._save(data)
             return "ok", dict(rec, id=approval_id, previous_status=previous)
+
+    def set_resume(self, approval_id: str, state: str, status: Optional[str] = None) -> None:
+        """Suivi de la reprise d'une approbation tardive : `queued` → `done` | `failed` (+ statut visible)."""
+        with self._lock:
+            data = self._load()
+            rec = data.get(approval_id)
+            if rec is None:
+                return
+            rec["resume"] = state
+            if status:
+                rec["status"] = status
+            self._save(data)
+
+    def queued_resumes(self) -> list:
+        """Approbations tardives acceptées dont la reprise n'a pas (encore) eu lieu."""
+        with self._lock:
+            return [dict(rec, id=aid) for aid, rec in self._load().items()
+                    if rec.get("status") == "allowed" and rec.get("resume") == "queued"]
 
     def verify_token(self, token: str, action: str) -> tuple:
         """(résultat, enregistrement) ; résultat : ok | unknown | used | expired | mismatch.
@@ -658,9 +714,10 @@ class ChatService:
     """État partagé par les requêtes : configuration, stockage, backend, tours, approbations."""
 
     def __init__(self, workspace: Path, cfg: dict, backend: ChatBackend, notif: Optional[dict] = None,
-                 policy: Optional[Policy] = None):
+                 policy: Optional[Policy] = None, language: Optional[str] = None):
         self.workspace = Path(workspace)
         self.cfg = cfg
+        self.language = language or load_language(self.workspace)
         self.backend = backend
         self.notif = notif if notif is not None else {"provider": "none"}
         self.policy = policy or Policy.load(ENGINE, self.workspace)
@@ -668,16 +725,20 @@ class ChatService:
         root.mkdir(parents=True, exist_ok=True)
         os.chmod(root, 0o700)
         self.sessions = SessionStore(root)
-        self.approvals = ApprovalStore(root / "approvals.json")
+        self.approvals = ApprovalStore(root / "approvals.json", on_expired=self._on_expired)
         self.spend = SpendStore(root)
         self.limiter = RateLimiter(int(cfg["rate_limit_per_min"]))
-        self.approve_limiter = RateLimiter(30)          # route à jeton : essais par minute, toutes sources
+        self.approve_limiter = RateLimiter(APPROVE_PER_IP_PER_MIN)   # route à jeton : par adresse cliente
+        self.approve_global = RateLimiter(APPROVE_GLOBAL_PER_MIN)    # … et plafond global
         self._lock = threading.Lock()
         self._slots: dict = {}                          # session_id → verrou « un tour à la fois »
         self.turns: dict = {}                           # session_id → Turn en cours
         self._waiters: dict = {}                        # approval_id → (Event, [décision])
         self._raw_tokens: dict = {}                     # approval_id → jetons en clair (mémoire seulement)
         self._notified: set = set()
+        self._resumes: dict = {}                        # session_id → [enregistrements à reprendre] (FIFO)
+        self._quick_warned = False
+        self._drain_lock = threading.Lock()
         self.approvals.reopen_orphans()
 
     # -- dépense ---------------------------------------------------------------
@@ -700,16 +761,18 @@ class ChatService:
         with self._lock:
             return self._slots.setdefault(sid, threading.Lock())
 
-    def begin_turn(self, sid: str, user: str, text: str, preapproved=None, resume: bool = False) -> tuple:
+    def begin_turn(self, sid: str, user: str, text: str, preapproved=None, resume: bool = False,
+                   resume_rec: Optional[dict] = None) -> tuple:
         """Démarre un tour. Renvoie (code, Turn|None, file d'événements|None).
 
-        code : ok | busy (409) | rate (429) | unknown (404). Un tour de reprise (`resume`)
-        attend son tour de parole au lieu d'échouer et n'entre pas dans la limite de débit.
+        code : ok | busy (409) | rate (429) | unknown (404). Un tour de reprise (`resume`) n'entre
+        pas dans la limite de débit ; si la session est occupée il renvoie `busy` et l'appelant
+        (`_drain_resume`) le remet en file : il repart à la fin du tour en cours.
         """
         if self.sessions.get(sid) is None:
             return "unknown", None, None
         slot = self._slot(sid)
-        if not slot.acquire(timeout=120 if resume else 0):
+        if not slot.acquire(blocking=False):
             return "busy", None, None
         if not resume and not self.limiter.allow(user):
             slot.release()
@@ -720,12 +783,17 @@ class ChatService:
             self.turns[sid] = turn
         self.sessions.append_event(sid, "user_message", {"text": text, **({"synthetic": True} if resume else {})})
         self.sessions.update(sid, title=re.sub(r"\s+", " ", text).strip()[:60] or "Conversation")
-        threading.Thread(target=self._run_turn, args=(turn, text, set(preapproved or ())),
+        threading.Thread(target=self._run_turn, args=(turn, text, set(preapproved or ()), resume_rec),
                          name=f"chat-turn-{sid[:6]}", daemon=True).start()
         return "ok", turn, q
 
-    def _run_turn(self, turn: Turn, text: str, preapproved: set) -> None:
+    def remaining_budget(self) -> float:
+        return max(0.0, float(self.cfg["daily_budget_eur"]) - self.spend.spent())
+
+    def _run_turn(self, turn: Turn, text: str, preapproved: set, resume_rec: Optional[dict] = None) -> None:
         sid = turn.session_id
+        consumed: list = []                              # le hash pré-approuvé a-t-il servi ?
+        failure = None                                   # raison d'échec d'une reprise
         try:
             if self.budget_exhausted():
                 turn.emit("error", {"message": (
@@ -733,17 +801,26 @@ class ChatService:
                     f"{float(self.cfg['daily_budget_eur']):.2f} €). Réessaie demain ou relève "
                     "[chat].daily_budget_eur.")})
                 turn.emit("done", {"reason": "budget"})
+                failure = "budget quotidien atteint"
                 return
             meta = self.sessions.get(sid) or {}
             state = meta.get("backend_state")
             state = state if isinstance(state, dict) else {}
+
+            def decide(tool, tool_input):
+                verdict = self.policy.decide(tool, tool_input, preapproved)
+                if preapproved and verdict == "allow" and self.policy.decide(tool, tool_input) == "ask":
+                    consumed.append(payload_hash(tool, tool_input))
+                return verdict
+
+            # Copie : le budget restant est propre au tour (les backends l'appliquent en cours de tour).
+            config = dict(self.cfg, turn_budget_eur=self.remaining_budget())
             ctx = TurnContext(
-                session_id=sid, workspace=self.workspace, config=self.cfg, emit=turn.emit,
-                decide=lambda tool, tool_input: self.policy.decide(tool, tool_input, preapproved),
+                session_id=sid, workspace=self.workspace, config=config, emit=turn.emit,
+                decide=decide,
                 request_approval=lambda tool, tool_input, summary, diff: self._request_approval(
                     turn, tool, tool_input, summary, diff),
-                cancelled=turn.cancelled, backend_state=state,
-                language=str(self.cfg.get("language", "fr")))
+                cancelled=turn.cancelled, backend_state=state, language=self.language)
             try:
                 self.backend.run_turn(ctx, text)
             finally:
@@ -752,16 +829,27 @@ class ChatService:
                 reason = ("interrupted" if turn.cancelled.is_set()
                           else "pending_approval" if turn.pending_created else "end_turn")
                 turn.emit("done", {"reason": reason})
+            if resume_rec is not None and not consumed:
+                failure = "le modèle n'a pas exécuté l'appel approuvé"
+                turn.emit("error", {"message": f"Proposition approuvée mais non exécutée : {failure}."})
         except BackendError as exc:
             turn.emit("error", {"message": str(exc)})
+            failure = str(exc)
         except Exception:                                # noqa: BLE001 — jamais de trace vers le navigateur
             log("erreur inattendue dans un tour :\n" + traceback.format_exc())
             turn.emit("error", {"message": "Erreur interne du service de chat."})
+            failure = "erreur interne du service"
         finally:
             with self._lock:
                 self.turns.pop(sid, None)
             turn.close()
             self._slot(sid).release()
+            if resume_rec is not None:
+                if failure:
+                    self._resume_failed(resume_rec, failure, emit_error=False)
+                else:
+                    self.approvals.set_resume(resume_rec["id"], "done")
+            self._drain_resume(sid)                      # reprises arrivées pendant ce tour
 
     def interrupt(self, sid: str) -> bool:
         with self._lock:
@@ -796,9 +884,24 @@ class ChatService:
         if send_ntfy(self.notif, "Coach : confirmation demandée", summary, actions):
             log(f"ntfy envoyé pour la proposition {approval_id[:4]}…")
 
+    def quick_approve_enabled(self) -> bool:
+        """Boutons « Appliquer / Refuser » : seulement sur un sujet ntfy à accès contrôlé.
+
+        Le jeton voyage dans la notification : sans `[notifications].ntfy_token_file`, tout abonné
+        du sujet pourrait approuver. Sans fichier, seul « Ouvrir » (page derrière le SSO) est envoyé.
+        """
+        wanted = bool(self.cfg["ntfy_quick_approve"] and self.ntfy_enabled() and self.cfg["public_url"])
+        if wanted and not self.notif.get("ntfy_token_file"):
+            if not self._quick_warned:
+                self._quick_warned = True
+                log("avertissement : boutons rapides ntfy désactivés — [notifications].ntfy_token_file "
+                    "absent (un sujet sans contrôle d'accès exposerait les jetons) ; seul « Ouvrir » est envoyé")
+            return False
+        return wanted
+
     def _request_approval(self, turn: Turn, tool: str, tool_input: dict, summary: str, diff: list) -> str:
         cfg = self.cfg
-        quick = bool(cfg["ntfy_quick_approve"] and self.ntfy_enabled() and cfg["public_url"])
+        quick = self.quick_approve_enabled()
         record, tokens = self.approvals.create(
             turn.session_id, tool, tool_input, summary, diff, float(cfg["approval_ttl_s"]),
             float(cfg["ntfy_token_ttl_s"]) if quick else None)
@@ -817,9 +920,9 @@ class ChatService:
                 self.notify_approval(aid, summary)       # personne devant l'écran : push tout de suite
             while True:
                 if event.is_set():
-                    return box[0] if box else "deny"
+                    return "allow" if box and box[0] == "allow" else "deny"
                 if turn.cancelled.is_set():
-                    self.resolve_approval(aid, "deny", via="cancel")
+                    self.resolve_approval(aid, "cancelled", via="cancel")
                     return "deny"
                 elapsed = time.monotonic() - start
                 if elapsed >= wait:
@@ -833,46 +936,104 @@ class ChatService:
                 turn.emit("approval_resolved", {"approval_id": aid, "decision": "pending"})
                 self.notify_approval(aid, summary)
                 return "pending"
-            return box[0] if box else "deny"             # décision arrivée pile au bord
+            # Décision arrivée pile au bord : la source de vérité est l'enregistrement, pas la boîte
+            # (le décideur a pu fermer la proposition sans avoir encore rempli la boîte).
+            rec = self.approvals.get(aid) or {}
+            return "allow" if rec.get("status") == "allowed" else "deny"
         finally:
             self._waiters.pop(aid, None)
 
     def resolve_approval(self, approval_id: str, decision: str, via: str = "page") -> tuple:
-        """Applique une décision (page, ntfy ou annulation). Renvoie (résultat, enregistrement)."""
+        """Applique une décision (page, ntfy ou annulation). Renvoie (résultat, enregistrement).
+
+        `decision` : allow | deny | cancelled. Seul l'état AVANT la décision compte : une proposition
+        `waiting` appartient au tour qui l'attend (il rend la décision, jamais de reprise) ; une
+        proposition `pending` approuvée déclenche la reprise de la session.
+        """
         result, rec = self.approvals.resolve(approval_id, decision)
-        if result == "expired" and rec is not None:
-            return result, rec
         if result != "ok":
             return result, rec
         self._raw_tokens.pop(approval_id, None)
         sid = rec["session_id"]
         self._emit_session(sid, "approval_resolved", {"approval_id": approval_id, "decision": decision})
         log(f"approbation {approval_id[:4]}… : {decision} ({via})")
-        waiter = self._waiters.get(approval_id)
-        if waiter and rec.get("previous_status") == "waiting":
-            waiter[1].append(decision)
-            waiter[0].set()
-        elif decision == "allow" and via != "cancel":
+        if rec.get("previous_status") == "waiting":
+            waiter = self._waiters.get(approval_id)
+            if waiter:
+                waiter[1].append(decision)
+                waiter[0].set()
+        elif decision == "allow":
             self._resume_after_approval(rec)
         return result, rec
 
+    # -- reprise d'une approbation tardive ----------------------------------------
+
     def _resume_after_approval(self, rec: dict) -> None:
-        """Approbation tardive : nouveau tour dont SEUL l'appel approuvé (même hash) est pré-autorisé."""
-        message = (f"[approbation] L'athlète a approuvé la proposition {rec['id']} ({rec['summary']}). "
-                   "Exécute exactement cet appel maintenant.")
+        """Approbation tardive : mise en file d'un tour dont SEUL l'appel approuvé (même hash) est pré-autorisé."""
+        with self._lock:
+            self._resumes.setdefault(rec["session_id"], []).append(rec)
+        self._drain_resume(rec["session_id"])
 
-        def go():
-            code, _, _ = self.begin_turn(rec["session_id"], "resume", message,
-                                         preapproved={rec["hash"]}, resume=True)
-            if code != "ok":
-                log(f"reprise impossible pour {rec['id'][:4]}… ({code})")
+    def _drain_resume(self, sid: str) -> None:
+        """Lance la prochaine reprise de la session si elle est libre ; sinon elle reste en file.
 
-        threading.Thread(target=go, name="chat-resume", daemon=True).start()
+        Rappelé à chaque libération du créneau de la session (fin de tour) : une approbation
+        tardive arrivée pendant un autre tour n'est jamais perdue.
+        """
+        with self._drain_lock:                           # pop + tentative + remise en file : atomique
+            with self._lock:
+                queue_ = self._resumes.get(sid) or []
+                rec = queue_.pop(0) if queue_ else None
+                if not queue_:
+                    self._resumes.pop(sid, None)
+            if rec is None:
+                return
+            message = (f"[approbation] L'athlète a approuvé la proposition {rec['id']} ({rec['summary']}). "
+                       "Exécute exactement cet appel maintenant.")
+            code, _, _ = self.begin_turn(sid, "resume", message, preapproved={rec["hash"]}, resume=True,
+                                         resume_rec=rec)
+            if code == "busy":                           # un autre tour tient la session : il rappellera
+                with self._lock:
+                    self._resumes.setdefault(sid, []).insert(0, rec)
+                return
+        if code != "ok":                                 # session disparue
+            self._resume_failed(rec, "conversation introuvable", emit_error=False)
 
-    def sweep_expired(self) -> None:
-        for rec in self.approvals.expire_due():
+    def _resume_failed(self, rec: dict, reason: str, emit_error: bool = True) -> None:
+        """Reprise impossible : état visible dans la page, événement d'erreur dans le journal, push ntfy."""
+        self.approvals.set_resume(rec["id"], "failed", status="unexecuted")
+        sid = rec["session_id"]
+        if emit_error and self.sessions.get(sid) is not None:
+            self._emit_session(sid, "error", {"message": f"Proposition approuvée mais non exécutée : {reason}."})
+        if self.sessions.get(sid) is not None:
+            self._emit_session(sid, "approval_resolved", {"approval_id": rec["id"], "decision": "unexecuted"})
+        log(f"approbation {rec['id'][:4]}… : reprise impossible ({reason})")
+        if self.ntfy_enabled():
+            public = str(self.cfg["public_url"]).rstrip("/")
+            actions = f"view, Ouvrir, {public}/chat.html#approval={rec['id']}" if public else ""
+            send_ntfy(self.notif, "Coach : proposition non exécutée",
+                      f"Proposition approuvée mais non exécutée : {rec['summary']}", actions)
+
+    def resume_at_startup(self) -> None:
+        """Au démarrage : les approbations tardives acceptées mais jamais exécutées reprennent."""
+        for rec in self.approvals.queued_resumes():
+            self._resume_after_approval(rec)
+
+    # -- expiration ------------------------------------------------------------------
+
+    def _on_expired(self, records: list) -> None:
+        """Appelé par le magasin dès que des propositions expirent (quelle que soit la voie)."""
+        for rec in records:
+            self._raw_tokens.pop(rec["id"], None)
             self._emit_session(rec["session_id"], "approval_resolved",
                                {"approval_id": rec["id"], "decision": "expired"})
+            waiter = self._waiters.get(rec["id"])
+            if waiter and rec.get("previous_status", "waiting") == "waiting":
+                waiter[1].append("deny")
+                waiter[0].set()
+
+    def sweep_expired(self) -> None:
+        self.approvals.expire_due()
 
     # -- vues ---------------------------------------------------------------------
 
@@ -1064,7 +1225,8 @@ class Handler(BaseHTTPRequestHandler):
     def _post_token(self, token: str, action: str) -> None:
         """Action rapide ntfy : jeton à usage unique, lié à la proposition et à sa charge exacte."""
         svc = self.service
-        if not svc.approve_limiter.allow("approve"):
+        who = client_ip(svc.cfg, self.client_address[0], self.headers)
+        if not (svc.approve_limiter.allow(who) and svc.approve_global.allow("global")):
             return self._error(429, "Trop de tentatives.")
         if self._read_body() is None:
             return
@@ -1153,6 +1315,7 @@ def make_server(workspace: Path, cfg: dict, backend: ChatBackend, notif: Optiona
     except OSError as exc:
         raise ConfigError(f"impossible d'écouter sur {listen}:{wanted} ({exc.strerror}).")
     bound.allowed_hosts = host_allowlist(httpd.server_address[1], cfg)
+    service.resume_at_startup()
     return httpd, service
 
 

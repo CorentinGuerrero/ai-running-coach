@@ -14,11 +14,13 @@ Bibliothèque standard uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 import shlex
 import sys
 from pathlib import Path
 from typing import Iterable, Optional
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from arc_chat_backend import payload_hash, resolve_workspace_path  # noqa: E402
@@ -26,8 +28,22 @@ from coach_config import read_toml  # noqa: E402
 
 POLICY_FILE = "config/chat-policy.toml"
 
-# Métacaractères shell interdits dans une commande autorisée.
-SHELL_META = set(";|&$`><()\n\r")
+# Métacaractères shell interdits dans une commande autorisée : redirections, chaînage,
+# substitutions, échappement (`\` ferait diverger shlex et le vrai shell), `~` (expansion
+# du répertoire personnel), jokers et accolades (un joker contournerait la liste des secrets).
+SHELL_META = set(";|&$`><()\n\r\\~*?[]{}!#")
+
+# Un argument qui se termine ainsi est traité comme un chemin même sans « / ».
+PATH_SUFFIXES = (".md", ".json", ".jsonl", ".toml", ".db", ".sqlite", ".gpx", ".fit", ".csv", ".txt",
+                 ".yml", ".yaml", ".env", ".token", ".pem", ".key", ".py", ".sh")
+
+# Options toujours permises (sans valeur) pour tout script de la liste blanche.
+COMMON_FLAGS = ("--help", "-h")
+
+# Borne de l'expansion réelle d'un joker (fs.list) : au-delà, on refuse.
+GLOB_SCAN_LIMIT = 20000
+
+WILDCARDS = "*?["
 
 # Valeurs de repli si le fichier est absent ou incomplet : elles reproduisent
 # `config/chat-policy.toml` (le refus reste le comportement par défaut).
@@ -47,11 +63,50 @@ DEFAULTS = {
     },
 }
 
+# Options des scripts de repli (aucun fichier de politique) : les deux premiers scripts seulement.
+DEFAULT_SCRIPTS = {
+    "scripts/arc_index.py": {
+        "flags": ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active"],
+        "value_options": ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since",
+                          "--limit", "--trigger", "--outcome", "--months", "--band"],
+        "read_options": ["--workspace", "--validate"],
+        "output_options": ["--db"],
+    },
+    "scripts/arc_log.py": {
+        "read_options": ["--input", "--workspace"],
+        "output_options": ["--output"],
+    },
+}
+
 
 def _as_list(value) -> list:
     if isinstance(value, str):
         return [value]
     return [str(v) for v in value] if isinstance(value, (list, tuple)) else []
+
+
+def _script_rules(rules: dict) -> dict:
+    """Options permises par script : `[shell.scripts."scripts/x.py"]` → {script: {clé: [options]}}.
+
+    Deux formes selon le lecteur TOML : tableaux imbriqués (tomllib) ou nom de section
+    complet en clé (repli Python < 3.11, qui n'imbrique pas).
+    """
+    found: dict = {}
+    shell = rules.get("shell")
+    nested = shell.get("scripts") if isinstance(shell, dict) else None
+    if isinstance(nested, dict):
+        for script, table in nested.items():
+            if isinstance(table, dict):
+                found[str(script)] = {k: _as_list(v) for k, v in table.items()}
+    for key, table in rules.items():
+        match = re.match(r'^shell\.scripts\.["\']?(.+?)["\']?$', str(key))
+        if match and isinstance(table, dict):
+            found[match.group(1)] = {k: _as_list(v) for k, v in table.items()}
+    return found
+
+
+def _has_wildcard(text: str) -> bool:
+    return any(ch in text for ch in WILDCARDS)
 
 
 class Policy:
@@ -66,6 +121,7 @@ class Policy:
         self.write_dirs = _as_list(merged["fs"].get("write_dirs"))
         self.secret_patterns = _as_list(merged["fs"].get("secret_patterns"))
         self.shell_prefixes = _as_list(merged["shell"].get("allowed_prefixes"))
+        self.shell_scripts = _script_rules(rules or {}) or {k: dict(v) for k, v in DEFAULT_SCRIPTS.items()}
         self.fetch_domains = [d.lower() for d in _as_list(merged["web"].get("fetch_domains"))]
         self.mcp_servers = [s.lower() for s in _as_list(merged["mcp"].get("servers"))]
         self.mcp_read_prefixes = _as_list(merged["mcp"].get("read_prefixes"))
@@ -95,8 +151,10 @@ class Policy:
         return verdict
 
     def _base(self, tool: str, tool_input: dict) -> str:
-        if tool in ("fs.read", "fs.list"):
+        if tool == "fs.read":
             return self._fs_read(tool_input)
+        if tool == "fs.list":
+            return self._fs_list(tool_input)
         if tool == "fs.write":
             return self._fs_write(tool_input)
         if tool == "shell":
@@ -113,6 +171,10 @@ class Policy:
         parts = [p for p in rel.split("/") if p]
         return any(fnmatch.fnmatch(part, pattern) for part in parts for pattern in self.secret_patterns)
 
+    @staticmethod
+    def _in_arc(rel: str) -> bool:
+        return rel == ".arc" or rel.startswith(".arc/")
+
     def _fs_read(self, tool_input: dict) -> str:
         raw = tool_input.get("path")
         if raw in (None, "", "."):
@@ -120,7 +182,7 @@ class Policy:
         rel = resolve_workspace_path(self.workspace, str(raw))
         if rel is None or self._secret(rel):
             return "deny"
-        if rel == ".arc" or rel.startswith(".arc/"):
+        if self._in_arc(rel):
             return "deny"                        # index, sessions, approbations : jamais via le modèle
         return "allow"
 
@@ -130,6 +192,85 @@ class Policy:
             return "deny"
         return "allow" if rel.split("/", 1)[0] in self.write_dirs else "deny"
 
+    # -- fs.list : filtres de fichiers (glob) ----------------------------------------
+
+    @staticmethod
+    def _expand_braces(glob: str) -> list:
+        """`*.{md,toml}` → [`*.md`, `*.toml`] (récursif, borné)."""
+        match = re.search(r"\{([^{}]*)\}", glob)
+        if not match:
+            return [glob]
+        out: list = []
+        for alt in match.group(1).split(","):
+            out.extend(Policy._expand_braces(glob[:match.start()] + alt + glob[match.end():]))
+        return out[:64]
+
+    def _component_may_match_secret(self, component: str) -> bool:
+        """Un composant de glob peut-il désigner un secret ? Comparaison dans les deux sens."""
+        if not component:
+            return False
+        return any(fnmatch.fnmatch(pattern, component) or fnmatch.fnmatch(component, pattern)
+                   for pattern in self.secret_patterns)
+
+    def _fs_list(self, tool_input: dict) -> str:
+        """`path` comme fs.read, puis chaque valeur de `glob` (chaîne ou liste) ; `pattern` n'est pas un chemin."""
+        if self._fs_read(tool_input) != "allow":
+            return "deny"
+        globs = tool_input.get("glob")
+        globs = [globs] if isinstance(globs, str) else (list(globs) if isinstance(globs, (list, tuple)) else [])
+        raw = tool_input.get("path")
+        base = "" if raw in (None, "", ".") else (resolve_workspace_path(self.workspace, str(raw)) or "")
+        for glob in globs:
+            if not isinstance(glob, str) or not glob.strip():
+                continue
+            for one in self._expand_braces(glob.strip()):
+                if not self._glob_ok(base, one):
+                    return "deny"
+        return "allow"
+
+    def _glob_ok(self, base: str, glob: str) -> bool:
+        if glob.startswith(("/", "~")) or "\\" in glob or ".." in glob.split("/"):
+            return False
+        parts = [p for p in glob.split("/") if p and p != "."]
+        if not parts:
+            return True
+        if any(not _has_wildcard(p) and self._secret(p) for p in parts):
+            return False                                    # nom de secret cité tel quel
+        if any(self._component_may_match_secret(p) for p in parts[-1:]) or any(
+                not set(p) <= {"*"} and self._component_may_match_secret(p) for p in parts[:-1]):
+            # Joker large ou proche d'un secret : toléré seulement dans un dossier de données
+            # littéral (jamais config/, jamais la racine, jamais récursif), après vérification réelle.
+            literal = [p for p in base.split("/") if p]
+            for part in parts[:-1]:
+                if _has_wildcard(part):
+                    break
+                literal.append(part)
+            if not literal or literal[0] not in self.write_dirs or "**" in parts:
+                return False
+        return not self._glob_hits_secret(base, parts)
+
+    def _glob_hits_secret(self, base: str, parts: list) -> bool:
+        """Développe le glob sur le disque (borné) : vrai si un fichier réel est un secret ou sous `.arc/`."""
+        joined = "/".join(parts)
+        if not _has_wildcard(joined):
+            rel = (base + "/" + joined).lstrip("/")
+            return self._secret(rel) or self._in_arc(rel)
+        root = (self.workspace / base) if base else self.workspace
+        seen = 0
+        try:
+            for match in root.glob(joined):
+                seen += 1
+                if seen > GLOB_SCAN_LIMIT:
+                    return True                             # trop large pour être vérifié
+                rel = os.path.relpath(match, self.workspace).replace(os.sep, "/")
+                if self._secret(rel) or self._in_arc(rel):
+                    return True
+        except (OSError, ValueError, NotImplementedError):
+            return True
+        return False
+
+    # -- shell : liste blanche par script et par option -------------------------------
+
     def _shell(self, command: str) -> str:
         command = command.strip()
         if not command or any(ch in SHELL_META for ch in command):
@@ -138,19 +279,87 @@ class Policy:
             words = shlex.split(command)
         except ValueError:
             return "deny"
-        normalized = " ".join(words)
         for prefix in self.shell_prefixes:
-            if normalized == prefix or normalized.startswith(prefix + " "):
-                # Pas de remontée de répertoire dans les arguments.
-                return "deny" if any(".." in w.split("/") for w in words) else "allow"
+            head = prefix.split()
+            if head and words[:len(head)] == head:
+                return self._shell_args(head[-1], words[len(head):])
         return "deny"
 
+    def _shell_args(self, script: str, args: list) -> str:
+        """Chaque option doit être connue du script ; chaque chemin reste dans le workspace."""
+        rules = self.shell_scripts.get(script, {})
+        flags = set(rules.get("flags", [])) | set(COMMON_FLAGS)
+        outputs = set(rules.get("output_options", []))
+        reads = set(rules.get("read_options", []))
+        valued = outputs | reads | set(rules.get("value_options", []))
+        i = 0
+        while i < len(args):
+            token = args[i]
+            i += 1
+            if token.startswith("-") and token != "-":
+                name, eq, inline = token.partition("=")
+                if name in flags and not eq:
+                    continue
+                if name not in valued:
+                    return "deny"                           # option inconnue : refusée
+                if eq:
+                    value = inline
+                elif i < len(args):
+                    value, i = args[i], i + 1
+                else:
+                    return "deny"
+                kind = "write" if name in outputs else "read" if name in reads else "plain"
+            else:
+                value, kind = token, "plain"
+            if not self._shell_value(value, kind):
+                return "deny"
+        return "allow"
+
+    def _shell_value(self, value: str, kind: str) -> bool:
+        """Argument acceptable ? Les chemins restent dans le workspace, hors secrets et `.arc/`."""
+        if value == "" and kind == "plain":
+            return True
+        for piece in [value] + ([value.partition("=")[2]] if "=" in value else []):
+            if piece.startswith(("/", "~")) or Path(piece).is_absolute():
+                return False
+        segments = re.split(r"[/=]", value)
+        if ".." in segments or any(self._secret(seg) for seg in segments if seg):
+            return False
+        pathlike = (kind != "plain" or "/" in value or value in (".", "..")
+                    or value.lower().endswith(PATH_SUFFIXES))
+        if not pathlike:
+            return True
+        rel = resolve_workspace_path(self.workspace, value)
+        if rel is None or self._secret(rel) or self._in_arc(rel):
+            return False
+        if kind == "write":                                 # sortie : uniquement les dossiers de données
+            return "/" in rel and rel.split("/", 1)[0] in self.write_dirs
+        return True
+
+    # -- web -------------------------------------------------------------------------
+
     def _web_fetch(self, url: str) -> str:
-        match = re.match(r"^https?://([^/:?#@\s]+)(?::\d+)?(?:[/?#]|$)", url, re.I)
-        if not match:
+        """http(s) sans identifiants, sans encodage dans l'hôte, hôte ASCII, port par défaut, domaine listé."""
+        if not url or url != url.strip() or "\\" in url or any(ord(c) <= 0x20 or ord(c) == 0x7F for c in url):
             return "deny"
-        host = match.group(1).lower()
+        try:
+            parts = urlsplit(url)
+            port = parts.port
+        except ValueError:
+            return "deny"
+        if parts.scheme not in ("http", "https"):
+            return "deny"
+        netloc = parts.netloc
+        if "@" in netloc or "%" in netloc or not netloc.isascii():
+            return "deny"
+        if port is not None and port != (443 if parts.scheme == "https" else 80):
+            return "deny"
+        host = (parts.hostname or "").lower()
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", host) or ".." in host:
+            return "deny"
         return "allow" if any(host == d or host.endswith("." + d) for d in self.fetch_domains) else "deny"
+
+    # -- mcp -------------------------------------------------------------------------
 
     def _mcp(self, tool: str) -> str:
         server, _, name = tool[len("mcp:"):].partition(".")

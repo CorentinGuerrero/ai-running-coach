@@ -12,8 +12,10 @@ write_dirs = ["activities", "medical", "nutrition", "planning", "rapports"]
 secret_patterns = ["workspace.user.toml", ".env", "*.env", "*.token", ".garminconnect", "llm.env", "*.pem", "*.key"]
 
 [shell]
-# Une commande n'est exécutable que si elle commence par l'un de ces préfixes
-# ET ne contient aucun métacaractère shell (; | & $ ` > < ( ) retour à la ligne).
+# Une commande n'est exécutable que si elle commence par l'un de ces préfixes, ne contient
+# aucun métacaractère shell (; | & $ ` > < ( ) \ ~ * ? [ ] { } ! # retour à la ligne) ET ne
+# passe que des options déclarées ci-dessous pour ce script (option inconnue = refus).
+# `coach_doctor.py` est volontairement absent : il lit les jetons Garmin.
 allowed_prefixes = [
   "python3 scripts/arc_index.py",
   "python3 scripts/arc_log.py",
@@ -22,8 +24,48 @@ allowed_prefixes = [
   "python3 scripts/compare_course.py",
   "python3 scripts/download_fit.py",
   "python3 scripts/arc_energy.py",
-  "python3 scripts/coach_doctor.py",
 ]
+
+# Options par script (relevées dans l'argparse de chaque script) :
+#   flags           options sans valeur ;
+#   value_options   options à valeur simple (date, nombre, choix…) ;
+#   read_options    options dont la valeur est un chemin LU : dans le workspace, hors secrets et `.arc/` ;
+#   output_options  options dont la valeur est un chemin ÉCRIT : sous `[fs].write_dirs` uniquement.
+# Tout argument positionnel ou valeur qui ressemble à un chemin (« / », extension connue) subit
+# le même contrôle. `--help` / `-h` sont toujours permis.
+[shell.scripts."scripts/arc_index.py"]
+flags = ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active"]
+value_options = ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since", "--limit", "--trigger", "--outcome", "--months", "--band"]
+read_options = ["--workspace", "--validate"]
+output_options = ["--db"]
+
+[shell.scripts."scripts/arc_log.py"]
+read_options = ["--input", "--workspace"]
+output_options = ["--output"]
+
+[shell.scripts."scripts/arc_race_pacing.py"]
+flags = ["--memory", "--rebuild"]
+value_options = ["--today", "--band", "--months", "--segment-m", "--race-date", "--start", "--official-distance-m", "--fade-pct", "--fade-weeks", "--temp-max-c", "--pack-kg", "--terrain"]
+read_options = ["--gpx", "--workspace", "--aid-stations", "--weather-file"]
+output_options = ["--db"]
+
+[shell.scripts."scripts/analyze_gpx.py"]
+flags = ["--quiet"]
+value_options = ["--name", "--target-distance", "--target-dp", "--smooth", "--min-gain", "--min-grade", "--min-climb-dist"]
+read_options = ["--gpx"]
+output_options = ["--output", "--json"]
+
+[shell.scripts."scripts/compare_course.py"]
+value_options = ["--lieu", "--aliases", "--ref", "--dates", "--exclude-dates", "--loop-length", "--tolerance", "--min-climb"]
+read_options = ["--dir", "--workspace"]
+output_options = ["--output", "--json"]
+
+[shell.scripts."scripts/download_fit.py"]
+flags = ["--json", "--overwrite"]
+read_options = ["--from-dir"]
+output_options = ["--output-dir"]
+
+[shell.scripts."scripts/arc_energy.py"]
 
 [web]
 # Domaines joignables par `web.fetch` (le domaine exact ou un sous-domaine). `web.search` est refusé.

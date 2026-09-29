@@ -59,7 +59,7 @@ rate_limit_per_min = 6             # turns per user per minute
 approval_wait_s = 600              # in-turn wait before a proposal becomes "pending"
 approval_ttl_s = 86400             # pending proposal lifetime
 ntfy_approvals = true              # push an "Ouvrir" button (needs [notifications] + public_url)
-ntfy_quick_approve = true          # also "Appliquer / Refuser" buttons (signed single-use tokens)
+ntfy_quick_approve = true          # also "Appliquer / Refuser" buttons (single-use tokens) — only sent when [notifications].ntfy_token_file is set
 ntfy_token_ttl_s = 1800
 
 [sync]                             # existing keys unchanged; additions:
@@ -125,6 +125,14 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
    **resumes the session** with a new turn whose user message is
    `"[approbation] L'athlète a approuvé la proposition <id> (<summary>). Exécute exactement cet appel maintenant."`
    and the policy auto-allows only the matching `payload_hash` for that turn.
+   The resume is queued per session and drained when the session's turn slot is released
+   (and at service start for `allowed` approvals whose `resume` is still `queued`). If it
+   cannot run (budget, backend error, the model did not make the approved call) the approval
+   becomes `unexecuted`, an `error` event is logged, `approval_resolved` carries
+   `"unexecuted"` and ntfy sends "Proposition approuvée mais non exécutée : <summary>".
+   Interrupting a turn while an approval waits sets it to `cancelled` (event decision
+   `"cancelled"`), not `denied`. Whoever expires a record logs `approval_resolved: expired`.
+   `ctx.config["turn_budget_eur"]` (float) is the remaining daily budget at turn start.
 6. ntfy message (via `[notifications]`, reuse `scripts/notify.sh` config semantics:
    `ntfy_url`, `ntfy_topic`, `ntfy_token_file`): title "Coach : confirmation demandée",
    body = `summary` only (no health values), `Actions` header:
@@ -144,7 +152,17 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
   `python3 scripts/arc_race_pacing.py`, `python3 scripts/analyze_gpx.py`,
   `python3 scripts/compare_course.py`, `python3 scripts/download_fit.py`, …) with no shell
   metacharacters (`; | & $ \` > < ( ) \n`); deny otherwise.
-- `web.fetch`: allow listed domains (`wttr.in`, `overpass-api.de`, `nominatim.openstreetmap.org`); deny otherwise. `web.search`: deny.
+  Shell hardening: no `\ ~ * ? [ ] { } ! #` either; every option must be declared for the
+  script in `[shell.scripts."scripts/x.py"]` (`flags`, `value_options`, `read_options`,
+  `output_options`; unknown option → deny); every path-like argument must resolve inside the
+  workspace (no absolute path, no secret, no `.arc/`) and output options must land under
+  `[fs].write_dirs`. `coach_doctor.py` is not allowlisted (reads Garmin tokens).
+- `fs.list`: `path` as `fs.read`, plus the `glob` key (string or list) is checked against
+  `secret_patterns` (either direction fnmatch, real expansion under data dirs); `pattern`
+  (search regex) is not a path.
+- `web.fetch`: allow listed domains (`wttr.in`, `overpass-api.de`, `nominatim.openstreetmap.org`)
+  — http(s) only, parsed with `urlsplit`, no `\`, `%` or userinfo in the authority, ASCII host,
+  default port, hostname equal to or a true subdomain of a listed domain; deny otherwise. `web.search`: deny.
 - `task`, `skill`: allow (agents limited by `[agents].enabled` already).
 - `mcp:garmin.*` / `mcp:intervals.*`: reads allow; writes **ask** (explicit list:
   `schedule_workout(s)`, `schedule_week`, `delete_workout(s)`, `unschedule_workout`,

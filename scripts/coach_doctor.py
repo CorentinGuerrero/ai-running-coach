@@ -818,7 +818,19 @@ def _uses_opencode(config: dict) -> bool:
     )
 
 
-def check_llm_config(config: dict) -> dict:
+def _mcp_gateway_only(workspace: Path) -> bool:
+    """`.mcp.json` ne déclare que la passerelle leanproxy (aucun serveur direct garmin/intervals) ?"""
+    try:
+        data = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        return False
+    return "leanproxy" in servers and not {"garmin", "intervals"} & set(servers)
+
+
+def check_llm_config(config: dict, workspace: Optional[Path] = None) -> dict:
     """Jamais plus sévère qu'un `warning` : une configuration LLM incohérente prive
     du chat ou de la sync API, mais n'empêche pas le reste du coach de fonctionner.
     Ne lit ni n'affiche jamais une clé — seulement son NOM, et sa présence."""
@@ -843,6 +855,8 @@ def check_llm_config(config: dict) -> dict:
         problems.append("[sync].model doit être au format fournisseur/modèle pour le runner opencode")
     if sync_key and runner == "codex":
         problems.append("[sync].api_key_env est ignoré par le runner codex")
+    if runner == "opencode" and workspace is not None and _mcp_gateway_only(workspace):
+        problems.append("opencode + leanproxy non pris en charge pour la synchronisation — utilisez le mode direct")
     if chat_on:
         backend = chat.get("backend", "claude")
         model = str(chat.get("model") or "")
@@ -1020,7 +1034,7 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
     if check_id == "ntfy_configured":
         return check_ntfy(config)
     if check_id == "llm_config":
-        return check_llm_config(config)
+        return check_llm_config(config, workspace)
     if check_id == "chat_service":
         return check_chat_service(Path.home(), config)
     if check_id == "opencode_cli":

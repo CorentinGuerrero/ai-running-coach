@@ -35,7 +35,7 @@ from typing import Callable, Optional
 #   tool_end           {"id": str, "ok": bool, "summary": str}
 #   approval_request   {"approval_id": str, "tool": str, "summary": str,
 #                       "diff": [{"op": "-"|"+"|" ", "text": str}], "expires_at": iso8601}
-#   approval_resolved  {"approval_id": str, "decision": "allow"|"deny"|"pending"|"expired"}
+#   approval_resolved  {"approval_id": str, "decision": "allow"|"deny"|"pending"|"expired"|"cancelled"|"unexecuted"}
 #   file_written       {"path": str (relatif au workspace)}
 #   usage              {"input_tokens": int, "output_tokens": int,
 #                       "cache_read_tokens": int, "cost_eur": float}

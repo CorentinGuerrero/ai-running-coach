@@ -107,6 +107,25 @@ class TestOpencodeRunnerDryRun(InstallAsserts):
             self.assertFalse((sb.repo / ".arc/sync/opencode.json").exists())
             self.assertNotCalled(sb, "opencode")
 
+    def test_gateway_only_mcp_is_flagged_in_dry_run(self):
+        with Sandbox() as sb:
+            _write_config(sb, OPENCODE_SYNC.format(extra=""))
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"leanproxy": {
+                "command": "leanproxy-mcp", "args": ["serve"]}}}))
+            proc = sb.script("daily-sync.sh", "--dry-run")
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "opencode + leanproxy non pris en charge")
+
+    def test_direct_mode_next_to_leanproxy_is_not_flagged(self):
+        with Sandbox() as sb:
+            _write_config(sb, OPENCODE_SYNC.format(extra=""))
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {
+                "garmin": {"command": "garmin-mcp", "args": ["stdio"]},
+                "leanproxy": {"command": "leanproxy-mcp"}}}))
+            proc = sb.script("daily-sync.sh", "--dry-run")
+            self.assertSucceeded(proc)
+            self.assertOutputLacks(proc, "non pris en charge")
+
     def test_model_is_required(self):
         with Sandbox() as sb:
             _write_config(sb, '[sync]\nrunner = "opencode"\n')
@@ -189,6 +208,16 @@ class TestOpencodeRunnerExecution(InstallAsserts):
             self.assertTrue(any("Sync OK (stub)" in c for c in _curl_calls(sb)), _curl_calls(sb))
             spend = (sb.repo / f"logs/.sync-spend-{TODAY}").read_text().strip()
             self.assertAlmostEqual(float(spend), 0.5 * 0.92, places=3)
+
+    def test_gateway_only_mcp_fails_fast_with_a_notification(self):
+        with Sandbox() as sb:
+            self._setup(sb)
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"leanproxy": {
+                "command": "leanproxy-mcp", "args": ["serve"]}}}))
+            proc = _run_sync(sb)
+            self.assertFailed(proc)
+            self.assertNotCalled(sb, "opencode")
+            self.assertTrue(any("leanproxy non pris en charge" in c for c in _curl_calls(sb)), _curl_calls(sb))
 
     def test_over_budget_skips_the_run_and_notifies_once(self):
         with Sandbox() as sb:
@@ -389,6 +418,23 @@ class TestInstallLlm(InstallAsserts):
             self.assertOutputContains(proc, "pip install claude-agent-sdk")
             self.assertOutputLacks(proc, "exporte-dans-le-shell")
 
+    def test_anthropic_switch_from_subscription_to_paid_api_is_warned(self):
+        with Sandbox() as sb:
+            proc = sb.install("--no-auth", "--ide", "claude", "--llm", "anthropic")
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "[sync].api_key_env : (vide) → ANTHROPIC_API_KEY")
+            self.assertOutputContains(proc, "abonnement → clé API facturée au token")
+            # Rerun : déjà en mode API, plus rien à signaler.
+            proc = sb.install("--no-auth", "--ide", "claude", "--llm", "anthropic")
+            self.assertSucceeded(proc)
+            self.assertOutputLacks(proc, "abonnement → clé API facturée au token")
+
+    def test_openrouter_does_not_print_the_subscription_warning(self):
+        with Sandbox() as sb:
+            proc = sb.install("--no-auth", "--ide", "claude", "--llm", "openrouter")
+            self.assertSucceeded(proc)
+            self.assertOutputLacks(proc, "facturée au token")
+
     def test_custom_model_and_openai_requirements(self):
         with Sandbox() as sb:
             proc = sb.install("--no-auth", "--ide", "claude", "--llm", "openrouter",
@@ -555,6 +601,18 @@ class TestDoctorLlmChecks(InstallAsserts):
             self.assertEqual(check["status"], "warning")
             self.assertIn("644", check["message"])
             self.assertIn("non définie", check["message"])
+
+    def test_llm_config_warns_on_opencode_with_the_leanproxy_gateway(self):
+        with Sandbox() as sb:
+            _write_config(sb, OPENCODE_SYNC.format(extra=""))
+            _write_llm_env(sb, f"OPENROUTER_API_KEY={SECRET}\n")
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"leanproxy": {"command": "x"}}}))
+            check = _doctor(sb, "llm_config")
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("opencode + leanproxy non pris en charge pour la synchronisation", check["message"])
+            self.assertIn("mode direct", check["message"])
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"garmin": {"command": "x"}}}))
+            self.assertEqual(_doctor(sb, "llm_config")["status"], "ok")
 
     def test_llm_config_warns_on_inconsistent_model(self):
         with Sandbox() as sb:
