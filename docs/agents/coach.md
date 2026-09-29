@@ -79,6 +79,16 @@ dans le profil (`planning/Runner_Profile.md`, section « Matériel & lieux »).
 Le rapport hebdomadaire du coach nomme toute paire non retirée ayant atteint
 son seuil d'alerte (propre à la paire, sinon 700 km par défaut).
 
+Depuis #132 : le segment `départ N km` d'une puce (kilométrage avant le suivi) est
+compté dans le cumul, le coach le corrige en discutant (« mes Pegasus ont en fait
+~300 km » — seul le segment `départ` change, jamais une séance passée), la sortie
+porte une **prévision de retraite** (rythme des 28 derniers jours) et
+`near_threshold` (≥ 90 %), le retour de séance ajoute une ligne « Chaussures : … »
+quand la paire portée est proche du seuil ou à moins de 4 semaines de la retraite,
+et, dès deux paires actives, la validation quotidienne/hebdomadaire **suggère** une
+paire par séance (type de séance, météo, kilométrage restant, rodage de la paire de
+course) — jamais imposée.
+
 ### Débrief post-course (#61)
 
 Après une course (`intensity: "race"`) dont le plan (`planning/`,

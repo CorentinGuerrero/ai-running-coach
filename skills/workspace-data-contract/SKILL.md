@@ -156,7 +156,8 @@ seul le nom est obligatoire :
 
 - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
 - Adidas Adizero SL — alerte 500 km
-- Nike Pegasus (retirée)
+- Nike Pegasus — départ 300 km (retirée)
+- Salomon S/Lab Ultra — usage: course — départ 20 km
 ```
 
 Une puce de **premier niveau** par paire — une puce indentée en dessous n'est
@@ -167,7 +168,10 @@ d'espaces** (` - ` : un nom de modèle peut légitimement contenir un trait
 d'union SANS espaces, ex. « Salomon S/Lab Ultra-Trail », qui reste intact),
 ou par un deux-points suivi d'un mot-clé reconnu : `depuis AAAA-MM-JJ` (ou
 « mars 2026 »/« 03/2026 », 1er du mois — date d'achat), `alerte N km` (ou
-`N miles`/`N mi`, convertis), `id: <texte>` (identifiant explicite, passé par
+`N miles`/`N mi`, convertis), `départ N km` (ou `N mi`, converti — #132 : kilométrage
+déjà parcouru AVANT le suivi, voir plus bas), `usage: <texte libre>` (#132,
+facultatif : `course`, `trail`, `route`, `récup`… — rôle de la paire, lu par le
+coach pour suggérer une paire, jamais par un KPI), `id: <texte>` (identifiant explicite, passé par
 `gear_slug` comme n'importe quel `gear_id`). `(par défaut)` et `(retirée)`
 peuvent être accolés n'importe où sur la ligne. `arc_legacy.parse_gear` lit
 cette sous-section ; `scripts/arc_index.py` l'indexe dans la table dérivée
@@ -195,6 +199,29 @@ méthode complète. En résumé :
 - `(retirée)` : kilométrage toujours affiché (historique), jamais d'alerte,
   jamais candidate à l'attribution par défaut (priorité retraite avant
   défaut, même si `(par défaut)` est aussi coché sur la même puce).
+- `départ N km` (#132) : ajouté au cumul (`start_m` dans la table `gear`,
+  `distance_m` de `gear_mileage` = activités + départ), donc compté dans le
+  seuil d'alerte, la prévision et `near_threshold` ; conservé pour une paire
+  `(retirée)`. Seule la forme `[~]N [km|mi]` est lue (« départ usine 2025 » ou une
+  valeur négative restent du texte libre ignoré) ; point et virgule sont toujours
+  décimaux (`1.200 km` = 1,2 km), l'espace sépare les milliers ; l'unité peut être
+  collée (`186mi`) ;
+  `départ 0 km` est valide. Le corriger par chat (« mes Pegasus ont en fait ~300
+  km ») = réécrire ce SEUL segment de la puce (départ = total déclaré − km déjà
+  comptés par les activités, plancher 0), jamais les activités passées.
+- Prévision de retraite (#132) : `arc_index.py gear` (et `/api/summary.gear`)
+  ajoute par paire non retirée et sous son seuil, si elle a roulé dans les 28
+  derniers jours (borne `--today`, sinon aujourd'hui) : `recent_28d_m`,
+  `retire_forecast_weeks` (semaines, 0,1 près) et `retire_forecast_date`
+  (toujours future). Clés OMISES sans usage sur 28 jours, pour une paire retirée
+  ou déjà au seuil (`alert` : « seuil dépassé »). `near_threshold: true` dès 90 %
+  du seuil. `arc_index.py gear --activities ID[,ID…]` (garmin_activity_id,
+  intervals_activity_id ou chemin du fichier des séances synchronisées dans CE run) ajoute
+  `crossed_in_run: true` à la paire dont elles font franchir le seuil — base de
+  l'alerte unique du `garmin-daily-sync` (par séance, pas par date : un second
+  passage le même jour ne ré-émet rien), sans fichier d'état. Avec `--today`
+  dans le passé, le cumul ignore les séances postérieures. Méthode et limites :
+  `arc_metrics.ASSUMPTIONS["gear_mileage"]`.
 - Deux puces qui dérivent le même `gear_id` (même modèle racheté sans `id:`
   pour les distinguer) : la première garde le slug nu, les suivantes reçoivent
   `-2`, `-3`… et une collision signalée dans `gear_mileage().warnings` — pour

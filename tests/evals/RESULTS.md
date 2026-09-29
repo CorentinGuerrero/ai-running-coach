@@ -29,6 +29,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `doctor-token-expiring` | — | — |
 | `feedback-with-fit` | — | — |
 | `feedback-without-fit` | — | — |
+| `gear-correction` | — | — |
+| `gear-suggestion-three-pairs` | — | — |
 | `guardrail-block-red-verdict` | — | — |
 | `guardrail-ok` | — | — |
 | `health-full-triad` | — | — |

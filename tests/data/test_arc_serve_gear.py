@@ -91,5 +91,31 @@ class TestGearSummary(GearApi):
         self.assertEqual(gear, {"shoes": [], "unknown": [], "warnings": []})
 
 
+class TestGearSummaryStartAndForecast(GearApi):
+    def test_start_counted_and_forecast_exposed(self):
+        self.profile("- Nike Pegasus — départ 100 km — alerte 200 km — id: pegasus (par défaut)")
+        self.activity("2026-09-13", distance_m=28000)   # J-10, dans la fenêtre de 28 j
+        shoe = self.summary()["gear"]["shoes"][0]
+        self.assertEqual(shoe["distance_m"], 128000)
+        self.assertEqual(shoe["start_m"], 100000)
+        self.assertEqual(shoe["recent_28d_m"], 28000)
+        # 1 km/j, 72 km restants
+        self.assertEqual(shoe["retire_forecast_date"], "2026-12-04")
+        self.assertEqual(shoe["retire_forecast_weeks"], 10.3)
+
+    def test_no_forecast_without_recent_usage(self):
+        self.profile("- Nike Pegasus — départ 100 km — id: pegasus (par défaut)")
+        self.activity("2026-06-01", distance_m=28000)
+        shoe = self.summary()["gear"]["shoes"][0]
+        self.assertNotIn("retire_forecast_date", shoe)
+
+    def test_no_forecast_when_over_threshold(self):
+        self.profile("- Nike Pegasus — départ 300 km — alerte 200 km — id: pegasus (par défaut)")
+        self.activity("2026-09-20", distance_m=10000)
+        shoe = self.summary()["gear"]["shoes"][0]
+        self.assertTrue(shoe["alert"])
+        self.assertNotIn("retire_forecast_date", shoe)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -127,6 +127,10 @@ GEAR_WEAR_SPORTS = RUNNING_SPORTS + ("hiking",)
 # Seuil d'alerte par défaut si la puce du profil n'en précise pas (`arc_legacy.parse_gear`,
 # segment « alerte NNN km ») — valeur courante pour une chaussure de route/trail.
 GEAR_ALERT_THRESHOLD_M_DEFAULT = 700_000
+# Prévision de retraite (#132) : fenêtre de rythme récent (jours, `today` inclus) et
+# proportion du seuil à partir de laquelle une paire est dite « proche » du seuil.
+GEAR_FORECAST_WINDOW_DAYS = 28
+GEAR_NEAR_RATIO = 0.9
 
 # Glucides/h et taux de sudation sur les sorties longues (#41) : entraînement digestif.
 # « Sortie longue » = duration_s STRICTEMENT supérieure à 90 min (issue #41), la même
@@ -506,7 +510,30 @@ ASSUMPTIONS = {
                  "porte plus ne doit pas absorber les séances sans `gear_id`) — priorité documentée : retraite "
                  "avant défaut. Deux puces qui dérivent le même slug (rachat du même modèle sans `id:` pour les "
                  "distinguer) : `arc_legacy.parse_gear` renomme les suivantes `-2`, `-3`… plutôt que de laisser "
-                 "la dernière écraser la première dans l'index, et la collision remonte dans `warnings`.",
+                 "la dernière écraser la première dans l'index, et la collision remonte dans `warnings`. "
+                 "Kilométrage de départ (#132) : segment « départ N km » de la puce (`start_m`, « mi » converti) "
+                 "= kilométrage déjà parcouru avant le suivi, AJOUTÉ à `distance_m` (donc au seuil d'alerte, à la "
+                 "prévision et à `near_threshold`), y compris pour une paire `(retirée)` (historique) ; il ne "
+                 "dépend d'aucune date et n'est jamais recalculé depuis les activités — le corriger par chat = "
+                 "réécrire ce seul segment (total déclaré − km déjà comptés par les activités, jamais négatif). "
+                 f"Prévision de retraite (#132, `today` fourni) : rythme = km attribués à la paire sur les "
+                 f"{GEAR_FORECAST_WINDOW_DAYS} derniers jours (`today` inclus, séances datées seulement — la "
+                 "même attribution que le cumul) ÷ 28 ; jours restants = (seuil − cumul) ÷ rythme ; date = "
+                 "`today` + ⌈jours⌉ (donc toujours future) et `retire_forecast_weeks` = jours ÷ 7 arrondi à "
+                 "0,1. Clés OMISES (jamais 0, jamais une date passée) : aucun usage sur 28 jours, paire "
+                 "retirée, seuil déjà atteint (`alert`, le texte dit alors « seuil dépassé »). Approximation "
+                 "linéaire : ne tient pas compte d'un bloc de repos, d'une préparation de course ou d'un "
+                 "changement de rotation ; `near_threshold` (clé présente seulement si vraie) = cumul ≥ 90 % "
+                 "du seuil sans l'avoir atteint. Alerte « une seule fois » (`run_refs`, #132) : `crossed_in_run` "
+                 "(clé présente seulement si `run_refs` est fourni) vaut vrai si le cumul HORS les séances "
+                 "désignées (par `garmin_activity_id`, `intervals_activity_id` ou chemin du fichier) était "
+                 "sous le seuil et que le cumul total l'atteint : la séance qui franchit le seuil est "
+                 "identifiée par son identifiant, jamais par sa date — une seconde synchronisation le même "
+                 "jour, ou la fusion d'une séance déjà synchronisée (que l'appelant ne passe pas), ne "
+                 "ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` "
+                 "quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans "
+                 "la prévision), et le séparateur décimal du départ est toujours le point ou la virgule "
+                 "(« 1.200 km » = 1,2 km ; espace = milliers).",
     "hr_zones": "Zones FC, temps en zone et polarisation 80/20 (#43) : des APPROXIMATIONS d'entraînement, "
                 "jamais une mesure physiologique directe (pas de test d'effort, pas de lactate, pas de "
                 "seuils ventilatoires mesurés) — voir plus bas pour la polarisation, la plus approximative "
@@ -1631,24 +1658,29 @@ def durability_trend(activities: List[dict], day: date, window_weeks: int = DURA
     }
 
 
-def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
+def gear_mileage(activities: List[dict], gear_defs: List[dict],
+                 today: Optional[date] = None, run_refs: Optional[Iterable[str]] = None) -> dict:
     """Kilométrage cumulé par chaussure (#40). Voir `ASSUMPTIONS["gear_mileage"]`
     pour la méthode complète (attribution, chaussure par défaut, `gear_id` inconnu,
     date `depuis` filtrant l'attribution PAR DÉFAUT seulement, priorité
-    retraite/défaut).
+    retraite/défaut, kilométrage de départ, prévision de retraite).
 
     `activities` : dicts portant au moins `sport`, `distance_m` (optionnel — une
     séance sans distance ne contribue rien), `gear_id` (optionnel) et `date`
     (AAAA-MM-JJ — nécessaire pour filtrer l'attribution par défaut par `depuis`,
     voir plus bas ; son absence n'exclut jamais une activité à `gear_id` explicite).
     `gear_defs` : liste au format `arc_legacy.parse_gear` (`gear_id`, `name`,
-    `start_date`, `threshold_m`, `default`, `retired`, `collision_base`).
+    `start_date`, `threshold_m`, `default`, `retired`, `start_m`, `usage`,
+    `collision_base`).
+    `today` (#132) : jour de référence de la prévision de retraite — sans lui, aucune
+    prévision. `run_refs` (#132) : identifiants des séances synchronisées dans CE run (clé `refs` de chaque
+    activité : garmin_activity_id, intervals_activity_id, chemin) ; ajoute `crossed_in_run`.
 
     Rend `{"shoes": [...], "unknown": [...], "warnings": [...]}` : `shoes` couvre
     TOUTE chaussure déclarée dans le profil, y compris à 0 m (l'athlète voit sa
-    liste complète), chacune avec `distance_m`, `alert` (bool) et les champs du
-    profil ; `unknown` liste les `gear_id` vus sur une activité mais absents du
-    profil, avec leur seul kilométrage (pas de nom, pas de seuil — rien à
+    liste complète), chacune avec `distance_m` (départ compris), `alert` (bool) et
+    les champs du profil ; `unknown` liste les `gear_id` vus sur une activité mais
+    absents du profil, avec leur seul kilométrage (pas de nom, pas de seuil — rien à
     afficher de plus) ; `warnings` signale toute collision de `gear_id` dérivé
     détectée par `arc_legacy.parse_gear` (revue #85 blocker 2)."""
     by_id = {g["gear_id"]: dict(g) for g in gear_defs if g.get("gear_id")}
@@ -1662,14 +1694,21 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
     # est filtrée : un `gear_id` EXPLICITE sur l'activité n'est jamais remis en
     # cause par la date (voir ASSUMPTIONS["gear_mileage"]).
     default_start = default_entry.get("start_date") if default_entry else None
+    window_start = (today - timedelta(days=GEAR_FORECAST_WINDOW_DAYS - 1)).isoformat() if today else None
+    today_iso = today.isoformat() if today else None
 
     totals: Dict[str, float] = {}
+    recent: Dict[str, float] = {}     # 28 derniers jours (prévision)
+    run_set = {str(r) for r in run_refs} if run_refs else set()
+    run_m: Dict[str, float] = {}      # séances de CE run (alerte à franchissement)
     for act in activities:
         if act.get("sport") not in GEAR_WEAR_SPORTS:
             continue
         distance = act.get("distance_m")
         if not distance:
             continue
+        if today_iso and act.get("date") and act["date"] > today_iso:
+            continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
         gear_id = act.get("gear_id")
         if not gear_id:
             if not default_id:
@@ -1678,19 +1717,44 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
                 continue    # séance antérieure à l'entrée en service de la chaussure par défaut
             gear_id = default_id
         totals[gear_id] = totals.get(gear_id, 0.0) + distance
+        day = act.get("date")
+        if window_start and day and window_start <= day <= today_iso:
+            recent[gear_id] = recent.get(gear_id, 0.0) + distance
+        if run_set and run_set & {str(r) for r in (act.get("refs") or [])}:
+            run_m[gear_id] = run_m.get(gear_id, 0.0) + distance
 
     shoes = []
     warnings = []
     for gear_id, g in by_id.items():
-        distance_m = round(totals.get(gear_id, 0.0))
+        start_m = round(g.get("start_m") or 0)
+        distance_m = round(totals.get(gear_id, 0.0)) + start_m
         threshold_m = round(g.get("threshold_m") or GEAR_ALERT_THRESHOLD_M_DEFAULT)
         retired = bool(g.get("retired"))
-        shoes.append({
+        alert = (not retired) and distance_m >= threshold_m
+        shoe = {
             "gear_id": gear_id, "name": g.get("name") or gear_id, "distance_m": distance_m,
             "threshold_m": threshold_m, "start_date": g.get("start_date"),
             "default": bool(g.get("default")), "retired": retired,
-            "alert": (not retired) and distance_m >= threshold_m,
-        })
+            "alert": alert,
+        }
+        if g.get("start_m") is not None:
+            shoe["start_m"] = start_m
+        if g.get("usage"):
+            shoe["usage"] = g["usage"]
+        if (not retired) and (not alert) and distance_m >= GEAR_NEAR_RATIO * threshold_m:
+            shoe["near_threshold"] = True
+        recent_m = recent.get(gear_id, 0.0)
+        if today and (not retired) and (not alert) and recent_m > 0:
+            rate_m_day = recent_m / GEAR_FORECAST_WINDOW_DAYS
+            days = (threshold_m - distance_m) / rate_m_day
+            shoe["recent_28d_m"] = round(recent_m)
+            shoe["retire_forecast_date"] = (today + timedelta(days=max(1, math.ceil(days)))).isoformat()
+            shoe["retire_forecast_weeks"] = round(days / 7, 1)
+        if run_set:
+            before = distance_m - round(run_m.get(gear_id, 0.0))
+            if (not retired) and before < threshold_m <= distance_m:
+                shoe["crossed_in_run"] = True
+        shoes.append(shoe)
         collision_base = g.get("collision_base")
         if collision_base:
             warnings.append(

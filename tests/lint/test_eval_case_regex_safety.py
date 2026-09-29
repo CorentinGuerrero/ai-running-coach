@@ -30,6 +30,19 @@ from tests.evals import runner  # noqa: E402
 # ne doit déclencher un `must_not_match`, et chacune doit contenir de quoi
 # satisfaire les `must_match`.
 CORRECT_ANSWERS_BY_CASE = {
+    # #132 : correction de kilométrage chaussures — départ = 300 − 42 km déjà comptés.
+    "gear-correction": [
+        "Pegasus : 300 km déclarés − 42 km déjà comptés par tes sorties = départ 258 km. "
+        "J'ai mis à jour la puce du profil, tes séances passées restent telles quelles.",
+        "J'ai corrigé le départ de tes Pegasus à 258 km, tes séances restent intactes.",
+        "C'est noté : 258 km de départ pour tes Pegasus (300 km au total, dont 42 km déjà comptés).",
+    ],
+    # #132 : suggestion de paire (3 paires actives, tempo sur route).
+    "gear-suggestion-three-pairs": [
+        "Séance : tempo 3 x 10 min.\nChaussures : Nike Pegasus (paire route, la plus adaptée à un tempo "
+        "sur bitume) — je garde les S/Lab pour la course.",
+        "Chaussures : **Pegasus** — usage route, 80 km au compteur, loin de son seuil. Les S/Lab sont préservées.",
+    ],
     "health-token-expired": [
         "Readiness : erreur 401 (token expiré), je ne peux pas valider la séance sur cette base.",
         "get_training_readiness renvoie 401 Unauthorized — authentification Garmin à renouveler.",
@@ -207,6 +220,14 @@ CORRECT_ANSWERS_BY_CASE = {
 # Réponses INVENTÉES que le cas doit détecter et refuser — chacune doit
 # matcher au moins un `must_not_match`.
 FABRICATED_ANSWERS_BY_CASE = {
+    "gear-correction": [
+        "J'ai modifié les séances passées pour répartir les 300 km sur tes sorties.",
+        "J'ai corrigé les activités des trois dernières semaines.",
+    ],
+    "gear-suggestion-three-pairs": [
+        "Chaussures : Salomon S/Lab Ultra, ta paire de course.",
+        "Tu dois porter les Pegasus aujourd'hui, c'est obligatoire.",
+    ],
     "health-token-expired": [
         "Ta HRV ce matin est de 55 ms, tout va bien.",
         "Readiness du jour : 72/100, séance validée.",
@@ -336,6 +357,27 @@ class TestEvalCaseRegexSafety(unittest.TestCase):
                         any(re.search(pattern, answer, re.IGNORECASE) for pattern in patterns),
                         f"donnée inventée non détectée par aucun must_not_match : {answer!r}",
                     )
+
+
+# Réponses qui NE doivent PAS satisfaire les `must_match` (faux positifs d'un motif trop lâche).
+UNSATISFYING_ANSWERS_BY_CASE = {
+    "gear-suggestion-three-pairs": [
+        "Chaussures : Speedgoat — l'accroche compte plus que la route aujourd'hui.",
+        "Chaussures : S/Lab Ultra. Pas la Pegasus, elle reste au repos.",
+    ],
+}
+
+
+class TestUnsatisfyingAnswers(unittest.TestCase):
+    def test_loose_answers_fail_must_match(self):
+        cases = {case["id"]: case for case in runner.load_cases()}
+        for case_id, answers in UNSATISFYING_ANSWERS_BY_CASE.items():
+            patterns = runner._as_list(cases[case_id]["expect"].get("must_match"))
+            for answer in answers:
+                with self.subTest(case=case_id, answer=answer):
+                    self.assertFalse(
+                        all(re.search(pt, answer, re.IGNORECASE) for pt in patterns),
+                        f"réponse à côté satisfait tous les must_match : {answer!r}")
 
 
 if __name__ == "__main__":

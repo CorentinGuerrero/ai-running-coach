@@ -727,7 +727,7 @@ def legacy_report(text: str, filename: str) -> Dict[str, Any]:
 # `parse_gear`).
 # Format documenté dans `templates/Runner_Profile.template.md` :
 #   - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
-#   - Nike Pegasus (retirée)
+#   - Nike Pegasus — départ 300 km (retirée)
 # Tout est facultatif sauf le nom. `(par défaut)`/`(retirée)` peuvent être
 # accolés n'importe où sur la ligne (avant ou après les segments « — »).
 _GEAR_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*chaussures\s*$", re.I | re.M)
@@ -739,10 +739,18 @@ _GEAR_NEXT_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s", re.M)
 _GEAR_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
 _GEAR_SUB_BULLET_RE = re.compile(r"^\s+[-*]\s+(.+)$")
 _GEAR_SEGMENT_SPLIT_RE = re.compile(
-    r"\s+-\s+(?=depuis\b|alerte\b|id\s*:)|\s*[—–]\s*|\s*:\s*(?=depuis\b|alerte\b|id\s*:)", re.I)
+    r"\s+-\s+(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:)|\s*[—–]\s*|"
+    r"\s*:\s*(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:)", re.I)
 _GEAR_DEFAULT_RE = re.compile(r"\(\s*par\s*d[ée]faut\s*\)", re.I)
 _GEAR_RETIRED_RE = re.compile(r"\(\s*retir[ée]e?\s*\)", re.I)
-_GEAR_MILES_RE = re.compile(r"\bmi(?:les?)?\b", re.I)
+# « 186mi » (unité collée au nombre) compte : seul un préfixe alphabétique (« min ») l'exclut.
+_GEAR_MILES_RE = re.compile(r"(?<![a-z])mi(?:les?)?\b", re.I)
+# Segment « départ » : UNIQUEMENT « [~] <nombre> [km|mi|mile(s)] » — toute autre forme
+# (« départ usine 2025 », « départ en rotation le 12/03 ») reste du texte libre ignoré.
+# Séparateur de milliers = espace ; un point ou une virgule est TOUJOURS décimal
+# (« 1.200 km » = 1,2 km, jamais 1 200 km).
+_GEAR_START_VALUE_RE = re.compile(
+    r"^~?\s*(\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?)\s*(km|mi(?:les?)?)?\s*$", re.I)
 
 
 def _gear_section(text: str) -> Optional[str]:
@@ -787,7 +795,7 @@ def _gear_bullets(section: str) -> List[str]:
 
 def _gear_segment_kind(segment: str) -> Tuple[Optional[str], str]:
     """(type, valeur brute) d'un segment « — xxx » : `start_date`/`threshold`/
-    `id`, ou `(None, segment)` pour un segment non reconnu (ignoré silencieusement
+    `start_mileage` (« départ N km », #132)/`usage`/`id`, ou `(None, segment)` pour un segment non reconnu (ignoré silencieusement
     — un athlète peut vouloir noter autre chose, ex. « — usure semelle visible »).
 
     Ancrés sur le DÉBUT du segment avec limite de mot (`\\b`) : revue #85 blocker 3
@@ -800,6 +808,12 @@ def _gear_segment_kind(segment: str) -> Tuple[Optional[str], str]:
     m = re.match(r"alerte\b\s*:?\s*(.*)$", stripped, re.I)
     if m:
         return "threshold", m.group(1).strip()
+    m = re.match(r"d[ée]part\b\s*:?\s*(.*)$", stripped, re.I)
+    if m:
+        return "start_mileage", m.group(1).strip()
+    m = re.match(r"usage\s*:\s*(.*)$", stripped, re.I)
+    if m:
+        return "usage", m.group(1).strip()
     m = re.match(r"id\s*:\s*(.*)$", stripped, re.I)
     if m:
         return "id", m.group(1).strip()
@@ -809,7 +823,7 @@ def _gear_segment_kind(segment: str) -> Tuple[Optional[str], str]:
 def parse_gear(text: str) -> List[Dict[str, Any]]:
     """Sous-section « Chaussures » du profil (`## Matériel & lieux` → `### Chaussures`)
     → liste de dicts `{gear_id, name, start_date, threshold_m, default, retired,
-    collision_base}` (clés absentes plutôt que `None` — voir `_drop_none`).
+    start_m, usage, collision_base}` (clés absentes plutôt que `None` — voir `_drop_none`).
 
     `gear_id` : l'identifiant explicite (`id: …`) passé par `arc_contract.gear_slug`
     pour rester au format slug (même si l'athlète l'a déjà écrit en minuscules avec
@@ -829,6 +843,15 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
     `threshold_m` : le nombre du segment « alerte » est en km, SAUF si l'unité
     « mi »/« mile »/« miles » apparaît (alors × 1609,344 — revue #85 blocker 6) ;
     aucune autre unité n'est reconnue.
+
+    `start_m` (#132) : segment « départ N km » (ou « N mi »/« miles », × 1609,344) — le
+    kilométrage déjà parcouru AVANT le suivi (paire d'occasion, usage antérieur à
+    l'installation), ajouté au cumul par `arc_metrics.gear_mileage` ; 0 est une valeur
+    valide (« départ 0 km »). Seule la forme « [~]N [km|mi] » est acceptée : toute autre
+    (« départ usine 2025 », valeur négative ou illisible) est du texte libre ignoré (clé
+    omise). Un point/une virgule est toujours décimal (« 1.200 km » = 1,2 km).
+    `usage` (#132, facultatif) : rôle libre en minuscules (« usage: course », « trail »,
+    « route », « récup ») — lu par le coach pour suggérer une paire, jamais par un KPI.
 
     `(par défaut)` déclare la chaussure attribuée à une activité sans `gear_id`
     (voir `arc_metrics.gear_mileage`) ; `(retirée)`, une chaussure sortie de
@@ -853,6 +876,8 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
         explicit_id = None
         start_date = None
         threshold_m = None
+        start_m = None
+        usage = None
         for segment in segments[1:]:
             kind, value = _gear_segment_kind(segment)
             if kind == "start_date":
@@ -862,6 +887,15 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
                 if number is not None:
                     factor = 1609.344 if _GEAR_MILES_RE.search(value) else 1000.0
                     threshold_m = round(number * factor)
+            elif kind == "start_mileage":
+                m_start = _GEAR_START_VALUE_RE.match(value.strip())
+                if m_start:
+                    number = parse_fr_number(m_start.group(1))
+                    unit = (m_start.group(2) or "").lower()
+                    factor = 1609.344 if unit.startswith("mi") else 1000.0
+                    start_m = round(number * factor)
+            elif kind == "usage":
+                usage = value.strip().lower() or None
             elif kind == "id":
                 explicit_id = value.strip() or None
         base_id = gear_slug(explicit_id) if explicit_id else gear_slug(name)
@@ -873,6 +907,7 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
         entry = {
             "gear_id": gear_id, "name": name or None, "start_date": start_date,
             "threshold_m": threshold_m, "default": is_default or None, "retired": is_retired or None,
+            "start_m": start_m, "usage": usage,
         }
         if n > 1:
             entry["collision_base"] = base_id

@@ -1,0 +1,31 @@
+# Chaussures : correction de kilométrage par chat (#132).
+#
+# Fixture `gear-correction/` : une seule paire déclarée (Nike Pegasus, `id: pegasus`,
+# par défaut, aucun `départ`) et trois sorties (20 + 12 + 10 km = 42 km) qui la portent
+# via `gear_id`. L'athlète annonce 300 km au compteur : le coach doit ne toucher qu'au
+# segment `départ` de la puce (départ = 300 − 42 = 258 km) et l'expliquer en une ligne.
+#
+# Limite du harnais : `planning/Runner_Profile.md` est un fichier APPORTÉ par la
+# fixture — `arc_field`/`file_contains_any` ne voient que les fichiers NOUVEAUX, l'édition
+# de la puce elle-même n'est donc pas vérifiable ici. On vérifie ce qui l'est : la
+# réponse cite le départ calculé (258 km) et les séances passées restent intactes
+# (`unchanged_files`, jamais une réécriture des activités).
+#
+# `must_match` : « 258 » collé à « départ » (dans un sens ou l'autre, à 40 caractères
+# près) — le calcul total déclaré − km déjà comptés, pas un simple « 300 ».
+# `must_not_match` : ne doit pas prétendre avoir modifié les séances passées.
+id = "gear-correction"
+prompt = "Mes Pegasus ont en fait 300 km au compteur, corrige ça."
+fixture = "gear-correction"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "(d[ée]part[^\\n]{0,40}258)|(258[^\\n]{0,40}d[ée]part)",
+]
+must_not_match = [
+  "(j['’]ai|je viens de) (modifi[ée]|corrig[ée]|r[ée][ée]crit) (les|tes|des|toutes)\\s+(s[ée]ances?|activit[ée]s?)",
+]
+unchanged_files = ["activities/*.md"]

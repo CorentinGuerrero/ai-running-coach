@@ -1328,7 +1328,13 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 25)
+        self.assertEqual(I.SCHEMA_VERSION, 26)
+
+    def test_schema_version_26_adds_gear_start_and_usage_columns(self):
+        """#132 : `gear` gagne `start_m` et `usage` — une base d'avant ce schéma est reconstruite."""
+        self.index()
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(gear)")}
+        self.assertTrue({"start_m", "usage"} <= cols, cols)
 
     def test_schema_version_25_adds_energy_table_and_bmr_column(self):
         """Dépense énergétique modèle : `activity` gagne `calories_bmr_kcal` (REAL)
@@ -2146,6 +2152,165 @@ class TestDecisionCli(Workspace):
         result = self.run_cli("--days", "1", "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), [])
+
+
+class TestParseGearStartMileage(unittest.TestCase):
+    """#132 — segment « départ N km » (ou « N mi ») et « usage: … » de `parse_gear`."""
+
+    def _gear(self, bullet: str):
+        text = f"# Profil\n\n## Matériel & lieux\n\n### Chaussures\n\n- {bullet}\n"
+        gear = L.parse_gear(text)
+        self.assertEqual(len(gear), 1, gear)
+        return gear[0]
+
+    def test_start_km(self):
+        g = self._gear("Nike Pegasus — départ 300 km — id: pegasus")
+        self.assertEqual(g["start_m"], 300000)
+        self.assertEqual(g["gear_id"], "pegasus")
+        self.assertEqual(g["name"], "Nike Pegasus")
+
+    def test_start_miles_converted(self):
+        for unit in ("mi", "miles", "mile"):
+            with self.subTest(unit=unit):
+                self.assertEqual(self._gear(f"Nike Pegasus — départ 100 {unit}")["start_m"], 160934)
+
+    def test_start_without_accent_and_decimal_comma(self):
+        self.assertEqual(self._gear("Nike Pegasus — depart 12,5 km")["start_m"], 12500)
+
+    def test_start_absent_key_omitted(self):
+        self.assertNotIn("start_m", self._gear("Nike Pegasus — alerte 600 km"))
+
+    def test_start_zero_is_kept(self):
+        self.assertEqual(self._gear("Nike Pegasus — départ 0 km")["start_m"], 0)
+
+    def test_start_unreadable_or_negative_ignored(self):
+        self.assertNotIn("start_m", self._gear("Nike Pegasus — départ beaucoup"))
+        self.assertNotIn("start_m", self._gear("Nike Pegasus — départ -50 km"))
+
+    def test_start_with_other_segments_and_flags(self):
+        g = self._gear("Hoka Speedgoat 5 — depuis 2026-03-01 — départ 120 km — alerte 700 km (retirée)")
+        self.assertEqual((g["start_m"], g["threshold_m"], g["start_date"]), (120000, 700000, "2026-03-01"))
+        self.assertIs(g["retired"], True)
+
+    def test_start_with_colon_separator(self):
+        self.assertEqual(self._gear("Nike Pegasus: départ 40 km")["start_m"], 40000)
+
+    def test_departure_word_in_free_note_is_not_a_segment_keyword(self):
+        g = self._gear("Nike Pegasus — départementale uniquement")
+        self.assertNotIn("start_m", g)
+
+    def test_usage_segment(self):
+        g = self._gear("Salomon S/Lab — usage: course — départ 20 km")
+        self.assertEqual(g["usage"], "course")
+        self.assertEqual(g["start_m"], 20000)
+        self.assertEqual(g["name"], "Salomon S/Lab")
+
+    def test_no_usage_key_when_absent(self):
+        self.assertNotIn("usage", self._gear("Salomon S/Lab"))
+
+
+class TestGearStartMileageIndex(Workspace):
+    """#132 : `start_m`/`usage` persistés dans la table `gear`, départ compté dans le cumul."""
+
+    def test_start_m_indexed_and_counted(self):
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Matériel & lieux
+
+### Chaussures
+
+- Nike Pegasus — départ 300 km — id: pegasus (par défaut)
+- Salomon S/Lab — usage: course — id: slab
+""")
+        self.write("activities/2026-04-01_running.md", arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-01", "sport": "running", '
+            '"duration_s": 3600, "distance_m": 10000}'))
+        self.index()
+        rows = {r["gear_id"]: dict(r) for r in self.conn.execute("SELECT * FROM gear")}
+        self.assertEqual(rows["pegasus"]["start_m"], 300000)
+        self.assertIsNone(rows["slab"]["start_m"])
+        self.assertEqual(rows["slab"]["usage"], "course")
+        result = I.gear_mileage(self.conn, date(2026, 4, 5))
+        by_id = {s["gear_id"]: s for s in result["shoes"]}
+        self.assertEqual(by_id["pegasus"]["distance_m"], 310000)
+        self.assertEqual(by_id["pegasus"]["start_m"], 300000)
+        self.assertEqual(by_id["slab"]["usage"], "course")
+
+    def test_cli_gear_crossed_in_run_once(self):
+        self.write("planning/Runner_Profile.md", """# Profil
+
+## Matériel & lieux
+
+### Chaussures
+
+- Nike Pegasus — départ 95 km — alerte 100 km — id: pegasus (par défaut)
+""")
+        morning = "activities/2026-04-04_running.md"
+        self.write(morning, arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-04", "sport": "running", '
+            '"duration_s": 3600, "distance_m": 10000, "garmin_activity_id": 5551}'))
+        self.index()
+        today = date(2026, 4, 5)
+        shoe = I.gear_mileage(self.conn, today, ["5551"])["shoes"][0]
+        self.assertTrue(shoe["alert"])
+        self.assertTrue(shoe["crossed_in_run"])
+        self.assertNotIn("retire_forecast_date", shoe)   # seuil dépassé : pas de prévision
+        # même séance désignée par son chemin
+        self.assertTrue(I.gear_mileage(self.conn, today, [morning])["shoes"][0]["crossed_in_run"])
+        # second passage du même jour : séance du soir seule dans le run
+        self.write("activities/2026-04-04_running_2.md", arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-04", "sport": "running", '
+            '"duration_s": 1800, "distance_m": 4000, "garmin_activity_id": 5552}'))
+        self.index()
+        second = I.gear_mileage(self.conn, today, ["5552"])["shoes"][0]
+        self.assertNotIn("crossed_in_run", second)
+        # re-fusion d'une séance déjà synchronisée : rien n'est passé, rien n'est émis
+        self.assertNotIn("crossed_in_run", I.gear_mileage(self.conn, today)["shoes"][0])
+
+    def test_cli_activities_flag_and_invalid_today(self):
+        self.write("planning/Runner_Profile.md", "# Profil\n\n## Matériel & lieux\n\n### Chaussures\n\n"
+                   "- Nike Pegasus — départ 10 km — alerte 11 km — id: pegasus (par défaut)\n")
+        self.write("activities/2026-04-04_running.md", arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-04", "sport": "running", '
+            '"duration_s": 3600, "distance_m": 5000, "garmin_activity_id": 5551}'))
+        base = [sys.executable, str(REPO / "scripts/arc_index.py"), "gear", "--workspace", str(self.ws),
+                "--memory", "--today", "2026-04-05"]
+        ok = subprocess.run(base + ["--activities", "5551, 99"], capture_output=True, text=True)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertTrue(json.loads(ok.stdout)["shoes"][0]["crossed_in_run"])
+        bad = subprocess.run(base[:-1] + ["2026-9-1"], capture_output=True, text=True)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("--today", bad.stderr + bad.stdout)
+
+
+class TestParseGearStrictStart(unittest.TestCase):
+    """#132 (revue) : forme stricte du segment « départ », unités collées, décimales."""
+
+    def _gear(self, bullet):
+        return L.parse_gear(f"# P\n\n## Matériel & lieux\n\n### Chaussures\n\n- {bullet}\n")[0]
+
+    def test_free_text_after_keyword_is_ignored(self):
+        for seg in ("départ usine 2025", "départ en rotation le 12/03", "départ vers 2025 environ"):
+            with self.subTest(seg=seg):
+                g = self._gear(f"Nike Pegasus — {seg}")
+                self.assertNotIn("start_m", g)
+                self.assertEqual(g["name"], "Nike Pegasus")
+
+    def test_accepted_shapes(self):
+        cases = {"départ 300 km": 300000, "départ: 300": 300000, "départ ~300 km": 300000,
+                 "départ : ~ 300 km": 300000, "départ 1 200 km": 1200000, "départ 12,5": 12500,
+                 "départ 186mi": 299338, "départ 100 miles": 160934, "départ 300km": 300000}
+        for seg, expected in cases.items():
+            with self.subTest(seg=seg):
+                self.assertEqual(self._gear(f"Nike Pegasus — {seg}")["start_m"], expected)
+
+    def test_dot_or_comma_is_always_decimal(self):
+        self.assertEqual(self._gear("Nike Pegasus — départ 1.200 km")["start_m"], 1200)
+        self.assertEqual(self._gear("Nike Pegasus — départ 1,200 km")["start_m"], 1200)
+
+    def test_glued_miles_unit_on_alert_too(self):
+        self.assertEqual(self._gear("Nike Pegasus — alerte 400mi")["threshold_m"], 643738)
+        self.assertEqual(self._gear("Nike Pegasus — alerte 400 min")["threshold_m"], 400000)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,9 @@ La page du matin, à ouvrir avant de lacer ses chaussures. De haut en bas :
    « Matériel & lieux » du profil (hors chaussures retirées) atteint son seuil
    d'alerte (700 km par défaut, ou celui précisé sur sa puce) — détail complet
    (toutes les paires, y compris retirées, et tout `gear_id` inconnu du profil)
-   dans **Performance**.
+   dans **Performance**, où chaque paire affiche aussi sa **prévision de retraite**
+   (« ≈ 6 sem. » à partir du rythme des 28 derniers jours, absente sans usage
+   récent), « proche du seuil » dès 90 %, et son éventuel kilométrage de départ.
 4. **Forme** : condition, fatigue, forme et ratio de charge, avec une phrase qui les
    lit pour vous (« la fatigue est sous la condition physique »), puis une **mini
    tendance de conformité sur 4 semaines** (une barre par semaine, hauteur = % de
@@ -591,7 +593,11 @@ kilomètre : pas de graphique, c'est normal.
   lieux » du profil (course et randonnée seulement), une ligne « à surveiller »
   au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
   alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
-  profil — jamais masqué silencieusement.
+  profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
+  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
+  donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
+  récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
+  et le rôle `usage:` déclaré s'affiche à côté du nom.
 - **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
   récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
   et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de
@@ -622,6 +628,13 @@ kilomètre : pas de graphique, c'est normal.
 **Comment la lire** : ce sont des ordres de grandeur, calculés sur l'allure et la FC
 *moyennes* de chaque séance — pas une mesure de laboratoire. Deux estimations qui
 divergent disent que le terrain ou la forme du jour pèsent.
+
+![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
+
+*La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
+leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
+visible en grisé. Liste de chaussures d'illustration, kilométrages calculés sur les
+séances réelles du workspace des captures.*
 
 | Alimentée par | Calcul |
 |---|---|

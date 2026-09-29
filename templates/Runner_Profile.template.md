@@ -84,7 +84,7 @@
   facultatif sauf le nom. Segments séparés par un tiret cadratin " — " (le plus
   lisible), ou par un simple tiret ENTOURÉ D'ESPACES " - " (jamais un tiret
   sans espaces, qui peut faire partie du nom, ex. « Ultra-Trail ») :
-    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — id: <identifiant> (par défaut)
+    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> (par défaut)
 
   - "depuis" : date d'achat — AAAA-MM-JJ, ou juste "mars 2026"/"03/2026" (1er du
     mois). Depuis #40, filtre l'attribution automatique des séances SANS
@@ -92,6 +92,12 @@
     n'y est pas rattachée) — sans effet sur une séance qui cite cet id.
   - "alerte" : seuil d'usure propre à cette paire, en km (ou "N miles"/"N mi",
     converti), sinon 700 km par défaut.
+  - "départ" : kilomètres déjà parcourus AVANT le suivi (paire d'occasion, usage
+    antérieur à l'installation) — "départ 300 km" ou "départ 100 mi". Ajouté au
+    cumul, donc à l'alerte et à la prévision de retraite. Vous pouvez aussi le
+    corriger en discutant avec le coach ("mes Pegasus ont en fait ~300 km").
+  - "usage:" (facultatif) : rôle de la paire — course, trail, route, récup — pour
+    que le coach suggère quelle paire porter quand vous en avez deux ou plus.
   - "id:" : identifiant explicite (sinon dérivé automatiquement du nom).
     OBLIGATOIRE si vous rachetez le même modèle (deux puces au même nom sans
     id explicite se voient sinon attribuer un identifiant renommé -2, -3… et
@@ -102,7 +108,8 @@
   Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
   - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
   - Hoka Speedgoat 5 (grises) — depuis 2026-09-01 — id: speedgoat-grises
-  - Nike Pegasus (retirée)
+  - Salomon S/Lab Ultra — usage: course — départ 20 km — id: slab-ultra
+  - Nike Pegasus — départ 300 km (retirée)
 -->
 
 
