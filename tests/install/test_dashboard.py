@@ -12,6 +12,7 @@ import signal
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from tests.lib.asserts import InstallAsserts
@@ -103,6 +104,28 @@ class TestDashboardServer(InstallAsserts):
     def test_no_path_traversal(self):
         self.assertEqual(self.server.get("/..%2f..%2fconfig/workspace.toml")[0], 404)
         self.assertEqual(self.server.get("/../scripts/arc_serve.py")[0], 404)
+
+    def test_gear_inspection_history_and_photo_route(self):
+        """#135 : l'historique d'inspection est dans `/api/summary`, et la photo CITÉE par une
+        inspection est servie (image seulement) — rien d'autre du workspace."""
+        summary = json.loads(self.server.get("/api/summary")[1])
+        entry = next(e for e in summary["gear_inspections"]["gear"] if e["gear_id"] == "adizero-sl")
+        self.assertEqual(len(entry["inspections"]), 2)
+        self.assertEqual(entry["latest"]["condition"], "yellow")
+        self.assertEqual(entry["condition_change"], "worse")
+        photo = entry["latest"]["photos"][0]
+        status, body, headers = self.server.get("/media/gear-photo?path=" + urllib.parse.quote(photo, safe=""))
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/png")
+        self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertTrue(body.startswith(b"\x89PNG"))
+        for bad in ("planning/Runner_Profile.md", "gear/photos/../../planning/Runner_Profile.md",
+                    "gear/photos/absente.png", "/etc/passwd", ""):
+            self.assertEqual(self.server.get("/media/gear-photo?path=" + urllib.parse.quote(bad, safe=""))[0],
+                             404, bad)
+        self.assertEqual(self.server.get("/media/gear-photo")[0], 404)
+        self.assertEqual(self.server.get("/media/gear-photo?path=x", host="evil.example")[0], 403)
+        self.assertEqual(self.server.get("/media/gear-photo?path=x", method="POST")[0], 405)
 
     def test_new_file_appears_without_restart(self):
         """Un fichier écrit par un agent apparaît sans relancer le serveur."""

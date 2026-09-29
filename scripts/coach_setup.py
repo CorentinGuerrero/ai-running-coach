@@ -70,7 +70,7 @@ SCAFFOLD = {
     "templates/Runner_Profile.template.md": "planning/Runner_Profile.md",
     "templates/active_objective.template.md": "planning/active_objective.md",
 }
-WORK_DIRS = ["activities", "medical", "nutrition", "planning", "rapports", "resources"]
+WORK_DIRS = ["activities", "medical", "nutrition", "planning", "rapports", "resources", "gear"]
 
 
 def workspace_root(explicit: str | None = None) -> Path:

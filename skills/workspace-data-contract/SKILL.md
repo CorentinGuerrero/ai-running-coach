@@ -84,6 +84,7 @@ inattendu pour le dossier) se corrigent aussi.
 | `course_eval` | `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` | skill `gpx-analysis` |
 | `race_plan` | plan de course dans `planning/` | course-strategist |
 | `decision` | `planning/YYYY-MM-DD_decision_<slug>.md` | coach, medical (garde-fous, bilan matinal, blessure) |
+| `gear_inspection` | `gear/YYYY-MM-DD_<gear_id>_inspection.md` (photos dans `gear/photos/`) | coach (skill `gear-inspection`) |
 
 `planning/Runner_Profile.md` et `planning/active_objective.md` **n'ont pas de
 bloc** : l'athlète les édite à la main. Remplissez leurs puces
@@ -1130,6 +1131,36 @@ Décision qui en remplace une autre (`supersedes`) — la précédente restait
   "after": {"status": "cancelled"},
   "session_ref": {"week": "planning/Semaine_2026-09-21.md", "date": "2026-09-24"}
 }
+```
+
+### `gear_inspection`
+
+Inspection photo d'une paire de chaussures (#135, skill `gear-inspection`) : un fichier
+par inspection, `gear/YYYY-MM-DD_<gear_id>_inspection.md`. Le nom porte la date et le
+`gear_id` (avertissement à la validation s'ils contredisent le bloc). Le texte libre sous
+le bloc porte la justification visuelle, les indices de foulée en clair et la comparaison
+avec l'inspection précédente. Dossier `gear/` : gitignoré, données personnelles — les
+photos vivent dans `gear/photos/`, **jamais dans le dépôt public**.
+
+| Clé | Type | Notes |
+|---|---|---|
+| **`date`** | date | jour de l'inspection |
+| **`gear_id`** | slug | la paire, comme dans `activities` / `### Chaussures` du profil |
+| **`condition`** | `green` `yellow` `orange` `red` | verdict 🟢🟡🟠🔴, justifié visuellement sous le bloc |
+| `distance_m` | nombre | kilométrage de la paire AU MOMENT de l'inspection (lu dans `python3 scripts/arc_index.py gear`, jamais deviné ; clé omise si inconnu) |
+| `wear_zones` | liste d'objets | **`side`** (`left` `right`), **`zone`** (`heel_posterolateral` `heel_lateral` `heel_medial` `heel_central` `midfoot_lateral` `midfoot_medial` `midfoot_central` `forefoot_lateral` `forefoot_medial` `forefoot_central` `toe`), `severity` (`light` `moderate` `marked`) |
+| `asymmetry` | objet | **`level`** (`none` `mild` `marked`), `side` (`left` `right`, le côté le PLUS usé — obligatoire dès que `level` vaut `mild`/`marked`) |
+| `gait_hints` | liste | `heel_strike` `midfoot_forefoot_strike` `pronation_hint` `supination_hint` — un INDICE, jamais un diagnostic |
+| `photos` | liste de chemins | sous `gear/photos/`, `.jpg` `.jpeg` `.png` `.webp` seulement |
+| `previous` | chemin | inspection précédente de la MÊME paire (`gear/…_inspection.md`) : la comparaison est le signal le plus fiable |
+| `scale_reference` | booléen | `true` si une pièce ou une règle est visible dans le cadre |
+| `lug_depth_mm` | nombre | profondeur de crampon en mm — **interdite** sans `scale_reference: true` (aucune mesure sans échelle) |
+
+Mesure absente = clé omise. `asymmetry.side` sur `none` est ignoré (avertissement) ; une
+seule semelle documentée dans `wear_zones` est signalée (le protocole demande les deux).
+
+```arc
+{"arc": 1, "kind": "gear_inspection", "date": "2026-09-24", "gear_id": "pegasus-41", "condition": "yellow", "distance_m": 412000, "wear_zones": [{"side": "left", "zone": "heel_posterolateral", "severity": "moderate"}, {"side": "right", "zone": "heel_posterolateral", "severity": "light"}], "asymmetry": {"level": "mild", "side": "left"}, "gait_hints": ["heel_strike"], "photos": ["gear/photos/2026-09-24_pegasus-41_semelles.jpg"], "previous": "gear/2026-08-02_pegasus-41_inspection.md", "scale_reference": true, "lug_depth_mm": 2.5}
 ```
 
 ## Réécrire un fichier ancien (backfill)

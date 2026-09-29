@@ -281,9 +281,11 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # #134 : nouvelle table `equipment` (section « ### Matériel » du profil, `arc_legacy.parse_equipment`)
 # et `activity` gagne `gear_ids` (liste JSON des slugs de matériel porté) — sans ce bump, une base
 # déjà construite n'a ni la table ni la colonne (« no such table »/« no such column »).
-SCHEMA_VERSION = 28
+# #135 : nouvelle table `gear_inspection` (inspections photo de chaussures, `gear/*_inspection.md`, dossier
+# `gear/` ajouté à `DATA_DIRS`) — sans ce bump, une base déjà construite n'a pas la table (« no such table »).
+SCHEMA_VERSION = 29
 DEFAULT_DB = ".arc/coach.db"
-DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
+DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports", "gear")
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -811,6 +813,15 @@ CREATE TABLE slope_model_meta (
     n_activities INTEGER, flat_reference_speed_ms REAL, selected_by_plan INTEGER, selected_by_hr INTEGER,
     reason TEXT, reason_code TEXT
 );
+-- Inspections photo de chaussures (#135) : une ligne par `gear/AAAA-MM-JJ_<gear_id>_inspection.md`.
+-- `wear_zones`/`gait_hints`/`photos` : JSON. `asymmetry_side` = côté le plus usé. Lu par
+-- `gear_inspections()` (CLI `inspections`, `/api/summary.gear_inspections`) et `gear_career()`.
+CREATE TABLE gear_inspection (
+    source_path TEXT, date TEXT, gear_id TEXT, distance_m REAL, condition TEXT,
+    asymmetry_level TEXT, asymmetry_side TEXT, wear_zones TEXT, gait_hints TEXT, photos TEXT,
+    previous TEXT, scale_reference INTEGER, lug_depth_mm REAL, body_md TEXT
+);
+CREATE INDEX gear_inspection_gear ON gear_inspection(gear_id, date);
 """
 
 # Tables alimentées par fichier (colonne `source_path`) : purgées à la réindexation d'un fichier.
@@ -818,6 +829,7 @@ PER_FILE_TABLES = (
     "athlete", "objective", "health_day", "weather_day", "week", "planned_session",
     "nutrition_day", "report", "course_eval", "race_plan", "aid_station", "gear", "equipment",
     "performance_index", "performance_index_warning", "decision", "decision_rule",
+    "gear_inspection",
 )
 
 
@@ -873,6 +885,9 @@ def open_db(workspace: Path, db: Optional[str] = None, memory: bool = False,
 _DECISION_FILENAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_decision_[^/.]+\.md$")
 
 
+_GEAR_INSPECTION_FILENAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_([a-z0-9]+(?:-[a-z0-9]+)*)_inspection\.md$")
+
+
 def classify(rel: str) -> Optional[str]:
     """Type attendu d'après le chemin (None : fichier hors contrat, sauf bloc ```arc)."""
     parts = rel.split("/")
@@ -889,6 +904,8 @@ def classify(rel: str) -> Optional[str]:
         return "nutrition"
     if folder == "rapports" and name.endswith(".md"):
         return "report"
+    if folder == "gear" and name.endswith("_inspection.md") and L.filename_date(name):
+        return "gear_inspection"
     if folder == "planning":
         if name == "Runner_Profile.md":
             return "athlete"
@@ -1196,6 +1213,16 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                     "source_path": rel, "km": station.get("km"), "name": station.get("name"),
                     "cutoff": station.get("cutoff"), "services": _j(station.get("services")),
                 })
+    elif kind == "gear_inspection":
+        asym = g("asymmetry") if isinstance(g("asymmetry"), dict) else {}
+        _insert(conn, "gear_inspection", {
+            "source_path": rel, "date": g("date"), "gear_id": g("gear_id"), "distance_m": g("distance_m"),
+            "condition": g("condition"), "asymmetry_level": asym.get("level"),
+            "asymmetry_side": asym.get("side"), "wear_zones": _j(g("wear_zones")),
+            "gait_hints": _j(g("gait_hints")), "photos": _j(g("photos")), "previous": g("previous"),
+            "scale_reference": None if g("scale_reference") is None else int(bool(g("scale_reference"))),
+            "lug_depth_mm": g("lug_depth_mm"), "body_md": body,
+        })
     elif kind == "decision":
         _insert(conn, "decision", {
             "source_path": rel, "arc_version": arc_version, "date": g("date"),
@@ -2796,7 +2823,7 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None,
             # écarté est relu à chaque passe (sha vide) pour reprendre la main si l'autre disparaît.
             issues.append(f"doublon de {twin[0]} (même garmin_activity_id) : non compté")
             digest = ""
-        elif kind is not None and parsed_ok != "no" and (kind != "decision" or parsed_ok == "ok"):
+        elif kind is not None and parsed_ok != "no" and (kind not in ("decision", "gear_inspection") or parsed_ok == "ok"):
             # `decision` (#100, revue de code) : PAS de repli légitime — il n'existe
             # aucun format hérité pour ce type neuf (contrairement à `activity`/
             # `health`/…, où `parsed_ok = "partial"` porte une vraie lecture best-
@@ -3032,6 +3059,21 @@ def validate_file(path: Path) -> Tuple[bool, List[str], List[str]]:
                 "directement sous `planning/`) — le tableau de bord (#55) l'affiche "
                 "dans le journal mais ne pourra jamais résoudre son détail par id."
             )
+    if block.get("kind") == "gear_inspection":
+        # #135 : `gear/AAAA-MM-JJ_<gear_id>_inspection.md` — la date et le `gear_id` du nom de fichier
+        # doivent dire la même chose que le bloc (sinon l'inspection est retrouvée sous une autre paire
+        # ou une autre date que celle que le nom annonce). Avertissement : le bloc fait foi à l'index.
+        m = _GEAR_INSPECTION_FILENAME_RE.match(path.name)
+        if not m or path.parent.name != "gear":
+            warnings.append("fichier « gear_inspection » hors du format attendu "
+                            "(`gear/AAAA-MM-JJ_<gear_id>_inspection.md`) — non indexé s'il n'est pas sous gear/.")
+        else:
+            if isinstance(block.get("date"), str) and m.group(1) != block["date"]:
+                warnings.append(f"date du nom de fichier ({m.group(1)}) différente de gear_inspection.date "
+                                f"({block['date']})")
+            if isinstance(block.get("gear_id"), str) and m.group(2) != block["gear_id"]:
+                warnings.append(f"gear_id du nom de fichier ({m.group(2)}) différent de gear_inspection.gear_id "
+                                f"({block['gear_id']})")
     return not errors, errors, warnings
 
 
@@ -3869,13 +3911,103 @@ def trail_shape_report(conn, today: date) -> dict:
     return TS.trail_shape_report(objective, rows, today)
 
 
+def _inspection_rows(conn, gear_id: Optional[str] = None) -> List[dict]:
+    """Inspections indexées (plus récentes d'abord), colonnes JSON décodées, `path` = fichier."""
+    sql = ("SELECT source_path, date, gear_id, distance_m, condition, asymmetry_level, asymmetry_side, "
+           "wear_zones, gait_hints, photos, previous, scale_reference, lug_depth_mm FROM gear_inspection")
+    params: tuple = ()
+    if gear_id:
+        sql += " WHERE gear_id = ?"
+        params = (gear_id,)
+    rows = []
+    for r in conn.execute(sql + " ORDER BY date DESC, source_path DESC", params):
+        d = dict(r)
+        item = {"path": d["source_path"], "date": d["date"], "gear_id": d["gear_id"],
+                "condition": d["condition"]}
+        if d["distance_m"] is not None:
+            item["distance_m"] = d["distance_m"]
+        if d["asymmetry_level"]:
+            item["asymmetry"] = {"level": d["asymmetry_level"]}
+            if d["asymmetry_side"]:
+                item["asymmetry"]["side"] = d["asymmetry_side"]
+        for key in ("wear_zones", "gait_hints", "photos"):
+            if d[key]:
+                item[key] = json.loads(d[key])
+        if d["previous"]:
+            item["previous"] = d["previous"]
+        if d["scale_reference"] is not None:
+            item["scale_reference"] = bool(d["scale_reference"])
+        if d["lug_depth_mm"] is not None:
+            item["lug_depth_mm"] = d["lug_depth_mm"]
+        rows.append(item)
+    return rows
+
+
+def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] = None) -> dict:
+    """Inspections photo par paire (#135) — commande « inspections » et `/api/summary.gear_inspections`.
+
+    Rend `{"interval_m", "gear": [...], "due": [gear_id…]}` : par paire, `inspections` (récentes d'abord),
+    `latest`, `condition_change` (deux dernières), `km_since_inspection_m` et `due`/`due_reason` (rappel
+    « inspection conseillée », jamais imposé — `arc_metrics.ASSUMPTIONS["gear_inspection"]`). N'est PAS
+    soumis à `[health].morning_check` (aucune donnée de santé) ni à `[data].source`."""
+    shoes = gear_mileage(conn, today)["shoes"]
+    entries = M.gear_inspection_status(shoes, _inspection_rows(conn))
+    if gear_id:
+        entries = [e for e in entries if e["gear_id"] == gear_id]
+    return {"interval_m": M.GEAR_INSPECTION_INTERVAL_M, "gear": entries,
+            "due": [e["gear_id"] for e in entries if e.get("due")]}
+
+
+def _activities_of_gear(conn, gear_id: str, today: Optional[date]) -> List[dict]:
+    """Séances attribuées à `gear_id` par EXACTEMENT la règle de `gear_mileage` (chaque séance est
+    passée seule à `M.gear_mileage` — jamais une seconde copie de la règle d'attribution : défaut,
+    `depuis`, séance sans distance, futur…)."""
+    gear_defs = [dict(r) for r in conn.execute(
+        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
+        "start_m, usage FROM gear")]
+    for d in gear_defs:
+        d["start_m"] = None      # le départ n'est pas une séance : seule la distance de la séance compte
+    picked = []
+    for row in conn.execute(
+            "SELECT id, sport, date, name, distance_m, duration_s, gear_id, source_path FROM activity "
+            "WHERE distance_m > 0 ORDER BY date, id"):
+        act = dict(row)
+        result = M.gear_mileage([act], gear_defs, today)
+        owner = next((sh["gear_id"] for sh in result["shoes"] if sh["distance_m"] > 0), None)
+        if owner is None and result["unknown"]:
+            owner = result["unknown"][0]["gear_id"]
+        if owner == gear_id:
+            picked.append(act)
+    return picked
+
+
+def gear_career(conn, gear_id: str, today: Optional[date] = None) -> dict:
+    """Bilan de carrière d'une paire (#135, item 7) — commande « gear-career --gear ID » : km, séances,
+    courses (intensité PLANIFIÉE `race` le jour de la séance), meilleurs efforts (séances à splits),
+    dernière inspection. Rend `{"error": ...}` si `gear_id` est inconnu du profil ET des activités."""
+    shoes = gear_mileage(conn, today)
+    shoe = next((sh for sh in shoes["shoes"] if sh["gear_id"] == gear_id), None)
+    if shoe is None:
+        unknown = next((u for u in shoes["unknown"] if u["gear_id"] == gear_id), None)
+        if unknown is None:
+            return {"error": f"paire inconnue : {gear_id}"}
+        shoe = {"gear_id": gear_id, "name": gear_id, "distance_m": unknown["distance_m"], "retired": False}
+    acts = _activities_of_gear(conn, gear_id, today)
+    for act in acts:
+        act["is_race"] = planned_intensity_for(conn, act["date"], act["sport"]) == "race"
+        act["splits"] = [dict(r) for r in conn.execute(
+            "SELECT km, distance_m, duration_s FROM activity_split WHERE activity_id = ?", (act["id"],))]
+    return M.gear_career(shoe, acts, _inspection_rows(conn, gear_id))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
                                  "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
-                                 "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment"))
+                                 "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
+                                 "inspections", "gear-career"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -3934,6 +4066,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, metavar="N",
                         help="commande « energy » : nombre de dernières séances éligibles à rendre "
                              "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
+    parser.add_argument("--gear", metavar="GEAR_ID",
+                        help="commande « inspections » (#135) : restreint à cette paire ; commande "
+                             "« gear-career » : paire dont on veut le bilan de carrière (obligatoire)")
     parser.add_argument("--assumptions", action="store_true",
                         help="commande « energy » : rend arc_energy.ASSUMPTIONS en entier au lieu du "
                              "résumé court par défaut (assumptions_summary)")
@@ -4017,6 +4152,17 @@ def main(argv=None) -> int:
             since_date = date.fromisoformat(args.last_pass) if args.last_pass else None
             print(json.dumps(equipment_usage(conn, today_date, run_refs, since_date), ensure_ascii=False))
         return 0
+    if args.command == "inspections":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(gear_inspections(conn, args.gear, today_date), ensure_ascii=False))
+        return 0
+    if args.command == "gear-career":
+        if not args.gear:
+            raise ConfigError("commande « gear-career » : --gear GEAR_ID est obligatoire.")
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        career = gear_career(conn, args.gear, today_date)
+        print(json.dumps(career, ensure_ascii=False))
+        return 1 if "error" in career else 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         print(json.dumps(performance_index(conn, today_date), ensure_ascii=False))

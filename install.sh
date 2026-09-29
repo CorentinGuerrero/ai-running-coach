@@ -1340,12 +1340,12 @@ configure_ide() {
 # ---------------------------------------------------------------------------
 create_workspace_dirs() {
     log "Création des dossiers de travail (exclus du dépôt)"
-    for d in activities medical nutrition planning rapports resources; do
+    for d in activities medical nutrition planning rapports resources gear; do
         if [[ "$DRY_RUN" -eq 0 ]]; then
             mkdir -p "$WORKSPACE_ROOT/$d"
         fi
     done
-    ok "Dossiers activities/ medical/ nutrition/ planning/ rapports/ resources/ prêts"
+    ok "Dossiers activities/ medical/ nutrition/ planning/ rapports/ resources/ gear/ prêts"
 }
 
 # ---------------------------------------------------------------------------

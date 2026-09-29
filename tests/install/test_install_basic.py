@@ -10,7 +10,7 @@ IDE_CONFIGS = [
     ".cursor/mcp.json",
     ".windsurf/mcp_config.json",
 ]
-WORK_DIRS = ["activities", "medical", "nutrition", "planning", "rapports", "resources"]
+WORK_DIRS = ["activities", "medical", "nutrition", "planning", "rapports", "resources", "gear"]
 
 
 class TestFreshInstall(InstallAsserts):

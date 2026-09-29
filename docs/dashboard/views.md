@@ -600,6 +600,16 @@ kilomètre : pas de graphique, c'est normal.
   donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
   récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
   et le rôle `usage:` déclaré s'affiche à côté du nom.
+- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
+  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
+  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
+  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
+  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
+  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
+  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
+  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
+  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
+  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
 - **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
   récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
   et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de

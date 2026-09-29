@@ -41,6 +41,7 @@ formulation du modèle.
 | `week` | `planning/Semaine_AAAA-MM-JJ.md`, daté du **lundi** — un fichier par semaine, ou un seul fichier multi-semaines (bloc `weeks`, un plan de 10 semaines peut tenir dans 1 fichier) — séances datées, lieu de la semaine |
 | `nutrition` | `nutrition/AAAA-MM-JJ_nutrition.md` |
 | `report` | `rapports/…` |
+| `gear_inspection` | `gear/AAAA-MM-JJ_<gear_id>_inspection.md` — inspection photo d'une paire de chaussures (#135), photos dans `gear/photos/` |
 | `course_eval` | `planning/…_evaluation_parcours_<lieu>.md` |
 | `race_plan` | plan de course dans `planning/` |
 | `decision` | `planning/AAAA-MM-JJ_decision_<slug>.md` — traçabilité d'un ajustement (garde-fou, bilan matinal, blessure…), un fichier par décision |

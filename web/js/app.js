@@ -262,12 +262,67 @@ function gearForecast(s) {
   return `${near}<span class="tag" title="Rythme des 28 derniers jours — approximation linéaire, retraite estimée le ${F.esc(s.retire_forecast_date)}">≈ ${weeks} sem.</span>`;
 }
 
+// Inspection photo des chaussures (#135) : dernier état connu de la paire (pastille 🟢🟡🟠🔴 + date)
+// sur sa ligne du tableau, et rappel « inspection conseillée » (jamais imposé). Texte d'état toujours
+// écrit en toutes lettres à côté de la couleur (pas seulement la couleur).
+const GEAR_CONDITION = { green: "Bon état", yellow: "Usure visible", orange: "Usure avancée", red: "Fin de vie" };
+const GEAR_SIDE = { left: "gauche", right: "droite" };
+const GEAR_ZONE = {
+  heel_posterolateral: "talon postéro-latéral", heel_lateral: "talon latéral", heel_medial: "talon médial",
+  heel_central: "talon central", midfoot_lateral: "médio-pied latéral", midfoot_medial: "médio-pied médial",
+  midfoot_central: "médio-pied central", forefoot_lateral: "avant-pied latéral", forefoot_medial: "avant-pied médial",
+  forefoot_central: "avant-pied central", toe: "bout",
+};
+const GEAR_SEVERITY = { light: "légère", moderate: "modérée", marked: "marquée" };
+const GEAR_HINT = {
+  heel_strike: "attaque talon", midfoot_forefoot_strike: "attaque médio/avant-pied",
+  pronation_hint: "indice de pronation", supination_hint: "indice de supination",
+};
+const GEAR_ASYMMETRY = { none: "aucune asymétrie", mild: "asymétrie légère", marked: "asymétrie marquée" };
+const gearConditionChip = (c) => chip("gearcond", c, GEAR_CONDITION[c] || c);
+function inspectionBadge(entry) {
+  if (!entry) return "";
+  const latest = entry.latest ? `<span class="tag" title="Inspection du ${F.esc(entry.latest.date)}">inspectée ${F.esc(F.dayShort(entry.latest.date))}</span> ${gearConditionChip(entry.latest.condition)}` : "";
+  const due = entry.due ? ` ${chip("gear", "orange", "Inspection conseillée")}` : "";
+  return `${latest}${due}`;
+}
+function inspectionPhotos(insp) {
+  const photos = insp.photos || [];
+  if (!photos.length) return "";
+  const alt = `Photo d'inspection du ${insp.date}`;
+  return `<span class="gear-photos">${photos.map((path, i) => {
+    const src = `/media/gear-photo?path=${encodeURIComponent(path)}`;
+    return `<a href="${F.esc(src)}" target="_blank" rel="noopener"><img class="gear-photo" loading="lazy" width="72" height="72" src="${F.esc(src)}" alt="${F.esc(alt)} (${i + 1}/${photos.length})"></a>`;
+  }).join("")}</span>`;
+}
+function inspectionItem(insp) {
+  const zones = (insp.wear_zones || []).map((z) => `${F.esc(GEAR_ZONE[z.zone] || z.zone)} ${F.esc(GEAR_SIDE[z.side] || z.side)}${z.severity ? ` (${F.esc(GEAR_SEVERITY[z.severity] || z.severity)})` : ""}`).join(", ");
+  const asym = insp.asymmetry ? `${F.esc(GEAR_ASYMMETRY[insp.asymmetry.level] || insp.asymmetry.level)}${insp.asymmetry.side ? ` — ${F.esc(GEAR_SIDE[insp.asymmetry.side] || insp.asymmetry.side)} plus usée` : ""}` : "";
+  const hints = (insp.gait_hints || []).map((h) => F.esc(GEAR_HINT[h] || h)).join(", ");
+  const facts = [zones && `usure : ${zones}`, asym, hints && `indices de foulée (à prendre comme un indice, pas un diagnostic) : ${hints}`].filter(Boolean).join(" · ");
+  return `<li><strong>${F.esc(F.dayLong(insp.date))}</strong> ${gearConditionChip(insp.condition)}${insp.distance_m != null ? ` <span class="muted">à ${F.distance(insp.distance_m, 0)}</span>` : ""}
+    ${facts ? `<br><small class="muted">${facts}</small>` : ""}${inspectionPhotos(insp) ? `<br>${inspectionPhotos(insp)}` : ""}</li>`;
+}
+function gearInspectionSection(inspections) {
+  const entries = (inspections?.gear || []).filter((e) => e.inspections.length || e.due);
+  if (!entries.length) return "";
+  const blocks = entries.map((e) => {
+    const change = e.condition_change === "worse" ? ` <span class="tag">plus dégradée que la précédente</span>` : e.condition_change === "better" ? ` <span class="tag">mieux que la précédente</span>` : e.condition_change === "same" ? ` <span class="tag">état stable</span>` : "";
+    const due = e.due ? ` ${chip("gear", "orange", "Inspection conseillée")} <small class="muted">${e.due_reason === "threshold_alert" ? "seuil d'alerte franchi" : e.due_reason === "never_inspected" ? "jamais inspectée" : `${F.distance(e.km_since_inspection_m, 0)} depuis la dernière`}</small>` : "";
+    const list = e.inspections.length ? `<ol class="gear-inspections">${e.inspections.map(inspectionItem).join("")}</ol>` : `<p class="muted">Aucune inspection enregistrée.</p>`;
+    return `<div class="gear-inspection-block"><h3>${F.esc(e.name)}${e.retired ? ` <span class="tag">retirée</span>` : ""}${e.unknown ? ` <span class="tag">inconnue</span>` : ""}${change}${due}</h3>${list}</div>`;
+  }).join("");
+  return `<section class="band"><h2>Inspections photo</h2>${blocks}
+    ${note("L'usure d'une semelle est un signal faible (les chaussures modernes la déforment) : la comparaison avec l'inspection précédente compte plus que le verdict isolé. Demandez une inspection au coach — il la propose environ tous les 200 km.")}</section>`;
+}
+
 // Détail complet du kilométrage chaussures (vue Performance) : toutes les paires
 // déclarées (retirées comprises, en fin de tableau), plus une ligne « inconnue »
 // par `gear_id` vu sur une activité mais absent du profil (#40 — ne jamais
 // masquer silencieusement un `gear_id` mal orthographié).
-function gearSection(gear) {
+function gearSection(gear, inspections) {
   const shoes = gear?.shoes || [];
+  const inspectionByGear = Object.fromEntries((inspections?.gear || []).map((e) => [e.gear_id, e]));
   const unknown = gear?.unknown || [];
   const warnings = gear?.warnings || [];
   if (!shoes.length && !unknown.length) return "";
@@ -276,7 +331,7 @@ function gearSection(gear) {
       <th scope="row">${F.esc(s.name)}${s.default ? ` <span class="tag">défaut</span>` : ""}${s.retired ? ` <span class="tag">retirée</span>` : ""}${s.usage ? ` <span class="tag">${F.esc(s.usage)}</span>` : ""}</th>
       <td class="num">${F.distance(s.distance_m, 0)}${s.start_m ? `<br><small class="muted">dont ${F.distance(s.start_m, 0)} de départ</small>` : ""}</td>
       <td class="num">${F.distance(s.threshold_m, 0)}</td>
-      <td>${s.alert ? chip("gear", "orange", "À surveiller") : ""} ${gearForecast(s)}</td></tr>`).join("");
+      <td>${s.alert ? chip("gear", "orange", "À surveiller") : ""} ${gearForecast(s)} ${inspectionBadge(inspectionByGear[s.gear_id])}</td></tr>`).join("");
   const unknownRows = unknown.map((u) => `<tr><th scope="row">${F.esc(u.gear_id)} <span class="tag">inconnue</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td class="num">—</td><td></td></tr>`).join("");
   return `<section class="band"><h2>Matériel</h2><div class="table-wrap"><table class="data data--compact">
       <thead><tr><th scope="col">Chaussure</th><th scope="col" class="num">Kilométrage</th><th scope="col" class="num">Seuil</th><th scope="col">Statut</th></tr></thead>
@@ -1691,8 +1746,9 @@ async function viewPerformance(params) {
       ${trail ? note("En trail, la distance « effort » ajoute le dénivelé (1000 m D+ ≈ 1,75 km de plat, <code>config/sports/trail.md</code>). Sable, vent et barrières ne sont pas modélisés.") : ""}</div>
       <div><h2>Records</h2>${rec}</div></section>
     ${slopeHtml}
-    ${gearSection(SUMMARY.gear)}
+    ${gearSection(SUMMARY.gear, SUMMARY.gear_inspections)}
     ${equipmentSection(SUMMARY.equipment)}
+    ${gearInspectionSection(SUMMARY.gear_inspections)}
     ${indexHtml}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
