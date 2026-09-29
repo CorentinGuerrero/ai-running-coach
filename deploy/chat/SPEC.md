@@ -59,7 +59,7 @@ rate_limit_per_min = 6             # turns per user per minute
 approval_wait_s = 600              # in-turn wait before a proposal becomes "pending"
 approval_ttl_s = 86400             # pending proposal lifetime
 ntfy_approvals = true              # push an "Ouvrir" button (needs [notifications] + public_url)
-ntfy_quick_approve = true          # also "Appliquer / Refuser" buttons (signed single-use tokens)
+ntfy_quick_approve = true          # also "Appliquer / Refuser" buttons (single-use tokens) — only sent when [notifications].ntfy_token_file is set
 ntfy_token_ttl_s = 1800
 
 [sync]                             # existing keys unchanged; additions:
@@ -125,6 +125,14 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
    **resumes the session** with a new turn whose user message is
    `"[approbation] L'athlète a approuvé la proposition <id> (<summary>). Exécute exactement cet appel maintenant."`
    and the policy auto-allows only the matching `payload_hash` for that turn.
+   The resume is queued per session and drained when the session's turn slot is released
+   (and at service start for `allowed` approvals whose `resume` is still `queued`). If it
+   cannot run (budget, backend error, the model did not make the approved call) the approval
+   becomes `unexecuted`, an `error` event is logged, `approval_resolved` carries
+   `"unexecuted"` and ntfy sends "Proposition approuvée mais non exécutée : <summary>".
+   Interrupting a turn while an approval waits sets it to `cancelled` (event decision
+   `"cancelled"`), not `denied`. Whoever expires a record logs `approval_resolved: expired`.
+   `ctx.config["turn_budget_eur"]` (float) is the remaining daily budget at turn start.
 6. ntfy message (via `[notifications]`, reuse `scripts/notify.sh` config semantics:
    `ntfy_url`, `ntfy_topic`, `ntfy_token_file`): title "Coach : confirmation demandée",
    body = `summary` only (no health values), `Actions` header:
