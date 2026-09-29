@@ -736,7 +736,9 @@ try:
     servers = json.load(open(sys.argv[1], encoding="utf-8")).get("mcpServers") or {}
 except (OSError, ValueError, AttributeError):
     sys.exit(1)
-sys.exit(0 if "leanproxy" in servers and not {"garmin", "intervals"} & set(servers) else 1)
+# Serveur direct : « garmin » ou tout nom commençant par « intervals » (Intervals_icu, intervals-icu…), sans tenir compte de la casse.
+direct = [n for n in servers if n.lower() == "garmin" or n.lower().startswith("intervals")]
+sys.exit(0 if "leanproxy" in servers and not direct else 1)
 ' "$MCP_CONFIG"
 }
 

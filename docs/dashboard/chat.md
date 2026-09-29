@@ -161,6 +161,12 @@ suite si aucune page n'est ouverte), une notification part sur votre téléphone
     Sans ce fichier, seul « Ouvrir » part et un avertissement est journalisé une fois.
     Voir [Notifications](../mobile.md#3-notifications-push-ntfy).
 
+    **Un `ntfy_token_file` renseigné ne suffit pas** : le service ne peut pas vérifier que le
+    sujet est réellement protégé en lecture. Le sujet doit avoir des ACL de lecture — côté
+    serveur ntfy, `auth-default-access: deny-all` et un utilisateur disposant des droits de
+    lecture/écriture sur ce sujet (celui du jeton). Sinon, tout abonné anonyme du sujet reçoit
+    les liens : mettez alors `ntfy_quick_approve = false`.
+
 `public_url` doit être renseigné pour que les boutons pointent au bon endroit.
 
 Le coach attend votre réponse une dizaine de minutes (`approval_wait_s`). Passé ce délai, la
@@ -196,6 +202,11 @@ décide est écrit comme d'habitude dans les fichiers Markdown, avec leur bloc `
 chat le dit et n'appelle plus le modèle jusqu'au lendemain. Modifiez-le dans
 `config/workspace.user.toml` ou avec `./install.sh --chat-budget 5`. Les fournisseurs facturent
 en dollars : `usd_eur_rate` (0,92) sert à la conversion.
+
+Le budget restant du jour est **réservé par tour** : une conversation qui répond alloue tout le
+reste du jour, donc une seconde conversation lancée en même temps est refusée (« budget réservé
+par une autre conversation ») jusqu'à la fin du tour. `turn_budget_max_eur` (défaut `0` = pas de
+plafond par tour) borne l'allocation d'un tour et permet ainsi des conversations simultanées.
 
 !!! note "Coût inconnu"
     Avec OpenCode, un modèle absent de son catalogue de prix remonte un coût nul : le plafond ne

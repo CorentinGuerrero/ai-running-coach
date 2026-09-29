@@ -154,12 +154,15 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
   metacharacters (`; | & $ \` > < ( ) \n`); deny otherwise.
   Shell hardening: no `\ ~ * ? [ ] { } ! #` either; every option must be declared for the
   script in `[shell.scripts."scripts/x.py"]` (`flags`, `value_options`, `read_options`,
-  `output_options`; unknown option → deny); every path-like argument must resolve inside the
+  `output_options`, `multi_value_options` for argparse `nargs="*"/"+"`; unknown option → deny;
+  a value starting with `-` → deny; `--workspace` is never accepted); every path-like argument must resolve inside the
   workspace (no absolute path, no secret, no `.arc/`) and output options must land under
   `[fs].write_dirs`. `coach_doctor.py` is not allowlisted (reads Garmin tokens).
 - `fs.list`: `path` as `fs.read`, plus the `glob` key (string or list) is checked against
-  `secret_patterns` (either direction fnmatch, real expansion under data dirs); `pattern`
-  (search regex) is not a path.
+  `secret_patterns` (either direction fnmatch, real expansion under data dirs; brace expansion
+  over 64 items or nesting over 3 → deny, never truncated); comparisons are case-insensitive
+  (`casefold`). `pattern` (search regex) is not a path, but a content search (`pattern` present)
+  must target a directory of `[fs].write_dirs` or `[fs].search_dirs`.
 - `web.fetch`: allow listed domains (`wttr.in`, `overpass-api.de`, `nominatim.openstreetmap.org`)
   — http(s) only, parsed with `urlsplit`, no `\`, `%` or userinfo in the authority, ASCII host,
   default port, hostname equal to or a true subdomain of a listed domain; deny otherwise. `web.search`: deny.

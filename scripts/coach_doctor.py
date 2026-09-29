@@ -827,7 +827,9 @@ def _mcp_gateway_only(workspace: Path) -> bool:
     servers = data.get("mcpServers") if isinstance(data, dict) else None
     if not isinstance(servers, dict):
         return False
-    return "leanproxy" in servers and not {"garmin", "intervals"} & set(servers)
+    # Serveur direct : « garmin » ou tout nom commençant par « intervals » (Intervals_icu…), sans tenir compte de la casse.
+    direct = [n for n in servers if str(n).lower() == "garmin" or str(n).lower().startswith("intervals")]
+    return "leanproxy" in servers and not direct
 
 
 def check_llm_config(config: dict, workspace: Optional[Path] = None) -> dict:

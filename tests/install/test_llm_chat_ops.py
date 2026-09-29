@@ -126,6 +126,16 @@ class TestOpencodeRunnerDryRun(InstallAsserts):
             self.assertSucceeded(proc)
             self.assertOutputLacks(proc, "non pris en charge")
 
+    def test_n6_intervals_icu_direct_server_next_to_leanproxy_is_not_flagged(self):
+        for name in ("Intervals_icu", "intervals-icu", "INTERVALS"):
+            with Sandbox() as sb:
+                _write_config(sb, OPENCODE_SYNC.format(extra=""))
+                (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {
+                    name: {"command": "intervals-icu-mcp"}, "leanproxy": {"command": "leanproxy-mcp"}}}))
+                proc = sb.script("daily-sync.sh", "--dry-run")
+                self.assertSucceeded(proc)
+                self.assertOutputLacks(proc, "non pris en charge")
+
     def test_model_is_required(self):
         with Sandbox() as sb:
             _write_config(sb, '[sync]\nrunner = "opencode"\n')
@@ -612,6 +622,14 @@ class TestDoctorLlmChecks(InstallAsserts):
             self.assertIn("opencode + leanproxy non pris en charge pour la synchronisation", check["message"])
             self.assertIn("mode direct", check["message"])
             (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"garmin": {"command": "x"}}}))
+            self.assertEqual(_doctor(sb, "llm_config")["status"], "ok")
+
+    def test_n6_doctor_recognises_intervals_icu_as_a_direct_server(self):
+        with Sandbox() as sb:
+            _write_config(sb, OPENCODE_SYNC.format(extra=""))
+            _write_llm_env(sb, f"OPENROUTER_API_KEY={SECRET}\n")
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {
+                "Intervals_icu": {"command": "x"}, "leanproxy": {"command": "y"}}}))
             self.assertEqual(_doctor(sb, "llm_config")["status"], "ok")
 
     def test_llm_config_warns_on_inconsistent_model(self):

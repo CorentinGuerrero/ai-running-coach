@@ -344,10 +344,11 @@ défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
 | `auth` | `"local"` (boucle locale seulement) \| `"proxy"` (identité transmise par le SSO du reverse proxy). |
 | `auth_header`, `allowed_users`, `trusted_proxies`, `allowed_hosts` | Mode `proxy` : en-tête d'identité (`X-authentik-username`, Authelia : `Remote-User`), utilisateurs admis (vide = tous), IP source de Traefik, hôtes acceptés. Voir `deploy/chat/traefik/README.md`. |
 | `public_url` | URL publique du tableau de bord, requise pour les boutons ntfy. |
-| `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). |
+| `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). Le reste du jour est réservé par tour en cours (une conversation simultanée est refusée tant qu'il est réservé). |
+| `turn_budget_max_eur` | Plafond d'allocation d'un tour (défaut `0` = tout le reste du jour) ; > 0 permet des conversations simultanées. |
 | `max_turns`, `rate_limit_per_min` | Tours d'agent par message (30) ; tours par minute et par utilisateur (6). |
 | `approval_wait_s`, `approval_ttl_s` | Attente en cours de tour d'une approbation (600 s) ; durée de vie d'une proposition en attente (86400 s). |
-| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). **Les boutons rapides ne sont envoyés que si `[notifications].ntfy_token_file` est renseigné** (sujet ntfy à accès contrôlé) : le jeton voyage dans la notification, donc tout abonné d'un sujet public pourrait approuver. Sans ce fichier, seul « Ouvrir » part, avec un avertissement dans le journal. |
+| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). **Les boutons rapides ne sont envoyés que si `[notifications].ntfy_token_file` est renseigné** (sujet ntfy à accès contrôlé) : le jeton voyage dans la notification, donc tout abonné d'un sujet public pourrait approuver. Sans ce fichier, seul « Ouvrir » part, avec un avertissement dans le journal. **Le fichier ne garantit pas que le sujet est protégé en lecture** : il faut des ACL de lecture côté ntfy (`auth-default-access: deny-all` + un utilisateur avec droits de lecture/écriture), sinon mettre `ntfy_quick_approve = false`. |
 | `ntfy_delay_s` | Délai (60 s) avant le push ntfy quand une page est ouverte ; sans page, le push part tout de suite. |
 
 La clé API n'est jamais dans ce fichier : `~/.config/ai-running-coach/llm.env`.
