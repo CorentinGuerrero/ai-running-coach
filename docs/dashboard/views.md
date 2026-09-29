@@ -594,7 +594,7 @@ kilomètre : pas de graphique, c'est normal.
   au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
   alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
   profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
-  « départ » déclaré sur la puce (affiché entre parenthèses), un badge **« ≈ N sem. »**
+  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
   donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
   récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
   et le rôle `usage:` déclaré s'affiche à côté du nom.
@@ -628,6 +628,13 @@ kilomètre : pas de graphique, c'est normal.
 **Comment la lire** : ce sont des ordres de grandeur, calculés sur l'allure et la FC
 *moyennes* de chaque séance — pas une mesure de laboratoire. Deux estimations qui
 divergent disent que le terrain ou la forme du jour pèsent.
+
+![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
+
+*La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
+leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
+visible en grisé. Liste de chaussures d'illustration, kilométrages calculés sur les
+séances réelles du workspace des captures.*
 
 | Alimentée par | Calcul |
 |---|---|
