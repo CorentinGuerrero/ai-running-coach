@@ -95,6 +95,16 @@ class TestGearSweatFuel(unittest.TestCase):
             weight_pre_kg=70.2, weight_post_kg=69.1))
         self.assertEqual(errors + warnings, [])
 
+    def test_gear_source_enum_and_requires_gear_id(self):
+        """#133 : `gear_source` ∈ {garmin, chat} et exige un gear_id."""
+        for ok in ("garmin", "chat"):
+            errors, _ = C.validate(self.base(gear_id="pegasus", gear_source=ok))
+            self.assertEqual(errors, [], ok)
+        errors, _ = C.validate(self.base(gear_id="pegasus", gear_source="default"))
+        self.assertTrue(any("gear_source" in e for e in errors), errors)
+        errors, _ = C.validate(self.base(gear_source="garmin"))
+        self.assertTrue(any("gear_source" in e and "gear_id" in e for e in errors), errors)
+
     def test_gear_id_must_be_a_slug(self):
         errors, _ = C.validate(self.base(gear_id="Hoka Speedgoat 5"))
         self.assertTrue(any("gear_id" in e for e in errors), errors)

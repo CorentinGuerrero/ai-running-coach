@@ -1,0 +1,28 @@
+# Matériel Garmin (#133) : la synchronisation lit le matériel attaché par la montre
+# (`get_activity_gear`) et l'inscrit dans `gear_id` quand une puce du profil porte le
+# `garmin: <uuid>` correspondant (fixture `gear-sync/`, stub : Nike Pegasus attachée à
+# l'activité canned 99000001). Priorité Garmin > chat > défaut : ici seul Garmin parle.
+id = "gear-sync-garmin-attached"
+prompt = "/garmin-daily-sync"
+fixture = "gear-sync"
+
+[config.sync]
+lookback_days = 3
+
+[stub.garmin.get_activity_gear]
+file = "gear-activity-pegasus.json"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+tools_called = ["get_activity_gear"]
+tools_not_called = ["add_gear_to_activity"]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_id"
+equals = "pegasus"
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_source"
+equals = "garmin"

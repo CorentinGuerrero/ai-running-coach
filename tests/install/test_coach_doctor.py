@@ -737,6 +737,71 @@ class TestDataSourceAware(InstallAsserts):
             self.assertIn("expires_at", token_check)
 
 
+class TestGearSync(InstallAsserts):
+    """#133 — `gear_sync` : vérification STATIQUE (liste blanche de `.mcp.json` + profil), jamais d'appel Garmin."""
+
+    PROFILE = (
+        "# Profil\n\n## Matériel & lieux\n\n### Chaussures\n\n"
+        "- Nike Pegasus — id: pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n"
+        "- Salomon S/Lab — id: slab\n"
+        "- Vieille paire — id: vieille (retirée)\n"
+    )
+
+    def _check(self, sb):
+        proc = sb.script("coach_doctor.py", "--json", "--check", "gear_sync",
+                         "--tokens-dir", str(_fresh_tokens_dir(sb)))
+        self.assertSucceeded(proc)
+        return _find(json.loads(proc.stdout), "gear_sync")
+
+    def _mcp(self, sb, tools):
+        (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"garmin": {
+            "command": "garmin-mcp", "args": ["stdio"], "env": {"GARMIN_ENABLED_TOOLS": tools}}}}))
+
+    def _profile(self, sb, text):
+        path = sb.repo / "planning" / "Runner_Profile.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def test_old_whitelist_is_warning_with_reinstall_fix(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_activities,get_sleep_data")
+            check = self._check(sb)
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("get_gear", check["message"])
+            self.assertIn("install.sh", check["fix"])
+
+    def test_unlinked_active_pair_is_info_and_retired_ignored(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_gear,get_activity_gear")
+            self._profile(sb, self.PROFILE)
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIn("Salomon S/Lab", check["message"])
+            self.assertNotIn("Pegasus", check["message"])
+            self.assertNotIn("Vieille", check["message"])
+
+    def test_all_linked_is_ok(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_gear,get_activity_gear")
+            self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n")
+            self.assertEqual(self._check(sb)["status"], "ok")
+
+    def test_unreadable_whitelist_is_never_a_warning(self):
+        with Sandbox() as sb:
+            self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n")
+            check = self._check(sb)
+            self.assertEqual(check["status"], "ok")
+            self.assertIn("non lisible", check["message"])
+
+    def test_intervals_source_is_info(self):
+        with Sandbox() as sb:
+            (sb.repo / "config").mkdir(exist_ok=True)
+            (sb.repo / "config/workspace.user.toml").write_text('[data]\nsource = "intervals"\n')
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIn("get_gear_list", check["message"])
+
+
 class TestJsonSchema(InstallAsserts):
     def test_schema_shape(self):
         with Sandbox() as sb:
@@ -750,6 +815,7 @@ class TestJsonSchema(InstallAsserts):
             expected_ids = {
                 "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
                 "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
+                "gear_sync",
             }
             self.assertEqual({c["id"] for c in payload["checks"]}, expected_ids)
             for check in payload["checks"]:

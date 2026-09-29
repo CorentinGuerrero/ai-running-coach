@@ -45,7 +45,7 @@ Le script d'installation enregistre le serveur MCP `garmin` dans votre IDE avec 
       "command": "garmin-mcp",
       "args": ["stdio"],
       "env": {
-        "GARMIN_ENABLED_TOOLS": "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status"
+        "GARMIN_ENABLED_TOOLS": "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
       }
     }
   }
@@ -103,7 +103,7 @@ servers:
         args:
             - stdio
         env:
-            - GARMIN_ENABLED_TOOLS: "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status"
+            - GARMIN_ENABLED_TOOLS: "get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
         cwd: .
       timeout: 300s
       connect_timeout: 10s
@@ -129,6 +129,34 @@ servers:
     Appelez ensuite les nouveaux outils via
     `leanproxy_invoke_tool(server="garmin", tool="get_stats", arguments={...})`
     (voir `skills/garmin-sync-efficiency/SKILL.md`), pas directement.
+
+## Synchronisation du matériel Garmin
+
+Garmin Connect gère son propre matériel (attribution automatique par sport, seuils de retraite).
+Trois outils sont dans la liste blanche : `get_gear` et `get_activity_gear` (lecture) et
+`add_gear_to_activity` (**écriture** côté Garmin — le coach ne l'appelle qu'après votre
+confirmation explicite dans la conversation, jamais en synchronisation automatique).
+
+- **Association, une seule fois.** Au premier `get_gear` qui montre un matériel Garmin sans puce
+  correspondante, le coach vous propose, pour chacun, de l'associer à une puce existante de
+  `### Chaussures` (ajout du segment `garmin: <uuid>`) ou d'en créer une (`alerte` ← seuil Garmin,
+  `depuis` ← date de début, `(retirée)` ← statut retiré). Jamais d'association devinée ; sans
+  réponse, le matériel n'est simplement pas attribué. Le total Garmin d'une paire qui précède
+  votre suivi peut alimenter son `départ` (départ = total Garmin − kilomètres déjà comptés par vos
+  séances, jamais négatif : aucun double comptage).
+- **Priorité d'attribution.** Matériel attaché par la montre à la séance (un seul
+  `get_activity_gear` par séance **nouvelle**) > paire citée en chat > `(par défaut)`. Si Garmin
+  dit A et que vous dites B, vous gagnez et le coach le signale une fois. Un matériel Garmin sans
+  puce n'est jamais attribué en silence. La provenance est tracée dans `gear_source`
+  (`garmin`/`chat`) ; règle exécutée par `python3 scripts/arc_index.py gear-attribution`.
+- **Retour vers Garmin (facultatif).** Une attribution faite en chat peut être poussée vers Garmin
+  si vous le confirmez ; sans confirmation, rien n'est écrit.
+- **Installations existantes.** Relancez `./install.sh` : la liste blanche de `.mcp.json` est
+  mise à jour. En mode passerelle, éditez à la main `GARMIN_ENABLED_TOOLS` de
+  `~/.config/leanproxy_servers.yaml` (voir l'avertissement plus haut) pour y ajouter
+  `get_gear,get_activity_gear,add_gear_to_activity`. `/coach-doctor` (`gear_sync`) signale une liste
+  blanche trop ancienne et les paires du profil sans `garmin:` — sans jamais contacter Garmin.
+- **Source intervals.icu.** Voir [Configuration Intervals.icu](intervals-setup.md#materiel-et-attribution-par-seance).
 
 ## Authentification
 

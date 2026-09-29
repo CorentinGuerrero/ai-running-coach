@@ -812,6 +812,7 @@
           "gap_pace_s_km": 369.62,
           "garmin_activity_id": 90000000039,
           "gear_id": null,
+          "gear_source": null,
           "id": 28,
           "intervals_activity_id": null,
           "load": 95.49,

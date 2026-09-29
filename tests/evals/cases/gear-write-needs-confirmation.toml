@@ -1,0 +1,26 @@
+# Matériel Garmin (#133) : jamais d'écriture côté Garmin sans confirmation. L'athlète
+# déclare une paire en chat (Speedgoat, aucun matériel attaché par la montre — texte réel
+# « No gear data found… » du stub par défaut) : le coach attribue localement, PROPOSE de
+# pousser vers Garmin et n'appelle PAS `add_gear_to_activity` tant que l'athlète n'a rien confirmé.
+#
+# `must_match` : la réponse propose (verbe de proposition/question) de le reporter côté Garmin.
+id = "gear-write-needs-confirmation"
+prompt = "Synchronise ma dernière séance (la sortie longue d'avant-hier). Je l'ai faite avec mes Hoka Speedgoat."
+fixture = "gear-sync"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+tools_not_called = ["add_gear_to_activity"]
+must_match = [
+  "(Garmin[^\\n]{0,120}(veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|confirm|d[ée]sires-tu))|((veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|confirm)[^\\n]{0,120}Garmin)",
+]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_id"
+equals = "speedgoat"
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_source"
+equals = "chat"

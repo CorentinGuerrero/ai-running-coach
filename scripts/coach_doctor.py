@@ -38,7 +38,7 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
         {
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
-                | "daily_sync_scheduled" | "ntfy_configured",
+                | "daily_sync_scheduled" | "ntfy_configured" | "gear_sync",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -160,6 +160,7 @@ GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/T
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
+    "gear_sync",
 )
 
 
@@ -790,6 +791,72 @@ def _load_config(workspace: Path) -> dict:
         return {}
 
 
+GEAR_TOOLS_REQUIRED = ("get_gear", "get_activity_gear")
+
+
+def check_gear_sync(workspace: Path, config: dict) -> dict:
+    """#133 — synchronisation du matériel Garmin, vérifiée STATIQUEMENT (aucun appel Garmin,
+    aucune écriture — même contrat que le reste du script hors `--probe-mcp`) :
+
+    1. la liste blanche `GARMIN_ENABLED_TOOLS` de `.mcp.json` contient `get_gear` et
+       `get_activity_gear` (une installation antérieure à #133 les ignore tant que
+       `install.sh` n'a pas été relancé) ; en mode passerelle/config manuelle la liste n'est
+       pas lisible ici → information, jamais un faux diagnostic ;
+    2. le profil déclare des paires actives (`### Chaussures`) SANS segment `garmin: <uuid>` :
+       information — c'est le coach qui, au premier `get_gear`, liste le matériel Garmin sans
+       puce et propose l'association ; le doctor ne peut pas le lister sans contacter Garmin.
+    """
+    check_id = "gear_sync"
+    source = (config.get("data") or {}).get("source", "garmin")
+    if source == "intervals":
+        return build_check(
+            check_id, "info",
+            "[data].source = \"intervals\" — pas de matériel par séance côté intervals.icu "
+            "(inventaire `get_gear_list` en référence seulement) ; attribution via le chat/défaut.",
+            fix=None,
+        )
+    env = _resolve_mcp_server(workspace).get("env", {})
+    listed = env.get("GARMIN_ENABLED_TOOLS")
+    if listed:
+        enabled = {t.strip() for t in listed.split(",") if t.strip()}
+        missing = [t for t in GEAR_TOOLS_REQUIRED if t not in enabled]
+        if missing:
+            return build_check(
+                check_id, "warning",
+                f"Liste blanche `GARMIN_ENABLED_TOOLS` sans {', '.join(missing)} — l'attribution "
+                "automatique du matériel Garmin est indisponible.",
+                fix="./install.sh (relancez-le : la liste blanche de .mcp.json est mise à jour)",
+            )
+    rel = config.get("athlete", {}).get("profile", "planning/Runner_Profile.md")
+    path = workspace / rel
+    pairs = []
+    if path.is_file():
+        try:
+            pairs = L.parse_gear(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            pairs = []
+    active = [g for g in pairs if not g.get("retired")]
+    unlinked = [g for g in active if not g.get("garmin_uuid")]
+    whitelist_note = "" if listed else " (liste blanche non lisible ici : mode passerelle ou config manuelle)"
+    if unlinked:
+        names = ", ".join(g.get("name") or g["gear_id"] for g in unlinked)
+        return build_check(
+            check_id, "info",
+            f"{len(unlinked)} paire(s) active(s) sans segment `garmin: <uuid>` ({names}){whitelist_note} — "
+            "le coach propose l'association au prochain `get_gear` ; rien n'est jamais associé sans votre accord.",
+            fix="demandez au coach « associe mes chaussures à Garmin » (aucun appel n'est fait par le doctor)",
+        )
+    if not active:
+        return build_check(
+            check_id, "ok",
+            f"Outils matériel Garmin autorisés ; aucune paire active déclarée{whitelist_note}.", fix=None,
+        )
+    return build_check(
+        check_id, "ok",
+        f"{len(active)} paire(s) active(s), toutes associées à Garmin{whitelist_note}.", fix=None,
+    )
+
+
 def check_garmin_check_not_applicable(check_id: str) -> dict:
     """#68 : `[data].source = "intervals"` — ni tokens OAuth Garmin ni serveur
     MCP `garmin` à vérifier ici (aucun des deux n'est installé/enregistré
@@ -824,6 +891,8 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_daily_sync(Path.home(), workspace, config, now)
     if check_id == "ntfy_configured":
         return check_ntfy(config)
+    if check_id == "gear_sync":
+        return check_gear_sync(workspace, config)
     raise ValueError(f"vérification inconnue : {check_id!r}")
 
 

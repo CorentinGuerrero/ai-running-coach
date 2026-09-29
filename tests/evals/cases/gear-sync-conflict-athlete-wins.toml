@@ -1,0 +1,30 @@
+# Matériel Garmin (#133) : conflit. La montre dit Nike Pegasus (stub), l'athlète dit
+# Salomon S/Lab dans la même phrase que la synchronisation. L'athlète gagne
+# (`gear_id: slab`, `gear_source: chat`) et le désaccord est signalé dans la réponse.
+# Aucune écriture côté Garmin : rien n'a été confirmé.
+#
+# `must_match` : la réponse met Garmin/montre et Pegasus dans la même phrase (le conflit est
+# nommé) — 120 caractères max entre les deux pour ne pas valider sur deux paragraphes distincts.
+id = "gear-sync-conflict-athlete-wins"
+prompt = "Synchronise ma dernière séance (la sortie longue d'avant-hier). Je l'ai faite avec mes Salomon S/Lab."
+fixture = "gear-sync"
+
+[stub.garmin.get_activity_gear]
+file = "gear-activity-pegasus.json"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+tools_not_called = ["add_gear_to_activity"]
+must_match = [
+  "((Garmin|montre)[^\\n]{0,120}Pegasus)|(Pegasus[^\\n]{0,120}(Garmin|montre))",
+]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_id"
+equals = "slab"
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_source"
+equals = "chat"

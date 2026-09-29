@@ -22,6 +22,15 @@ Il **n'ajoute aucune logique** : il délègue à l'agent `coach` et au skill
    ligne devient `Pourquoi :` (raison de l'ajustement, #56) au lieu de `Alerte :` —
    jamais les deux, jamais inventée sans fichier `decision` à l'appui
 
+6. **Matériel (#133, source Garmin)** : pour chaque séance **nouvelle** (un seul
+   `get_activity_gear` par séance, jamais pour une séance déjà synchronisée), le matériel
+   attaché par la montre alimente `gear_id` **si une puce du profil porte le `garmin: <uuid>`
+   correspondant** ; la règle (Garmin > déclaration de l'athlète > `(par défaut)`, l'athlète gagne
+   un conflit) est exécutée par `arc_index.py gear-attribution`. Un `gear_id` déjà déclaré est
+   conservé ; un matériel Garmin sans puce n'est **jamais** attribué (mentionné sur la ligne
+   `Alerte :`). Aucune écriture côté Garmin (`add_gear_to_activity`) en headless, jamais. Voir
+   [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
+
 ## Fichier source
 
 `skills/garmin-daily-sync/SKILL.md`

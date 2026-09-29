@@ -89,6 +89,19 @@ et, dès deux paires actives, la validation quotidienne/hebdomadaire **suggère*
 paire par séance (type de séance, météo, kilométrage restant, rodage de la paire de
 course) — jamais imposée.
 
+### Synchronisation du matériel Garmin (#133)
+
+Avec la source Garmin, le coach **propose une fois** d'associer chaque matériel Garmin
+(`get_gear`) à une puce `### Chaussures` du profil — ajout du seul segment `garmin: <uuid>`, ou
+création d'une puce (`alerte` ← seuil Garmin, `depuis` ← date de début, `(retirée)` ← statut ;
+le total Garmin peut alimenter `départ`, en soustrayant les kilomètres déjà comptés par vos
+séances). Jamais d'association devinée. Ensuite `gear_id` est renseigné avec la priorité
+**matériel Garmin > paire citée en chat > `(par défaut)`** (`arc_index.py gear-attribution`) ; en
+cas de désaccord vous gagnez, signalé une fois. Avec votre accord explicite, une attribution faite en
+chat peut être poussée vers Garmin (`add_gear_to_activity`) — jamais en headless. Source
+intervals.icu : pas de matériel par séance, attribution par chat/défaut uniquement.
+Détails : [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
+
 ### Débrief post-course (#61)
 
 Après une course (`intensity: "race"`) dont le plan (`planning/`,

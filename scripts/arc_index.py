@@ -275,7 +275,10 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # #132 : `gear` gagne `start_m` (kilométrage de départ, segment « départ N km » de la puce
 # chaussure) et `usage` (rôle facultatif) — sans ce bump, une base déjà construite
 # n'a pas les colonnes et l'insertion échouerait avec « no such column ».
-SCHEMA_VERSION = 26
+# #133 : `gear` gagne `garmin_uuid` (segment « garmin: <uuid> » de la puce chaussure) et
+# `activity` gagne `gear_source` (« garmin »/« chat », provenance du `gear_id`) — sans ce
+# bump, une base déjà construite n'a pas les colonnes (« no such column »).
+SCHEMA_VERSION = 27
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -452,7 +455,8 @@ CREATE TABLE athlete (
 );
 CREATE TABLE gear (
     source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL,
-    is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT
+    is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT,
+    garmin_uuid TEXT
 );
 -- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
 -- section « Indices de performance » du profil (`arc_legacy.
@@ -491,7 +495,7 @@ CREATE TABLE activity (
     elevation_loss_m REAL, avg_hr_bpm REAL, max_hr_bpm REAL, recovery_hr_bpm REAL,
     avg_cadence_spm REAL, calories_kcal REAL, calories_bmr_kcal REAL, te_aerobic REAL, te_anaerobic REAL, rpe REAL,
     load REAL, load_source TEXT, vo2max_est REAL, missing_reason TEXT,
-    gear_id TEXT, carbs_g REAL, fluid_intake_ml REAL, weight_pre_kg REAL, weight_post_kg REAL,
+    gear_id TEXT, gear_source TEXT, carbs_g REAL, fluid_intake_ml REAL, weight_pre_kg REAL, weight_post_kg REAL,
     sweat_rate_l_h REAL, gap_pace_s_km REAL, decoupling_pct REAL, ef_whole REAL,
     decoupling_reason TEXT, best_vam_10min_m_h REAL, best_vam_20min_m_h REAL,
     best_climb_vam_elapsed_m_h REAL, descent_reference_gap_pace_s_km REAL,
@@ -1043,6 +1047,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "is_default": int(bool(shoe.get("default"))), "retired": int(bool(shoe.get("retired"))),
                 "collision_base": shoe.get("collision_base"),
                 "start_m": shoe.get("start_m"), "usage": shoe.get("usage"),
+                "garmin_uuid": shoe.get("garmin_uuid"),
             })
         for entry in g("performance_index") or []:
             if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
@@ -1075,7 +1080,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
             "calories_bmr_kcal": g("calories_bmr_kcal"),
             "te_aerobic": g("training_effect_aerobic"), "te_anaerobic": g("training_effect_anaerobic"),
             "rpe": g("rpe"), "missing_reason": _j(g("missing_reason")),
-            "gear_id": g("gear_id"), "carbs_g": g("carbs_g"), "fluid_intake_ml": g("fluid_intake_ml"),
+            "gear_id": g("gear_id"), "gear_source": g("gear_source"), "carbs_g": g("carbs_g"), "fluid_intake_ml": g("fluid_intake_ml"),
             "weight_pre_kg": g("weight_pre_kg"), "weight_post_kg": g("weight_post_kg"),
             "body_md": body,
             "data_json": _data_json(data),
@@ -3085,6 +3090,14 @@ def heat_acclimation_today(conn, conf: dict, today: date) -> dict:
     return M.heat_acclimation(activities, weather_rows, today, conf["heat_threshold_c"], window_days)
 
 
+def gear_attribution(conn, garmin_gear: Optional[str], chat_gear: Optional[str]) -> dict:
+    """Commande « gear-attribution » (#133) : priorité Garmin > chat > défaut, résolue par
+    `arc_metrics.resolve_gear_attribution` à partir des puces du profil (colonne `garmin_uuid`)."""
+    gear_defs = [dict(r) for r in conn.execute("SELECT gear_id, garmin_uuid FROM gear")]
+    uuids = [u.strip() for u in (garmin_gear or "").split(",") if u.strip()]
+    return M.resolve_gear_attribution(gear_defs, uuids, (chat_gear or "").strip() or None)
+
+
 def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None) -> dict:
     """Kilométrage par chaussure (#40) — pour la CLI et pour les agents en headless
     (`coach`, rapport hebdomadaire). N'est pas soumis à `[health].morning_check` :
@@ -3731,7 +3744,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
-                                 "heat-acclimation", "gear", "performance-index", "fueling", "samples",
+                                 "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy"))
     parser.add_argument("selector", nargs="?", default=None,
@@ -3770,6 +3783,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « gear » (#132) : séances synchronisées dans CE run "
                              "(garmin_activity_id, intervals_activity_id ou chemin du fichier, séparés par "
                              "des virgules) — ajoute `crossed_in_run` à la paire dont elles franchissent le seuil")
+    parser.add_argument("--garmin-gear", metavar="UUID[,UUID…]",
+                        help="commande « gear-attribution » (#133) : uuid du matériel Garmin (get_activity_gear ou "
+                             "get_gear), séparés par des virgules")
+    parser.add_argument("--chat-gear", metavar="GEAR_ID",
+                        help="commande « gear-attribution » (#133) : gear_id déclaré par l'athlète en chat")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="commande « energy » : nombre de dernières séances éligibles à rendre "
                              "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
@@ -3841,6 +3859,9 @@ def main(argv=None) -> int:
         run_refs = [r.strip() for r in args.activities.split(",") if r.strip()] if args.activities else None
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         print(json.dumps(gear_mileage(conn, today_date, run_refs), ensure_ascii=False))
+        return 0
+    if args.command == "gear-attribution":
+        print(json.dumps(gear_attribution(conn, args.garmin_gear, args.chat_gear), ensure_ascii=False))
         return 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
