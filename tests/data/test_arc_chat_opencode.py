@@ -690,6 +690,23 @@ class TestBudgetAndTimeouts(OpenCodeCase):
         self.assertEqual(self.replies(), [{"reply": "once"}])
 
 
+class TestAbortSignal(OpenCodeCase):
+    def test_s5_abort_pose_un_signal_local_qui_fait_refuser_les_permissions(self):
+        h = Harness(self.ws)
+        turn = O._Turn(h.ctx)
+        turn.root = SID
+        with mock.patch.object(self.backend, "_request"):
+            self.backend._abort(SID, turn)
+        self.assertTrue(turn.abort_event.is_set())
+        self.assertFalse(h.ctx.cancelled.is_set())        # l'annulation de l'athlète reste distincte
+        self.fake.scenario = {"events": []}
+        self.backend._ensure_server()
+        self.backend._answer_permission(SID, turn, {
+            "id": "per_late", "permission": "edit", "tool": {"messageID": "m", "callID": "c"}})
+        self.assertEqual(h.decided, [])                    # jamais soumis à la politique
+        self.assertEqual(self.replies()[0]["reply"], "reject")
+
+
 class TestUnresolvedPermission(OpenCodeCase):
     def _scenario(self):
         return {"before_permission": [

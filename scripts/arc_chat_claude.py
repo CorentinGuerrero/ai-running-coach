@@ -51,6 +51,35 @@ _FS_LIST = ("Glob", "Grep", "LS")
 HOOK_TIMEOUT_MARGIN_S = 120      # marge au-dessus de approval_wait_s pour le délai du hook PreToolUse
 DEFAULT_APPROVAL_WAIT_S = 600
 
+# Tarifs USD par million de jetons (entrée, sortie) : repli quand aucun `ResultMessage` n'est arrivé
+# (plantage du SDK) — le coût est alors estimé depuis les jetons comptés. Lecture du cache = 10 % de l'entrée.
+# Modèle inconnu : tarif Sonnet, le choix prudent le plus courant.
+MODEL_PRICES_USD_PER_MTOK = {
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
+DEFAULT_MODEL_PRICE = MODEL_PRICES_USD_PER_MTOK["claude-sonnet-5-5"]
+CACHE_READ_FACTOR = 0.1
+
+
+def model_price(model: Any) -> tuple:
+    """(entrée, sortie) en USD/MTok ; correspondance exacte, puis par famille, sinon tarif Sonnet."""
+    name = str(model or "").lower()
+    if name in MODEL_PRICES_USD_PER_MTOK:
+        return MODEL_PRICES_USD_PER_MTOK[name]
+    for family in ("opus", "haiku", "sonnet"):
+        if family in name:
+            return next(v for k, v in MODEL_PRICES_USD_PER_MTOK.items() if family in k)
+    return DEFAULT_MODEL_PRICE
+
+
+def estimate_cost_usd(model: Any, tokens: dict) -> float:
+    """Coût estimé depuis les jetons cumulés (`input`, `output`, `cache_read`)."""
+    price_in, price_out = model_price(model)
+    return (tokens.get("input", 0) * price_in + tokens.get("cache_read", 0) * price_in * CACHE_READ_FACTOR
+            + tokens.get("output", 0) * price_out) / 1_000_000
+
 
 def canonical_tool(name: str, tool_input: Optional[dict]) -> tuple:
     """Nom d'outil Claude Code -> (nom canonique, entrée canonique)."""
@@ -170,20 +199,29 @@ class ClaudeBackend(ChatBackend):
             wait = float(DEFAULT_APPROVAL_WAIT_S)
         return wait + HOOK_TIMEOUT_MARGIN_S
 
-    def _budget_usd(self) -> Optional[float]:
-        """Plafond du tour en USD (`ClaudeAgentOptions.max_budget_usd`) ; None = pas de plafond."""
-        raw = self.config.get("turn_budget_eur")
+    def _cfg_value(self, ctx: Optional[TurnContext], key: str) -> Any:
+        """Valeur du tour (`ctx.config`, où le service pose le budget restant) sinon de la configuration du backend."""
+        ctx_config = getattr(ctx, "config", None) or {}
+        return ctx_config[key] if ctx_config.get(key) is not None else self.config.get(key)
+
+    def _rate(self, ctx: Optional[TurnContext]) -> float:
+        try:
+            return float(self._cfg_value(ctx, "usd_eur_rate") or 0.92)
+        except (TypeError, ValueError):
+            return 0.92
+
+    def _budget_usd(self, ctx: Optional[TurnContext] = None) -> Optional[float]:
+        """Plafond du tour en USD (`ClaudeAgentOptions.max_budget_usd`) ; None = pas de plafond.
+
+        `turn_budget_eur` (budget restant du jour, propre au tour) vient de `ctx.config`."""
+        raw = self._cfg_value(ctx, "turn_budget_eur")
         try:
             eur = float(raw)
         except (TypeError, ValueError):
             return None
         if eur <= 0:
-            return None
-        try:
-            rate = float(self.config.get("usd_eur_rate") or 0.92)
-        except (TypeError, ValueError):
-            rate = 0.92
-        return round(eur / rate, 6)
+            return 0.000001                     # budget épuisé : jamais « sans plafond »
+        return round(eur / self._rate(ctx), 6)
 
     def _api_key_env(self) -> str:
         return str(self.config.get("api_key_env") or DEFAULT_API_KEY_ENV)
@@ -247,7 +285,7 @@ class ClaudeBackend(ChatBackend):
             kwargs["model"] = str(cfg["model"])
         if cfg.get("max_turns"):
             kwargs["max_turns"] = int(cfg["max_turns"])
-        cap_usd = self._budget_usd()
+        cap_usd = self._budget_usd(turn.ctx)
         if cap_usd is not None:
             kwargs["max_budget_usd"] = cap_usd
         if resume:
@@ -405,12 +443,16 @@ class ClaudeBackend(ChatBackend):
         turn.usage_emitted = True
         usage = (getattr(result, "usage", None) or {}) if result is not None else {}
         tokens = turn.tokens
+        cost_usd = getattr(result, "total_cost_usd", None) if result is not None else None
+        if cost_usd is None and any(tokens.values()):
+            # Pas de `ResultMessage` (plantage) : estimation depuis les jetons, jamais 0 €.
+            model = (getattr(turn.ctx, "config", None) or {}).get("model") or self.config.get("model")
+            cost_usd = estimate_cost_usd(model, tokens)
         turn.ctx.emit("usage", {
             "input_tokens": int(usage.get("input_tokens") or tokens["input"]),
             "output_tokens": int(usage.get("output_tokens") or tokens["output"]),
             "cache_read_tokens": int(usage.get("cache_read_input_tokens") or tokens["cache_read"]),
-            "cost_eur": usd_to_eur(getattr(result, "total_cost_usd", None) if result is not None else None,
-                                   self.config.get("usd_eur_rate")),
+            "cost_eur": usd_to_eur(cost_usd, self._rate(turn.ctx)),
         })
 
     def _finish(self, turn: _Turn, result: Any, assistant_error: Optional[str]) -> None:

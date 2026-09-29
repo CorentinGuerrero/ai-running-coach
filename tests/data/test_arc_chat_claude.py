@@ -587,6 +587,34 @@ class TestBudget(ClaudeBackendCase):
         self.assertIn("budget", "".join(p["text"] for p in h.of("text_delta")).lower())
         self.assertAlmostEqual(h.of("usage")[0]["cost_eur"], 0.45, places=4)
 
+    def test_b3_budget_du_tour_lu_dans_ctx_config(self):
+        """Le service pose `turn_budget_eur` sur `ctx.config` (pas sur la config du backend)."""
+        backend, sdk, rec = self.backend([("msg", MB.ResultMessage())], {"usd_eur_rate": 0.9})
+        h = Harness(self.ws)
+        h.ctx.config = {"turn_budget_eur": 0.45, "usd_eur_rate": 0.9}
+        backend.run_turn(h.ctx, "x")
+        self.assertAlmostEqual(rec["options"].max_budget_usd, 0.5, places=4)
+
+    def test_b3_budget_epuise_jamais_sans_plafond(self):
+        backend, sdk, rec = self.backend([("msg", MB.ResultMessage())], {})
+        h = Harness(self.ws)
+        h.ctx.config = {"turn_budget_eur": 0.0}
+        backend.run_turn(h.ctx, "x")
+        self.assertLess(rec["options"].max_budget_usd, 0.001)
+
+    def test_s4_plantage_sans_resultat_cout_estime_depuis_les_jetons(self):
+        script = [("msg", MB.AssistantMessage([MB.TextBlock("a")], message_id="m1",
+                                              usage={"input_tokens": 1_000_000, "output_tokens": 100_000,
+                                                     "cache_read_input_tokens": 1_000_000})),
+                  ("raise", RuntimeError("boom"))]
+        for model, usd in (("claude-sonnet-5-5", 2.0 + 0.2 + 1.0), ("claude-opus-5-5", 4.0 + 0.4 + 2.0),
+                           ("claude-haiku-4-5", 1.0 + 0.1 + 0.5), ("modele-inconnu", 2.0 + 0.2 + 1.0)):
+            backend, sdk, _ = self.backend(script, {"model": model, "usd_eur_rate": 0.9})
+            h = Harness(self.ws)
+            with self.assertRaises(BackendError):
+                backend.run_turn(h.ctx, "x")
+            self.assertAlmostEqual(h.of("usage")[0]["cost_eur"], usd * 0.9, places=4, msg=model)
+
 
 class TestPreconditions(ClaudeBackendCase):
     def test_missing_key(self):

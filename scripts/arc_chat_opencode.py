@@ -224,6 +224,10 @@ class _Turn:
         self.pending = False
         self.started = False
         self.aborted = False
+        # Signal PROPRE au tour, posé par `_abort` : les fils de permission refusent alors tout
+        # nouvel appel. (`ctx.cancelled` reste réservé à l'annulation demandée par l'athlète : il
+        # annulerait aussi les propositions en attente, qui doivent rester ouvertes.)
+        self.abort_event = threading.Event()
         self.max_steps_hit = False
         self.workers: list = []
         self.root = ""                     # id de la session du tour
@@ -543,6 +547,7 @@ class OpenCodeBackend(ChatBackend):
     def _abort(self, sid: str, turn: _Turn) -> None:
         """Interrompt la session du tour (et ses sessions filles, au mieux)."""
         turn.aborted = True
+        turn.abort_event.set()
         turn.abort_at = time.monotonic()
         for target in [sid, *sorted(turn.children)]:
             try:
@@ -810,7 +815,7 @@ class OpenCodeBackend(ChatBackend):
         call_id = self._key(turn, sid, raw_call) if raw_call else ""
         child = sid != turn.root
         try:
-            if permission in ALWAYS_REJECT or ctx.cancelled.is_set():
+            if permission in ALWAYS_REJECT or ctx.cancelled.is_set() or turn.abort_event.is_set():
                 self._reply(sid, request_id, False, REFUSAL_DENY)
                 return
             with turn.lock:
