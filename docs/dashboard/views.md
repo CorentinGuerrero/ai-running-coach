@@ -650,6 +650,13 @@ d'une séance mais absent du profil apparaît en « inconnu ». Le tableau ne s'
 le profil déclare du matériel ; le détail des règles est dans les Hypothèses
 (`equipment_usage`).
 
+![Équipement : usage par objet, déclencheurs en heures, séances et jours, poche à eau à nettoyer](../assets/dashboard/equipement.webp)
+
+*Le tableau Équipement : la poche à eau a passé son rappel d'hygiène de 30 jours depuis
+le dernier entretien, la ceinture cardio approche de son année (« 12 mois » compté 360 j),
+les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
+d'illustration, usage calculé sur les séances réelles du workspace des captures.*
+
 | Alimentée par | Calcul |
 |---|---|
 | `activities/*.md` (course et trail : allure, FC, splits) | `scripts/arc_metrics.py` |
