@@ -645,8 +645,17 @@ divergent disent que le terrain ou la forme du jour pèsent.
 
 *La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
 leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
-visible en grisé. Liste de chaussures d'illustration, kilométrages calculés sur les
-séances réelles du workspace des captures.*
+visible en grisé ; la dernière inspection photo (#135) s'affiche à côté (« inspectée
+22 sept. », état « Usure visible ») et « Inspection conseillée » signale une paire à
+inspecter. Liste de chaussures d'illustration, kilométrages calculés sur les séances
+réelles du workspace des captures.*
+
+![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
+
+*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
+conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
+relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
+schématiques), jamais de vraies photos dans le dépôt.*
 
 **Équipement (#134)** — sous la carte Matériel, un tableau pour tout ce qui n'est pas
 chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,

@@ -35,11 +35,20 @@ Photo floue ou angle manquant → le coach **redemande l'angle** plutôt que de 
 | Talon médial | indice de pronation |
 | Avant-pied latéral fort | supination à la propulsion |
 
+Correspondances issues des sources citées plus bas, qui ne concordent pas toutes (l'usure
+latérale du milieu du pied est lue comme une foulée neutre par l'une d'elles) : un indice,
+jamais un diagnostic.
+
 - Une **asymétrie gauche/droite** mise en avant (le côté le plus usé), rapprochée de votre
   historique de blessures et de douleurs (`medical/`)
 - Un **relais** vers l'agent `medical` en cas d'asymétrie marquée ou de lien plausible avec une
   douleur — **uniquement s'il est activé** (`[agents].enabled`) ; sinon il suggère un kiné ou
   une analyse de foulée en laboratoire
+
+Dans le tableau de bord, chaque inspection rejoint l'historique de sa paire (vue
+Performance) :
+
+![Inspections photo dans le tableau de bord](../assets/dashboard/inspections.webp)
 
 ## Garde-fous
 
