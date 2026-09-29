@@ -42,6 +42,7 @@ n'apparaît jamais littéralement en sortie.)
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme | ⚠️ si non nul |
 | `daily_sync_scheduled` | Tâche cron (Linux) ou LaunchAgent (macOS) du daily-sync ; en mode `watch`, dernier passage de `scripts/garmin_watch.py` | ℹ️ si non installé (choix valide) ; ⚠️ si le watcher est installé mais muet depuis plus de 3 intervalles |
 | `ntfy_configured` | Notifications push configurées, si activées | ℹ️ si désactivées, ⚠️ si mal configurées |
+| `fit_reader` | `fitparse` présent dans l'environnement MCP de la source (`garmin-mcp` ou `intervals-icu-mcp`), pour lire les FIT téléchargés | ⚠️ si absent : zones, GAP, VAM… restent vides — relancer `./install.sh --source <source>` |
 
 Un ❌ fait échouer la commande (code de sortie non nul). Un ⚠️ ou un ℹ️ jamais —
 ce sont des dégradations connues, pas des pannes.

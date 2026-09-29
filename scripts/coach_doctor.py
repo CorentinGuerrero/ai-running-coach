@@ -6,7 +6,8 @@ Vérifie l'installation SANS RIEN ÉCRIRE ni appeler le réseau *par défaut* :
 `--probe-mcp` pour un vrai handshake, opt-in), validité TOML de
 `config/workspace*.toml`, complétude du profil athlète (FC max / FC de repos),
 fraîcheur de l'index dérivé `.arc/coach.db`, nombre de fichiers hors contrat,
-planification du daily-sync (cron/launchd), configuration ntfy.
+planification du daily-sync (cron/launchd), configuration ntfy, lecteur FIT
+(`fitparse` dans l'environnement MCP de `[data].source`).
 
 Usage :
     scripts/coach_doctor.py                 # tableau ✅/⚠️/❌ en français
@@ -38,7 +39,7 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
         {
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
-                | "daily_sync_scheduled" | "ntfy_configured",
+                | "daily_sync_scheduled" | "ntfy_configured" | "fit_reader",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -160,6 +161,7 @@ GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/T
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
+    "fit_reader",
 )
 
 
@@ -776,6 +778,64 @@ def check_ntfy(config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# fit_reader
+# ---------------------------------------------------------------------------
+
+# Outil `uv` dont l'interpréteur lit les FIT pour `skills/fit-download` (`--json`),
+# par source — le même que celui dans lequel `download_fit.py` se relance.
+FIT_READER_TOOLS = {"garmin": "garmin-mcp", "intervals": "intervals-icu-mcp"}
+
+
+def _tool_python(tool: str, home: Path) -> Optional[Path]:
+    """Interpréteur de l'outil `uv` `tool` : celui du binaire du PATH (lien uv →
+    `<env>/bin/<tool>`), sinon l'emplacement uv par défaut — même résolution que
+    `download_fit._auto_relaunch`."""
+    exe = shutil.which(tool)
+    candidates = []
+    if exe:
+        candidates.append(Path(os.path.realpath(exe)).parent / "python3")
+    candidates.append(home / f".local/share/uv/tools/{tool}/bin/python3")
+    return next((c for c in candidates if c.is_file() and os.access(c, os.X_OK)), None)
+
+
+def check_fit_reader(config: dict, home: Path) -> dict:
+    """`fitparse` est-il importable dans l'environnement MCP de la source ? Sans lui,
+    `download_fit.py --json` (et l'étape FIT du daily-sync) ne produit aucun
+    échantillon : zones, GAP, découplage, VAM, descente, durabilité et dépense
+    énergétique modèle restent vides. Typiquement une installation intervals.icu
+    antérieure à la lecture des FIT, mise à jour par un simple `git pull` sans
+    relancer `install.sh` (docs/update.md). `warning`, jamais `error` : les KPI de
+    base restent disponibles. Lance un interpréteur local (`import fitparse`),
+    aucun appel réseau."""
+    check_id = "fit_reader"
+    source = (config.get("data") or {}).get("source", "garmin")
+    tool = FIT_READER_TOOLS.get(source, FIT_READER_TOOLS["garmin"])
+    fix = f"./install.sh --source {source}" if source in FIT_READER_TOOLS else "./install.sh"
+    python = _tool_python(tool, home)
+    if python is None:
+        return build_check(
+            check_id, "warning",
+            f"Environnement « {tool} » introuvable : les fichiers FIT ne peuvent pas être lus "
+            "(KPI fins — zones, GAP, VAM… — indisponibles).",
+            fix=fix,
+        )
+    try:
+        proc = subprocess.run([str(python), "-c", "import fitparse"], capture_output=True, timeout=30)
+        available = proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        available = False
+    if not available:
+        return build_check(
+            check_id, "warning",
+            f"fitparse absent de l'environnement « {tool} » : les FIT téléchargés ne sont pas lus "
+            "(KPI fins — zones, GAP, VAM… — indisponibles).",
+            fix=fix,
+        )
+    return build_check(check_id, "ok", f"Lecteur FIT (fitparse) présent dans l'environnement « {tool} ».",
+                       fix=None)
+
+
+# ---------------------------------------------------------------------------
 # Orchestration + CLI
 # ---------------------------------------------------------------------------
 
@@ -824,6 +884,8 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_daily_sync(Path.home(), workspace, config, now)
     if check_id == "ntfy_configured":
         return check_ntfy(config)
+    if check_id == "fit_reader":
+        return check_fit_reader(config, Path.home())
     raise ValueError(f"vérification inconnue : {check_id!r}")
 
 

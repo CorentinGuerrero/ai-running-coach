@@ -158,16 +158,21 @@ source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
 | Profil athlète (référence, jamais substitué au profil déclaré) | — | `get_athlete_profile` | |
 | Charge/forme (vocabulaire générique du projet, jamais les noms TrainingPeaks) | — (calculée par `scripts/arc_index.py`) | `get_fitness_summary` | Ne jamais citer `ctl`/`atl`/`form` sous ces noms dans une réponse — reformuler en charge/condition/fatigue/forme comme partout ailleurs (`docs/marques.md`). |
 
-**Fonctionnalités/champs Garmin sans portage intervals.icu dans cette story —
+**Téléchargement FIT — disponible avec les deux sources.** Le skill
+`fit-download` télécharge le FIT d'une séance intervals.icu par l'API REST
+(`download_fit.py <intervals_activity_id> --json`, source lue dans
+`[data].source`, clé API du serveur MCP) : `activities/fit/i<chiffres>.json` se
+rattache à la séance par son `intervals_activity_id` et débloque les mêmes KPI
+qu'avec Garmin (zones, GAP, découplage, VAM, descente, durabilité, dépense
+énergétique modèle), ainsi que `session-parts-analyzer`. **Exception : une
+activité importée dans intervals.icu depuis Strava** — l'API Strava interdit sa
+redistribution, aucun FIT n'existe : le script le dit (`INDISPONIBLE`), la
+séance reste valide sans ces KPI, jamais de valeur inventée.
+
+**Fonctionnalités/champs Garmin sans portage intervals.icu —
 indisponibles et EXPLIQUÉS comme tels quand `[data].source = "intervals"`,
 jamais devinés ou simulés :**
 
-- **Téléchargement FIT** (skill `fit-download`, `session-parts-analyzer`, et
-  tout KPI qui en dépend — GAP, VAM, décrochage cardiaque, durabilité) : le
-  script `scripts/download_fit.py` est câblé sur `garminconnect` + les tokens
-  `~/.garminconnect`, pas sur l'API intervals.icu. Non porté dans cette story
-  (#68) — dire à l'athlète que l'analyse sub-km n'est pas disponible avec
-  cette source plutôt que d'inventer des valeurs FIT.
 - **Fréquence cardiaque de récupération (HRR, `recovery_hr_bpm`) et `splits`
   par km** : absents des activités synchronisées côté intervals.icu (voir la
   table ci-dessus) — omis du bloc `arc`, jamais inventés ; `course-comparison`
@@ -194,11 +199,11 @@ jamais devinés ou simulés :**
 - `garmin-sync-efficiency` — discipline de récupération pour éviter l'explosion du contexte
 - `workspace-data-contract` — **schéma du bloc ```` ```arc ````** par type de fichier (activité, santé, météo, semaine, nutrition, rapport, évaluation de parcours, plan de course), unités SI, validation par `scripts/arc_index.py --validate`. Charger avant d'écrire un fichier du workspace.
 - `arc-backfill` — met au contrat les fichiers écrits avant lui, par lots, à partir de la liste produite par `python3 scripts/arc_index.py backfill-plan`.
-- `coach-doctor` — **diagnostic d'installation en une commande** (`/coach-doctor`, `python3 scripts/coach_doctor.py`) : âge/échéance des tokens Garmin, joignabilité du MCP `garmin`, validité TOML de la config, complétude du profil athlète, fraîcheur de l'index `.arc/coach.db`, fichiers hors contrat, planification du daily-sync, configuration ntfy. Ne lit ni n'écrit rien de sensible ; à charger dès qu'un symptôme d'installation apparaît, avant de deviner la cause.
+- `coach-doctor` — **diagnostic d'installation en une commande** (`/coach-doctor`, `python3 scripts/coach_doctor.py`) : âge/échéance des tokens Garmin, joignabilité du MCP `garmin`, validité TOML de la config, complétude du profil athlète, fraîcheur de l'index `.arc/coach.db`, fichiers hors contrat, planification du daily-sync, configuration ntfy, lecteur FIT (`fitparse` dans l'environnement MCP de la source). Ne lit ni n'écrit rien de sensible ; à charger dès qu'un symptôme d'installation apparaît, avant de deviner la cause.
 - `garmin-daily-sync` — **prompt d'orchestration headless** (`/garmin-daily-sync`) lancé par le cron de la machine coach (`scripts/daily-sync.sh`) — aux heures fixes, ou seulement quand Garmin a du neuf avec `[sync].mode = "watch"` (`scripts/garmin_watch.py`, sondage sans LLM, indice `trigger=` passé au skill) —, depuis le téléphone (Remote Control) ou l'IDE : délègue au `coach` + `garmin-sync-efficiency`, ne pose aucune question, ne récupère que les dates manquantes, termine par un bloc ```` ```resume ```` (≤ 5 lignes) envoyé en notification push (ntfy). Voir `docs/mobile.md`.
 - `weather-forecast` — récupération + persistance des prévisions météo (wttr.in via webfetch), résolution du lieu (override fichier semaine → `active_objective.md` défaut → profil défaut → demander), seuils de catégorie (🟢/🟡/🟠/🔴), créneau optimal par séance outdoor. Utilisé par l'agent `coach` à chaque validation hebdo/journalière.
 - `session-parts-analyzer` — analyse au niveau segment des drills (strides, montées, intervalles, sprints) depuis FIT/MCP. L'analyse détaillée délègue le téléchargement FIT à `fit-download`.
-- `fit-download` — **téléchargement des fichiers FIT Garmin + records GPS en bypassant le MCP** (qui timeoute sur les FIT) : `scripts/download_fit.py` utilisant `garminconnect` + tokens locaux `~/.garminconnect`. Charger dès qu'une séance doit être analysée à précision sub-km (profil de parcours, montées, dérive FC×élévation, analyse stride/sprint/intervalle, comparaison de parcours). Toujours persister l'analyse dans le MD de l'activité dans la langue des documents (`config/workspace.toml`), ne jamais dumper le JSON brut.
+- `fit-download` — **téléchargement des fichiers FIT + records GPS en bypassant le MCP** (qui timeoute sur les FIT) : `scripts/download_fit.py`, source suivant `[data].source` — Garmin via `garminconnect` + tokens locaux `~/.garminconnect`, ou intervals.icu via son API REST + la clé API du serveur MCP (activités importées depuis Strava exclues, voir « Backends MCP »). Charger dès qu'une séance doit être analysée à précision sub-km (profil de parcours, montées, dérive FC×élévation, analyse stride/sprint/intervalle, comparaison de parcours). Toujours persister l'analyse dans le MD de l'activité dans la langue des documents (`config/workspace.toml`), ne jamais dumper le JSON brut.
 - `gpx-analysis` — **analyse générique de parcours GPX** (fichiers Strava/Garmin/course) via `scripts/analyze_gpx.py` (stdlib) : distance réelle, D+/D- (lissage anti-bruit), profil par km, montées significatives, boucle vs point-to-point, verdict de compatibilité vs une cible (distance/D+). Charger dès que l'utilisateur fournit un GPX et veut l'analyser ou l'évaluer contre une séance planifiée. Persister la fiche d'évaluation dans `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` (langue des documents). Utilisé par `course-strategist` pour l'entrée GPX.
 - `course-comparison` — **analyse comparative de séances sur le même parcours/lieu** via `scripts/compare_course.py` : découverte de toutes les activités d'un lieu (fichiers MD Garmin), alignement des boucles/segments, comparaison des montées, tableau global (date, distance, D+, durée, allure, FC moy/max, premier tour, montées) et dump JSON. Charger quand l'utilisateur demande de comparer des séances d'un même lieu ou d'évaluer la progression sur un parcours connu. Prérequis : chaque MD d'activité porte son bloc ```` ```arc ```` avec `location` et `splits` (fichiers anciens : bloc YAML `## Données brutes Garmin (référence)` + `## Analyse par splits (km)`). Persister les rapports dans `rapports/YYYY-MM-DD_comparaison_<lieu>.md`.
 - `log` — **saisie libre en une phrase** (`/log`, #67) : « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Le modèle extrait les entités, `scripts/arc_log.py` (stdlib, JSON-in/JSON-out) fait l'arithmétique et la correspondance catalogue (`resources/nutrition/catalogue-produits-*.md`) — jamais l'inverse. Produit inconnu/ambigu → toujours demander, jamais inventer. Écrit `carbs_g`/`fluid_intake_ml`/`rpe` dans l'activité du jour (`activities/`, agent coach) et `pain` dans `medical/YYYY-MM-DD_health.md` (agent medical si activé, sinon coach) ; une douleur ≥ 7/10 déclenche une recommandation de consultation.

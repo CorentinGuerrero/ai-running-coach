@@ -74,9 +74,9 @@ Offer it, never block on it.
 - **In-effort fuelling stays in GROSS kcal/h** (`garmin_kcal`/duration, or
   `course-strategist`'s `kcal_per_h`) — never the net figure, which excludes
   the resting-metabolism floor the effort still draws on.
-- **`model_kcal` is `null`** (no FIT, sport outside the run family, or
-  `[data].source = "intervals"` — #68, no FIT ever available from that
-  source, say "intervals.icu" rather than "Garmin"): never invent a figure —
+- **`model_kcal` is `null`** (no FIT downloaded, sport outside the run family,
+  or an intervals.icu activity imported from Strava — no FIT exists; at
+  `[data].source = "intervals"`, say "intervals.icu" rather than "Garmin"): never invent a figure —
   fall back to `garmin_kcal`/`calories_kcal` alone for that session.
 
 ### PRODUITS DE RÉFÉRENCE (catalogues locaux — optionnels)

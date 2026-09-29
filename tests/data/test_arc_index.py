@@ -1328,7 +1328,27 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 25)
+        self.assertEqual(I.SCHEMA_VERSION, 26)
+
+    def test_schema_version_26_adds_intervals_id_to_sample_tables(self):
+        """FIT Intervals.icu (#68) : `activity_sample` et `sample_file` gagnent
+        `intervals_activity_id` — une base de version 25 doit être reconstruite avec,
+        sinon l'ingestion d'un `activities/fit/i<chiffres>.json` échouerait avec
+        « no such column »."""
+        db_path = self.tmp / "legacy25.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '25');"
+            "CREATE TABLE activity_sample (garmin_activity_id INTEGER, source_path TEXT, t_s REAL);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        for table in ("activity_sample", "sample_file"):
+            columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            self.assertIn("intervals_activity_id", columns, table)
+        conn.close()
 
     def test_schema_version_25_adds_energy_table_and_bmr_column(self):
         """Dépense énergétique modèle : `activity` gagne `calories_bmr_kcal` (REAL)

@@ -1,6 +1,6 @@
 ---
 name: coach-doctor
-description: Diagnostic d'installation en une commande — vérifie l'échéance des tokens Garmin, la joignabilité du MCP garmin, la validité des fichiers config/workspace*.toml, la complétude du profil athlète, la fraîcheur de l'index .arc/coach.db, les fichiers hors contrat, la planification du daily-sync (cron/launchd) et la configuration ntfy. Charger quand l'utilisateur lance /coach-doctor, quand quelque chose semble cassé (synchronisation en échec, réponse étrange d'un agent, erreur MCP), ou proactivement avant de creuser un problème d'installation plutôt que de deviner à l'aveugle.
+description: Diagnostic d'installation en une commande — vérifie l'échéance des tokens Garmin, la joignabilité du MCP garmin, la validité des fichiers config/workspace*.toml, la complétude du profil athlète, la fraîcheur de l'index .arc/coach.db, les fichiers hors contrat, la planification du daily-sync (cron/launchd), la configuration ntfy et le lecteur FIT (fitparse dans l'environnement MCP de [data].source). Charger quand l'utilisateur lance /coach-doctor, quand quelque chose semble cassé (synchronisation en échec, réponse étrange d'un agent, erreur MCP), ou proactivement avant de creuser un problème d'installation plutôt que de deviner à l'aveugle.
 ---
 
 # Diagnostic d'installation
@@ -28,6 +28,7 @@ commande de correction sous chaque ligne non ✅ :
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme |
 | `daily_sync_scheduled` | Tâche cron ou LaunchAgent du daily-sync installée ; en mode `[sync].mode = "watch"`, passage récent de `garmin_watch.py` (⚠ après 3 intervalles de silence) |
 | `ntfy_configured` | Notifications push configurées (si activées) |
+| `fit_reader` | `fitparse` importable dans l'environnement MCP de `[data].source` (`garmin-mcp` ou `intervals-icu-mcp`) — sans lui, les FIT téléchargés ne sont pas lus et les KPI fins restent vides. Correctif : `./install.sh --source <source>` |
 
 Un ❌ fait échouer la commande (code de sortie non nul) ; un ⚠️ ou un ℹ️ jamais
 — ce sont des dégradations connues, pas des pannes.
