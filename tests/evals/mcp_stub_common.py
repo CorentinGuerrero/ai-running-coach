@@ -145,6 +145,8 @@ def resolve_content(
 
     error = override.get("error")
     if error is None:
+        if isinstance(default, str):
+            return default      # texte brut (ex. « No gear data found… » de get_activity_gear), pas du JSON
         return json.dumps(default, ensure_ascii=False)
     error = str(error)              # un `error = 401` TOML (entier) reste géré
     if error == "401":

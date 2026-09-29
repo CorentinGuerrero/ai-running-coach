@@ -31,6 +31,10 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `feedback-without-fit` | — | — |
 | `gear-correction` | — | — |
 | `gear-suggestion-three-pairs` | — | — |
+| `gear-sync-conflict-athlete-wins` | — | — |
+| `gear-sync-garmin-attached` | — | — |
+| `gear-sync-unmapped-not-attributed` | — | — |
+| `gear-write-needs-confirmation` | — | — |
 | `guardrail-block-red-verdict` | — | — |
 | `guardrail-ok` | — | — |
 | `health-full-triad` | — | — |

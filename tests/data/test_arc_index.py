@@ -1328,7 +1328,7 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 26)
+        self.assertEqual(I.SCHEMA_VERSION, 27)
 
     def test_schema_version_26_adds_gear_start_and_usage_columns(self):
         """#132 : `gear` gagne `start_m` et `usage` — une base d'avant ce schéma est reconstruite."""
@@ -2311,6 +2311,293 @@ class TestParseGearStrictStart(unittest.TestCase):
     def test_glued_miles_unit_on_alert_too(self):
         self.assertEqual(self._gear("Nike Pegasus — alerte 400mi")["threshold_m"], 643738)
         self.assertEqual(self._gear("Nike Pegasus — alerte 400 min")["threshold_m"], 400000)
+
+U1 = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+U2 = "0f9e8d7c6b5a49382716f5e4d3c2b1a0"
+
+
+class TestGearGarminSegment(Workspace):
+    """#133 : segment « garmin: <uuid> », colonnes indexées et priorité d'attribution."""
+
+    def _gear(self, bullet: str):
+        text = f"# Profil\n\n## Matériel & lieux\n\n### Chaussures\n\n- {bullet}\n"
+        gear = L.parse_gear(text)
+        self.assertEqual(len(gear), 1, gear)
+        return gear[0]
+
+    def test_garmin_segment_all_separators(self):
+        for sep in (" — ", " - ", ": ", " – "):
+            with self.subTest(sep=sep):
+                g = self._gear(f"Nike Pegasus{sep}garmin: {U1.upper()} — départ 20 km")
+                self.assertEqual(g["garmin_uuid"], U1)   # minuscules
+                self.assertEqual(g["gear_id"], "nike-pegasus")
+                self.assertEqual(g["start_m"], 20000)
+
+    def test_dashed_uuid_and_absent(self):
+        dashed = "a1b2c3d4-e5f6-0718-293a-4b5c6d7e8f90"
+        self.assertEqual(self._gear(f"Nike Pegasus — garmin: {dashed}")["garmin_uuid"], dashed)
+        self.assertNotIn("garmin_uuid", self._gear("Nike Pegasus — alerte 600 km"))
+
+    def test_malformed_uuid_ignored(self):
+        for bad in ("abc", "pas un uuid !", ""):
+            with self.subTest(bad=bad):
+                self.assertNotIn("garmin_uuid", self._gear(f"Nike Pegasus — garmin: {bad}"))
+
+    def test_garmin_word_in_free_text_not_a_segment(self):
+        g = self._gear("Nike Pegasus — synchronisée garmin plus tard")
+        self.assertNotIn("garmin_uuid", g)
+
+    def test_indexed_and_gear_source_column(self):
+        self.write("planning/Runner_Profile.md", f"""# Profil
+
+## Matériel & lieux
+
+### Chaussures
+
+- Nike Pegasus — garmin: {U1} — id: pegasus (par défaut)
+- Salomon S/Lab — id: slab
+""")
+        self.write("activities/2026-04-01_running.md", arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-01", "sport": "running", '
+            '"duration_s": 3600, "distance_m": 10000, "gear_id": "slab", "gear_source": "garmin"}'))
+        self.index()
+        rows = {r["gear_id"]: r["garmin_uuid"] for r in self.conn.execute("SELECT * FROM gear")}
+        self.assertEqual(rows, {"pegasus": U1, "slab": None})
+        self.assertEqual(self.conn.execute("SELECT gear_source FROM activity").fetchone()[0], "garmin")
+
+    def test_schema_version_27_columns(self):
+        self.index()
+        self.assertIn("garmin_uuid", {r[1] for r in self.conn.execute("PRAGMA table_info(gear)")})
+        self.assertIn("gear_source", {r[1] for r in self.conn.execute("PRAGMA table_info(activity)")})
+
+
+class TestGearAttributionPriority(unittest.TestCase):
+    """#133 : Garmin > chat > défaut — l'athlète gagne un conflit, rien n'est deviné."""
+
+    DEFS = [{"gear_id": "pegasus", "garmin_uuid": U1}, {"gear_id": "slab", "garmin_uuid": U2},
+            {"gear_id": "speedgoat"}]
+
+    def r(self, uuids, chat=None, defs=None):
+        return M.resolve_gear_attribution(defs or self.DEFS, uuids, chat)
+
+    def test_garmin_only(self):
+        out = self.r([U1])
+        self.assertEqual((out["gear_id"], out["gear_source"], out["conflict"]), ("pegasus", "garmin", None))
+
+    def test_case_insensitive_uuid(self):
+        self.assertEqual(self.r([U1.upper()])["gear_id"], "pegasus")
+
+    def test_chat_only(self):
+        out = self.r([], "speedgoat")
+        self.assertEqual((out["gear_id"], out["gear_source"]), ("speedgoat", "chat"))
+
+    def test_agreement_is_not_a_conflict(self):
+        out = self.r([U1], "pegasus")
+        self.assertEqual((out["gear_id"], out["conflict"]), ("pegasus", None))
+
+    def test_conflict_athlete_wins_and_is_flagged(self):
+        out = self.r([U1], "slab")
+        self.assertEqual((out["gear_id"], out["gear_source"]), ("slab", "chat"))
+        self.assertEqual(out["conflict"], {"garmin": "pegasus", "chat": "slab"})
+
+    def test_nothing_falls_back_to_default(self):
+        out = self.r([])
+        self.assertEqual((out["gear_id"], out["gear_source"]), (None, None))
+
+    def test_unmapped_garmin_never_attributed(self):
+        out = self.r(["ffffffffffffffffffffffffffffffff"])
+        self.assertIsNone(out["gear_id"])
+        self.assertEqual(out["unmapped_garmin"], ["ffffffffffffffffffffffffffffffff"])
+
+    def test_unmapped_with_chat_keeps_chat_and_reports_unmapped(self):
+        out = self.r(["ffffffffffffffffffffffffffffffff"], "slab")
+        self.assertEqual((out["gear_id"], out["conflict"]), ("slab", None))
+        self.assertEqual(len(out["unmapped_garmin"]), 1)
+
+    def test_two_mapped_pairs_is_ambiguous(self):
+        out = self.r([U1, U2])
+        self.assertIsNone(out["gear_id"])
+        self.assertEqual(sorted(out["ambiguous"]), ["pegasus", "slab"])
+
+    def test_shared_uuid_on_two_bullets_is_ambiguous(self):
+        defs = [{"gear_id": "a", "garmin_uuid": U1}, {"gear_id": "b", "garmin_uuid": U1}]
+        out = self.r([U1], defs=defs)
+        self.assertIsNone(out["gear_id"])
+        self.assertEqual(sorted(out["ambiguous"]), ["a", "b"])
+
+    def test_unmapped_without_chat_yields_marker_without_gear_id(self):
+        out = self.r(["ffffffffffffffffffffffffffffffff"])
+        self.assertEqual((out["gear_id"], out["gear_source"]), (None, "garmin_unmapped"))
+
+    def test_ambiguous_yields_marker(self):
+        self.assertEqual(self.r([U1, U2])["gear_source"], "garmin_unmapped")
+
+    def test_chat_beats_marker(self):
+        self.assertEqual(self.r(["ffffffffffffffffffffffffffffffff"], "slab")["gear_source"], "chat")
+
+    def test_no_garmin_gear_no_marker(self):
+        self.assertIsNone(self.r([])["gear_source"])
+
+    def test_ignored_uuid_is_silent_but_marked(self):
+        defs = self.DEFS + [{"gear_id": "ghost", "garmin_uuid": "c0ffee00c0ffee00c0ffee00c0ffee00", "ignored": 1}]
+        out = self.r(["c0ffee00c0ffee00c0ffee00c0ffee00"], defs=defs)
+        self.assertEqual((out["unmapped_garmin"], out["ignored_garmin"], out["gear_source"]),
+                         ([], ["c0ffee00c0ffee00c0ffee00c0ffee00"], "garmin_unmapped"))
+
+    def test_cli(self):
+        ws = Path(tempfile.mkdtemp(prefix="arc-gear-attr-"))
+        self.addCleanup(shutil.rmtree, ws, True)
+        for d in ("activities", "medical", "nutrition", "planning", "rapports"):
+            (ws / d).mkdir()
+        (ws / "planning/Runner_Profile.md").write_text(
+            f"# Profil\n\n## Matériel & lieux\n\n### Chaussures\n\n- Nike Pegasus — garmin: {U1}\n"
+            "- Salomon S/Lab\n", encoding="utf-8")
+        cmd = [sys.executable, str(Path(I.__file__)), "gear-attribution", "--workspace", str(ws),
+               "--garmin-gear", f"{U1},{U2}", "--chat-gear", "salomon-s-lab"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = json.loads(res.stdout)
+        self.assertEqual((out["gear_id"], out["gear_source"]), ("salomon-s-lab", "chat"))
+        self.assertEqual(out["conflict"], {"garmin": "nike-pegasus", "chat": "salomon-s-lab"})
+        self.assertEqual(out["unmapped_garmin"], [U2])
+
+
+
+class TestGearUnmappedNeverCreditedToDefault(Workspace):
+    """#133 — revue : un matériel Garmin non associé ne doit JAMAIS être crédité en silence à la
+    paire par défaut (sinon faux kilométrage, faux `crossed_in_run`)."""
+
+    PROFILE = f"""# Profil
+
+## Matériel & lieux
+
+### Chaussures
+
+- Nike Pegasus — id: pegasus — alerte 20 km (par défaut)
+- Brooks Ghost — garmin: c0ffee00c0ffee00c0ffee00c0ffee00 (ignorée)
+"""
+
+    def _run(self, extra):
+        self.write("planning/Runner_Profile.md", self.PROFILE)
+        self.write("activities/2026-04-01_running.md", arc(
+            '{"arc": 1, "kind": "activity", "date": "2026-04-01", "sport": "running", "duration_s": 3600, '
+            '"distance_m": 15000, "garmin_activity_id": 777' + extra + '}'))
+        self.index()
+        return I.gear_mileage(self.conn, date(2026, 4, 5), ["777"])
+
+    def test_control_without_marker_credits_the_default_pair(self):
+        shoes = {s["gear_id"]: s for s in self._run("")["shoes"]}
+        self.assertEqual(shoes["pegasus"]["distance_m"], 15000)
+
+    def test_unmapped_marker_is_excluded_from_default_and_crossed_in_run(self):
+        result = self._run(', "gear_source": "garmin_unmapped"')
+        shoes = {s["gear_id"]: s for s in result["shoes"]}
+        self.assertEqual(shoes["pegasus"]["distance_m"], 0)
+        self.assertNotIn("crossed_in_run", shoes["pegasus"])
+
+    def test_ignored_bullet_is_not_a_shoe_but_is_resolvable(self):
+        self._run("")
+        self.assertEqual([s["gear_id"] for s in I.gear_mileage(self.conn, date(2026, 4, 5))["shoes"]], ["pegasus"])
+        out = I.gear_attribution(self.conn, "c0ffee00c0ffee00c0ffee00c0ffee00", None)
+        self.assertEqual(out["ignored_garmin"], ["c0ffee00c0ffee00c0ffee00c0ffee00"])
+        self.assertEqual(out["unmapped_garmin"], [])
+        self.assertEqual((out["gear_id"], out["gear_source"]), (None, "garmin_unmapped"))
+
+
+class TestGearAttributionCliHardening(Workspace):
+    """#133 — revue : uuid validés, `--chat-gear` normalisé en gear_id valide au contrat."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("planning/Runner_Profile.md", f"""# Profil
+
+## Matériel & lieux
+
+### Chaussures
+
+- Nike Pegasus — id: pegasus — garmin: {U1}
+- Salomon S/Lab Ultra — garmin: {U2}
+""")
+        self.index()
+
+    def test_non_uuid_text_is_ignored(self):
+        out = I.gear_attribution(self.conn, "No gear data found for activity with ID 1", None)
+        self.assertEqual((out["gear_id"], out["gear_source"], out["unmapped_garmin"]), (None, None, []))
+
+    def test_chat_gear_by_profile_id_name_or_slug(self):
+        for raw, expected in (("pegasus", "pegasus"), ("Nike Pegasus", "pegasus"),
+                              ("Salomon S/Lab Ultra", "salomon-s-lab-ultra"), ("Hoka Speedgoat 5", "hoka-speedgoat-5")):
+            with self.subTest(raw=raw):
+                out = I.gear_attribution(self.conn, None, raw)
+                self.assertEqual((out["gear_id"], out["gear_source"]), (expected, "chat"))
+                self.assertTrue(C_gear_id_ok(out["gear_id"]))
+
+    def test_chat_gear_with_no_alphanumeric_is_dropped(self):
+        self.assertIsNone(I.gear_attribution(self.conn, None, "???")["gear_id"])
+
+    def test_already_synced_activity_uses_stored_garmin_side(self):
+        """Séance déjà synchronisée : le côté Garmin = l'uuid de la puce du `gear_id` stocké."""
+        out = I.gear_attribution(self.conn, U1, "salomon-s-lab-ultra")   # stocké : pegasus (garmin), chat : S/Lab
+        self.assertEqual(out["conflict"], {"garmin": "pegasus", "chat": "salomon-s-lab-ultra"})
+
+
+def C_gear_id_ok(value):
+    import arc_contract as C
+    errors, _ = C.validate({"arc": 1, "kind": "activity", "date": "2026-01-01", "sport": "running",
+                            "duration_s": 60, "gear_id": value})
+    return not errors
+
+
+class TestGearProfileSegments(unittest.TestCase):
+    """#133 — `(ignorée)` et `garmin:` illisible côté parse_gear."""
+
+    def _one(self, bullet):
+        gear = L.parse_gear(f"# P\n\n### Chaussures\n\n- {bullet}\n")
+        self.assertEqual(len(gear), 1)
+        return gear[0]
+
+    def test_ignored_flag(self):
+        g = self._one(f"Brooks Ghost — garmin: {U1} (ignorée)")
+        self.assertTrue(g["ignored"])
+        self.assertEqual(g["garmin_uuid"], U1)
+        self.assertEqual(g["name"], "Brooks Ghost")
+
+    def test_invalid_segment_is_flagged(self):
+        g = self._one("Nike Pegasus — garmin: abc")
+        self.assertTrue(g["garmin_uuid_invalid"])
+        self.assertNotIn("garmin_uuid", g)
+        self.assertNotIn("garmin_uuid_invalid", self._one(f"Nike Pegasus — garmin: {U1}"))
+
+
+class TestSchemaMigrationV26ToV27(Workspace):
+    def test_v26_database_is_rebuilt_with_new_columns(self):
+        """#133 : une base v26 (sans `gear.garmin_uuid`/`gear.ignored`/`activity.gear_source`) est reconstruite ;
+        l'indexation ne lève pas « no such column » et le profil, déjà connu (même sha256), est relu."""
+        self.write("planning/Runner_Profile.md", f"# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: {U1}\n")
+        db_path = self.tmp / "v26.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '26');"
+            "CREATE TABLE source_file (path TEXT PRIMARY KEY, kind TEXT, sha256 TEXT, mtime REAL, "
+            "arc_version INTEGER, parsed_ok TEXT, issues TEXT);"
+            "CREATE TABLE gear (source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL, "
+            "is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT);")
+        digest = hashlib.sha256((self.ws / "planning/Runner_Profile.md").read_bytes()).hexdigest()
+        legacy.execute("INSERT INTO source_file VALUES (?, 'athlete', ?, 0, 0, 'ok', '[]')",
+                       ("planning/Runner_Profile.md", digest))
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        try:
+            self.assertEqual(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "27")
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(gear)")}
+            self.assertTrue({"garmin_uuid", "ignored"} <= cols, cols)
+            self.assertIn("gear_source", {r[1] for r in conn.execute("PRAGMA table_info(activity)")})
+            I.index_workspace(conn, self.ws, "2026-09-27")
+            self.assertEqual(conn.execute("SELECT garmin_uuid FROM gear").fetchone()[0], U1)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

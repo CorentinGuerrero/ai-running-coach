@@ -158,7 +158,7 @@ une puce de **premier niveau** par paire (jamais de puce indentée dessous —
 elle serait ignorée), tout facultatif sauf le nom :
 
 ```
-- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> (par défaut)
+- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> — garmin: <uuid> (par défaut)
 ```
 
 | Segment | Rôle |
@@ -168,6 +168,7 @@ elle serait ignorée), tout facultatif sauf le nom :
 | `départ <N> km` | Kilomètres déjà parcourus **avant** le suivi (paire d'occasion, usage antérieur à l'installation) ; accepte aussi « N mi »/« N miles », converti. Ajouté au kilométrage cumulé : il compte dans l'alerte et dans la prévision de retraite, y compris pour une paire retirée. `départ 0 km` est valide. |
 | `usage: <rôle>` | Facultatif — rôle de la paire (`course`, `trail`, `route`, `récup`), texte libre. Le coach s'en sert pour suggérer une paire, aucun calcul n'en dépend. |
 | `id: <identifiant>` | Identifiant explicite — **obligatoire** si vous rachetez le même modèle (sinon un id `-2`/`-3` est dérivé automatiquement, avec un avertissement au tableau de bord). |
+| `garmin: <uuid>` | Facultatif (#133) — identifiant du matériel dans Garmin Connect (sans effet avec la source intervals.icu), pour rattacher le matériel que la montre attache à une séance. Ajouté par le coach après votre accord, jamais deviné. Voir [Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin). |
 | `(par défaut)` | Chaussure attribuée aux séances sans matériel précisé. |
 | `(retirée)` | Sortie de rotation — kilométrage conservé, plus jamais d'alerte. |
 
@@ -209,6 +210,20 @@ proche de son seuil. Le budget de rodage de la paire de course (environ 30 à
 50 km avant le jour J, puis préservée) est une **approximation du projet**, pas
 un standard publié. C'est une suggestion, jamais une consigne ; avec une seule
 paire déclarée, rien n'est suggéré.
+
+**Synchronisation du matériel Garmin (#133).** Avec la source Garmin, le coach
+lit le matériel que la montre attache à chaque **nouvelle** séance
+(`get_activity_gear`) et l'inscrit dans `gear_id` quand une puce porte le
+`garmin: <uuid>` correspondant. Priorité : ce que vous déclarez en discutant >
+matériel attaché par Garmin > `(par défaut)` — en cas de désaccord (Garmin dit A, vous dites B),
+c'est vous qui gagnez, et le coach le signale une fois. Un
+matériel Garmin sans puce n'est jamais attribué en silence (la séance n'est pas non plus créditée à
+la paire par défaut) : le coach vous propose une fois de l'associer à une puce existante ou d'en
+créer une ; si vous refusez, une puce `- <nom Garmin> — garmin: <uuid> (ignorée)` fait taire
+propositions et alertes. Voir
+[Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin)
+(y compris la source intervals.icu, où l'attribution par séance reste
+manuelle).
 
 ## Les décisions tracées
 

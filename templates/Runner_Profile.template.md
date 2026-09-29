@@ -84,7 +84,7 @@
   facultatif sauf le nom. Segments séparés par un tiret cadratin " — " (le plus
   lisible), ou par un simple tiret ENTOURÉ D'ESPACES " - " (jamais un tiret
   sans espaces, qui peut faire partie du nom, ex. « Ultra-Trail ») :
-    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> (par défaut)
+    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> — garmin: <uuid> (par défaut)
 
   - "depuis" : date d'achat — AAAA-MM-JJ, ou juste "mars 2026"/"03/2026" (1er du
     mois). Depuis #40, filtre l'attribution automatique des séances SANS
@@ -102,8 +102,15 @@
     OBLIGATOIRE si vous rachetez le même modèle (deux puces au même nom sans
     id explicite se voient sinon attribuer un identifiant renommé -2, -3… et
     un avertissement au tableau de bord).
+  - "garmin:" (facultatif) : identifiant (uuid) du matériel dans Garmin Connect, tel que
+    listé par le coach (`get_gear`) — il permet de rattacher automatiquement le matériel
+    que la montre attache à une séance. Le coach vous propose l'association une fois ;
+    il ne la devine jamais.
   - "(par défaut)" : chaussure attribuée aux séances sans matériel précisé.
   - "(retirée)" : sortie de rotation — kilométrage conservé, jamais d'alerte.
+  - "(ignorée)" : matériel Garmin que vous ne suivez pas — puce réduite à `garmin: <uuid>` ; le coach
+    ne le repropose plus et ne le signale plus, et ses séances ne sont jamais créditées à la
+    paire par défaut.
 
   Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
   - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)

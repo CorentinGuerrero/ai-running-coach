@@ -119,6 +119,7 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `splits_cols` | liste | en-tête des splits, voir ci-dessous |
 | `splits` | liste | une ligne par km, dans l'ordre de `splits_cols` |
 | `gear_id` | texte | identifiant matériel (slug), voir ci-dessous |
+| `gear_source` | `garmin` \| `chat` \| `garmin_unmapped` | (#133) provenance du `gear_id` : matériel attaché par la montre (`get_activity_gear`, rattaché à la puce par son segment `garmin:`) ou déclaré par l'athlète en chat. `garmin` et `chat` exigent un `gear_id` ; `garmin_unmapped` l'EXCLUT : la montre a attaché un matériel sans puce correspondante (non associé, ambigu ou `(ignorée)`) — la séance n'est alors jamais créditée à la paire `(par défaut)` ; jamais `default` — sans `gear_id`, la paire `(par défaut)` est calculée à la lecture, pas écrite. Clé omise = provenance inconnue (séances antérieures à #133) |
 | `carbs_g` | nombre | glucides ingérés pendant l'effort, 0-1000 g |
 | `fluid_intake_ml` | nombre | liquide ingéré pendant l'effort, 0-10 000 ml |
 | `weight_pre_kg`, `weight_post_kg` | nombre | pesée avant / après effort, 30-200 kg |
@@ -172,8 +173,12 @@ ou par un deux-points suivi d'un mot-clé reconnu : `depuis AAAA-MM-JJ` (ou
 déjà parcouru AVANT le suivi, voir plus bas), `usage: <texte libre>` (#132,
 facultatif : `course`, `trail`, `route`, `récup`… — rôle de la paire, lu par le
 coach pour suggérer une paire, jamais par un KPI), `id: <texte>` (identifiant explicite, passé par
-`gear_slug` comme n'importe quel `gear_id`). `(par défaut)` et `(retirée)`
-peuvent être accolés n'importe où sur la ligne. `arc_legacy.parse_gear` lit
+`gear_slug` comme n'importe quel `gear_id`), `garmin: <uuid>` (#133, facultatif :
+identifiant du matériel côté Garmin Connect, recopié de `get_gear` → `uuid`, jeton
+alphanumérique/tirets de 8 à 64 caractères, comparé sans casse ; sert à rattacher le
+matériel attaché par la montre à une activité à CETTE puce — jamais deviné, voir
+« Priorité d'attribution » ci-dessous). `(par défaut)`, `(retirée)` et
+`(ignorée)` (#133, matériel Garmin non suivi) peuvent être accolés n'importe où sur la ligne. `arc_legacy.parse_gear` lit
 cette sous-section ; `scripts/arc_index.py` l'indexe dans la table dérivée
 `gear` (une ligne par chaussure) ; `arc_metrics.gear_mileage` calcule le
 kilométrage cumulé — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]` pour la
@@ -209,6 +214,24 @@ méthode complète. En résumé :
   `départ 0 km` est valide. Le corriger par chat (« mes Pegasus ont en fait ~300
   km ») = réécrire ce SEUL segment de la puce (départ = total déclaré − km déjà
   comptés par les activités, plancher 0), jamais les activités passées.
+- Priorité d'attribution (#133) : déclaration de l'athlète (`gear_id` cité en chat) >
+  matériel attaché par Garmin à l'activité (`get_activity_gear`, puce reconnue par
+  `garmin: <uuid>`) > paire `(par défaut)`. Résolue par `python3 scripts/arc_index.py
+  gear-attribution --garmin-gear UUID[,UUID…] [--chat-gear GEAR_ID]`
+  (`arc_metrics.resolve_gear_attribution`) qui rend `{gear_id, gear_source,
+  conflict, unmapped_garmin, ignored_garmin, ambiguous}` — le coach écrit
+  `gear_id` et `gear_source` tels quels, sans refaire la règle. Conflit (Garmin dit A,
+  l'athlète dit B) : l'athlète gagne (`gear_source: "chat"`), `conflict` est
+  signalé une fois. Uuid Garmin sans puce, ambigu ou `(ignorée)` : `gear_id` omis et
+  `gear_source: "garmin_unmapped"` — jamais attribué en silence, et jamais crédité à la paire
+  `(par défaut)` (`arc_metrics.gear_mileage`, y compris `--activities`/`crossed_in_run`). Le
+  segment `(ignorée)` (puce `- <nom Garmin> — garmin: <uuid> (ignorée)`) fait taire les
+  propositions et alertes pour ce matériel ; ces puces ne sont pas des chaussures suivies
+  (colonne `gear.ignored`). Déclaration en chat sur une séance DÉJÀ synchronisée : le côté Garmin
+  est son `gear_id` stocké quand `gear_source` vaut `garmin` (passer l'uuid de cette puce à
+  `--garmin-gear`, sans nouvel appel Garmin) ; `chat-gear` est normalisé (id du profil, nom, ou slug
+  valide au contrat) et toute valeur `--garmin-gear` qui n'a pas la forme d'un uuid est ignorée.
+  Seule la paire `(par défaut)` reste calculée à la lecture.
 - Prévision de retraite (#132) : `arc_index.py gear` (et `/api/summary.gear`)
   ajoute par paire non retirée et sous son seuil, si elle a roulé dans les 28
   derniers jours (borne `--today`, sinon aujourd'hui) : `recent_28d_m`,

@@ -325,3 +325,76 @@ class TestGearAlertsWiring(unittest.TestCase):
         text = self.WEEK.read_text(encoding="utf-8")
         self.assertIn("arc_index.py gear", text)
         self.assertIn("near_threshold", text)
+
+
+class TestGarminGearWhitelist(unittest.TestCase):
+    """#133 — liste blanche `install.sh` ↔ prompts/skills/docs qui citent les outils matériel.
+
+    Lecture (`get_gear`, `get_activity_gear`) et écriture (`add_gear_to_activity`) doivent être
+    autorisées côté serveur ; l'écriture doit toujours être encadrée par « confirmation » dans tout
+    fichier qui la cite, et interdite dans la synchronisation headless."""
+
+    TOOLS = ("get_gear", "get_activity_gear", "add_gear_to_activity")
+
+    @classmethod
+    def setUpClass(cls):
+        install = (REPO / "install.sh").read_text(encoding="utf-8")
+        m = re.search(r'GARMIN_TOOL_WHITELIST="([^"]+)"', install)
+        cls.whitelist = m.group(1).split(",")
+
+    def test_gear_tools_are_whitelisted(self):
+        for tool in self.TOOLS:
+            self.assertIn(tool, self.whitelist)
+
+    def test_remove_gear_is_not_whitelisted(self):
+        self.assertNotIn("remove_gear_from_activity", self.whitelist)
+
+    def test_docs_whitelist_copies_match_install_sh(self):
+        text = (REPO / "docs/garmin-setup.md").read_text(encoding="utf-8")
+        copies = re.findall(r'GARMIN_ENABLED_TOOLS"?:\s*"([^"]+)"', text)
+        self.assertGreaterEqual(len(copies), 2)
+        for copy in copies:
+            self.assertEqual(copy.split(","), self.whitelist)
+
+    def test_every_file_citing_the_write_tool_requires_confirmation(self):
+        files = list(AGENTS.glob("*.md")) + list(SKILLS.glob("*/SKILL.md")) + [REPO / "AGENTS.md"]
+        cited = [f for f in files if "add_gear_to_activity" in f.read_text(encoding="utf-8")]
+        self.assertTrue(cited)
+        for f in cited:
+            with self.subTest(file=f.name):
+                self.assertRegex(f.read_text(encoding="utf-8"), r"(?i)confirm")
+
+    def test_daily_sync_script_disallows_gear_writes(self):
+        text = (REPO / "scripts/daily-sync.sh").read_text(encoding="utf-8")
+        self.assertIn("mcp__garmin__add_gear_to_activity", text)
+        self.assertIn("mcp__garmin__remove_gear_from_activity", text)
+        self.assertIn("--disallowedTools", text)
+        # Limite documentée : en mode passerelle l'outil `invoke_tool` n'est pas filtrable par sous-outil.
+        self.assertRegex(text, r"(?i)invoke_tool[^\n]*\n[^\n]*filtr")
+
+    def test_priority_wording_is_consistent_everywhere(self):
+        """Priorité = déclaration de l'athlète > Garmin > défaut ; jamais « Garmin > chat »."""
+        for rel in ("AGENTS.md", "agents/coach.md", "skills/garmin-daily-sync/SKILL.md",
+                    "skills/garmin-sync-efficiency/SKILL.md", "skills/workspace-data-contract/SKILL.md",
+                    "docs/garmin-setup.md", "docs/workspace.md", "docs/agents/coach.md", "docs/skills.md",
+                    "docs/skills/garmin-daily-sync.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(file=rel):
+                self.assertNotRegex(text, r"(?i)garmin\s*>\s*(gear_id|chat|d[ée]claration)")
+                self.assertNotRegex(text, r"(?i)matériel garmin\s*>\s*(gear_id|paire (que|cit)|chat|d[ée]claration)")
+
+    def test_headless_sync_never_writes_gear(self):
+        text = (SKILLS / "garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
+        self.assertRegex(text, r"NEVER call `add_gear_to_activity`")
+
+    def test_read_tools_cited_by_sync_skills_are_whitelisted(self):
+        for rel in ("skills/garmin-daily-sync/SKILL.md", "skills/garmin-sync-efficiency/SKILL.md", "agents/coach.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            for tool in ("get_gear", "get_activity_gear"):
+                if re.search(rf"`{tool}\b", text):
+                    self.assertIn(tool, self.whitelist, f"{rel} cite {tool}")
+
+    def test_sync_efficiency_limits_gear_calls_to_new_activities(self):
+        text = (SKILLS / "garmin-sync-efficiency/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("one `get_activity_gear(activity_id)` call per NEW activity", text)
+        self.assertIn("include_stats=False", text)

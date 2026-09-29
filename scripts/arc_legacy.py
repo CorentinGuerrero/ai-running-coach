@@ -739,8 +739,18 @@ _GEAR_NEXT_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s", re.M)
 _GEAR_TOP_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
 _GEAR_SUB_BULLET_RE = re.compile(r"^\s+[-*]\s+(.+)$")
 _GEAR_SEGMENT_SPLIT_RE = re.compile(
-    r"\s+-\s+(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:)|\s*[—–]\s*|"
-    r"\s*:\s*(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:)", re.I)
+    r"\s+-\s+(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:|garmin\s*:)|\s*[—–]\s*|"
+    r"\s*:\s*(?=depuis\b|alerte\b|d[ée]part\b|usage\s*:|id\s*:|garmin\s*:)", re.I)
+# Segment « garmin: <uuid> » (#133) : identifiant OPAQUE du matériel côté Garmin Connect,
+# recopié tel quel de `get_gear` (champ `uuid`). Aucun format Garmin n'est garanti par
+# le serveur MCP — on accepte donc un jeton alphanumérique/tirets de 8 à 64 caractères,
+# comparé sans casse ; toute autre forme est du texte libre ignoré (clé omise).
+_GEAR_GARMIN_UUID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$")
+GEAR_GARMIN_UUID_RE = _GEAR_GARMIN_UUID_RE   # public : validé aussi par `arc_index.py gear-attribution`
+# `(ignorée)` (#133) : matériel Garmin volontairement NON suivi — la puce ne porte que son
+# `garmin: <uuid>` ; plus jamais reproposé ni signalé « non associé », mais jamais crédité non plus
+# à la paire par défaut (`gear_source: "garmin_unmapped"`).
+_GEAR_IGNORED_RE = re.compile(r"\(\s*ignor[ée]e?\s*\)", re.I)
 _GEAR_DEFAULT_RE = re.compile(r"\(\s*par\s*d[ée]faut\s*\)", re.I)
 _GEAR_RETIRED_RE = re.compile(r"\(\s*retir[ée]e?\s*\)", re.I)
 # « 186mi » (unité collée au nombre) compte : seul un préfixe alphabétique (« min ») l'exclut.
@@ -795,7 +805,7 @@ def _gear_bullets(section: str) -> List[str]:
 
 def _gear_segment_kind(segment: str) -> Tuple[Optional[str], str]:
     """(type, valeur brute) d'un segment « — xxx » : `start_date`/`threshold`/
-    `start_mileage` (« départ N km », #132)/`usage`/`id`, ou `(None, segment)` pour un segment non reconnu (ignoré silencieusement
+    `start_mileage` (« départ N km », #132)/`usage`/`id`/`garmin` (#133), ou `(None, segment)` pour un segment non reconnu (ignoré silencieusement
     — un athlète peut vouloir noter autre chose, ex. « — usure semelle visible »).
 
     Ancrés sur le DÉBUT du segment avec limite de mot (`\\b`) : revue #85 blocker 3
@@ -817,13 +827,16 @@ def _gear_segment_kind(segment: str) -> Tuple[Optional[str], str]:
     m = re.match(r"id\s*:\s*(.*)$", stripped, re.I)
     if m:
         return "id", m.group(1).strip()
+    m = re.match(r"garmin\s*:\s*(.*)$", stripped, re.I)
+    if m:
+        return "garmin", m.group(1).strip()
     return None, stripped
 
 
 def parse_gear(text: str) -> List[Dict[str, Any]]:
     """Sous-section « Chaussures » du profil (`## Matériel & lieux` → `### Chaussures`)
     → liste de dicts `{gear_id, name, start_date, threshold_m, default, retired,
-    start_m, usage, collision_base}` (clés absentes plutôt que `None` — voir `_drop_none`).
+    start_m, usage, garmin_uuid, collision_base}` (clés absentes plutôt que `None` — voir `_drop_none`).
 
     `gear_id` : l'identifiant explicite (`id: …`) passé par `arc_contract.gear_slug`
     pour rester au format slug (même si l'athlète l'a déjà écrit en minuscules avec
@@ -853,6 +866,13 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
     `usage` (#132, facultatif) : rôle libre en minuscules (« usage: course », « trail »,
     « route », « récup ») — lu par le coach pour suggérer une paire, jamais par un KPI.
 
+    `garmin_uuid` (#133, facultatif) : segment « garmin: <uuid> » — identifiant du matériel
+    côté Garmin Connect (`get_gear` → `uuid`), en minuscules ; sert à rattacher le matériel
+    attaché par la montre à une activité (`get_activity_gear`) à cette puce, jamais deviné.
+    `garmin_uuid_invalid` : `True` si un segment `garmin:` est présent mais illisible (jamais indexé,
+    lu par `coach_doctor`). `ignored` : `True` pour `(ignorée)` (matériel Garmin non suivi, voir plus haut).
+    Un uuid partagé par deux puces n'est pas résolu ici (voir `arc_metrics.resolve_gear_attribution`).
+
     `(par défaut)` déclare la chaussure attribuée à une activité sans `gear_id`
     (voir `arc_metrics.gear_mileage`) ; `(retirée)`, une chaussure sortie de
     rotation (exclue des alertes, voir la même fonction). Les deux repères sont
@@ -868,7 +888,8 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
         raw = raw.replace("**", "").strip()   # gras markdown : jamais significatif ici (comme `parse_bullets`)
         is_default = bool(_GEAR_DEFAULT_RE.search(raw))
         is_retired = bool(_GEAR_RETIRED_RE.search(raw))
-        raw = _GEAR_RETIRED_RE.sub("", _GEAR_DEFAULT_RE.sub("", raw)).strip()
+        is_ignored = bool(_GEAR_IGNORED_RE.search(raw))
+        raw = _GEAR_IGNORED_RE.sub("", _GEAR_RETIRED_RE.sub("", _GEAR_DEFAULT_RE.sub("", raw))).strip()
         segments = [s for s in _GEAR_SEGMENT_SPLIT_RE.split(raw) if s.strip()]
         if not segments:
             continue
@@ -878,6 +899,8 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
         threshold_m = None
         start_m = None
         usage = None
+        garmin_uuid = None
+        garmin_invalid = False
         for segment in segments[1:]:
             kind, value = _gear_segment_kind(segment)
             if kind == "start_date":
@@ -898,6 +921,11 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
                 usage = value.strip().lower() or None
             elif kind == "id":
                 explicit_id = value.strip() or None
+            elif kind == "garmin":
+                if _GEAR_GARMIN_UUID_RE.match(value.strip()):
+                    garmin_uuid = value.strip().lower()
+                else:
+                    garmin_invalid = True   # segment présent mais illisible (signalé par le doctor)
         base_id = gear_slug(explicit_id) if explicit_id else gear_slug(name)
         if not base_id:
             continue
@@ -907,7 +935,8 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
         entry = {
             "gear_id": gear_id, "name": name or None, "start_date": start_date,
             "threshold_m": threshold_m, "default": is_default or None, "retired": is_retired or None,
-            "start_m": start_m, "usage": usage,
+            "start_m": start_m, "usage": usage, "garmin_uuid": garmin_uuid,
+            "garmin_uuid_invalid": garmin_invalid or None, "ignored": is_ignored or None,
         }
         if n > 1:
             entry["collision_base"] = base_id

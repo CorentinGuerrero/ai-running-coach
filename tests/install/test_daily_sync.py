@@ -45,6 +45,23 @@ class TestDataSourceAwareTools(InstallAsserts):
             self.assertOutputContains(proc, "mcp__leanproxy")
             self.assertOutputLacks(proc, "mcp__intervals")
 
+    def test_garmin_source_forbids_gear_writes_in_headless_runs(self):
+        """#133 : `mcp__garmin` autorise tout le serveur ; les outils d'écriture matériel sont retirés."""
+        with Sandbox() as sb:
+            ws = self._workspace(sb, None)
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            self.assertOutputContains(proc, "--disallowedTools")
+            self.assertOutputContains(proc, "mcp__garmin__add_gear_to_activity")
+            self.assertOutputContains(proc, "mcp__garmin__remove_gear_from_activity")
+
+    def test_intervals_source_has_no_disallowed_tools(self):
+        with Sandbox() as sb:
+            ws = self._workspace(sb, "intervals")
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            self.assertOutputLacks(proc, "--disallowedTools")
+
     def test_explicit_garmin_source_matches_default(self):
         with Sandbox() as sb:
             ws = self._workspace(sb, "garmin")
