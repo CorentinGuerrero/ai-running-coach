@@ -8,7 +8,7 @@ description: Inspection photo d'une paire de chaussures — protocole de prise d
 Le compteur de kilomètres dit combien une paire a couru, pas dans quel état elle est.
 Une photo des semelles, lue avec l'historique de l'athlète, donne une deuxième
 opinion — et l'usure raconte un peu la foulée. **L'usure est un signal faible** : les
-chaussures modernes (pile haute, rocker, mousses) la déforment, et un motif d'usure
+chaussures modernes (pile haute, rocker, mousses) la déforment (approximation du projet, pas une mesure publiée), et un motif d'usure
 n'est **jamais un diagnostic**, seulement un indice à croiser.
 
 ## 1. Quand proposer une inspection
@@ -93,7 +93,7 @@ pas un protocole clinique :
 | Zone d'usure principale | Indice (`gait_hints`) | Remarque |
 |---|---|---|
 | Talon postéro-latéral | `heel_strike` — attaque talon | fréquent et normal |
-| Milieu du pied latéral, talon peu usé | `midfoot_forefoot_strike` — attaque médio/avant-pied | |
+| Milieu du pied latéral, talon peu usé | `midfoot_forefoot_strike` — attaque médio/avant-pied | **les sources divergent** : Marathon Handbook lit une usure latérale du médio-pied comme une foulée neutre — le formuler avec encore plus de prudence |
 | Talon médial (intérieur) | `pronation_hint` — indice de pronation | à croiser, très dépendant du modèle |
 | Avant-pied latéral fort | `supination_hint` — supination à la propulsion | à croiser |
 

@@ -928,6 +928,8 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
 def _invalid_workspace_path_reason(value) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return "chemin non vide attendu"
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        return "caractère de contrôle interdit (NUL, retour à la ligne, tabulation…)"
     if "\\" in value:
         return "antislash interdit (jamais un séparateur valide dans ce contrat)"
     if ":" in value:

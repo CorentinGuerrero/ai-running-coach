@@ -1158,11 +1158,14 @@ def gear_photo_file(store: Store, rel) -> Optional[Tuple[Path, str]]:
             continue
     if not cited:
         return None
-    root = (store.workspace / "gear" / "photos").resolve()
-    target = (store.workspace / rel).resolve()
-    if root not in target.parents or not target.is_file():
-        return None
-    if target.stat().st_size > GEAR_PHOTO_MAX_BYTES:
+    try:
+        root = (store.workspace / "gear" / "photos").resolve()
+        target = (store.workspace / rel).resolve()
+        if root not in target.parents or not target.is_file():
+            return None
+        if target.stat().st_size > GEAR_PHOTO_MAX_BYTES:
+            return None
+    except (OSError, ValueError):     # NUL, nom trop long, permission…
         return None
     return target, ctype
 
@@ -1507,7 +1510,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
             return
         target, ctype = found
-        self._send(HTTPStatus.OK, target.read_bytes(), ctype, cache="private, no-cache")
+        try:
+            body = target.read_bytes()
+        except (OSError, ValueError):
+            self._json(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
+            return
+        self._send(HTTPStatus.OK, body, ctype, cache="private, no-cache")
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")

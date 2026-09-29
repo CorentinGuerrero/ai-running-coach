@@ -471,5 +471,118 @@ class TestSummary(Workspace):
         self.assertEqual(gi["gear"][0]["latest"]["condition"], "green")
 
 
+class TestReviewFixes(Workspace):
+    """Revue #135 : attribution partagée avec `gear`, caractères de contrôle, bloc hors `gear/`,
+    cas limites du rappel, paires ignorées, liens `previous`/`gear_id`, backfill."""
+
+    def day(self):
+        return __import__("datetime").date.fromisoformat(TODAY)
+
+    def test_career_uses_the_same_attribution_as_gear(self):
+        self.profile("- Nike Pegasus — id: pegasus (retirée)\n- Hoka — id: hoka (par défaut)\n"
+                     "- Vieille — id: vieille (ignorée)")
+        self.activity("2026-08-01", 10000)                              # défaut -> hoka
+        self.activity("2026-08-02", 7000, sport="running")              # défaut -> hoka
+        self.write("activities/2026-08-03_trail.md", arc_md({
+            "arc": 1, "kind": "activity", "date": "2026-08-03", "sport": "trail", "duration_s": 3600,
+            "distance_m": 9000, "gear_source": "garmin_unmapped"}))     # jamais crédité au défaut
+        self.activity("2026-08-04", 5000, gear_id="vieille", sport="hiking")   # paire ignorée
+        self.index()
+        career = I.gear_career(self.conn, "hoka", self.day())
+        shoes = {s["gear_id"]: s for s in I.gear_mileage(self.conn, self.day())["shoes"]}
+        self.assertEqual(career["sessions"], 2)
+        self.assertEqual(career["counted_distance_m"], 17000)
+        self.assertEqual(career["counted_distance_m"], shoes["hoka"]["distance_m"])
+        self.assertNotIn("vieille", shoes)
+
+    def test_nul_and_control_characters_are_rejected(self):
+        for bad in ("gear/photos/a\x00.png", "gear/photos/a\n.png", "gear/photos/a\t.png"):
+            errors, _ = C.validate(block(photos=[bad]))
+            self.assertTrue(errors, repr(bad))
+        errors, _ = C.validate(block(previous="gear/2026-08-02_pe\x00gasus_inspection.md"))
+        self.assertTrue(errors)
+
+    def test_photo_route_survives_nul_byte(self):
+        self.inspection("2026-09-20", photos=[PHOTO])
+        store = S.Store(self.ws, memory=True, today=TODAY)
+        self.assertIsNone(S.gear_photo_file(store, "gear/photos/a\x00.png"))
+
+    def test_inspection_block_outside_gear_is_not_indexed_nor_cited(self):
+        self.write("planning/sneaky.md", arc_md(block(photos=[PHOTO])))
+        (self.ws / PHOTO).write_bytes(b"\xff\xd8\xff")
+        self.index()
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM gear_inspection").fetchone()[0], 0)
+        issues = json.loads(self.conn.execute(
+            "SELECT issues FROM source_file WHERE path = 'planning/sneaky.md'").fetchone()[0])
+        self.assertTrue(any("non indexé" in i for i in issues), issues)
+        store = S.Store(self.ws, memory=True, today=TODAY)
+        self.assertIsNone(S.gear_photo_file(store, PHOTO))
+
+    def test_declared_start_mileage_is_the_never_inspected_baseline(self):
+        self.profile("- Nike Pegasus — id: pegasus — départ 250 km (par défaut)")
+        self.index()
+        e = I.gear_inspections(self.conn, "pegasus", self.day())["gear"][0]
+        self.assertFalse(e["due"])
+        self.assertEqual(e["km_since_inspection_m"], 0)
+        self.activity("2026-09-01", 210000)
+        self.index()
+        e = I.gear_inspections(self.conn, "pegasus", self.day())["gear"][0]
+        self.assertEqual((e["due"], e["due_reason"]), (True, "never_inspected"))
+
+    def test_missing_distance_does_not_mask_threshold_alert(self):
+        self.profile("- Nike Pegasus — alerte 100 km — id: pegasus (par défaut)")
+        self.activity("2026-09-01", 120000)
+        self.inspection("2026-09-02")                       # dernière inspection sans distance_m
+        self.index()
+        e = I.gear_inspections(self.conn, "pegasus", self.day())["gear"][0]
+        self.assertEqual((e["due"], e["due_reason"]), (True, "threshold_alert"))
+
+    def test_negative_distance_since_is_clamped_with_a_warning(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.activity("2026-09-01", 50000)
+        self.inspection("2026-09-02", distance_m=90000)
+        self.index()
+        e = I.gear_inspections(self.conn, "pegasus", self.day())["gear"][0]
+        self.assertEqual(e["km_since_inspection_m"], 0)
+        self.assertTrue(e["warnings"])
+        self.assertFalse(e["due"])
+
+    def test_ignored_pair_inspection_is_ignored_not_unknown(self):
+        self.profile("- Vieille — id: vieille (ignorée)\n- Hoka — id: hoka")
+        self.inspection("2026-09-01", gear_id="vieille")
+        self.index()
+        entry = next(e for e in I.gear_inspections(self.conn, None, self.day())["gear"]
+                     if e["gear_id"] == "vieille")
+        self.assertTrue(entry["ignored"])
+        self.assertFalse(entry["unknown"])
+        self.assertFalse(entry["due"])
+
+    def test_unknown_gear_filter_is_an_error_with_rc_1(self):
+        self.profile("- Hoka — id: hoka")
+        code, out = self.cli("inspections", "--gear", "nope")
+        self.assertEqual(code, 1)
+        self.assertIn("error", out)
+
+    def test_inspection_is_not_a_backfill_debt(self):
+        self.write("gear/2026-09-01_hoka_inspection.md", "# sans bloc\n")
+        self.write("gear/2026-09-02_hoka_inspection.md", arc_md(block(condition="amber")))
+        self.index()
+        self.assertEqual([i for i in I.backfill_items(self.conn) if i["kind"] == "gear_inspection"], [])
+
+    def test_validate_warns_on_undeclared_gear_and_bad_previous(self):
+        self.profile("- Hoka — id: hoka")
+        self.inspection("2026-08-01", gear_id="hoka")
+        self.inspection("2026-09-01", gear_id="hoka", previous="gear/2026-08-01_hoka_inspection.md")
+        ok, errors, warnings = I.validate_file(self.ws / "gear/2026-09-01_hoka_inspection.md")
+        self.assertEqual((ok, warnings), (True, []))
+        self.inspection("2026-09-02", gear_id="poles", previous="gear/2026-09-05_hoka_inspection.md")
+        ok, errors, warnings = I.validate_file(self.ws / "gear/2026-09-02_poles_inspection.md")
+        text = " | ".join(warnings)
+        self.assertIn("poles", text)
+        self.assertIn("introuvable", text)
+        self.assertIn("autre paire", text)
+        self.assertIn("antérieure", text)
+
+
 if __name__ == "__main__":
     unittest.main()

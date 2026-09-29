@@ -980,6 +980,8 @@ def read_file(path: Path, rel: str, conf: dict) -> Tuple[Optional[str], dict, in
             if kind and block_kind != kind:
                 issues.append(f"kind « {block_kind} » dans un fichier attendu « {kind} »")
             kind = block_kind
+            if kind == "gear_inspection" and classify(rel) != "gear_inspection":
+                issues.append("gear_inspection hors de `gear/AAAA-MM-JJ_<gear_id>_inspection.md` : non indexé")
         issues.extend(warnings)
         if not errors:
             data = dict(block)
@@ -1213,7 +1215,9 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                     "source_path": rel, "km": station.get("km"), "name": station.get("name"),
                     "cutoff": station.get("cutoff"), "services": _j(station.get("services")),
                 })
-    elif kind == "gear_inspection":
+    elif kind == "gear_inspection" and classify(rel) == "gear_inspection":
+        # Jamais un bloc `gear_inspection` égaré hors de `gear/` (ex. `planning/sneaky.md`) : ses
+        # photos deviendraient « citées » pour la route d'images. `read_file` le signale.
         asym = g("asymmetry") if isinstance(g("asymmetry"), dict) else {}
         _insert(conn, "gear_inspection", {
             "source_path": rel, "date": g("date"), "gear_id": g("gear_id"), "distance_m": g("distance_m"),
@@ -2935,7 +2939,7 @@ def backfill_items(conn) -> List[dict]:
         # `decision` (#54) exclu au même titre que `athlete`/`objective` : c'est un
         # type NEUF, jamais écrit avant ce contrat — aucun fichier historique à
         # reprendre, jamais de dette de backfill à faire apparaître pour lui.
-        "WHERE kind IS NOT NULL AND kind NOT IN ('athlete', 'objective', 'decision') "
+        "WHERE kind IS NOT NULL AND kind NOT IN ('athlete', 'objective', 'decision', 'gear_inspection') "
         f"AND (parsed_ok != 'ok' OR issues LIKE '%{_WEEK_COLLISION_MARKER}%') ORDER BY path"
     ).fetchall():
         # Seul un fichier hors contrat (sans bloc, bloc invalide, illisible) est une dette.
@@ -3015,6 +3019,29 @@ def write_backfill(conn, workspace: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _validate_gear_inspection_links(path: Path, block: dict, warnings: List[str]) -> None:
+    """#135 : `gear_id` déclaré comme chaussure dans le profil (et non un slug de matériel #134),
+    `previous` existant, de la même paire et antérieur. Avertissements seulement."""
+    root = path.parent.parent
+    profile = root / "planning" / "Runner_Profile.md"
+    gear_id = block.get("gear_id")
+    if profile.is_file() and isinstance(gear_id, str):
+        declared = {g.get("gear_id") for g in (L.parse_profile(profile.read_text(encoding="utf-8")).get("gear") or [])}
+        if gear_id not in declared:
+            warnings.append(f"gear_id « {gear_id} » n'est pas une chaussure déclarée dans « ### Chaussures » du "
+                            "profil (matériel hors chaussures ? l'inspection photo ne concerne que les chaussures)")
+    previous = block.get("previous")
+    if isinstance(previous, str) and not C._invalid_workspace_path_reason(previous):
+        if not (root / previous).is_file():
+            warnings.append(f"previous : {previous} introuvable")
+        pm = _GEAR_INSPECTION_FILENAME_RE.match(Path(previous).name)
+        if pm:
+            if pm.group(2) != gear_id:
+                warnings.append(f"previous : inspection d'une autre paire ({pm.group(2)}, pas {gear_id})")
+            if isinstance(block.get("date"), str) and pm.group(1) >= block["date"]:
+                warnings.append(f"previous : {pm.group(1)} n'est pas antérieure à la date de l'inspection")
+
+
 def validate_file(path: Path) -> Tuple[bool, List[str], List[str]]:
     if not path.is_file():
         return False, [f"{path} : fichier introuvable"], []
@@ -3068,6 +3095,7 @@ def validate_file(path: Path) -> Tuple[bool, List[str], List[str]]:
             warnings.append("fichier « gear_inspection » hors du format attendu "
                             "(`gear/AAAA-MM-JJ_<gear_id>_inspection.md`) — non indexé s'il n'est pas sous gear/.")
         else:
+            _validate_gear_inspection_links(path, block, warnings)
             if isinstance(block.get("date"), str) and m.group(1) != block["date"]:
                 warnings.append(f"date du nom de fichier ({m.group(1)}) différente de gear_inspection.date "
                                 f"({block['date']})")
@@ -3184,6 +3212,30 @@ def gear_attribution(conn, garmin_gear: Optional[str], chat_gear: Optional[str])
     return M.resolve_gear_attribution(gear_defs, uuids, chat)
 
 
+def _gear_defs(conn) -> List[dict]:
+    """Paires déclarées PRISES EN COMPTE (`ignored = 0`, #133) — lues par `gear_mileage` ET par le
+    bilan de carrière (#135) : une seule requête, jamais retapée à deux endroits."""
+    return [dict(r) for r in conn.execute(
+        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
+        "start_m, usage FROM gear WHERE ignored = 0")]
+
+
+def _gear_activities(conn) -> List[dict]:
+    """Séances candidates à l'attribution de matériel (partagé `gear_mileage` / `gear_career`)."""
+    activities = [dict(r) for r in conn.execute(
+        # `date` : indispensable à `M.attribute_gear` pour filtrer l'attribution par
+        # défaut par `depuis` (revue PR #85, blocker 1) — jamais utilisée pour
+        # exclure une activité à `gear_id` explicite. `id`/`name`/`duration_s` : bilan de carrière.
+        "SELECT id, name, duration_s, sport, distance_m, gear_id, gear_source, date, garmin_activity_id, "
+        "intervals_activity_id, source_path "
+        "FROM activity WHERE gear_id IS NOT NULL OR sport IN "
+        f"({', '.join('?' for _ in M.GEAR_WEAR_SPORTS)}) ORDER BY date, id", M.GEAR_WEAR_SPORTS).fetchall()]
+    for a in activities:
+        a["refs"] = [str(v) for v in (a.pop("garmin_activity_id"), a.pop("intervals_activity_id"),
+                                       a.pop("source_path")) if v is not None]
+    return activities
+
+
 def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None) -> dict:
     """Kilométrage par chaussure (#40) — pour la CLI et pour les agents en headless
     (`coach`, rapport hebdomadaire). N'est pas soumis à `[health].morning_check` :
@@ -3193,20 +3245,7 @@ def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str
     contre `today` (défaut : la date du jour, comme les autres KPI) ; `run_refs`
     (garmin_activity_id, intervals_activity_id ou chemin de fichier des séances du run)
     ajoute `crossed_in_run` — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]`."""
-    gear_defs = [dict(r) for r in conn.execute(
-        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
-        "start_m, usage FROM gear WHERE ignored = 0")]
-    activities = [dict(r) for r in conn.execute(
-        # `date` : indispensable à `M.gear_mileage` pour filtrer l'attribution par
-        # défaut par `depuis` (revue PR #85, blocker 1) — jamais utilisée pour
-        # exclure une activité à `gear_id` explicite.
-        "SELECT sport, distance_m, gear_id, gear_source, date, garmin_activity_id, intervals_activity_id, source_path "
-        "FROM activity WHERE gear_id IS NOT NULL OR sport IN "
-        f"({', '.join('?' for _ in M.GEAR_WEAR_SPORTS)})", M.GEAR_WEAR_SPORTS).fetchall()]
-    for a in activities:
-        a["refs"] = [str(v) for v in (a.pop("garmin_activity_id"), a.pop("intervals_activity_id"),
-                                       a.pop("source_path")) if v is not None]
-    return M.gear_mileage(activities, gear_defs, today or date.today(), run_refs)
+    return M.gear_mileage(_gear_activities(conn), _gear_defs(conn), today or date.today(), run_refs)
 
 
 def _equipment_defs(conn) -> List[dict]:
@@ -3951,34 +3990,23 @@ def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] 
     « inspection conseillée », jamais imposé — `arc_metrics.ASSUMPTIONS["gear_inspection"]`). N'est PAS
     soumis à `[health].morning_check` (aucune donnée de santé) ni à `[data].source`."""
     shoes = gear_mileage(conn, today)["shoes"]
-    entries = M.gear_inspection_status(shoes, _inspection_rows(conn))
+    ignored = {r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear WHERE ignored = 1")}
+    entries = M.gear_inspection_status(shoes, _inspection_rows(conn), ignored=ignored)
     if gear_id:
         entries = [e for e in entries if e["gear_id"] == gear_id]
-    return {"interval_m": M.GEAR_INSPECTION_INTERVAL_M, "gear": entries,
-            "due": [e["gear_id"] for e in entries if e.get("due")]}
+    out = {"interval_m": M.GEAR_INSPECTION_INTERVAL_M, "gear": entries,
+           "due": [e["gear_id"] for e in entries if e.get("due")]}
+    if gear_id and not entries:
+        out["error"] = f"paire inconnue : {gear_id}"     # même contrat que `gear-career` (code retour 1)
+    return out
 
 
 def _activities_of_gear(conn, gear_id: str, today: Optional[date]) -> List[dict]:
-    """Séances attribuées à `gear_id` par EXACTEMENT la règle de `gear_mileage` (chaque séance est
-    passée seule à `M.gear_mileage` — jamais une seconde copie de la règle d'attribution : défaut,
-    `depuis`, séance sans distance, futur…)."""
-    gear_defs = [dict(r) for r in conn.execute(
-        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
-        "start_m, usage FROM gear")]
-    for d in gear_defs:
-        d["start_m"] = None      # le départ n'est pas une séance : seule la distance de la séance compte
-    picked = []
-    for row in conn.execute(
-            "SELECT id, sport, date, name, distance_m, duration_s, gear_id, source_path FROM activity "
-            "WHERE distance_m > 0 ORDER BY date, id"):
-        act = dict(row)
-        result = M.gear_mileage([act], gear_defs, today)
-        owner = next((sh["gear_id"] for sh in result["shoes"] if sh["distance_m"] > 0), None)
-        if owner is None and result["unknown"]:
-            owner = result["unknown"][0]["gear_id"]
-        if owner == gear_id:
-            picked.append(act)
-    return picked
+    """Séances attribuées à `gear_id` par `M.attribute_gear` — la MÊME règle que `gear_mileage`
+    (mêmes requêtes `_gear_defs`/`_gear_activities`, mêmes exclusions : `garmin_unmapped`, paires
+    ignorées, `depuis`, futur, sans distance), donc jamais de divergence entre kilométrage et bilan."""
+    return [act for act, owner in M.attribute_gear(_gear_activities(conn), _gear_defs(conn), today)
+            if owner == gear_id]
 
 
 def gear_career(conn, gear_id: str, today: Optional[date] = None) -> dict:
@@ -4154,8 +4182,9 @@ def main(argv=None) -> int:
         return 0
     if args.command == "inspections":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        print(json.dumps(gear_inspections(conn, args.gear, today_date), ensure_ascii=False))
-        return 0
+        report = gear_inspections(conn, args.gear, today_date)
+        print(json.dumps(report, ensure_ascii=False))
+        return 1 if "error" in report else 0
     if args.command == "gear-career":
         if not args.gear:
             raise ConfigError("commande « gear-career » : --gear GEAR_ID est obligatoire.")

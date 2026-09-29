@@ -549,7 +549,9 @@ class TestGearInspectionWiring(unittest.TestCase):
         for needle in ("GEAR INSPECTION MANDATE", "scripts/arc_index.py inspections",
                        "scripts/arc_index.py gear-career", "a proposal, never an imposition",
                        "NEVER recommend changing foot strike", "ONLY IF `medical` is in `[agents].enabled`",
-                       "Never in headless mode", "not extracted anywhere"):
+                       "Never in headless mode", "not extracted anywhere",
+                       "worded by `due_reason`", "`threshold_alert` →", "`never_inspected` →",
+                       "belongs to the chat reply ONLY"):
             self.assertIn(needle, text, f"coach.md : {needle}")
 
     def test_mobile_doc_flags_photo_upload_as_unvalidated(self):

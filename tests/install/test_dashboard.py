@@ -120,7 +120,7 @@ class TestDashboardServer(InstallAsserts):
         self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
         self.assertTrue(body.startswith(b"\x89PNG"))
         for bad in ("planning/Runner_Profile.md", "gear/photos/../../planning/Runner_Profile.md",
-                    "gear/photos/absente.png", "/etc/passwd", ""):
+                    "gear/photos/absente.png", "/etc/passwd", "", "gear/photos/a\x00.png"):
             self.assertEqual(self.server.get("/media/gear-photo?path=" + urllib.parse.quote(bad, safe=""))[0],
                              404, bad)
         self.assertEqual(self.server.get("/media/gear-photo")[0], 404)

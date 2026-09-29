@@ -24,9 +24,10 @@ responses = "fr"
 [expect]
 must_match = [
   "inspection|photos? (de|des) (tes |vos )?(semelles|chaussures)",
-  "(veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|si tu veux|si vous voulez|[àa] ta convenance|propos)",
+  "(veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|si tu veux|si vous voulez|[àa] ta convenance|[çc]a te (dit|tente)|conseill|(je te |on peut te )?propos(e|er))",
 ]
 must_not_match = [
+  "pas (d['’]|besoin d['’])inspection",
   "(tu dois|vous devez|il faut absolument|il est obligatoire|c['’]est obligatoire)[^\\n]{0,60}(inspect|photo)",
 ]
 files_absent = ["gear/*.md"]

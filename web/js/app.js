@@ -266,7 +266,7 @@ function gearForecast(s) {
 // sur sa ligne du tableau, et rappel « inspection conseillée » (jamais imposé). Texte d'état toujours
 // écrit en toutes lettres à côté de la couleur (pas seulement la couleur).
 const GEAR_CONDITION = { green: "Bon état", yellow: "Usure visible", orange: "Usure avancée", red: "Fin de vie" };
-const GEAR_SIDE = { left: "gauche", right: "droite" };
+const GEAR_SIDE = { left: "pied gauche", right: "pied droit" };
 const GEAR_ZONE = {
   heel_posterolateral: "talon postéro-latéral", heel_lateral: "talon latéral", heel_medial: "talon médial",
   heel_central: "talon central", midfoot_lateral: "médio-pied latéral", midfoot_medial: "médio-pied médial",
@@ -296,8 +296,8 @@ function inspectionPhotos(insp) {
   }).join("")}</span>`;
 }
 function inspectionItem(insp) {
-  const zones = (insp.wear_zones || []).map((z) => `${F.esc(GEAR_ZONE[z.zone] || z.zone)} ${F.esc(GEAR_SIDE[z.side] || z.side)}${z.severity ? ` (${F.esc(GEAR_SEVERITY[z.severity] || z.severity)})` : ""}`).join(", ");
-  const asym = insp.asymmetry ? `${F.esc(GEAR_ASYMMETRY[insp.asymmetry.level] || insp.asymmetry.level)}${insp.asymmetry.side ? ` — ${F.esc(GEAR_SIDE[insp.asymmetry.side] || insp.asymmetry.side)} plus usée` : ""}` : "";
+  const zones = (insp.wear_zones || []).map((z) => `${F.esc(GEAR_ZONE[z.zone] || z.zone)} (${F.esc(GEAR_SIDE[z.side] || z.side)})${z.severity ? ` (${F.esc(GEAR_SEVERITY[z.severity] || z.severity)})` : ""}`).join(", ");
+  const asym = insp.asymmetry ? `${F.esc(GEAR_ASYMMETRY[insp.asymmetry.level] || insp.asymmetry.level)}${insp.asymmetry.side ? ` — ${F.esc(GEAR_SIDE[insp.asymmetry.side] || insp.asymmetry.side)} plus usé` : ""}` : "";
   const hints = (insp.gait_hints || []).map((h) => F.esc(GEAR_HINT[h] || h)).join(", ");
   const facts = [zones && `usure : ${zones}`, asym, hints && `indices de foulée (à prendre comme un indice, pas un diagnostic) : ${hints}`].filter(Boolean).join(" · ");
   return `<li><strong>${F.esc(F.dayLong(insp.date))}</strong> ${gearConditionChip(insp.condition)}${insp.distance_m != null ? ` <span class="muted">à ${F.distance(insp.distance_m, 0)}</span>` : ""}
@@ -310,7 +310,7 @@ function gearInspectionSection(inspections) {
     const change = e.condition_change === "worse" ? ` <span class="tag">plus dégradée que la précédente</span>` : e.condition_change === "better" ? ` <span class="tag">mieux que la précédente</span>` : e.condition_change === "same" ? ` <span class="tag">état stable</span>` : "";
     const due = e.due ? ` ${chip("gear", "orange", "Inspection conseillée")} <small class="muted">${e.due_reason === "threshold_alert" ? "seuil d'alerte franchi" : e.due_reason === "never_inspected" ? "jamais inspectée" : `${F.distance(e.km_since_inspection_m, 0)} depuis la dernière`}</small>` : "";
     const list = e.inspections.length ? `<ol class="gear-inspections">${e.inspections.map(inspectionItem).join("")}</ol>` : `<p class="muted">Aucune inspection enregistrée.</p>`;
-    return `<div class="gear-inspection-block"><h3>${F.esc(e.name)}${e.retired ? ` <span class="tag">retirée</span>` : ""}${e.unknown ? ` <span class="tag">inconnue</span>` : ""}${change}${due}</h3>${list}</div>`;
+    return `<div class="gear-inspection-block"><h3>${F.esc(e.name)}${e.retired ? ` <span class="tag">retirée</span>` : ""}${e.unknown ? ` <span class="tag">inconnue</span>` : ""}${e.ignored ? ` <span class="tag">ignorée</span>` : ""}${change}${due}</h3>${list}</div>`;
   }).join("");
   return `<section class="band"><h2>Inspections photo</h2>${blocks}
     ${note("L'usure d'une semelle est un signal faible (les chaussures modernes la déforment) : la comparaison avec l'inspection précédente compte plus que le verdict isolé. Demandez une inspection au coach — il la propose environ tous les 200 km.")}</section>`;

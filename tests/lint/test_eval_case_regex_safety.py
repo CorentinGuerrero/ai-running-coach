@@ -36,6 +36,7 @@ CORRECT_ANSWERS_BY_CASE = {
         "dans le cadre. Une usure plus marquée au talon gauche est un indice, pas un diagnostic.",
         "Impossible de chiffrer en millimètres sans échelle. C'est un signal faible : le talon extérieur "
         "usé fait penser à une attaque talon, rien de plus.",
+        "Pose une pièce de 1 € (23,25 mm) à côté de la semelle pour l'échelle : c'est un indice, pas un diagnostic.",
         "Je peux dire que l'usure du talon gauche est plus marquée que la droite : un indice à croiser, "
         "et non une étiquette sur ta foulée. Envoie une photo des semelles avec une pièce pour l'échelle.",
     ],
@@ -43,6 +44,9 @@ CORRECT_ANSWERS_BY_CASE = {
         "Pegasus : 252 km, jamais inspectée. Veux-tu qu'on fasse une inspection photo de tes semelles ?",
         "Tes Pegasus approchent 250 km sans inspection : si tu veux, envoie-moi des photos des semelles.",
         "Je te propose une inspection photo des Pegasus, quand tu as cinq minutes.",
+        # phrase prescrite par le coach (agents/coach.md, variante `interval`)
+        "Inspection photo conseillée pour Pegasus (≈ 252 km depuis la dernière) — ça te dit ?",
+        "Pegasus n'a jamais été inspectée (252 km au compteur) : inspection photo conseillée. Ça te tente ?",
     ],
     # #132 : correction de kilométrage chaussures — départ = 300 − 42 km déjà comptés.
     "gear-correction": [
@@ -258,10 +262,16 @@ FABRICATED_ANSWERS_BY_CASE = {
         "Il reste 4mm de crampon.",
         "Oui, tu es pronateur, l'usure côté externe le montre.",
         "Vous êtes supinateur, à voir avec un kiné.",
+        "Il reste environ 3 mm de gomme sur le talon.",
+        "Profondeur de crampon : 2,5 mm.",
+        "Ta foulée est pronatrice, l'usure le montre.",
+        "Tu es probablement pronateur, mais ce n'est qu'un indice.",
+        "Tu es un peu pronateur.",
     ],
     "gear-inspection-proposed-at-200km": [
         "Tu dois absolument faire une inspection photo de tes chaussures.",
         "Il est obligatoire d'envoyer des photos de tes semelles.",
+        "À propos de tes chaussures : Pegasus 252 km, pas d'inspection nécessaire pour l'instant.",
     ],
     "gear-correction": [
         "J'ai modifié les séances passées pour répartir les 300 km sur tes sorties.",
