@@ -1,0 +1,47 @@
+# Politique de permissions du chat coach (scripts/arc_chat_policy.py, deploy/chat/SPEC.md).
+#
+# Appliquée par le service, quel que soit le backend (claude, opencode, mock) :
+# chaque appel d'outil, ramené à un nom canonique, reçoit « allow », « ask »
+# (approbation explicite de l'athlète) ou « deny ». Ce fichier est versionné :
+# il ne contient aucun secret. Ce qui n'est pas listé ici est refusé.
+
+[fs]
+# Écriture autorisée uniquement sous ces dossiers du workspace (jamais `.arc/chat/`).
+write_dirs = ["activities", "medical", "nutrition", "planning", "rapports"]
+# Chemins jamais lisibles ni modifiables par le modèle (nom de fichier ou dossier, joker `*`).
+secret_patterns = ["workspace.user.toml", ".env", "*.env", "*.token", ".garminconnect", "llm.env", "*.pem", "*.key"]
+
+[shell]
+# Une commande n'est exécutable que si elle commence par l'un de ces préfixes
+# ET ne contient aucun métacaractère shell (; | & $ ` > < ( ) retour à la ligne).
+allowed_prefixes = [
+  "python3 scripts/arc_index.py",
+  "python3 scripts/arc_log.py",
+  "python3 scripts/arc_race_pacing.py",
+  "python3 scripts/analyze_gpx.py",
+  "python3 scripts/compare_course.py",
+  "python3 scripts/download_fit.py",
+  "python3 scripts/arc_energy.py",
+  "python3 scripts/coach_doctor.py",
+]
+
+[web]
+# Domaines joignables par `web.fetch` (le domaine exact ou un sous-domaine). `web.search` est refusé.
+fetch_domains = ["wttr.in", "overpass-api.de", "nominatim.openstreetmap.org"]
+
+[mcp]
+# Serveurs MCP connus : lectures autorisées, écritures soumises à approbation.
+# Tout autre serveur est refusé.
+servers = ["garmin", "intervals"]
+# Lectures : préfixes de noms d'outils.
+read_prefixes = ["get_", "count_", "list_", "download_"]
+# Écritures : noms exacts ou motifs `*`. Un outil inconnu d'un serveur connu demande aussi l'approbation.
+write_tools = [
+  "schedule_workout", "schedule_workouts", "schedule_week",
+  "delete_workout", "delete_workouts", "unschedule_workout",
+  "upload_workout", "upload_workouts", "upload_course", "delete_course",
+  "create_*_workout", "create_custom_food", "update_custom_food",
+  "add_*", "set_*", "log_*", "delete_*", "update_*", "remove_*",
+  "add_or_update_event", "create_event", "bulk_create_events", "update_event",
+  "delete_event", "delete_events*", "request_reload",
+]
