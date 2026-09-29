@@ -10,7 +10,8 @@ de dupliquer ce code dans les deux adaptateurs).
 from __future__ import annotations
 
 import json
-from typing import Any
+import re
+from typing import Any, Optional
 
 # Texte renvoyé au modèle quand l'outil n'est pas exécuté.
 REFUSAL_DENY = ("Refusé : cette action n'est pas autorisée par la politique du coach "
@@ -34,6 +35,59 @@ def usd_to_eur(usd: Any, rate: Any) -> float:
         return round(float(usd or 0.0) * r, 6)
     except (TypeError, ValueError):
         return 0.0
+
+
+_LEANPROXY_META = ("list_servers", "list_tools", "search_tools")
+_HASH_SUFFIX_RE = re.compile(r"_[0-9a-f]{10}$")
+# Alias de noms de serveurs tels qu'exposés par leanproxy -> nom de serveur de la politique.
+_SERVER_ALIASES = {"intervals_icu": "intervals"}
+
+
+def map_leanproxy(tool: str, inp: dict) -> Optional[tuple]:
+    """Outil exposé par le serveur MCP « leanproxy » (`tool` = nom SANS préfixe de serveur).
+
+    - `invoke_tool` (passerelle) : seul `arguments` est l'entrée réellement exécutée ; si
+      l'appel porte `args` à la place, on ne devine pas -> `other:` (refusé par la politique),
+      pour que hash et diff reflètent ce qui s'exécute vraiment.
+    - `list_servers|list_tools|search_tools` : `mcp:leanproxy.<outil>`.
+    - outils exposés en direct `<serveur>__<outil>[_<hash>]` (ex. `garmin__get_rhr_day`,
+      constaté dans la liste d'outils de leanproxy) : `mcp:<serveur>.<outil>`.
+    Renvoie None si aucun motif ne s'applique (l'appelant garde le mapping générique).
+    """
+    if tool.endswith("invoke_tool"):
+        server, name = inp.get("server"), inp.get("tool")
+        if not (server and name):
+            return None
+        if isinstance(inp.get("arguments"), dict):
+            args = inp["arguments"]
+        elif "arguments" not in inp and "args" not in inp:
+            args = {}
+        else:
+            return f"other:leanproxy.{tool}", dict(inp)
+        return f"mcp:{str(server).lower()}.{name}", dict(args)
+    if tool in _LEANPROXY_META:
+        return f"mcp:leanproxy.{tool}", inp
+    if "__" in tool:
+        server, _, name = tool.partition("__")
+        server = server.lower()
+        name = _HASH_SUFFIX_RE.sub("", name)
+        if server and name:
+            return f"mcp:{_SERVER_ALIASES.get(server, server)}.{name}", inp
+    return None
+
+
+def fs_list_input(path: Any, pattern: Any = None, glob: Any = None) -> dict:
+    """Entrée canonique `fs.list` : `path`, `pattern` (regex de grep) et `glob` (filtre de fichiers).
+
+    Le filtre de fichiers vit sous `glob` (str ou liste) pour que la politique le confronte
+    aux motifs de fichiers secrets ; un `pattern` de grep n'est jamais un chemin.
+    """
+    out: dict = {"path": path or "."}
+    if pattern:
+        out["pattern"] = pattern
+    if glob:
+        out["glob"] = glob
+    return out
 
 
 def _server_label(server: str) -> str:
@@ -63,7 +117,10 @@ def summarize_tool(tool: str, tool_input: dict) -> str:
     if tool == "fs.write":
         return f"Écriture de {short(inp.get('path'))}"
     if tool == "fs.list":
-        return f"Recherche dans {short(inp.get('path') or '.')}"
+        extra = inp.get("glob")
+        if isinstance(extra, list):
+            extra = ", ".join(str(g) for g in extra)
+        return f"Recherche dans {short(inp.get('path') or '.')}" + (f" ({short(extra, 40)})" if extra else "")
     if tool == "shell":
         return f"Commande : {short(inp.get('command'), 60)}"
     if tool == "web.fetch":

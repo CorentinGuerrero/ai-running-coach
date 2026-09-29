@@ -1,0 +1,424 @@
+{
+ "before_permission": [
+  {
+   "id": "evt_task_01",
+   "type": "session.status",
+   "properties": {
+    "sessionID": "$SESSION",
+    "status": {
+     "type": "busy"
+    }
+   }
+  },
+  {
+   "id": "evt_task_02",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "info": {
+     "id": "msg_root_a",
+     "role": "assistant",
+     "sessionID": "$SESSION",
+     "time": {
+      "created": 1790662900000
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_task_03",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "part": {
+     "id": "prt_task",
+     "type": "tool",
+     "callID": "call_task",
+     "tool": "task",
+     "state": {
+      "status": "running",
+      "input": {
+       "subagent_type": "coach",
+       "description": "Lire le plan",
+       "prompt": "Lis planning/x.md"
+      },
+      "metadata": {
+       "sessionId": "ses_child1"
+      },
+      "time": {
+       "start": 1790662900001
+      }
+     },
+     "sessionID": "$SESSION",
+     "messageID": "msg_root_a"
+    },
+    "time": 1790662900003
+   }
+  },
+  {
+   "id": "evt_task_04",
+   "type": "session.created",
+   "properties": {
+    "sessionID": "ses_child1",
+    "info": {
+     "id": "ses_child1",
+     "parentID": "$SESSION",
+     "title": "Lire le plan (@coach subagent)",
+     "directory": "$WS"
+    }
+   }
+  },
+  {
+   "id": "evt_task_05",
+   "type": "session.status",
+   "properties": {
+    "sessionID": "ses_child1",
+    "status": {
+     "type": "busy"
+    }
+   }
+  },
+  {
+   "id": "evt_task_06",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "ses_child1",
+    "part": {
+     "id": "prt_c_txt",
+     "type": "text",
+     "text": "Je lis le fichier (interne).",
+     "sessionID": "ses_child1",
+     "messageID": "msg_child_a"
+    },
+    "time": 1790662900006
+   }
+  },
+  {
+   "id": "evt_task_07",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "ses_child1",
+    "part": {
+     "id": "prt_c_tool",
+     "type": "tool",
+     "callID": "call_c1",
+     "tool": "read",
+     "state": {
+      "status": "running",
+      "input": {
+       "filePath": "$WS/planning/x.md"
+      },
+      "time": {
+       "start": 1790662900002
+      }
+     },
+     "sessionID": "ses_child1",
+     "messageID": "msg_child_a"
+    },
+    "time": 1790662900007
+   }
+  },
+  {
+   "id": "evt_task_08",
+   "type": "permission.asked",
+   "properties": {
+    "id": "per_child1",
+    "sessionID": "ses_child1",
+    "permission": "read",
+    "patterns": [
+     "$WS/planning/x.md"
+    ],
+    "metadata": {},
+    "always": [
+     "*"
+    ],
+    "tool": {
+     "messageID": "msg_child_a",
+     "callID": "call_c1"
+    }
+   }
+  }
+ ],
+ "after": {
+  "once": [
+   {
+    "id": "evt_task_10",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "ses_child1",
+     "part": {
+      "id": "prt_c_tool",
+      "type": "tool",
+      "callID": "call_c1",
+      "tool": "read",
+      "state": {
+       "status": "completed",
+       "input": {
+        "filePath": "$WS/planning/x.md"
+       },
+       "output": "contenu",
+       "time": {
+        "start": 1790662900002,
+        "end": 1790662900500
+       }
+      },
+      "sessionID": "ses_child1",
+      "messageID": "msg_child_a"
+     },
+     "time": 1790662900010
+    }
+   },
+   {
+    "id": "evt_task_11",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "ses_child1",
+     "part": {
+      "id": "prt_c_step",
+      "type": "step-finish",
+      "reason": "stop",
+      "cost": 0.0004,
+      "tokens": {
+       "input": 400,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "read": 50,
+        "write": 0
+       }
+      },
+      "sessionID": "ses_child1",
+      "messageID": "msg_child_a"
+     },
+     "time": 1790662900011
+    }
+   },
+   {
+    "id": "evt_task_12",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "ses_child1"
+    }
+   },
+   {
+    "id": "evt_task_13",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_task",
+      "type": "tool",
+      "callID": "call_task",
+      "tool": "task",
+      "state": {
+       "status": "completed",
+       "input": {
+        "subagent_type": "coach",
+        "description": "Lire le plan",
+        "prompt": "Lis planning/x.md"
+       },
+       "output": "ok",
+       "metadata": {
+        "sessionId": "ses_child1"
+       },
+       "time": {
+        "start": 1790662900001,
+        "end": 1790662901000
+       }
+      },
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900013
+    }
+   },
+   {
+    "id": "evt_task_14",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_root_txt",
+      "type": "text",
+      "text": "Fini.",
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900014
+    }
+   },
+   {
+    "id": "evt_task_15",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_root_step",
+      "type": "step-finish",
+      "reason": "stop",
+      "cost": 0.0001,
+      "tokens": {
+       "input": 100,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900015
+    }
+   },
+   {
+    "id": "evt_task_16",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "$SESSION"
+    }
+   }
+  ],
+  "reject": [
+   {
+    "id": "evt_task_10",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "ses_child1",
+     "part": {
+      "id": "prt_c_tool",
+      "type": "tool",
+      "callID": "call_c1",
+      "tool": "read",
+      "state": {
+       "status": "error",
+       "input": {
+        "filePath": "$WS/planning/x.md"
+       },
+       "error": "$FEEDBACK",
+       "time": {
+        "start": 1790662900002,
+        "end": 1790662900500
+       }
+      },
+      "sessionID": "ses_child1",
+      "messageID": "msg_child_a"
+     },
+     "time": 1790662900010
+    }
+   },
+   {
+    "id": "evt_task_11",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "ses_child1",
+     "part": {
+      "id": "prt_c_step",
+      "type": "step-finish",
+      "reason": "stop",
+      "cost": 0.0004,
+      "tokens": {
+       "input": 400,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "read": 50,
+        "write": 0
+       }
+      },
+      "sessionID": "ses_child1",
+      "messageID": "msg_child_a"
+     },
+     "time": 1790662900011
+    }
+   },
+   {
+    "id": "evt_task_12",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "ses_child1"
+    }
+   },
+   {
+    "id": "evt_task_13",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_task",
+      "type": "tool",
+      "callID": "call_task",
+      "tool": "task",
+      "state": {
+       "status": "completed",
+       "input": {
+        "subagent_type": "coach",
+        "description": "Lire le plan",
+        "prompt": "Lis planning/x.md"
+       },
+       "output": "ok",
+       "metadata": {
+        "sessionId": "ses_child1"
+       },
+       "time": {
+        "start": 1790662900001,
+        "end": 1790662901000
+       }
+      },
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900013
+    }
+   },
+   {
+    "id": "evt_task_14",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_root_txt",
+      "type": "text",
+      "text": "Fini.",
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900014
+    }
+   },
+   {
+    "id": "evt_task_15",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_root_step",
+      "type": "step-finish",
+      "reason": "stop",
+      "cost": 0.0001,
+      "tokens": {
+       "input": 100,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "sessionID": "$SESSION",
+      "messageID": "msg_root_a"
+     },
+     "time": 1790662900015
+    }
+   },
+   {
+    "id": "evt_task_16",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "$SESSION"
+    }
+   }
+  ]
+ }
+}

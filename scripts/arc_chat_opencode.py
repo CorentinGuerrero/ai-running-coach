@@ -36,6 +36,10 @@ Faits établis (voir `tests/data/fixtures/chat/opencode_*.json`, extraits du bin
   - `permission: {"*": "ask", "question"|"todowrite"|"external_directory"|"doom_loop": "deny"}` :
     `*` = ask pour tout (lectures comprises) ; un outil « deny » disparaît du contexte du modèle.
   - Les outils MCP sont demandés sous `permission = "<serveur>_<outil>"`, `patterns = ["*"]`.
+  - Le tool `task` exécute les sous-agents dans des sessions FILLES (`session.created` /
+    `session.updated` avec `info.parentID` ; `metadata.sessionId` sur la partie `task`, vérifiés
+    dans le schéma OpenAPI 1.18.32 et `tool/task.ts`) : leurs `permission.asked` (avec `"*": "ask"`)
+    portent l'id de la session fille -> même politique ; leurs coûts comptent dans le tour.
   - `OPENCODE_CONFIG` charge notre fichier ; le config global `~/.config/opencode` est aussi lu
     -> on isole XDG_CONFIG_HOME/XDG_DATA_HOME/XDG_STATE_HOME/XDG_CACHE_HOME sous `.arc/chat/opencode/xdg`.
 """
@@ -62,19 +66,26 @@ from urllib.parse import urlparse
 
 from arc_chat_backend import (SYSTEM_ADDENDUM, BackendError, ChatBackend, TurnContext,
                               resolve_workspace_path)
-from arc_chat_tools import (REFUSAL_DENY, display_input, gate, parse_unified_diff, short,
-                            summarize_tool, usd_to_eur)
+from arc_chat_tools import (REFUSAL_DENY, display_input, fs_list_input, gate, map_leanproxy,
+                            parse_unified_diff, short, summarize_tool, usd_to_eur)
 
 OPENCODE_TESTED_VERSION = "1.18.32"
 DEFAULT_MODEL = "openrouter/deepseek/deepseek-chat"
 DEFAULT_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 HEALTH_TIMEOUT_S = 40.0
-EVENT_IDLE_TIMEOUT_S = 120.0     # le serveur émet un `server.heartbeat` régulier
+EVENT_IDLE_TIMEOUT_S = 120.0     # sans évènement UTILE (les `server.heartbeat` ne comptent pas)
+SOCKET_TIMEOUT_S = 120.0         # lecture du flux SSE (le serveur émet un `server.heartbeat` régulier)
+TURN_TIMEOUT_S = 1800.0          # durée maximale d'un tour (hors attente d'approbation), `[chat].turn_timeout_s`
+HEARTBEAT_EVENTS = ("server.heartbeat", "server.connected")
 ABORT_GRACE_S = 15.0
 
 # Permissions refusées d'office (sans passer par la politique) : sans objet dans le chat.
 ALWAYS_REJECT = ("question", "external_directory", "doom_loop", "todowrite", "todoread")
+
+REFUSAL_UNRESOLVED = ("Refusé : l'appel d'outil à approuver est introuvable côté serveur "
+                      "(entrée inconnue). Ne le réessaie pas ; explique-le simplement à l'athlète.")
+BUDGET_NOTICE = "\n\nLe budget du jour est atteint : je m'arrête ici."
 
 
 # ---------------------------------------------------------------------------
@@ -98,10 +109,12 @@ def canonical_tool(name: str, tool_input: Optional[dict], mcp_servers: Any = ())
         out["path"] = path
         return "fs.write", out
     if name in ("glob", "grep", "list", "ls"):
-        out = {"path": inp.get("path") or "."}
-        if inp.get("pattern"):
-            out["pattern"] = inp["pattern"]
-        return "fs.list", out
+        if name == "glob":   # `pattern` de glob = filtre de fichiers
+            return "fs.list", fs_list_input(inp.get("path"), None, inp.get("pattern"))
+        if name == "grep":   # `pattern` = regex ; `include` = filtre de fichiers
+            return "fs.list", fs_list_input(inp.get("path"), inp.get("pattern"),
+                                            inp.get("include") or inp.get("glob"))
+        return "fs.list", fs_list_input(inp.get("path"))
     if name == "bash":
         return "shell", {"command": inp.get("command", "")}
     if name == "webfetch":
@@ -118,18 +131,16 @@ def canonical_tool(name: str, tool_input: Optional[dict], mcp_servers: Any = ())
         if name.startswith(prefix) and len(name) > len(prefix):
             tool = name[len(prefix):]
             srv = str(server).lower()
-            if srv.startswith("leanproxy") and tool.endswith("invoke_tool") \
-                    and inp.get("server") and inp.get("tool"):
-                args = inp.get("arguments")
-                if args is None:
-                    args = inp.get("args")
-                return f"mcp:{str(inp['server']).lower()}.{inp['tool']}", dict(args or {})
+            if srv.startswith("leanproxy"):
+                mapped = map_leanproxy(tool, inp)
+                if mapped:
+                    return mapped
             return f"mcp:{srv}.{tool}", inp
     return f"other:{name}", inp
 
 
 # ---------------------------------------------------------------------------
-# Configuration OpenCode générée (aucune clé écrite sur disque)
+# Configuration OpenCode générée (clé fournisseur par référence `{env:VAR}`, jamais en clair)
 # ---------------------------------------------------------------------------
 
 def split_model(model: str) -> tuple:
@@ -215,6 +226,15 @@ class _Turn:
         self.aborted = False
         self.max_steps_hit = False
         self.workers: list = []
+        self.root = ""                     # id de la session du tour
+        self.children: set = set()         # sessions filles (sous-agents `task`), descendantes de root
+        self.awaiting = 0                  # approbations en cours (le délai d'inactivité est suspendu)
+        self.budget_hit = False
+        self.abort_at: Optional[float] = None
+        self.usage_emitted = False
+
+    def known_sessions(self) -> set:
+        return {self.root} | self.children
 
 
 class OpenCodeBackend(ChatBackend):
@@ -266,14 +286,22 @@ class OpenCodeBackend(ChatBackend):
             return {}
 
     def write_config(self) -> Path:
-        """Écrit `.arc/chat/opencode/opencode.json` (sans aucun secret) et renvoie son chemin."""
+        """Écrit `.arc/chat/opencode/opencode.json` (mode 600) et renvoie son chemin.
+
+        La clé du fournisseur reste une référence `{env:VAR}` ; en revanche les blocs `env`
+        de `.mcp.json` sont recopiés TELS QUELS (ils peuvent contenir des identifiants des
+        serveurs MCP) — d'où le mode 600.
+        """
         mcp = self._read_mcp()
         self._mcp_names = set(mcp)
         cfg = build_config(self._model(), self._base_url(),
                            self._api_key_env() if self._need_key() else "", mcp)
         self._state_dir.mkdir(parents=True, exist_ok=True)
         path = self._state_dir / "opencode.json"
-        path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(path, 0o600)   # fichier préexistant : os.open ne change pas son mode
         return path
 
     # -- vérifications ---------------------------------------------------
@@ -413,7 +441,7 @@ class OpenCodeBackend(ChatBackend):
         """
         q: queue.Queue = queue.Queue()
         parsed = urlparse(self._base)
-        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=EVENT_IDLE_TIMEOUT_S)
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=SOCKET_TIMEOUT_S)
         try:
             conn.request("GET", "/event", headers=self._auth_headers())
             resp = conn.getresponse()
@@ -478,6 +506,7 @@ class OpenCodeBackend(ChatBackend):
         provider_id, model_id = split_model(self._model())
         sid = self._session_id(ctx)
         turn = _Turn(ctx)
+        turn.root = sid
         events = self._open_events()
         try:
             # Attendre `server.connected` : aucun évènement du tour ne doit être manqué.
@@ -488,6 +517,9 @@ class OpenCodeBackend(ChatBackend):
                 "model": {"providerID": provider_id, "modelID": model_id},
             })
             self._consume(sid, turn, events)
+        except BackendError:
+            self._emit_usage(turn, only_if_known=True)   # coût partiel du tour interrompu
+            raise
         finally:
             events.stop()  # type: ignore[attr-defined]
             for worker in turn.workers:
@@ -508,57 +540,111 @@ class OpenCodeBackend(ChatBackend):
                 return
         raise BackendError("Le flux d'évènements OpenCode ne s'est pas ouvert.")
 
+    def _abort(self, sid: str, turn: _Turn) -> None:
+        """Interrompt la session du tour (et ses sessions filles, au mieux)."""
+        turn.aborted = True
+        turn.abort_at = time.monotonic()
+        for target in [sid, *sorted(turn.children)]:
+            try:
+                self._request("POST", f"/session/{target}/abort", timeout=10)
+            except BackendError:
+                pass
+
+    def _turn_cost_eur(self, turn: _Turn) -> float:
+        return usd_to_eur(turn.cost_usd, turn.ctx.config.get("usd_eur_rate"))
+
+    def _adopt_if_child(self, sid: str, turn: _Turn, candidate: str) -> bool:
+        """Session inconnue qui demande une permission : fille de la nôtre ? (GET /session/{id})."""
+        try:
+            info = self._request("GET", f"/session/{candidate}", timeout=5)
+        except BackendError:
+            return False
+        parent = (info or {}).get("parentID") if isinstance(info, dict) else None
+        if parent and parent in turn.known_sessions():
+            turn.children.add(candidate)
+            return True
+        return False
+
     def _consume(self, sid: str, turn: _Turn, events: "queue.Queue") -> None:
         ctx = turn.ctx
-        last_event = time.monotonic()
-        abort_at: Optional[float] = None
+        started = last_event = last_tick = time.monotonic()
+        paused = 0.0
         max_steps = int(ctx.config.get("max_turns") or 0)
+        try:
+            turn_timeout = float(ctx.config.get("turn_timeout_s") or TURN_TIMEOUT_S)
+        except (TypeError, ValueError):
+            turn_timeout = TURN_TIMEOUT_S
+        try:
+            cap_eur: Optional[float] = float(ctx.config["turn_budget_eur"])
+        except (KeyError, TypeError, ValueError):
+            cap_eur = None
         while True:
+            now = time.monotonic()
+            if turn.awaiting:   # attente d'approbation : ni inactivité ni durée ne courent
+                paused += now - last_tick
+                last_event = now
+            last_tick = now
             if ctx.cancelled.is_set() and not turn.aborted:
-                turn.aborted = True
-                abort_at = time.monotonic()
-                try:
-                    self._request("POST", f"/session/{sid}/abort", timeout=10)
-                except BackendError:
-                    pass
-            if abort_at is not None and time.monotonic() - abort_at > ABORT_GRACE_S:
+                self._abort(sid, turn)
+            if turn.abort_at is not None and now - turn.abort_at > ABORT_GRACE_S:
                 return
             if self._proc is not None and self._proc.poll() is not None:
                 raise BackendError("Le serveur OpenCode s'est arrêté pendant le tour.")
+            if not turn.aborted and now - started - paused > turn_timeout:
+                self._abort(sid, turn)
+                raise BackendError("Le tour a dépassé la durée maximale autorisée : il a été interrompu.")
+            if now - last_event > EVENT_IDLE_TIMEOUT_S:   # vérifié à CHAQUE tour de boucle (battements compris)
+                raise BackendError("Le serveur OpenCode ne répond plus (aucun évènement).")
             try:
                 event = events.get(timeout=0.2)
             except queue.Empty:
-                if time.monotonic() - last_event > EVENT_IDLE_TIMEOUT_S:
-                    raise BackendError("Le serveur OpenCode ne répond plus (aucun évènement).")
                 continue
             if event is None:
                 if turn.aborted:
                     return
                 raise BackendError("Le flux d'évènements OpenCode s'est interrompu.")
-            last_event = time.monotonic()
-            props = event.get("properties") or {}
-            if props.get("sessionID") not in (None, sid):
-                continue
             etype = event.get("type", "")
+            if etype not in HEARTBEAT_EVENTS:   # les battements de cœur ne prouvent pas que le tour avance
+                last_event = time.monotonic()
+            props = event.get("properties") or {}
+            # Sous-agents : le tool `task` ouvre des sessions FILLES ; leurs permissions doivent
+            # passer par la même politique, sinon le tour reste bloqué.
+            if etype in ("session.created", "session.updated"):
+                info = props.get("info") or {}
+                if info.get("id") and info.get("parentID") in turn.known_sessions():
+                    turn.children.add(info["id"])
+                continue
+            esid = props.get("sessionID")
+            child = esid is not None and esid != sid and esid in turn.children
+            if esid not in (None, sid) and not child:
+                if etype == "permission.asked" and self._adopt_if_child(sid, turn, esid):
+                    child = True
+                else:
+                    continue
             if etype == "message.updated":
-                self._on_message(turn, props.get("info") or {})
+                if not child:
+                    self._on_message(turn, props.get("info") or {})
             elif etype == "message.part.updated":
-                self._on_part(sid, turn, props.get("part") or {})
-                if max_steps and turn.steps >= max_steps and not turn.aborted:
-                    turn.aborted = True
-                    abort_at = time.monotonic()
+                self._on_part(esid or sid, turn, props.get("part") or {}, child)
+                if cap_eur is not None and not turn.aborted and self._turn_cost_eur(turn) > cap_eur:
+                    turn.budget_hit = True
+                    self._abort(sid, turn)
+                elif max_steps and turn.steps >= max_steps and not turn.aborted:
                     turn.max_steps_hit = True
-                    try:
-                        self._request("POST", f"/session/{sid}/abort", timeout=10)
-                    except BackendError:
-                        pass
+                    self._abort(sid, turn)
             elif etype == "message.part.delta":
-                self._on_delta(turn, props)
+                if not child:
+                    self._on_delta(turn, props)
             elif etype == "permission.asked":
-                worker = threading.Thread(target=self._answer_permission, args=(sid, turn, props),
+                with turn.lock:
+                    turn.awaiting += 1
+                worker = threading.Thread(target=self._answer_permission_guarded,
+                                          args=(esid or sid, turn, props),
                                           name="opencode-permission", daemon=True)
                 turn.workers.append(worker)
                 worker.start()
+            elif child:
+                continue
             elif etype == "session.status":
                 status = (props.get("status") or {}).get("type")
                 if status == "busy":
@@ -594,41 +680,55 @@ class OpenCodeBackend(ChatBackend):
         turn.text_seen[pid] = turn.text_seen.get(pid, 0) + len(text)
         turn.ctx.emit("text_delta", {"text": text})
 
-    def _on_part(self, sid: str, turn: _Turn, part: dict) -> None:
+    @staticmethod
+    def _key(turn: _Turn, sid: str, call_id: str) -> str:
+        """Identifiant d'appel unique du tour : les appels des sous-agents portent l'id de leur session."""
+        return call_id if sid == turn.root else f"{sid}:{call_id}"
+
+    def _on_part(self, sid: str, turn: _Turn, part: dict, child: bool = False) -> None:
         ptype = part.get("type")
-        if part.get("messageID") in turn.user_ids:
+        if not child and part.get("messageID") in turn.user_ids:
             return
         if ptype == "text":
-            if part.get("synthetic") or part.get("ignored"):
-                return
+            if child or part.get("synthetic") or part.get("ignored"):
+                return  # texte interne d'un sous-agent : non affiché
             text = part.get("text") or ""
             seen = turn.text_seen.get(part.get("id"), 0)
             if len(text) > seen:
                 turn.text_seen[part["id"]] = len(text)
                 turn.ctx.emit("text_delta", {"text": text[seen:]})
         elif ptype == "tool":
-            self._on_tool(turn, part)
+            self._on_tool(sid, turn, part, child)
         elif ptype == "step-finish":
             pid = part.get("id")
             if pid in turn.step_parts:
                 return
             turn.step_parts.add(pid)
-            turn.steps += 1
+            if not child:
+                turn.steps += 1
             tokens = part.get("tokens") or {}
             turn.tokens["input"] += int(tokens.get("input") or 0)
             turn.tokens["output"] += int(tokens.get("output") or 0)
             turn.tokens["cache_read"] += int((tokens.get("cache") or {}).get("read") or 0)
             turn.cost_usd += float(part.get("cost") or 0.0)
 
-    def _on_tool(self, turn: _Turn, part: dict) -> None:
-        call_id = part.get("callID") or part.get("id")
+    def _on_tool(self, sid: str, turn: _Turn, part: dict, child: bool = False) -> None:
+        raw_id = part.get("callID") or part.get("id")
+        call_id = self._key(turn, sid, raw_id)
         state = part.get("state") or {}
         status = state.get("status")
         name = part.get("tool", "")
+        if name == "task":   # `metadata.sessionId` = session fille créée par le tool `task`
+            meta = state.get("metadata") or part.get("metadata") or {}
+            if isinstance(meta, dict) and meta.get("sessionId"):
+                turn.children.add(meta["sessionId"])
         with turn.lock:
-            rec = turn.tools.setdefault(call_id, {"name": name, "input": {}, "started": False, "ended": False})
+            rec = turn.tools.setdefault(call_id, {"name": name, "input": {}, "started": False, "ended": False,
+                                                  "child": child})
             if state.get("input"):
                 rec["input"] = state["input"]
+            if status in ("running", "completed", "error") and "input" in state:
+                rec["input_known"] = True
         if status in ("running", "completed", "error"):
             self._ensure_started(turn, call_id)
         if status in ("completed", "error") and not rec["ended"]:
@@ -649,10 +749,12 @@ class OpenCodeBackend(ChatBackend):
                 if rel:
                     turn.ctx.emit("file_written", {"path": rel})
 
-    def _ensure_started(self, turn: _Turn, call_id: str, name: str = "", inp: Optional[dict] = None) -> None:
+    def _ensure_started(self, turn: _Turn, call_id: str, name: str = "", inp: Optional[dict] = None,
+                        child: bool = False) -> None:
         """Émet `tool_start` une seule fois par appel (depuis la boucle d'évènements OU le thread de permission)."""
         with turn.lock:
-            rec = turn.tools.setdefault(call_id, {"name": name, "input": {}, "started": False, "ended": False})
+            rec = turn.tools.setdefault(call_id, {"name": name, "input": {}, "started": False, "ended": False,
+                                                  "child": child})
             if name and not rec["name"]:
                 rec["name"] = name
             if inp and not rec["input"]:
@@ -662,8 +764,10 @@ class OpenCodeBackend(ChatBackend):
             rec["started"] = True
             tool, cinput = canonical_tool(rec["name"], rec["input"], self._mcp_names)
             rec["tool"], rec["cinput"] = tool, cinput
+            prefix = "Sous-agent · " if rec.get("child") else ""
         turn.ctx.emit("tool_start", {"id": call_id, "name": tool,
-                                     "summary": summarize_tool(tool, display_input(self.workspace, tool, cinput))})
+                                     "summary": prefix + summarize_tool(
+                                         tool, display_input(self.workspace, tool, cinput))})
 
     # -- permissions ---------------------------------------------------
 
@@ -689,33 +793,52 @@ class OpenCodeBackend(ChatBackend):
             legacy = {"response": "once" if allow else "reject"}
             self._request("POST", f"/session/{sid}/permissions/{request_id}", legacy, timeout=15)
 
+    def _answer_permission_guarded(self, sid: str, turn: _Turn, props: dict) -> None:
+        try:
+            self._answer_permission(sid, turn, props)
+        finally:
+            with turn.lock:
+                turn.awaiting -= 1
+
     def _answer_permission(self, sid: str, turn: _Turn, props: dict) -> None:
+        """Répond à une permission de la session `sid` (celle du tour OU une session fille)."""
         ctx = turn.ctx
         request_id = props.get("id", "")
         permission = props.get("permission", "")
         tool_ref = props.get("tool") or {}
-        call_id = tool_ref.get("callID") or ""
+        raw_call = tool_ref.get("callID") or ""
+        call_id = self._key(turn, sid, raw_call) if raw_call else ""
+        child = sid != turn.root
         try:
             if permission in ALWAYS_REJECT or ctx.cancelled.is_set():
                 self._reply(sid, request_id, False, REFUSAL_DENY)
                 return
             with turn.lock:
-                rec = turn.tools.get(call_id)
+                rec = turn.tools.get(call_id) if call_id else None
             inp = dict(rec["input"]) if rec and rec.get("input") else {}
             name = rec["name"] if rec else ""
-            if not inp and call_id:
-                part = self._lookup_tool_part(sid, tool_ref.get("messageID", ""), call_id)
+            known = bool(rec and (rec.get("input_known") or rec.get("input")))
+            if not known and raw_call:
+                part = self._lookup_tool_part(sid, tool_ref.get("messageID", ""), raw_call)
                 if part:
                     name = part.get("tool", name)
-                    inp = dict((part.get("state") or {}).get("input") or {})
+                    pstate = part.get("state") or {}
+                    inp = dict(pstate.get("input") or {})
+                    known = bool(inp) or pstate.get("status") in ("running", "completed", "error")
             metadata = props.get("metadata") or {}
             if not name:
                 name = permission
             if not inp and metadata.get("filepath"):
                 inp = {"filePath": metadata["filepath"]}
+                known = True
+            if not known:
+                # Entrée introuvable : ne JAMAIS laisser passer un appel non résolu (une reprise
+                # d'approbation pré-approuverait sinon n'importe quoi avec `{}`).
+                self._reply(sid, request_id, False, REFUSAL_UNRESOLVED)
+                return
             tool, cinput = canonical_tool(name, inp, self._mcp_names)
             if call_id:
-                self._ensure_started(turn, call_id, name, inp)
+                self._ensure_started(turn, call_id, name, inp, child)
             diff = parse_unified_diff(metadata["diff"]) if metadata.get("diff") and tool == "fs.write" else None
             decision, message = gate(ctx, tool, cinput, diff)
             if call_id:
@@ -754,15 +877,27 @@ class OpenCodeBackend(ChatBackend):
             return "Fournisseur injoignable : vérifier la connexion et l'URL du fournisseur."
         return f"Erreur du fournisseur : {short(message or name or 'inconnue', 200)}"
 
-    def _finish(self, turn: _Turn) -> None:
-        ctx = turn.ctx
-        ctx.emit("usage", {
+    def _emit_usage(self, turn: _Turn, only_if_known: bool = False) -> None:
+        """Émet `usage` une seule fois (sessions fille comprises) ; `only_if_known` : pas de zéros."""
+        if turn.usage_emitted:
+            return
+        if only_if_known and not (turn.cost_usd or any(turn.tokens.values())):
+            return
+        turn.usage_emitted = True
+        turn.ctx.emit("usage", {
             "input_tokens": turn.tokens["input"],
             "output_tokens": turn.tokens["output"],
             "cache_read_tokens": turn.tokens["cache_read"],
-            "cost_eur": usd_to_eur(turn.cost_usd, ctx.config.get("usd_eur_rate")),
+            "cost_eur": self._turn_cost_eur(turn),
         })
-        if turn.max_steps_hit:
+
+    def _finish(self, turn: _Turn) -> None:
+        ctx = turn.ctx
+        self._emit_usage(turn)
+        if turn.budget_hit:
+            ctx.emit("text_delta", {"text": BUDGET_NOTICE})
+            reason = "budget"
+        elif turn.max_steps_hit:
             reason = "max_turns"
         elif ctx.cancelled.is_set():
             reason = "interrupted"

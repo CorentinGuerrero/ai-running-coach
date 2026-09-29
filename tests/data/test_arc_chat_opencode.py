@@ -28,6 +28,7 @@ from arc_chat_backend import SYSTEM_ADDENDUM, BackendError, TurnContext  # noqa:
 
 FIXTURES = REPO / "tests" / "data" / "fixtures" / "chat"
 SID = "ses_fake1"
+CHILD = "ses_child1"
 
 
 def fixture(name: str) -> dict:
@@ -43,7 +44,10 @@ class FakeOpenCode:
         self.requests: list = []
         self.scenario: dict = {}
         self.session_exists = True
+        self.child_info: dict = {}      # id de session fille -> réponse de GET /session/{id}
+        self.child_messages: dict = {}  # id de session fille -> réponse de GET /session/{id}/message/…
         self.subscribers: list = []
+        self.stopping = threading.Event()
         self.lock = threading.Lock()
         outer = self
 
@@ -80,6 +84,13 @@ class FakeOpenCode:
                     return
                 if self.path == "/global/health":
                     return self._json(200, {"healthy": True, "version": O.OPENCODE_TESTED_VERSION})
+                for child_id, info in outer.child_info.items():
+                    if self.path == f"/session/{child_id}":
+                        return self._json(200, info)
+                for child_id, msg in outer.child_messages.items():
+                    if self.path.startswith(f"/session/{child_id}/message/"):
+                        outer.requests.append(("GET", self.path, None))
+                        return self._json(200, msg)
                 if self.path == f"/session/{SID}":
                     return self._json(200 if outer.session_exists else 404,
                                       {"id": SID} if outer.session_exists else {"name": "NotFoundError"})
@@ -121,9 +132,10 @@ class FakeOpenCode:
                     self._json(200, True)
                     outer.on_reply(body)
                     return
-                if self.path == f"/session/{SID}/abort":
+                if self.path.endswith("/abort") and self.path.startswith("/session/"):
                     self._json(200, True)
-                    outer.publish([{"id": "evt_a", "type": "session.idle", "properties": {"sessionID": SID}}])
+                    if self.path == f"/session/{SID}/abort":
+                        outer.publish([{"id": "evt_a", "type": "session.idle", "properties": {"sessionID": SID}}])
                     return
                 return self._json(404, {})
 
@@ -149,6 +161,19 @@ class FakeOpenCode:
 
     def on_prompt(self):
         sc = self.scenario
+        if sc.get("heartbeat"):
+            def beat():
+                while not self.stopping.is_set():
+                    self.publish([{"id": "hb", "type": "server.heartbeat", "properties": {}}])
+                    self.stopping.wait(0.05)
+            threading.Thread(target=beat, daemon=True).start()
+        if sc.get("ticks"):
+            def tick():
+                while not self.stopping.is_set():
+                    self.publish([{"id": "tk", "type": "session.status",
+                                   "properties": {"sessionID": SID, "status": {"type": "busy"}}}])
+                    self.stopping.wait(0.05)
+            threading.Thread(target=tick, daemon=True).start()
         if "events" in sc:
             self.publish(self._render(sc["events"]))
         else:
@@ -160,6 +185,7 @@ class FakeOpenCode:
         self.publish(self._render(after, body.get("message", "")))
 
     def close(self):
+        self.stopping.set()
         with self.lock:
             for q in self.subscribers:
                 q.put(None)
@@ -266,8 +292,11 @@ class TestMapping(unittest.TestCase):
             ("write", {"filePath": "planning/x.md", "content": "c"}, "fs.write", {"path": "planning/x.md", "content": "c"}),
             ("edit", {"filePath": "p", "oldString": "a", "newString": "b"}, "fs.write", None),
             ("patch", {"patchText": "*** Begin Patch\n*** Update File: planning/y.md\n"}, "fs.write", None),
-            ("glob", {"pattern": "*.md"}, "fs.list", {"path": ".", "pattern": "*.md"}),
+            ("glob", {"pattern": "*.md"}, "fs.list", {"path": ".", "glob": "*.md"}),
+            ("glob", {"pattern": "**/*.token", "path": "config"}, "fs.list", {"path": "config", "glob": "**/*.token"}),
             ("grep", {"pattern": "x", "path": "activities"}, "fs.list", {"path": "activities", "pattern": "x"}),
+            ("grep", {"pattern": "tok", "include": ".env*"}, "fs.list",
+             {"path": ".", "pattern": "tok", "glob": ".env*"}),
             ("list", {"path": "."}, "fs.list", {"path": "."}),
             ("bash", {"command": "ls", "description": "d"}, "shell", {"command": "ls"}),
             ("webfetch", {"url": "https://wttr.in"}, "web.fetch", {"url": "https://wttr.in"}),
@@ -293,6 +322,18 @@ class TestMapping(unittest.TestCase):
             O.canonical_tool("leanproxy_leanproxy_invoke_tool",
                              {"server": "garmin", "tool": "schedule_week", "arguments": {"w": 1}}, {"leanproxy"}),
             ("mcp:garmin.schedule_week", {"w": 1}))
+
+    def test_gateway_only_maps_arguments(self):
+        tool, inp = O.canonical_tool("leanproxy_leanproxy_invoke_tool",
+                                     {"server": "garmin", "tool": "schedule_week", "args": {"w": 1}}, {"leanproxy"})
+        self.assertTrue(tool.startswith("other:"), tool)
+        self.assertEqual(inp["args"], {"w": 1})
+
+    def test_leanproxy_direct_exposed_tools(self):
+        self.assertEqual(O.canonical_tool("leanproxy_garmin__get_rhr_day", {"d": 1}, {"leanproxy"}),
+                         ("mcp:garmin.get_rhr_day", {"d": 1}))
+        self.assertEqual(O.canonical_tool("leanproxy_garmin__schedule_week", {}, {"leanproxy"})[0],
+                         "mcp:garmin.schedule_week")
 
     def test_split_model(self):
         self.assertEqual(O.split_model("openrouter/deepseek/deepseek-chat"), ("openrouter", "deepseek/deepseek-chat"))
@@ -325,6 +366,13 @@ class TestConfigGeneration(OpenCodeCase):
         self.assertEqual(cfg["permission"]["question"], "deny")
         self.assertEqual(cfg["mcp"]["garmin"]["command"], ["garmin-mcp", "stdio"])
         self.assertFalse(cfg["autoupdate"])
+
+    def test_config_file_mode_600(self):
+        path = self.backend.write_config()
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        path.chmod(0o644)   # fichier préexistant trop ouvert : réécrit en 600
+        self.backend.write_config()
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_custom_base_url(self):
         b = O.OpenCodeBackend(self.ws, {"model": "mistral/mistral-large", "base_url": "https://api.mistral.ai/v1",
@@ -508,6 +556,168 @@ class TestTurns(OpenCodeCase):
         self.run_turn(fixture("opencode_edit_permission.json"), h)
         self.assertEqual(h.of("done"), [{"reason": "max_turns"}])
         self.assertTrue([1 for m, p, b in self.fake.requests if p.endswith("/abort")])
+
+
+class TestSubAgents(OpenCodeCase):
+    """Le tool `task` ouvre des sessions FILLES : leurs permissions/coûts appartiennent au tour."""
+
+    def test_child_permission_answered_through_policy(self):
+        h = self.run_turn(fixture("opencode_task_child_permission.json"))
+        # la permission de la session fille est traitée (sinon le tour resterait bloqué)
+        self.assertEqual(self.replies(), [{"reply": "once"}])
+        self.assertEqual(h.decided, [("fs.read", {"path": f"{self.ws}/planning/x.md"})])
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+        # texte interne du sous-agent masqué ; texte du tour visible
+        self.assertEqual("".join(p["text"] for p in h.of("text_delta")), "Fini.")
+        # outils du sous-agent visibles dans la trace, préfixés et avec un id propre à la session
+        starts = {p["id"]: p for p in h.of("tool_start")}
+        self.assertIn("call_task", starts)
+        child = starts[f"{CHILD}:call_c1"]
+        self.assertTrue(child["summary"].startswith("Sous-agent · "))
+        self.assertEqual(child["name"], "fs.read")
+        self.assertIn({"id": f"{CHILD}:call_c1", "ok": True, "summary": "Terminé"}, h.of("tool_end"))
+        # coûts et jetons de la session fille comptés
+        usage = h.of("usage")[0]
+        self.assertEqual((usage["input_tokens"], usage["output_tokens"], usage["cache_read_tokens"]), (500, 25, 50))
+        self.assertAlmostEqual(usage["cost_eur"], (0.0004 + 0.0001) * 0.5, places=6)
+
+    def test_child_permission_rejected_by_policy(self):
+        h = self.run_turn(fixture("opencode_task_child_permission.json"),
+                          Harness(self.ws, {"fs.read": "deny"}))
+        reply = self.replies()[0]
+        self.assertEqual(reply["reply"], "reject")
+        self.assertIn("Refusé", reply["message"])
+        self.assertIn({"id": f"{CHILD}:call_c1", "ok": False, "summary": "Refusé"}, h.of("tool_end"))
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+
+    def test_child_found_from_task_metadata_without_session_created(self):
+        fx = fixture("opencode_task_child_permission.json")
+        fx["before_permission"] = [e for e in fx["before_permission"] if e["type"] != "session.created"]
+        h = self.run_turn(fx)   # `metadata.sessionId` de la partie task suffit
+        self.assertEqual(self.replies(), [{"reply": "once"}])
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+
+    def test_unknown_session_adopted_through_parent_lookup(self):
+        fx = fixture("opencode_task_child_permission.json")
+        fx["before_permission"] = [e for e in fx["before_permission"] if e["type"] != "session.created"
+                                   and not (e["type"] == "message.part.updated"
+                                            and e["properties"]["part"].get("tool") == "task")]
+        self.fake.child_info[CHILD] = {"id": CHILD, "parentID": SID}
+        # les évènements de la fille précèdent l'adoption : l'entrée est relue côté serveur
+        self.fake.child_messages[CHILD] = {"info": {}, "parts": [{
+            "type": "tool", "callID": "call_c1", "tool": "read",
+            "state": {"status": "running", "input": {"filePath": f"{self.ws}/planning/x.md"}}}]}
+        h = self.run_turn(fx)
+        self.assertEqual(self.replies(), [{"reply": "once"}])
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+
+    def test_foreign_session_permission_is_ignored(self):
+        scenario = {"events": [
+            {"id": "e1", "type": "session.status", "properties": {"sessionID": "$SESSION", "status": {"type": "busy"}}},
+            {"id": "e2", "type": "permission.asked", "properties": {
+                "id": "per_x", "sessionID": "ses_stranger", "permission": "read", "patterns": ["*"],
+                "metadata": {}, "tool": {"messageID": "m", "callID": "c"}}},
+            {"id": "e3", "type": "session.idle", "properties": {"sessionID": "$SESSION"}}]}
+        h = self.run_turn(scenario)
+        self.assertEqual(self.replies(), [])
+        self.assertEqual(h.decided, [])
+
+    def test_child_cost_counts_towards_turn_budget(self):
+        # 0.0004 USD * 0.5 = 0.0002 EUR de la session fille > plafond du tour
+        h = self.run_turn(fixture("opencode_task_child_permission.json"),
+                          Harness(self.ws, config={"turn_budget_eur": 0.0001}))
+        self.assertEqual(h.of("done"), [{"reason": "budget"}])
+        self.assertIn("budget", "".join(p["text"] for p in h.of("text_delta")).lower())
+        aborts = [p for m, p, b in self.fake.requests if p.endswith("/abort")]
+        self.assertIn(f"/session/{SID}/abort", aborts)
+        self.assertIn(f"/session/{CHILD}/abort", aborts)
+
+
+class TestBudgetAndTimeouts(OpenCodeCase):
+    def test_turn_budget_aborts_session(self):
+        # 1re étape : 0.00014 USD * 0.5 = 0.00007 EUR > 0.00005
+        h = self.run_turn(fixture("opencode_edit_permission.json"),
+                          Harness(self.ws, config={"turn_budget_eur": 0.00005}))
+        self.assertEqual(h.of("done"), [{"reason": "budget"}])
+        self.assertTrue([1 for m, p, b in self.fake.requests if p == f"/session/{SID}/abort"])
+        self.assertIn("budget", "".join(p["text"] for p in h.of("text_delta")).lower())
+        self.assertGreater(h.of("usage")[0]["cost_eur"], 0)
+
+    def test_no_cap_without_turn_budget(self):
+        h = self.run_turn(fixture("opencode_edit_permission.json"))
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+
+    def test_partial_usage_emitted_when_turn_fails(self):
+        scenario = {"events": [
+            {"id": "e1", "type": "session.status", "properties": {"sessionID": "$SESSION", "status": {"type": "busy"}}},
+            {"id": "e2", "type": "message.part.updated", "properties": {"sessionID": "$SESSION", "part": {
+                "id": "st1", "type": "step-finish", "messageID": "m1", "sessionID": "$SESSION", "cost": 0.002,
+                "tokens": {"input": 30, "output": 7, "cache": {"read": 0, "write": 0}}}}},
+            {"id": "e3", "type": "session.error", "properties": {"sessionID": "$SESSION", "error": {
+                "name": "UnknownError", "data": {"message": "boom"}}}}]}
+        h = Harness(self.ws)
+        with self.assertRaises(BackendError):
+            self.run_turn(scenario, h)
+        usage = h.of("usage")
+        self.assertEqual(len(usage), 1)
+        self.assertEqual((usage[0]["input_tokens"], usage[0]["output_tokens"]), (30, 7))
+        self.assertAlmostEqual(usage[0]["cost_eur"], 0.001, places=6)
+
+    def test_heartbeats_do_not_reset_idle_timer(self):
+        scenario = {"heartbeat": True, "events": [
+            {"id": "e1", "type": "session.status", "properties": {"sessionID": "$SESSION", "status": {"type": "busy"}}}]}
+        with mock.patch.object(O, "EVENT_IDLE_TIMEOUT_S", 0.6):
+            with self.assertRaises(BackendError) as cm:
+                self.run_turn(scenario)
+        self.assertIn("ne répond plus", str(cm.exception))
+
+    def test_turn_timeout_even_with_activity(self):
+        scenario = {"ticks": True, "events": []}
+        h = Harness(self.ws, config={"turn_timeout_s": 0.6})
+        with self.assertRaises(BackendError) as cm:
+            self.run_turn(scenario, h)
+        self.assertIn("durée maximale", str(cm.exception))
+        self.assertTrue([1 for m, p, b in self.fake.requests if p == f"/session/{SID}/abort"])
+
+    def test_approval_wait_does_not_trip_idle_timer(self):
+        def hook():
+            threading.Event().wait(1.2)
+            return "allow"
+        h = Harness(self.ws, {"fs.write": "ask"}, approval_hook=hook)
+        with mock.patch.object(O, "EVENT_IDLE_TIMEOUT_S", 0.5):
+            self.run_turn(fixture("opencode_edit_permission.json"), h)
+        self.assertEqual(h.of("done"), [{"reason": "end_turn"}])
+        self.assertEqual(self.replies(), [{"reply": "once"}])
+
+
+class TestUnresolvedPermission(OpenCodeCase):
+    def _scenario(self):
+        return {"before_permission": [
+            {"id": "e1", "type": "session.status", "properties": {"sessionID": "$SESSION", "status": {"type": "busy"}}},
+            {"id": "e2", "type": "permission.asked", "properties": {
+                "id": "per_u", "sessionID": "$SESSION", "permission": "garmin_schedule_workouts",
+                "patterns": ["*"], "metadata": {}, "always": [], "tool": {"messageID": "msg_9", "callID": "cX"}}}],
+            "after": {"reject": [{"id": "e3", "type": "session.idle", "properties": {"sessionID": "$SESSION"}}]}}
+
+    def test_rejected_when_tool_part_cannot_be_found(self):
+        h = self.run_turn(self._scenario())
+        self.assertEqual(h.decided, [])   # jamais soumis à la politique avec `{}`
+        self.assertEqual(h.approvals, [])
+        reply = self.replies()[0]
+        self.assertEqual(reply["reply"], "reject")
+        self.assertIn("introuvable", reply["message"])
+
+    def test_zero_argument_mcp_tool_with_known_input_is_not_rejected(self):
+        (self.ws / ".mcp.json").write_text(json.dumps({"mcpServers": {"garmin": {"command": "garmin-mcp"}}}))
+        sc = self._scenario()
+        sc["before_permission"].insert(1, {"id": "e1b", "type": "message.part.updated", "properties": {
+            "sessionID": "$SESSION", "part": {"type": "tool", "tool": "garmin_get_rhr_day", "callID": "cX",
+                                              "id": "p1", "messageID": "msg_9", "sessionID": "$SESSION",
+                                              "state": {"status": "running", "input": {}}}}})
+        sc["after"] = {"once": sc["after"]["reject"]}
+        h = self.run_turn(sc)
+        self.assertEqual(h.decided, [("mcp:garmin.get_rhr_day", {})])
+        self.assertEqual(self.replies(), [{"reply": "once"}])
 
 
 class TestSupervision(OpenCodeCase):
