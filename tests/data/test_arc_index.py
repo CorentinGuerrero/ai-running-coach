@@ -623,6 +623,18 @@ class TestHeatAcclimationCli(Workspace):
         self.assertEqual(result["hot_sessions"], 1)
 
 
+class TestChatEnabledSetting(unittest.TestCase):
+    """`settings().chat_enabled` pilote l'entrée de nav « Coach » : faux par défaut."""
+
+    def test_default_is_false(self):
+        self.assertIs(I.settings({})["chat_enabled"], False)
+        self.assertIs(I.settings({"chat": {}})["chat_enabled"], False)
+
+    def test_enabled_key(self):
+        self.assertIs(I.settings({"chat": {"enabled": True}})["chat_enabled"], True)
+        self.assertIs(I.settings({"chat": {"enabled": False}})["chat_enabled"], False)
+
+
 class TestHeatThresholdConfig(unittest.TestCase):
     """#38 — `[health].heat_threshold_c` : jamais d'exception (`settings()` est appelé
     par CHAQUE commande, y compris un simple `index`), booléen explicitement rejeté,

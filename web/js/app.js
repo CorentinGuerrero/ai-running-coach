@@ -383,6 +383,8 @@ function renderNav(s) {
     ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
   ];
   $("#nav").innerHTML = items.map(([h, l]) => `<a href="#/${h}" data-route="${h}">${l}</a>`).join("")
+    // Page séparée (chat.html), pas une route à hash : visible seulement si `[chat].enabled`.
+    + (s.settings.chat_enabled ? `<a href="chat.html" data-route="coach-chat">Coach</a>` : "")
     + (s.incomplete_files ? `<a href="#/fichiers" data-route="fichiers" class="nav__debt">${s.incomplete_files} fichier${s.incomplete_files > 1 ? "s" : ""} hors contrat</a>` : "")
     // `week_collisions_count` (#69, revue de code) : compté À PART de
     // `incomplete_files` — ces fichiers sont déjà valides au contrat, jamais

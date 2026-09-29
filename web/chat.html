@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Coach — ai-running-coach</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/chat.css">
+</head>
+<body class="chat-page">
+  <a class="skip" href="#composer-input">Aller à la saisie</a>
+  <header class="top">
+    <a class="brand" href="index.html#/"><svg class="brand__mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19 9 8l4 6 3-4 6 9Z"/></svg><span>ai-running-coach</span></a>
+    <div class="objective" id="objective" aria-live="polite"></div>
+    <button class="icon-btn" id="theme" type="button" aria-label="Basculer le thème clair / sombre">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+    </button>
+  </header>
+
+  <div class="shell">
+    <nav class="nav" id="nav" aria-label="Sections">
+      <a href="index.html#/">Aujourd'hui</a>
+      <a href="index.html#/forme">Forme &amp; charge</a>
+      <a href="index.html#/sante">Santé</a>
+      <a href="index.html#/semaine">Semaine</a>
+      <a href="index.html#/seances">Séances</a>
+      <a href="index.html#/decisions">Décisions</a>
+      <a href="index.html#/rapports">Rapports</a>
+      <a href="chat.html" aria-current="page">Coach</a>
+    </nav>
+
+    <main class="chat" id="main">
+      <section class="chat__thread" aria-label="Conversation avec le coach">
+        <div class="chat__bar">
+          <label class="sr-only" for="session-select">Conversation</label>
+          <select id="session-select" disabled></select>
+          <button class="btn btn--ghost btn--small" id="new-session" type="button" disabled>Nouvelle conversation</button>
+        </div>
+
+        <div id="pinned" class="pinned"></div>
+        <div id="banner" class="banner" role="alert" hidden></div>
+
+        <div class="chat__scroll" id="thread" role="log" aria-live="polite" aria-label="Messages">
+          <p class="chat__empty" id="empty">Chargement de la conversation…</p>
+        </div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <div class="quick" role="group" aria-label="Commandes rapides">
+            <button type="button" class="quick__btn" data-cmd="/today">/today</button>
+            <button type="button" class="quick__btn" data-cmd="/week">/week</button>
+            <button type="button" class="quick__btn" data-cmd="/why">/why</button>
+            <button type="button" class="quick__btn" data-cmd="/race">/race</button>
+            <button type="button" class="quick__btn" data-cmd="/log ">/log</button>
+          </div>
+          <div class="composer__box">
+            <label class="sr-only" for="composer-input">Message au coach</label>
+            <textarea id="composer-input" rows="1" placeholder="Écris au coach…" disabled></textarea>
+            <button class="composer__stop" id="stop" type="button" hidden aria-label="Interrompre la réponse">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+            <button class="composer__send" id="send" type="submit" aria-label="Envoyer" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5 21 12 3 3.5v6.6l12 1.9-12 1.9Z"/></svg>
+            </button>
+          </div>
+          <div class="composer__meta">
+            <span class="backend" id="backend">Backend : —</span>
+            <span class="cost" id="cost" aria-live="off"></span>
+          </div>
+        </form>
+      </section>
+
+      <aside class="context" aria-label="Contexte vu par le coach">
+        <h2>Ce que voit le coach</h2>
+        <div class="ctx-card">
+          <h3>Séance du jour</h3>
+          <div id="ctx-session"><p class="ctx-soft">Chargement…</p></div>
+        </div>
+        <div class="ctx-card">
+          <h3 id="ctx-week-title">Semaine</h3>
+          <div id="ctx-week"><p class="ctx-soft">Chargement…</p></div>
+        </div>
+        <div class="ctx-card">
+          <h3>Staff</h3>
+          <ul class="staff" id="ctx-staff"></ul>
+        </div>
+        <div class="ctx-card ctx-card--muted">
+          <h3>Permissions</h3>
+          <ul class="perms">
+            <li>Lecture du workspace, de Garmin et d'intervals.icu</li>
+            <li>Écriture des fichiers Markdown du suivi</li>
+            <li>Écriture Garmin / intervals.icu : confirmation à chaque fois</li>
+            <li>Shell restreint aux scripts du projet, réseau limité à quelques services</li>
+          </ul>
+        </div>
+        <p class="ctx-foot" id="ctx-user"></p>
+      </aside>
+    </main>
+  </div>
+  <script type="module" src="js/chat.js"></script>
+</body>
+</html>
