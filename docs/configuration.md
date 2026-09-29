@@ -347,9 +347,13 @@ défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
 | `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). |
 | `max_turns`, `rate_limit_per_min` | Tours d'agent par message (30) ; tours par minute et par utilisateur (6). |
 | `approval_wait_s`, `approval_ttl_s` | Attente en cours de tour d'une approbation (600 s) ; durée de vie d'une proposition en attente (86400 s). |
-| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). |
+| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). **Les boutons rapides ne sont envoyés que si `[notifications].ntfy_token_file` est renseigné** (sujet ntfy à accès contrôlé) : le jeton voyage dans la notification, donc tout abonné d'un sujet public pourrait approuver. Sans ce fichier, seul « Ouvrir » part, avec un avertissement dans le journal. |
+| `ntfy_delay_s` | Délai (60 s) avant le push ntfy quand une page est ouverte ; sans page, le push part tout de suite. |
 
 La clé API n'est jamais dans ce fichier : `~/.config/ai-running-coach/llm.env`.
+Variables d'environnement (dépannage, jamais nécessaires en usage courant) : `ARC_LLM_ENV` (autre chemin que
+`llm.env`, lu par le service, `daily-sync.sh` et `install.sh`), `ARC_CHAT_PING_S` (intervalle des
+commentaires `: ping` du flux SSE, 15 s).
 `./install.sh --chat-budget EUR` écrit `daily_budget_eur`. Le diagnostic :
 `python3 scripts/coach_doctor.py --check llm_config` (et `chat_service`, `opencode_cli`).
 

@@ -152,13 +152,26 @@ suite si aucune page n'est ouverte), une notification part sur votre téléphone
   notification. L'appli ntfy ne porte pas votre cookie de session : ces deux boutons passent
   par une route dédiée, **sans SSO**, protégée autrement — lien à usage unique, valable
   30 minutes (`ntfy_token_ttl_s`), lié à ce changement précis (un lien ne peut rien approuver
-  d'autre), débit limité. Mettez `ntfy_quick_approve = false` pour ne garder que « Ouvrir ».
+  d'autre), débit limité par adresse. Mettez `ntfy_quick_approve = false` pour ne garder que « Ouvrir ».
+
+!!! warning "Les boutons rapides exigent un sujet ntfy protégé"
+    Le lien à usage unique est **dans la notification** : quiconque est abonné au sujet peut
+    l'utiliser. Le service n'envoie donc « Appliquer / Refuser » que si
+    `[notifications].ntfy_token_file` est renseigné (sujet à accès contrôlé, jeton d'accès ntfy).
+    Sans ce fichier, seul « Ouvrir » part et un avertissement est journalisé une fois.
+    Voir [Notifications](../mobile.md#3-notifications-push-ntfy).
 
 `public_url` doit être renseigné pour que les boutons pointent au bon endroit.
 
 Le coach attend votre réponse une dizaine de minutes (`approval_wait_s`). Passé ce délai, la
 proposition reste **en attente** (`approval_ttl_s`, 24 h) : si vous l'appliquez plus tard, la
-conversation reprend et le coach exécute exactement ce qui a été approuvé — rien d'autre.
+conversation reprend et le coach exécute exactement ce qui a été approuvé — rien d'autre. Si
+la session est occupée à ce moment-là, la reprise attend la fin du tour en cours (et repart au
+redémarrage du service si celui-ci s'arrête entre-temps). Si elle est impossible (budget du jour
+atteint, erreur du fournisseur, le modèle n'a pas refait l'appel), la carte passe à « Approuvée
+mais non exécutée », une erreur est écrite dans la conversation et une notification vous le dit.
+Interrompre un tour pendant qu'une carte attend la marque « Annulée (tour interrompu) » — pas
+« refusée ».
 
 ## Ce que le coach peut faire
 
@@ -170,7 +183,7 @@ fournisseur :
 | Lire le workspace, lire Garmin / Intervals.icu | autorisé (jamais les fichiers de secrets) |
 | Écrire dans `activities/ medical/ nutrition/ planning/ rapports/` | autorisé |
 | Écrire vers Garmin / Intervals.icu (planifier, supprimer, téléverser…) | **votre accord à chaque fois** |
-| Scripts du projet (`arc_index.py`, `arc_log.py`…) | autorisé, liste fermée |
+| Scripts du projet (`arc_index.py`, `arc_log.py`…) | autorisé, liste fermée **et options fermées** : chaque script n'accepte que ses options déclarées dans `config/chat-policy.toml`, et tout chemin doit rester dans le workspace (jamais absolu, `~`, `..`, secret ni `.arc/`) ; les sorties ne s'écrivent que sous `activities/ medical/ nutrition/ planning/ rapports/` |
 | Shell libre, autre dossier, autre site | refusé |
 | Météo (`wttr.in`), points d'eau (OpenStreetMap) | autorisé |
 
