@@ -1,0 +1,961 @@
+{
+ "message_lookup": {
+  "info": {},
+  "parts": [
+   {
+    "type": "tool",
+    "tool": "garmin_schedule_workouts",
+    "callID": "call_1",
+    "state": {
+     "status": "running",
+     "input": {
+      "workouts": []
+     },
+     "time": {
+      "start": 1790662823851
+     }
+    },
+    "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+    "sessionID": "$SESSION",
+    "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3"
+   }
+  ]
+ },
+ "before_permission": [
+  {
+   "id": "evt_0ebd24d37001ewl5anxyKKOLRU",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "info": {
+     "id": "msg_0ebd24d31001qE25b4v3hSA9fV",
+     "role": "user",
+     "sessionID": "$SESSION",
+     "time": {
+      "created": 1790662823217
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "fake",
+      "modelID": "fake-model"
+     },
+     "system": "SYS ADDENDUM"
+    }
+   }
+  },
+  {
+   "id": "evt_0ebd24de4001JHVtcpqi32I8PB",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "part": {
+     "type": "text",
+     "text": "salut",
+     "messageID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+     "sessionID": "$SESSION",
+     "id": "prt_0ebd24d36001KUoo8qFgwzMT88"
+    },
+    "time": 1790662823396
+   }
+  },
+  {
+   "id": "evt_0ebd24de8001AcU1OPyai3m5vb",
+   "type": "session.status",
+   "properties": {
+    "sessionID": "$SESSION",
+    "status": {
+     "type": "busy"
+    }
+   }
+  },
+  {
+   "id": "evt_0ebd24de9001SoGss3WXBiOT5X",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "info": {
+     "id": "msg_0ebd24de9001XJC9okWBwe1vA3",
+     "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+     "role": "assistant",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "$WS",
+      "root": "/"
+     },
+     "cost": 0,
+     "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "modelID": "fake-model",
+     "providerID": "fake",
+     "time": {
+      "created": 1790662823401
+     },
+     "sessionID": "$SESSION"
+    }
+   }
+  },
+  {
+   "id": "evt_0ebd24e0e001JMUsWSDCt8rUC7",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "info": {
+     "role": "user",
+     "time": {
+      "created": 1790662823217
+     },
+     "agent": "build",
+     "model": {
+      "providerID": "fake",
+      "modelID": "fake-model"
+     },
+     "system": "SYS ADDENDUM",
+     "id": "msg_0ebd24d31001qE25b4v3hSA9fV",
+     "sessionID": "$SESSION",
+     "summary": {
+      "diffs": []
+     }
+    }
+   }
+  },
+  {
+   "id": "evt_0ebd24f8a001RH1FAW79J96NKh",
+   "type": "session.status",
+   "properties": {
+    "sessionID": "$SESSION",
+    "status": {
+     "type": "busy"
+    }
+   }
+  },
+  {
+   "id": "evt_0ebd24fa6001zkLqOxCSx3085u",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "part": {
+     "id": "prt_0ebd24fa6001p9Ri6kaqYHX6ow",
+     "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+     "sessionID": "$SESSION",
+     "type": "step-start"
+    },
+    "time": 1790662823846
+   }
+  },
+  {
+   "id": "evt_0ebd24fa7001z37d33l193qn43",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "part": {
+     "id": "prt_0ebd24fa70013p7XgTEUPjFutu",
+     "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+     "sessionID": "$SESSION",
+     "type": "text",
+     "text": "",
+     "time": {
+      "start": 1790662823847
+     }
+    },
+    "time": 1790662823847
+   }
+  },
+  {
+   "id": "evt_0ebd24fa8001mjcYKiyAlDU8SX",
+   "type": "message.part.delta",
+   "properties": {
+    "sessionID": "$SESSION",
+    "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+    "partID": "prt_0ebd24fa70013p7XgTEUPjFutu",
+    "field": "text",
+    "delta": "Je vais "
+   }
+  },
+  {
+   "id": "evt_0ebd24fa9001tnAEN3XMI7WddN",
+   "type": "message.part.updated",
+   "properties": {
+    "sessionID": "$SESSION",
+    "part": {
+     "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+     "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+     "sessionID": "$SESSION",
+     "type": "tool",
+     "tool": "garmin_schedule_workouts",
+     "callID": "call_1",
+     "state": {
+      "status": "pending",
+      "input": {},
+      "raw": ""
+     }
+    },
+    "time": 1790662823849
+   }
+  },
+  {
+   "id": "evt_0ebd24fab002v3KYPebtjbb15X",
+   "type": "permission.asked",
+   "properties": {
+    "id": "per_0ebd24fab001PjoJH6Mws79iar",
+    "sessionID": "$SESSION",
+    "permission": "garmin_schedule_workouts",
+    "patterns": [
+     "*"
+    ],
+    "metadata": {},
+    "always": [
+     "*"
+    ],
+    "tool": {
+     "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+     "callID": "call_1"
+    }
+   }
+  }
+ ],
+ "after": {
+  "once": [
+   {
+    "id": "evt_0ebd24fac001yEMPPFbG0DKW0q",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "type": "tool",
+      "tool": "garmin_schedule_workouts",
+      "callID": "call_1",
+      "state": {
+       "status": "running",
+       "input": {
+        "workouts": []
+       },
+       "time": {
+        "start": 1790662823851
+       }
+      },
+      "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+      "sessionID": "$SESSION",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3"
+     },
+     "time": 1790662823852
+    }
+   },
+   {
+    "id": "evt_0ebd24fad001gczZ5nqLlW2n7A",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fa70013p7XgTEUPjFutu",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "Je vais ",
+      "time": {
+       "start": 1790662823847,
+       "end": 1790662823853
+      }
+     },
+     "time": 1790662823853
+    }
+   },
+   {
+    "id": "evt_0ebd24fb6001UHcfczYn6QINZ7",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "type": "tool",
+      "tool": "garmin_schedule_workouts",
+      "callID": "call_1",
+      "state": {
+       "status": "completed",
+       "input": {
+        "workouts": []
+       },
+       "output": "scheduled",
+       "title": "",
+       "metadata": {},
+       "time": {
+        "start": 1790662823851,
+        "end": 1790662823862
+       }
+      },
+      "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+      "sessionID": "$SESSION",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3"
+     },
+     "time": 1790662823862
+    }
+   },
+   {
+    "id": "evt_0ebd24fb8001lrKcB2On9ufFtX",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fb8001bymawIF8znE6r3",
+      "reason": "tool-calls",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "sessionID": "$SESSION",
+      "type": "step-finish",
+      "tokens": {
+       "total": 120,
+       "input": 100,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "cost": 0.00014
+     },
+     "time": 1790662823864
+    }
+   },
+   {
+    "id": "evt_0ebd24fb8002QqhmZmFqYoELXB",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0.00014,
+      "tokens": {
+       "total": 120,
+       "input": 100,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823401,
+       "completed": 1790662823866
+      },
+      "sessionID": "$SESSION",
+      "finish": "tool-calls"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fba0023ax4GkMTHimn31",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fbb001V7aG69jSXD9Qqg",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823867
+      },
+      "sessionID": "$SESSION"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fbe001bc3MvJHCGOeuEA",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "role": "user",
+      "time": {
+       "created": 1790662823217
+      },
+      "agent": "build",
+      "model": {
+       "providerID": "fake",
+       "modelID": "fake-model"
+      },
+      "system": "SYS ADDENDUM",
+      "summary": {
+       "diffs": []
+      },
+      "id": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "sessionID": "$SESSION"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc0001gsj6XkJ1oZzzBe",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc3001KHW1bdlYQcbluw",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc30015wueeF6hKSdDKH",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "step-start"
+     },
+     "time": 1790662823875
+    }
+   },
+   {
+    "id": "evt_0ebd24fc4001nfs003nUPx9ENq",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "",
+      "time": {
+       "start": 1790662823876
+      }
+     },
+     "time": 1790662823876
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5001mAKN3cFM05cRaB",
+    "type": "message.part.delta",
+    "properties": {
+     "sessionID": "$SESSION",
+     "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+     "partID": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+     "field": "text",
+     "delta": "Termine."
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5002r4wIZDrOD1UGiD",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "Termine.",
+      "time": {
+       "start": 1790662823876,
+       "end": 1790662823877
+      }
+     },
+     "time": 1790662823877
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5003E5MIWNunZ3B6hd",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc5001kop65qy92XxDH1",
+      "reason": "stop",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "step-finish",
+      "tokens": {
+       "total": 155,
+       "input": 150,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "cost": 0.00016
+     },
+     "time": 1790662823877
+    }
+   },
+   {
+    "id": "evt_0ebd24fc6001gTXypac6x14GGW",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0.00016,
+      "tokens": {
+       "total": 155,
+       "input": 150,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823867,
+       "completed": 1790662823878
+      },
+      "sessionID": "$SESSION",
+      "finish": "stop"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc7002QrCqhbGDXPAiJp",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc80011yvV58IASGuw2B",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "idle"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc8002wmhPKAKJzEtQsZ",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "$SESSION"
+    }
+   }
+  ],
+  "reject": [
+   {
+    "id": "evt_0ebd24fac001yEMPPFbG0DKW0q",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "type": "tool",
+      "tool": "garmin_schedule_workouts",
+      "callID": "call_1",
+      "state": {
+       "status": "running",
+       "input": {
+        "workouts": []
+       },
+       "time": {
+        "start": 1790662823851
+       }
+      },
+      "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+      "sessionID": "$SESSION",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3"
+     },
+     "time": 1790662823852
+    }
+   },
+   {
+    "id": "evt_0ebd24fad001gczZ5nqLlW2n7A",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fa70013p7XgTEUPjFutu",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "Je vais ",
+      "time": {
+       "start": 1790662823847,
+       "end": 1790662823853
+      }
+     },
+     "time": 1790662823853
+    }
+   },
+   {
+    "id": "evt_0ebd24fb6001UHcfczYn6QINZ7",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "type": "tool",
+      "tool": "garmin_schedule_workouts",
+      "callID": "call_1",
+      "state": {
+       "status": "error",
+       "input": {
+        "workouts": []
+       },
+       "error": "The user rejected permission to use this specific tool call with the following feedback: $FEEDBACK",
+       "time": {
+        "start": 1790662823851,
+        "end": 1790662823862
+       }
+      },
+      "id": "prt_0ebd24fa90010WA1zvaKMUOzy7",
+      "sessionID": "$SESSION",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3"
+     },
+     "time": 1790662823862
+    }
+   },
+   {
+    "id": "evt_0ebd24fb8001lrKcB2On9ufFtX",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fb8001bymawIF8znE6r3",
+      "reason": "tool-calls",
+      "messageID": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "sessionID": "$SESSION",
+      "type": "step-finish",
+      "tokens": {
+       "total": 120,
+       "input": 100,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "cost": 0.00014
+     },
+     "time": 1790662823864
+    }
+   },
+   {
+    "id": "evt_0ebd24fb8002QqhmZmFqYoELXB",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24de9001XJC9okWBwe1vA3",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0.00014,
+      "tokens": {
+       "total": 120,
+       "input": 100,
+       "output": 20,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823401,
+       "completed": 1790662823866
+      },
+      "sessionID": "$SESSION",
+      "finish": "tool-calls"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fba0023ax4GkMTHimn31",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fbb001V7aG69jSXD9Qqg",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823867
+      },
+      "sessionID": "$SESSION"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fbe001bc3MvJHCGOeuEA",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "role": "user",
+      "time": {
+       "created": 1790662823217
+      },
+      "agent": "build",
+      "model": {
+       "providerID": "fake",
+       "modelID": "fake-model"
+      },
+      "system": "SYS ADDENDUM",
+      "summary": {
+       "diffs": []
+      },
+      "id": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "sessionID": "$SESSION"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc0001gsj6XkJ1oZzzBe",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc3001KHW1bdlYQcbluw",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc30015wueeF6hKSdDKH",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "step-start"
+     },
+     "time": 1790662823875
+    }
+   },
+   {
+    "id": "evt_0ebd24fc4001nfs003nUPx9ENq",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "",
+      "time": {
+       "start": 1790662823876
+      }
+     },
+     "time": 1790662823876
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5001mAKN3cFM05cRaB",
+    "type": "message.part.delta",
+    "properties": {
+     "sessionID": "$SESSION",
+     "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+     "partID": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+     "field": "text",
+     "delta": "Termine."
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5002r4wIZDrOD1UGiD",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc4001vmF2Bwe351uQj7",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "text",
+      "text": "Termine.",
+      "time": {
+       "start": 1790662823876,
+       "end": 1790662823877
+      }
+     },
+     "time": 1790662823877
+    }
+   },
+   {
+    "id": "evt_0ebd24fc5003E5MIWNunZ3B6hd",
+    "type": "message.part.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "part": {
+      "id": "prt_0ebd24fc5001kop65qy92XxDH1",
+      "reason": "stop",
+      "messageID": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "sessionID": "$SESSION",
+      "type": "step-finish",
+      "tokens": {
+       "total": 155,
+       "input": 150,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "cost": 0.00016
+     },
+     "time": 1790662823877
+    }
+   },
+   {
+    "id": "evt_0ebd24fc6001gTXypac6x14GGW",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "$SESSION",
+     "info": {
+      "id": "msg_0ebd24fbb001Ghmuk9A5rwMdaj",
+      "parentID": "msg_0ebd24d31001qE25b4v3hSA9fV",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "$WS",
+       "root": "/"
+      },
+      "cost": 0.00016,
+      "tokens": {
+       "total": 155,
+       "input": 150,
+       "output": 5,
+       "reasoning": 0,
+       "cache": {
+        "write": 0,
+        "read": 0
+       }
+      },
+      "modelID": "fake-model",
+      "providerID": "fake",
+      "time": {
+       "created": 1790662823867,
+       "completed": 1790662823878
+      },
+      "sessionID": "$SESSION",
+      "finish": "stop"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc7002QrCqhbGDXPAiJp",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "busy"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc80011yvV58IASGuw2B",
+    "type": "session.status",
+    "properties": {
+     "sessionID": "$SESSION",
+     "status": {
+      "type": "idle"
+     }
+    }
+   },
+   {
+    "id": "evt_0ebd24fc8002wmhPKAKJzEtQsZ",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "$SESSION"
+    }
+   }
+  ]
+ },
+ "_source": "OpenCode 1.18.32 : évènements réels capturés sur `opencode serve` (GET /event) contre un faux fournisseur OpenAI local ; ids de session et chemins remplacés par $SESSION / $WS / $WSREL."
+}
