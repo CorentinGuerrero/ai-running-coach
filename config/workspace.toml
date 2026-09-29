@@ -44,8 +44,23 @@ token_alert_days = [14, 3]
 
 [sync]
 # Synchronisation Garmin automatique (voir docs/mobile.md et scripts/daily-sync.sh).
-# Exécuteur headless : "claude" (Claude Code, `claude -p`) | "codex" (Codex CLI, `codex exec`).
+# Exécuteur headless : "claude" (Claude Code, `claude -p`) | "codex" (Codex CLI, `codex exec`)
+# | "opencode" (OpenCode, `opencode run` — OpenRouter ou toute API compatible OpenAI).
 runner = "claude"
+# Modèle du runner : requis pour "opencode" (format fournisseur/modèle, ex.
+# "openrouter/deepseek/deepseek-chat"), optionnel en mode API pour "claude"
+# (passé à `--model`). Vide = le modèle par défaut de l'abonnement.
+model = ""
+# Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner "opencode").
+base_url = ""
+# NOM de la variable qui porte la clé API, lue dans ~/.config/ai-running-coach/llm.env
+# (mode 600) — jamais la clé elle-même. Non vide = mode API (facturé au token) ;
+# vide = abonnement. Ex. "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY".
+api_key_env = ""
+# Plafond de dépense quotidien en EUR de la synchronisation. Appliqué seulement quand le
+# runner rapporte son coût (opencode, claude en mode API) : au-delà, le run est sauté
+# et une notification part. Sans effet en abonnement.
+daily_budget_eur = 0.5
 # Déclenchement (réinstaller avec `./install.sh --daily-sync` après un changement) :
 #   "schedule" — le LLM tourne aux heures fixes de `times`, qu'il y ait du neuf ou non.
 #   "watch"    — scripts/garmin_watch.py interroge Garmin toutes les `watch_interval_min`
@@ -203,6 +218,53 @@ severity_r4_monotony_projected = "warn"
 severity_r5_quality_after_red = "block"
 severity_r6_long_run_share = "warn"
 severity_r7_consecutive_quality = "warn"
+
+[chat]
+# Chat avec le coach dans le tableau de bord (voir docs/dashboard/chat.md). Désactivé par
+# défaut : c'est un service distinct (scripts/arc_chat.py, installé par
+# `./install.sh --chat`) facturé au token — clé API dans ~/.config/ai-running-coach/llm.env.
+enabled = false
+# Moteur : "claude" (Claude Agent SDK) | "opencode" (OpenRouter, OpenAI, Mistral, Ollama…)
+# | "mock" (tests). `./install.sh --llm …` écrit backend, model et api_key_env.
+backend = "claude"
+# Modèle. Backend opencode : identifiant fournisseur/modèle, ex. "openrouter/deepseek/deepseek-chat".
+model = "claude-sonnet-5-5"
+# Backend opencode + API compatible OpenAI autre qu'OpenRouter.
+base_url = ""
+# NOM de la variable qui porte la clé (llm.env ou environnement), jamais la clé elle-même.
+api_key_env = "ANTHROPIC_API_KEY"
+# Port du service (127.0.0.1 sauf si `listen` est défini) et interface d'écoute.
+port = 8766
+listen = "127.0.0.1"
+# Authentification : "local" (boucle locale uniquement) | "proxy" (identité transmise par le
+# reverse proxy après SSO — Traefik + Authentik/Authelia, voir deploy/chat/traefik/README.md).
+auth = "local"
+# Mode proxy : en-tête d'identité posé par le SSO (Authelia : "Remote-User").
+auth_header = "X-authentik-username"
+# Mode proxy : utilisateurs autorisés (vide = tout utilisateur authentifié) et IP sources
+# admises (celles de Traefik).
+allowed_users = []
+trusted_proxies = ["127.0.0.1"]
+# En-têtes Host acceptés (vide = dérivés de public_url + boucle locale).
+allowed_hosts = []
+# URL publique du tableau de bord, ex. "https://coach.example.com" — requise pour les
+# boutons de notification ntfy.
+public_url = ""
+# Plafond de dépense quotidien du chat (EUR) ; les fournisseurs facturent en USD.
+daily_budget_eur = 2.0
+usd_eur_rate = 0.92
+# Tours d'agent maximum par message, et tours par minute et par utilisateur.
+max_turns = 30
+rate_limit_per_min = 6
+# Attente (s) d'une approbation avant qu'elle ne passe « en attente », et durée de vie (s)
+# d'une proposition en attente.
+approval_wait_s = 600
+approval_ttl_s = 86400
+# Notification ntfy d'approbation : bouton « Ouvrir », boutons « Appliquer / Refuser »
+# (jetons signés à usage unique, durée de vie ntfy_token_ttl_s).
+ntfy_approvals = true
+ntfy_quick_approve = true
+ntfy_token_ttl_s = 1800
 
 [dashboard]
 # Tableau de bord local (`scripts/dashboard.sh`) : lecture seule, n'écoute que sur

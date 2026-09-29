@@ -1,0 +1,59 @@
+# ai-running-coach — chat avec le coach derrière Traefik (fournisseur « file »).
+#
+# À copier dans le dossier de configuration dynamique de Traefik, puis adapter les
+# trois valeurs marquées « À ADAPTER ». Explications : deploy/chat/traefik/README.md.
+#
+# Deux routeurs sur le MÊME hôte que le tableau de bord :
+#   arc-chat          tout /api/chat/*           SSO OBLIGATOIRE
+#   arc-chat-approve  POST /api/chat/approve/<jeton>/(allow|deny)
+#                     SANS SSO (jetons signés à usage unique), limité en débit
+# Les deux priorités explicites dépassent celle du routeur du tableau de bord
+# (règle « Host(...) » seule) : sans elles, la longueur de la règle décide.
+#
+# Traefik v3 : PathRegexp et Method sont les matchers de la v3
+# (https://doc.traefik.io/traefik/reference/routing-configuration/http/routing/rules-and-priority/).
+
+http:
+  routers:
+    arc-chat:
+      # À ADAPTER : l'hôte public du tableau de bord (ARC_DASHBOARD_HOST).
+      rule: 'Host(`coach.example.com`) && PathPrefix(`/api/chat`)'
+      entryPoints: [websecure]          # À ADAPTER : votre point d'entrée
+      priority: 200
+      middlewares:
+        # OBLIGATOIRE — À ADAPTER : le middleware d'authentification déjà défini dans
+        # votre Traefik (forwardAuth Authentik ou Authelia). Ce nom volontairement
+        # invalide fait échouer le routeur tant que vous ne l'avez pas remplacé :
+        # le chat n'est jamais exposé sans SSO par oubli.
+        - SSO_MIDDLEWARE_A_REMPLACER@file
+      service: arc-chat
+      tls: {}
+
+    arc-chat-approve:
+      rule: >-
+        Host(`coach.example.com`) &&
+        PathRegexp(`^/api/chat/approve/[A-Za-z0-9_-]+/(allow|deny)$`) &&
+        Method(`POST`)
+      entryPoints: [websecure]
+      priority: 300
+      # Pas de SSO ici, volontairement (voir le README) : le jeton du chemin est la
+      # preuve d'identité. Le débit est limité pour décourager toute devinette.
+      middlewares:
+        - arc-chat-approve-ratelimit
+      service: arc-chat
+      tls: {}
+
+  middlewares:
+    arc-chat-approve-ratelimit:
+      rateLimit:
+        average: 10
+        period: 1m
+        burst: 5
+
+  services:
+    arc-chat:
+      loadBalancer:
+        servers:
+          # À ADAPTER : la machine « coach » (LAN ou Tailscale) et [chat].port (8766).
+          # Traefik sur la même machine : http://127.0.0.1:8766
+          - url: "http://COACH_IP:8766"

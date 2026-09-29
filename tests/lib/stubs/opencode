@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Stub OpenCode : journalise l'argv (comme tous les stubs) ET, pour `run`, ce que
+# le process voit de son environnement — jamais la valeur d'une clé, seulement sa
+# présence et sa longueur, ce qui suffit à prouver « injectée dans ce process seul ».
+#
+# Leviers (variables d'environnement, posées par le test) :
+#   ARC_STUB_OPENCODE_OUT    fichier dont le contenu est rendu tel quel sur stdout
+#                            (sinon : un run réussi avec un bloc ```resume et un coût)
+#   ARC_STUB_OPENCODE_RC     code de sortie de `run` (défaut 0)
+#   ARC_STUB_OPENCODE_COST   coût USD du run par défaut (défaut 0.01)
+#   ARC_STUB_OPENCODE_WRITE  fichier (chemin absolu) créé sans bloc arc pendant le run
+. "$(dirname "$0")/_common.sh"
+stub_init "$@"
+case "${1:-}" in
+    --version) echo "1.18.32-stub"; exit 0 ;;
+    run) ;;
+    *) exit 0 ;;
+esac
+key_len="${#OPENROUTER_API_KEY}"
+stub_log "env OPENCODE_CONFIG=${OPENCODE_CONFIG:-unset} OPENROUTER_API_KEY_LEN=$key_len ANTHROPIC_API_KEY=$([ -n "${ANTHROPIC_API_KEY:-}" ] && echo set || echo unset)"
+if [ -n "${ARC_STUB_OPENCODE_WRITE:-}" ]; then
+    mkdir -p "$(dirname "$ARC_STUB_OPENCODE_WRITE")"
+    printf '# fichier sans bloc arc\n' > "$ARC_STUB_OPENCODE_WRITE"
+fi
+if [ -n "${ARC_STUB_OPENCODE_OUT:-}" ] && [ -f "$ARC_STUB_OPENCODE_OUT" ]; then
+    cat "$ARC_STUB_OPENCODE_OUT"
+else
+    printf '{"type":"step_start","sessionID":"ses_stub","part":{"type":"step-start"}}\n'
+    printf '{"type":"text","sessionID":"ses_stub","part":{"type":"text","text":"```resume\\nSync OK (stub)\\n2 séances\\n```"}}\n'
+    printf '{"type":"step_finish","sessionID":"ses_stub","part":{"type":"step-finish","reason":"stop","cost":%s}}\n' "${ARC_STUB_OPENCODE_COST:-0.01}"
+fi
+exit "${ARC_STUB_OPENCODE_RC:-0}"
