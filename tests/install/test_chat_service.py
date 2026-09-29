@@ -500,7 +500,9 @@ class TestSecurity(ChatCase):
     def test_host_non_autorise(self):
         self.start()
         self.assertEqual(self.get("/api/chat/status", host="evil.example")[0], 403)
-        self.assertEqual(self.get("/api/chat/status", host="localhost:1")[0], 403)
+        self.assertEqual(self.get("/api/chat/status", host="evil.example:8765")[0], 403)
+        # Mode local : relais du tableau de bord, boucle locale acceptée sur tout port.
+        self.assertEqual(self.get("/api/chat/status", host="localhost:8765")[0], 200)
         self.assertEqual(self.get("/api/chat/status", host=f"localhost:{self.port}")[0], 200)
 
     def test_ecoute_locale_refusee_hors_boucle(self):
