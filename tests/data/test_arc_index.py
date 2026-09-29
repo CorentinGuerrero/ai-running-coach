@@ -1328,7 +1328,25 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 25)
+        self.assertEqual(I.SCHEMA_VERSION, 26)
+
+    def test_schema_version_26_adds_covered_s_to_samples(self):
+        """Temps en zone surestimé : `activity_sample` gagne `covered_s` — une base de
+        version 25 doit être reconstruite avec, sinon l'ingestion échouerait avec
+        « no such column »."""
+        db_path = self.tmp / "legacy25.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '25');"
+            "CREATE TABLE activity_sample (garmin_activity_id INTEGER, source_path TEXT, t_s REAL);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(activity_sample)").fetchall()}
+        self.assertIn("covered_s", columns)
+        conn.close()
 
     def test_schema_version_25_adds_energy_table_and_bmr_column(self):
         """Dépense énergétique modèle : `activity` gagne `calories_bmr_kcal` (REAL)

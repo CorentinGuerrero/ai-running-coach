@@ -345,6 +345,40 @@ class TestDownsample(unittest.TestCase):
         self.assertEqual(out[0]["altitude_m"], 3.0)
 
 
+class TestBucketCoverage(unittest.TestCase):
+    """`covered_s` : secondes que les mesures d'un bucket couvrent réellement
+    (ASSUMPTIONS["covered_s"]) — borne des consommateurs qui pèsent un bucket
+    par min(dt, resolution_s), comme le temps en zone."""
+
+    @staticmethod
+    def _covered(times, resolution_s=5):
+        records = [{"t_s": float(t), "distance_m": 0.0, "altitude_m": 0.0, "hr_bpm": 140.0,
+                    "speed_ms": 2.5, "cadence_spm": 160.0} for t in times]
+        return {b["t_s"]: b["covered_s"] for b in S.downsample(records, resolution_s)}
+
+    def test_continuous_1hz_fills_buckets_and_last_measure_covers_nothing(self):
+        self.assertEqual(self._covered(range(13)), {0: 5.0, 5: 5.0, 10: 2.0})
+
+    def test_pause_is_never_covered(self):
+        """13 s sans mesure après t=7 : la mesure de t=7 ne couvre qu'un pas typique
+        (1 s à 1 Hz), jamais la pause."""
+        self.assertEqual(self._covered([0, 1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 23, 24]),
+                         {0: 5.0, 5: 3.0, 20: 4.0})
+
+    def test_irregular_recording_spills_across_buckets(self):
+        """Enregistrement « intelligent » toutes les 3 s : continu, chaque intervalle
+        compte en entier, réparti entre les buckets qu'il chevauche."""
+        self.assertEqual(self._covered([0, 3, 6, 9]), {0: 5.0, 5: 4.0})
+
+    def test_total_never_exceeds_the_recorded_span(self):
+        records, _ = sample_session(seed=4, duration_s=900, dropout_windows=((301, 377),), noise=False)
+        covered = sum(b["covered_s"] for b in S.downsample(records, 5))
+        self.assertLessEqual(covered, records[-1]["t_s"] - records[0]["t_s"])
+
+    def test_no_coverage_field_without_downsampling(self):
+        self.assertNotIn("covered_s", S.downsample([{"t_s": 0.0, "hr_bpm": 140.0}], resolution_s=1)[0])
+
+
 class TestSyntheticSessionIngestionPreservesTruth(unittest.TestCase):
     """T1 (#25) : distance et D+ mesurés sur les échantillons sous-échantillonnés restent
     proches de la vérité connue du générateur, à la tolérance du sous-échantillonnage."""

@@ -732,9 +732,10 @@ def _time_weighted_buckets(samples: Sequence[dict], resolution_s: float,
                             bucket_of) -> Dict[Any, float]:
     """Partage commun à `time_in_zone_seconds` et `time_in_polarisation_seconds` :
     trie par `t_s`, ignore `hr_bpm` absent, pèse chaque échantillon par
-    `min(dt_vers_le_suivant, resolution_s)` (jamais `dt` brut — voir
-    `ASSUMPTIONS["hr_zones"]` pour pourquoi), et accumule dans le seau que rend
-    `bucket_of(hr_bpm)`."""
+    `min(dt_vers_le_suivant, resolution_s, covered_s)` (jamais `dt` brut — voir
+    `ASSUMPTIONS["hr_zones"]` pour pourquoi ; `covered_s`, quand l'échantillon le
+    porte, borne un bucket partiellement rempli — `arc_samples.ASSUMPTIONS
+    ["covered_s"]`), et accumule dans le seau que rend `bucket_of(hr_bpm)`."""
     ordered = sorted((s for s in samples if s.get("t_s") is not None), key=lambda s: s["t_s"])
     seconds: Dict[Any, float] = {}
     n = len(ordered)
@@ -744,6 +745,11 @@ def _time_weighted_buckets(samples: Sequence[dict], resolution_s: float,
             continue
         dt = ordered[i + 1]["t_s"] - sample["t_s"] if i + 1 < n else resolution_s
         dt = max(0.0, min(dt, resolution_s))
+        # Bucket partiellement rempli (autour d'une pause, fin de séance) : jamais plus que
+        # les secondes que ses mesures couvrent (`arc_samples.ASSUMPTIONS["covered_s"]`).
+        covered = sample.get("covered_s")
+        if covered is not None:
+            dt = min(dt, covered)
         bucket = bucket_of(hr)
         seconds[bucket] = seconds.get(bucket, 0.0) + dt
     return seconds

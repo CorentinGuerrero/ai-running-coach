@@ -272,7 +272,11 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # `activity_climb`). Sans ce bump, une base déjà construite par une version
 # antérieure n'a ni la colonne ni la table et l'indexation échouerait avec « no such
 # column »/« no such table ».
-SCHEMA_VERSION = 25
+# Temps en zone surestimé (buckets partiels) : `activity_sample` gagne `covered_s` (REAL,
+# secondes réellement couvertes par les mesures du bucket, `arc_samples.ASSUMPTIONS
+# ["covered_s"]`). Sans ce bump, une base déjà construite n'a pas la colonne et
+# l'ingestion échouerait avec « no such column ».
+SCHEMA_VERSION = 26
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -632,7 +636,7 @@ CREATE TABLE metric_day (
 -- `arc_climb_match.ASSUMPTIONS["privacy"]`).
 CREATE TABLE activity_sample (
     garmin_activity_id INTEGER, source_path TEXT, t_s REAL, distance_m REAL, altitude_m REAL,
-    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL
+    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, covered_s REAL
 );
 CREATE INDEX activity_sample_garmin ON activity_sample(garmin_activity_id);
 CREATE INDEX activity_sample_source ON activity_sample(source_path);
@@ -1347,7 +1351,7 @@ def _sample_stats(conn) -> Dict[int, list]:
         "SELECT garmin_activity_id, COUNT(*), TOTAL(t_s), MIN(t_s), MAX(t_s), "
         "COUNT(distance_m), TOTAL(distance_m), COUNT(altitude_m), TOTAL(altitude_m), "
         "COUNT(hr_bpm), TOTAL(hr_bpm), COUNT(speed_ms), TOTAL(speed_ms), "
-        "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon) "
+        "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon), TOTAL(covered_s) "
         "FROM activity_sample GROUP BY garmin_activity_id"
     ).fetchall():
         stats[row[0]] = [repr(v) for v in tuple(row)[1:]]
@@ -2015,10 +2019,10 @@ def ingest_samples(conn, workspace: Path, resolution_s: int = S.DEFAULT_RESOLUTI
         conn.executemany(
             "INSERT INTO activity_sample "
             "(garmin_activity_id, source_path, t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, "
-            "lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "lat, lon, covered_s) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(garmin_id, rel, rec["t_s"], rec["distance_m"], rec["altitude_m"],
               rec["hr_bpm"], rec["speed_ms"], rec["cadence_spm"],
-              rec.get("lat_deg"), rec.get("lon_deg")) for rec in records],
+              rec.get("lat_deg"), rec.get("lon_deg"), rec.get("covered_s")) for rec in records],
         )
         conn.execute(
             "INSERT OR REPLACE INTO sample_file VALUES (?, ?, ?, ?, ?, ?)",
@@ -2085,7 +2089,8 @@ def samples_by_garmin_id(conn, garmin_activity_id: int) -> dict:
     # bord (`arc_serve.py`), qui n'appelle jamais cette fonction et ne renvoie jamais de
     # coordonnée (voir `arc_climb_match.ASSUMPTIONS["privacy"]`).
     rows = conn.execute(
-        "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg "
+        "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg, "
+        "covered_s "
         "FROM activity_sample WHERE garmin_activity_id = ? ORDER BY t_s", (garmin_activity_id,),
     ).fetchall()
     result = {"garmin_activity_id": garmin_activity_id, "samples": [dict(r) for r in rows]}
