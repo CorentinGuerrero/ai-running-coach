@@ -25,6 +25,7 @@ const state = {
   sessionCost: 0,
   lastUsage: null,
   approvals: new Map(), // approval_id -> { card, pinned }
+  pollTimer: null,      // sondage d'une session dont un tour tourne ailleurs (autre onglet, reprise)
 };
 
 // ---------------------------------------------------------------------------
@@ -301,6 +302,7 @@ const RESOLVED = {
   allow: "applied", allowed: "applied", applied: "applied", approved: "applied",
   deny: "refused", denied: "refused", refused: "refused", rejected: "refused", rejected_by_athlete: "refused",
   waiting: "waiting", pending: "pending", expired: "expired",
+  cancelled: "cancelled", unexecuted: "unexecuted",
 };
 
 function buildApprovalCard(d) {
@@ -359,6 +361,12 @@ function setApprovalStatus(entry, status) {
   } else if (norm === "refused") {
     card.classList.add("is-refused");
     btns.appendChild(el("span", "action__result action__result--rejected", "Refusé — décision tracée comme refusée par l'athlète"));
+  } else if (norm === "cancelled") {
+    card.classList.add("is-refused");
+    btns.appendChild(el("span", "action__result action__result--rejected", "Annulée (tour interrompu)"));
+  } else if (norm === "unexecuted") {
+    card.classList.add("is-refused");
+    btns.appendChild(el("span", "action__result action__result--rejected", "Approuvée mais non exécutée — redemande au coach"));
   } else {
     btns.appendChild(el("span", "action__result action__result--rejected", "Expiré — la proposition n'est plus valable"));
   }
@@ -599,7 +607,31 @@ function showEmptyThread() {
   els.empty = p;
 }
 
+// Un tour tourne déjà dans cette conversation (autre onglet, reprise après approbation) :
+// on bloque la saisie (sinon 409) et on relit la session jusqu'à la fin du tour.
+function watchRunning(id) {
+  clearTimeout(state.pollTimer);
+  state.pollTimer = setTimeout(async () => {
+    if (state.sessionId !== id || state.streaming) return;
+    try {
+      const detail = await call("GET", `/sessions/${encodeURIComponent(id)}`);
+      if (state.sessionId !== id || state.streaming) return;
+      renderHistory(detail.events || detail.log || []);
+      if (detail.running) { watchRunning(id); return; }
+      showBanner("");
+      els.input.disabled = false;
+      els.send.disabled = false;
+      els.input.focus();
+      refreshStatus();
+      refreshSessions();
+    } catch {
+      watchRunning(id);
+    }
+  }, 2000);
+}
+
 async function loadSession(id, { quiet = false } = {}) {
+  clearTimeout(state.pollTimer);
   try {
     const detail = await call("GET", `/sessions/${encodeURIComponent(id)}`);
     state.sessionId = id;
@@ -607,17 +639,24 @@ async function loadSession(id, { quiet = false } = {}) {
     renderHistory(events);
     if (detail.cost_eur != null && !state.sessionCost) { state.sessionCost = Number(detail.cost_eur) || 0; renderCost(); }
     els.select.value = id;
-    els.input.disabled = state.streaming;
-    els.send.disabled = state.streaming;
+    const running = Boolean(detail.running) && !state.streaming;
+    els.input.disabled = state.streaming || running;
+    els.send.disabled = state.streaming || running;
     els.newBtn.disabled = state.streaming;
     els.select.disabled = state.streaming;
-    if (!quiet) els.input.focus();
+    if (running) {
+      showBanner("Une réponse est en cours dans cette conversation — la saisie reprendra à la fin.", true);
+      watchRunning(id);
+    } else if (!quiet) {
+      els.input.focus();
+    }
   } catch (err) {
     showBanner(`Conversation illisible : ${err.message}`);
   }
 }
 
 async function newSession() {
+  clearTimeout(state.pollTimer);
   showBanner("");
   try {
     const res = await call("POST", "/sessions", {});
