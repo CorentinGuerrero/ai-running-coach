@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Coach — ai-running-coach (prototype)</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/chat-prototype.css">
+</head>
+<body class="chat-page">
+  <!-- PROTOTYPE STATIQUE : aucune donnée réelle, aucun appel modèle. Réponses scriptées
+       dans js/chat-prototype.js pour montrer le rendu visé avant de choisir le backend. -->
+  <a class="skip" href="#composer-input">Aller à la saisie</a>
+  <header class="top">
+    <a class="brand" href="index.html"><svg class="brand__mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19 9 8l4 6 3-4 6 9Z"/></svg><span>ai-running-coach</span></a>
+    <div class="objective">
+      <span class="objective__count">J-19</span>
+      <span class="objective__text"><strong>Trail des Aiguilles Rouges — 52 km</strong><span>18 oct. · 3 100 m D+</span></span>
+    </div>
+    <span class="proto-badge" title="Maquette : données fictives, réponses scriptées">Prototype</span>
+  </header>
+
+  <div class="shell">
+    <nav class="nav" aria-label="Sections">
+      <a href="index.html#/">Aujourd'hui</a>
+      <a href="index.html#/forme">Forme &amp; charge</a>
+      <a href="index.html#/sante">Santé</a>
+      <a href="index.html#/semaine">Semaine</a>
+      <a href="index.html#/seances">Séances</a>
+      <a href="index.html#/decisions">Décisions</a>
+      <a href="index.html#/rapports">Rapports</a>
+      <a href="chat-prototype.html" aria-current="page">Coach</a>
+    </nav>
+
+    <main class="chat" id="main">
+      <section class="chat__thread" aria-label="Conversation avec le coach">
+        <div class="chat__scroll" id="thread" aria-live="polite">
+          <p class="day-sep"><span>Aujourd'hui · mardi 29 septembre</span></p>
+
+          <article class="msg msg--user">
+            <div class="msg__bubble">Grosse journée de boulot, je me sens un peu vidé. Je garde le fractionné de ce soir ?</div>
+          </article>
+
+          <article class="msg msg--coach">
+            <div class="msg__avatar" aria-hidden="true">C</div>
+            <div class="msg__body">
+              <details class="trace">
+                <summary><span class="trace__dot"></span>5 étapes · bilan matinal, séance, météo</summary>
+                <ol>
+                  <li><code>read</code> medical/2026-09-29_health.md <span class="trace__ok">déjà synchronisé</span></li>
+                  <li><code>get_training_readiness</code> → 38/100</li>
+                  <li><code>read</code> planning/2026-W40_semaine.md</li>
+                  <li><code>skill</code> weather-forecast → Chamonix, 18 h : 14 °C, averses</li>
+                  <li><code>arc_index.py guardrails</code> → règle <em>readiness_low</em></li>
+                </ol>
+              </details>
+
+              <div class="msg__text">
+                <div class="checkup" role="group" aria-label="Bilan matinal">
+                  <div class="kpi kpi--warn"><span>HRV</span><strong>41 ms</strong><em>−18 % vs base 7 j</em></div>
+                  <div class="kpi kpi--warn"><span>FC repos</span><strong>54 bpm</strong><em>+5 bpm</em></div>
+                  <div class="kpi kpi--bad"><span>Readiness</span><strong>38</strong><em>faible</em></div>
+                </div>
+                <p>Les trois signaux vont dans le même sens, et ton ressenti aussi. À J-19 le fractionné n'apporte plus beaucoup de gain, alors que tu risques de te fatiguer davantage.</p>
+                <p><strong>Je te propose</strong> de remplacer le <em>6 × 800 m en côte</em> par <strong>45 min d'endurance fondamentale (Z2)</strong> + 4 lignes droites, et de décaler le fractionné à jeudi si le bilan de demain remonte.</p>
+                <p class="weather-line"><span class="chip chip--weather-yellow"><span class="chip__dot"></span>Averses</span> Créneau conseillé : <strong>12 h 15 – 13 h 00</strong> (sec, 16 °C).</p>
+              </div>
+
+              <div class="action" id="action-1">
+                <div class="action__head">
+                  <span class="action__icon" aria-hidden="true">⌚</span>
+                  <div>
+                    <strong>Modifier la séance du 29/09 dans le calendrier Garmin</strong>
+                    <span>Écriture Garmin : ta confirmation est nécessaire</span>
+                  </div>
+                </div>
+                <div class="diff">
+                  <div class="diff__row diff__row--old"><span>−</span>Fractionné côte 6 × 800 m · 1 h 05</div>
+                  <div class="diff__row diff__row--new"><span>+</span>Endurance Z2 45 min + 4 lignes droites · 55 min</div>
+                  <div class="diff__row diff__row--new"><span>+</span>Jeu. 01/10 : fractionné côte 6 × 800 m <em>(sous réserve du bilan)</em></div>
+                </div>
+                <div class="action__btns">
+                  <button class="btn btn--primary" type="button" data-approve="action-1">Appliquer</button>
+                  <button class="btn btn--ghost" type="button" data-reject="action-1">Garder le fractionné</button>
+                </div>
+              </div>
+
+              <div class="files">
+                <span class="files__label">Fichier tracé</span>
+                <a class="file-chip" href="index.html#/decisions">planning/2026-09-29_decision_readiness-low.md</a>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <div class="quick" role="group" aria-label="Commandes rapides">
+            <button type="button" class="quick__btn" data-cmd="/today">/today</button>
+            <button type="button" class="quick__btn" data-cmd="/week">/week</button>
+            <button type="button" class="quick__btn" data-cmd="/why">/why</button>
+            <button type="button" class="quick__btn" data-cmd="/race">/race</button>
+            <button type="button" class="quick__btn" data-cmd="/log ">/log</button>
+          </div>
+          <div class="composer__box">
+            <label class="sr-only" for="composer-input">Message au coach</label>
+            <textarea id="composer-input" rows="1" placeholder="Écris au coach…"></textarea>
+            <button class="composer__send" type="submit" aria-label="Envoyer">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5 21 12 3 3.5v6.6l12 1.9-12 1.9Z"/></svg>
+            </button>
+          </div>
+          <div class="composer__meta">
+            <label class="backend">
+              <span>Backend</span>
+              <select id="backend">
+                <option value="claude">Claude · Sonnet 5.5 (API Anthropic)</option>
+                <option value="openai">OpenAI-compatible · OpenRouter</option>
+              </select>
+            </label>
+            <span class="cost" id="cost" title="Estimation affichée par le backend à partir de l'usage renvoyé par l'API">≈ 0,04 € · 18 k jetons (82 % en cache)</span>
+          </div>
+        </form>
+      </section>
+
+      <aside class="context" aria-label="Contexte vu par le coach">
+        <h2>Ce que voit le coach</h2>
+        <div class="ctx-card">
+          <h3>Séance du jour</h3>
+          <p class="ctx-strong" id="ctx-session">Fractionné côte 6 × 800 m</p>
+          <p class="ctx-soft">1 h 05 · Z4–Z5 · 180 m D+</p>
+          <span class="chip chip--status-planned" id="ctx-status"><span class="chip__dot"></span>planifiée</span>
+        </div>
+        <div class="ctx-card">
+          <h3>Semaine 40</h3>
+          <div class="bar"><span class="bar__fill"></span></div>
+          <p class="ctx-soft">4 h 10 / 9 h · 1 250 / 2 400 m D+</p>
+        </div>
+        <div class="ctx-card">
+          <h3>Staff</h3>
+          <ul class="staff">
+            <li><span class="dot dot--on"></span>coach</li>
+            <li><span class="dot dot--on"></span>medical</li>
+            <li><span class="dot"></span>nutritionist <em>non activé</em></li>
+            <li><span class="dot dot--on"></span>course-strategist</li>
+          </ul>
+        </div>
+        <div class="ctx-card ctx-card--muted">
+          <h3>Permissions</h3>
+          <ul class="perms">
+            <li>✓ Lecture du workspace et de Garmin</li>
+            <li>✓ Écriture des fichiers Markdown</li>
+            <li>⚠ Écriture Garmin : confirmation à chaque fois</li>
+            <li>✕ Shell et accès réseau libre</li>
+          </ul>
+        </div>
+        <p class="ctx-foot">Connecté via Authentik · <strong>mmornati</strong></p>
+      </aside>
+    </main>
+  </div>
+  <script src="js/chat-prototype.js"></script>
+</body>
+</html>

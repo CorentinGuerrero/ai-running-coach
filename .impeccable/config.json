@@ -8,6 +8,12 @@
         "value": "inter",
         "createdAt": "2026-09-23T06:11:29.203Z",
         "reason": "project design system: DESIGN.md sets Inter as the body/UI font (typography.body/label); the dashboard inherits the established world"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "mono",
+        "createdAt": "2026-09-29T05:40:22.207Z",
+        "reason": "Claude: DESIGN.md typography declares mono (JetBrains Mono); used for <code> via app.css"
       }
     ]
   }
