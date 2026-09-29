@@ -20,7 +20,10 @@ Claude (Pro/Max) ou ChatGPT (Codex).
     pas** utiliser votre abonnement. Depuis avril 2026, Anthropic bloque l'authentification
     par abonnement pour tout outil tiers (OpenCode a dû retirer cette possibilité), et la
     connexion « Sign in with ChatGPT » d'OpenAI est réservée à Codex CLI/App. Un front
-    maison implique donc une clé API facturée au token.
+    maison implique donc une **clé API facturée au token** : c'est le principe du
+    [chat du tableau de bord](dashboard/chat.md), une option à activer explicitement
+    (plafond de dépense quotidien, clé isolée dans `llm.env`), qui ne remplace pas
+    Remote Control.
 
 La seule voie qui préserve l'abonnement : utiliser les **surfaces distantes officielles**
 des éditeurs, en gardant une **machine « coach »** où vivent le workspace (`activities/`,
@@ -31,6 +34,7 @@ des éditeurs, en gardant une **machine « coach »** où vivent le workspace (`
 | Parler au coach depuis le téléphone | **Claude Code Remote Control** — `claude remote-control` tourne sur la machine coach, l'appli Claude (iOS/Android) ou claude.ai/code s'y connecte | ✅ Pro/Max/Team/Enterprise (clé API refusée) | Le processus doit rester lancé (service systemd/launchd fourni) |
 | Idem avec Codex | **Codex Remote** — appli Codex sur macOS + appli ChatGPT | ✅ ChatGPT Plus/Pro | macOS uniquement (le mode CLI est expérimental) |
 | Synchronisation automatique | **cron/launchd → `claude -p` ou `codex exec`** (CLI officiels, headless) | ✅ | — |
+| Synchronisation automatique sans abonnement | **cron/launchd → `opencode run`** sur OpenRouter (ou toute API compatible OpenAI), ou `claude -p` avec clé API — voir [ci-dessous](#synchronisation-sur-openrouter-ou-toute-api-compatible-openai) | ❌ clé API, facturé au token | Plafond quotidien, clé dans `llm.env` |
 | Machine éteinte | *Routines cloud* Claude (voir [plan B](#plan-b-cloud-anthropic-sans-machine-a-la-maison)) | ✅ Pro (5 exécutions/jour) / Max (15) | Workspace dans un dépôt GitHub, tokens Garmin en secrets |
 
 !!! note "Pourquoi pas les « routines » ou les tâches planifiées de l'appli Claude ?"
@@ -313,6 +317,87 @@ consultez-le par un tunnel SSH : voir [Machine coach & mode headless](dashboard/
   `codex remote-control` en CLI est expérimental) : utilisez Remote Control de Claude
   Code pour l'interactif et, si vous le souhaitez, Codex pour la synchronisation.
 
+## Synchronisation sur OpenRouter (ou toute API compatible OpenAI)
+
+Sans abonnement Claude, ou pour ne payer que ce que la synchronisation consomme, le cron
+peut tourner sur une API : `scripts/daily-sync.sh` a un troisième exécuteur, `opencode`
+([OpenCode](https://opencode.ai/docs/cli), `opencode run` en mode headless). Le mode
+`watch` reste identique : il n'appelle le modèle que s'il y a du neuf.
+
+```bash
+./install.sh --llm openrouter                  # chat ET sync sur OpenRouter
+./install.sh --llm openrouter --model mistralai/mistral-small
+./install.sh --llm openai --model gpt-4.1-mini --base-url https://api.exemple.org/v1
+./install.sh --llm anthropic                   # chat Sonnet 5.5, sync Haiku 4.5, clé API Anthropic
+./install.sh --sync-budget 0.5                 # plafond quotidien (EUR) de la synchronisation
+```
+
+`--llm` écrit à la fois `[chat]` et `[sync]` de `config/workspace.user.toml`
+(voir [Configuration](configuration.md#le-chat-avec-le-coach-chat)). Une valeur déjà
+posée qui diffère est **remplacée avec un avertissement** « ancien → nouveau » et la
+façon de revenir ; un rerun d'`install.sh` sans `--llm` n'y touche jamais. Aucun rechargement
+du cron : `daily-sync.sh` relit le runner à chaque exécution.
+
+### La clé API
+
+La clé n'est **jamais** dans le TOML ni dans votre profil de shell : elle vit dans
+`~/.config/ai-running-coach/llm.env` (mode 600, créé par l'installation avec une ligne
+d'exemple commentée). Ouvrez-le et ajoutez la ligne :
+
+```bash
+OPENROUTER_API_KEY=<votre clé>
+```
+
+`daily-sync.sh` lit ce fichier, ne retient que la variable nommée par `[sync].api_key_env`
+et ne la donne **qu'au process du runner** ; le service du chat la reçoit par
+`EnvironmentFile=` (systemd) ou en la lisant lui-même (launchd). `scripts/coach_doctor.py
+--check llm_config` vérifie sa présence et son mode sans jamais l'afficher.
+
+!!! warning "Ne jamais exporter `ANTHROPIC_API_KEY` globalement"
+    Remote Control exige l'authentification par abonnement claude.ai : dès que
+    `ANTHROPIC_API_KEY` est défini dans l'environnement de `claude`, il la refuse
+    (« Remote Control requires claude.ai subscription auth »). Gardez la clé Anthropic
+    dans `llm.env` : seuls la sync et le chat la lisent, chacun dans son process.
+
+### Modèles par défaut
+
+| | OpenRouter | API Anthropic |
+|---|---|---|
+| Chat | `openrouter/deepseek/deepseek-chat` | `claude-sonnet-5-5` |
+| Synchronisation | `openrouter/deepseek/deepseek-chat` | `claude-haiku-4-5` |
+
+La synchronisation est répétitive et très cadrée (récupérer les dates manquantes, écrire
+les fichiers au contrat, produire le bloc `resume`) : un modèle léger suffit, et
+`arc_index.py --validate` rattrape les écarts. Après un run `opencode`, les fichiers
+écrits sont validés et un écart figure dans la notification (`⚠ hors contrat arc`) — un
+modèle qui casserait le contrat toutes les nuits doit se voir. Le chat, lui, demande un
+modèle plus solide ; si un modèle DeepSeek vous déçoit dans la durée (appels d'outils
+longs), passez à `--model` ou à `--llm anthropic`.
+
+### Budget
+
+`[sync].daily_budget_eur` (défaut 0,5 €, `./install.sh --sync-budget EUR`) plafonne la
+dépense du jour, cumulée dans `logs/.sync-spend-AAAA-MM-JJ`. Il ne s'applique que si le
+runner **rapporte son coût** : `opencode` et `claude` en mode API. Une fois atteint, le run
+est sauté (code 0) et **une** notification par jour l'annonce. Les fournisseurs facturent en
+dollars, convertis avec `[chat].usd_eur_rate`. Sur abonnement (`claude`/`codex` sans clé),
+aucun plafond n'existe.
+
+### Vos données de santé et le fournisseur
+
+La synchronisation envoie au modèle votre HRV, votre sommeil, vos blessures. Sur
+OpenRouter, restreignez le routage aux fournisseurs qui **ne conservent pas et
+n'entraînent pas** sur vos données (réglages *Privacy* du compte et option de routage
+`provider` avec `data_collection: "deny"`, voir la documentation OpenRouter). Évitez
+l'API directe d'un fournisseur dont vous n'avez pas lu les conditions de conservation.
+
+### Erreurs propres au fournisseur
+
+Une clé refusée (401) ou un compte sans crédit (402) déclenche leur **propre**
+notification (`🔑 … clé openrouter refusée`, `💳 … crédits épuisés`), jamais confondue avec
+un refus d'authentification Garmin. Voir le
+[dépannage](troubleshooting.md#synchronisation-sur-une-api-openrouter-anthropic).
+
 ## Plan B : cloud Anthropic, sans machine à la maison
 
 Si aucune machine ne peut rester allumée, les **routines** et **sessions cloud** de Claude
@@ -343,4 +428,5 @@ datacenter (à valider une fois). C'est pourquoi la machine coach reste le choix
 | `❌ Sync Garmin échouée` | Voir `logs/sync-YYYY-MM-DD.log`. Cause fréquente : tokens Garmin expirés → `uv run garmin-mcp-auth`. |
 | Pas de notification | `scripts/notify.sh "test"` ; vérifiez `provider`, `ntfy_topic`, le token (serveur `deny-all`) et l'abonnement au sujet dans l'appli. |
 | Sur Linux, le service meurt à la déconnexion SSH | `loginctl enable-linger $USER` (fait par `install`). |
+| `🔑 … clé … refusée`, `💳 … crédits … épuisés`, `💸 … budget atteint` | Sync sur une API : voir [Synchronisation sur OpenRouter](#synchronisation-sur-openrouter-ou-toute-api-compatible-openai) et le [dépannage](troubleshooting.md#synchronisation-sur-une-api-openrouter-anthropic). |
 | Le portable et la machine coach ont chacun un workspace | Gardez une seule source de vérité (la machine coach) et travaillez dessus en Remote-SSH ; sinon synchronisez les dossiers avec `rsync`. |

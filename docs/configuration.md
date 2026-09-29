@@ -311,6 +311,48 @@ Les instructions des agents/skills restent en anglais ou en français selon le
 fichier — seule la langue de *sortie* (documents persistés, réponses) est
 réglée ici.
 
+## La synchronisation — `[sync]`
+
+`scripts/daily-sync.sh` lit ces clés à **chaque** exécution (pas de réinstallation du cron
+pour les changer, sauf `mode`/`times`, voir [Le coach dans la poche](mobile.md)).
+
+| Clé | Effet |
+|---|---|
+| `runner` | `"claude"` (Claude Code, `claude -p`, défaut) \| `"codex"` (`codex exec`) \| `"opencode"` (`opencode run`, OpenRouter ou API compatible OpenAI). |
+| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-chat`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
+| `base_url` | Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner `opencode`). |
+| `api_key_env` | **Nom** de la variable qui porte la clé, lue dans `~/.config/ai-running-coach/llm.env` (mode 600). Non vide = mode API, facturé au token ; vide (défaut) = abonnement. Jamais la clé elle-même. |
+| `daily_budget_eur` | Plafond de dépense quotidien (défaut `0.5`), appliqué seulement quand le runner rapporte son coût (`opencode`, `claude` en mode API). Atteint : run sauté, une notification par jour. |
+
+`./install.sh --llm openrouter|anthropic|openai` écrit ces clés (et `[chat]`) ;
+`./install.sh --sync-budget EUR` écrit `daily_budget_eur`. Détails, budget et données de
+santé : [Synchronisation sur OpenRouter](mobile.md#synchronisation-sur-openrouter-ou-toute-api-compatible-openai).
+
+## Le chat avec le coach — `[chat]`
+
+Service optionnel du tableau de bord ([page dédiée](dashboard/chat.md)), désactivé par
+défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
+
+| Clé | Effet |
+|---|---|
+| `enabled` | `false` (défaut) \| `true`. |
+| `backend` | `"claude"` (Claude Agent SDK, `pip install claude-agent-sdk`) \| `"opencode"` (OpenRouter, OpenAI, Mistral, Ollama…). |
+| `model` | Défaut `claude-sonnet-5-5`. Backend `opencode` : `fournisseur/modèle`. |
+| `base_url` | Backend `opencode` + API compatible OpenAI autre qu'OpenRouter. |
+| `api_key_env` | Nom de la variable de `llm.env` (défaut `ANTHROPIC_API_KEY`). |
+| `port`, `listen` | Port (8766) et interface d'écoute (`127.0.0.1`). |
+| `auth` | `"local"` (boucle locale seulement) \| `"proxy"` (identité transmise par le SSO du reverse proxy). |
+| `auth_header`, `allowed_users`, `trusted_proxies`, `allowed_hosts` | Mode `proxy` : en-tête d'identité (`X-authentik-username`, Authelia : `Remote-User`), utilisateurs admis (vide = tous), IP source de Traefik, hôtes acceptés. Voir `deploy/chat/traefik/README.md`. |
+| `public_url` | URL publique du tableau de bord, requise pour les boutons ntfy. |
+| `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). |
+| `max_turns`, `rate_limit_per_min` | Tours d'agent par message (30) ; tours par minute et par utilisateur (6). |
+| `approval_wait_s`, `approval_ttl_s` | Attente en cours de tour d'une approbation (600 s) ; durée de vie d'une proposition en attente (86400 s). |
+| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). |
+
+La clé API n'est jamais dans ce fichier : `~/.config/ai-running-coach/llm.env`.
+`./install.sh --chat-budget EUR` écrit `daily_budget_eur`. Le diagnostic :
+`python3 scripts/coach_doctor.py --check llm_config` (et `chat_service`, `opencode_cli`).
+
 ## Notifications et synchronisation
 
 `[notifications]` et `[sync]` sont décrits dans

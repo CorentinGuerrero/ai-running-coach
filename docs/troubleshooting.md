@@ -116,6 +116,23 @@ avec la commande de renouvellement quand l'échéance estimée approche.
   d'expiration est déjà partie plus tôt dans le même run, cette notification
   n'est pas doublée.
 
+### Synchronisation sur une API (OpenRouter, Anthropic)
+
+Quand `[sync].api_key_env` est défini, ces échecs ont **leur propre notification** — ils
+ne sont jamais présentés comme un problème Garmin :
+
+| Notification | Cause | Correctif |
+|---|---|---|
+| `🔑 Sync Garmin — clé openrouter refusée` (ou `Anthropic`) | Le fournisseur renvoie 401 : clé invalide, révoquée ou mal copiée. | Éditez `~/.config/ai-running-coach/llm.env` (ligne `OPENROUTER_API_KEY=…`, mode 600), puis `python3 scripts/coach_doctor.py --check llm_config`. |
+| `💳 Sync Garmin — crédits … épuisés` | Le fournisseur renvoie 402 : plus de crédit. | Rechargez le compte du fournisseur. |
+| `🔑 Sync Garmin — clé API absente` | `[sync].api_key_env` est défini mais la variable est introuvable dans `llm.env` et l'environnement. | Ajoutez la ligne dans `llm.env` (`./install.sh --llm …` crée le fichier). |
+| `💸 Sync Garmin suspendue — budget atteint` | Le cumul du jour (`logs/.sync-spend-AAAA-MM-JJ`) atteint `[sync].daily_budget_eur`. Le run est sauté, sans erreur. | Relancez demain, ou relevez `./install.sh --sync-budget EUR`. |
+| `⚠ hors contrat arc : …` (dans le résumé) | Un fichier écrit par le modèle pendant le run ne respecte pas le bloc `arc`. | Voir `logs/sync-AAAA-MM-JJ.log` ; changez de modèle (`[sync].model`) si cela se répète. |
+
+`opencode introuvable` : `curl -fsSL https://opencode.ai/install | bash`. Un refus
+d'authentification **Garmin** garde sa notification habituelle
+(`🔑 Authentification Garmin refusée`, voir plus haut).
+
 ## Configuration IDE
 
 ### L'agent `coach` n'apparaît pas dans mon IDE
