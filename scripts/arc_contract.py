@@ -90,6 +90,8 @@ RULE_ID_RE = re.compile(r"^r\d+_[a-z][a-z0-9_]*$")
 # Matériel, sudation, glucides pendant l'effort (#39 — champs consommés par #40
 # kilométrage chaussures, #41 KPI glucides/h et taux de sudation).
 GEAR_ID_MAX_LEN = 40
+# `activity.gear_ids` (#134) : nombre maximal d'objets par séance (un kit complet tient largement).
+GEAR_IDS_MAX = 30
 # Format slug : minuscules, chiffres, tirets simples, jamais en tête/fin — même
 # convention que la plupart des identifiants stables lisibles par un humain
 # (ex. "hoka-speedgoat-5-bleue"). La section « Matériel & lieux » du profil
@@ -241,6 +243,10 @@ SCHEMA = {
             "fluid_intake_ml": "fluid_ml",
             "weight_pre_kg": "body_weight_kg",
             "weight_post_kg": "body_weight_kg",
+            # #134 : matériel hors chaussures porté sur la séance (liste de slugs, `gear_id` reste
+            # LA chaussure). Absent = aucun objet attribué, jamais « aucun » écrit en liste vide
+            # (une liste vide est acceptée mais sans effet). Ancien fichier sans `gear_ids` : valide.
+            "gear_ids": "gear_id_list",
             "missing_reason": "obj",
             # KPI FIT (#51, épopée #21) : snapshot narratif écrit par le coach APRÈS
             # avoir lu la sortie des CLI dédiées (`scripts/arc_index.py gap/decoupling/
@@ -696,6 +702,24 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
         elif len(value) > GEAR_ID_MAX_LEN or not GEAR_ID_RE.match(value):
             fail(f"un identifiant de matériel au format slug (minuscules, chiffres, tirets, "
                  f"{GEAR_ID_MAX_LEN} caractères max)")
+        return
+    if spec == "gear_id_list":
+        if not isinstance(value, list):
+            fail("une liste d'identifiants de matériel (slugs)")
+            return
+        if len(value) > GEAR_IDS_MAX:
+            fail(f"{GEAR_IDS_MAX} identifiants de matériel au plus")
+            return
+        seen = set()
+        for i, gid in enumerate(value):
+            if not isinstance(gid, str) or len(gid) > GEAR_ID_MAX_LEN or not GEAR_ID_RE.match(gid):
+                errors.append(f"{where}[{i}] : un identifiant de matériel au format slug (minuscules, chiffres, "
+                              f"tirets, {GEAR_ID_MAX_LEN} caractères max) attendu, "
+                              f"{json.dumps(gid, ensure_ascii=False)} trouvé")
+            elif gid in seen:
+                errors.append(f"{where}[{i}] : identifiant « {gid} » en double")
+            else:
+                seen.add(gid)
         return
     if spec == "carbs_g":
         if not _is_number(value) or not 0 <= value <= CARBS_G_PLAUSIBLE_MAX:

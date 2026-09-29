@@ -50,6 +50,8 @@ La page du matin, à ouvrir avant de lacer ses chaussures. De haut en bas :
    dans **Performance**, où chaque paire affiche aussi sa **prévision de retraite**
    (« ≈ 6 sem. » à partir du rythme des 28 derniers jours, absente sans usage
    récent), « proche du seuil » dès 90 %, et son éventuel kilométrage de départ.
+   Depuis #134, la tuile **Matériel à contrôler** signale de même les objets hors
+   chaussures (bâtons, poche, frontale…) sous alerte.
 4. **Forme** : condition, fatigue, forme et ratio de charge, avec une phrase qui les
    lit pour vous (« la fatigue est sous la condition physique »), puis une **mini
    tendance de conformité sur 4 semaines** (une barre par semaine, hauteur = % de
@@ -635,6 +637,25 @@ divergent disent que le terrain ou la forme du jour pèsent.
 leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
 visible en grisé. Liste de chaussures d'illustration, kilométrages calculés sur les
 séances réelles du workspace des captures.*
+
+**Équipement (#134)** — sous la carte Matériel, un tableau pour tout ce qui n'est pas
+chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,
+séances, jours depuis la date de référence — `depuis` ou dernier `entretien`), ses
+**déclencheurs** avec la valeur atteinte face au seuil dans l'unité de chacun (km, h,
+séances, jours), ses kits, et un statut « À surveiller » (un déclencheur atteint — le
+premier suffit) ou « Proche du seuil » (≥ 90 %). Un objet sans déclencheur déclaré affiche
+« aucun seuil déclaré » et n'alerte jamais ; un déclencheur en jours sans `depuis` ni
+`entretien` est dit inopérant plutôt que compté à zéro. Un identifiant cité dans `gear_ids`
+d'une séance mais absent du profil apparaît en « inconnu ». Le tableau ne s'affiche que si
+le profil déclare du matériel ; le détail des règles est dans les Hypothèses
+(`equipment_usage`).
+
+![Équipement : usage par objet, déclencheurs en heures, séances et jours, poche à eau à nettoyer](../assets/dashboard/equipement.webp)
+
+*Le tableau Équipement : la poche à eau a passé son rappel d'hygiène de 30 jours depuis
+le dernier entretien, la ceinture cardio approche de son année (« 12 mois » compté 360 j),
+les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
+d'illustration, usage calculé sur les séances réelles du workspace des captures.*
 
 | Alimentée par | Calcul |
 |---|---|

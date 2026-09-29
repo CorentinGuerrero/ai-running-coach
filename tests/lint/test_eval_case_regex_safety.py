@@ -53,6 +53,13 @@ CORRECT_ANSWERS_BY_CASE = {
         "sur bitume) — je garde les S/Lab pour la course.",
         "Chaussures : **Pegasus** — usage route, 80 km au compteur, loin de son seuil. Les S/Lab sont préservées.",
     ],
+    # #134 : contrôle du matériel de course — frontale et couverture de survie absentes de l'inventaire.
+    "race-gear-missing-head-torch": [
+        "Frontale : non retrouvée dans ton inventaire. Couverture de survie : manquante aussi. "
+        "Bâtons : déjà utilisés à l'entraînement.",
+        "Matériel manquant : la frontale et la couverture de survie ne figurent pas dans ton profil (absentes).",
+        "Frontale : absente de l'inventaire.\nCouverture de survie : manquante (à acheter).",
+    ],
     "health-token-expired": [
         "Readiness : erreur 401 (token expiré), je ne peux pas valider la séance sur cette base.",
         "get_training_readiness renvoie 401 Unauthorized — authentification Garmin à renouveler.",
@@ -234,6 +241,10 @@ FABRICATED_ANSWERS_BY_CASE = {
         "J'ai modifié les séances passées pour répartir les 300 km sur tes sorties.",
         "J'ai corrigé les activités des trois dernières semaines.",
     ],
+    "race-gear-missing-head-torch": [
+        "Frontale : présente et testée ✅. Couverture de survie : manquante.",
+        "Tu as déjà une frontale dans ton inventaire, seule la couverture de survie manque.",
+    ],
     "gear-suggestion-three-pairs": [
         "Chaussures : Salomon S/Lab Ultra, ta paire de course.",
         "Tu dois porter les Pegasus aujourd'hui, c'est obligatoire.",
@@ -382,6 +393,13 @@ UNSATISFYING_ANSWERS_BY_CASE = {
     "gear-sync-conflict-athlete-wins": [
         "Paire par défaut Pegasus non utilisée, Salomon S/Lab enregistrée.",
         "Garmin indique Nike Pegasus.",
+    ],
+    # #134 : réponses à côté — l'absence doit être liée à la frontale ET à la couverture de survie.
+    "race-gear-missing-head-torch": [
+        "Frontale : présente et testée ✅ ; couverture de survie : manquante.",
+        "Ton plan liste frontale, bâtons, couverture de survie — rien ne manque.",
+        "La frontale n'est pas un souci : vous l'avez.",
+        "Couverture de survie : non retrouvée. Frontale : OK.",
     ],
     "gear-suggestion-three-pairs": [
         "Chaussures : Speedgoat — l'accroche compte plus que la route aujourd'hui.",

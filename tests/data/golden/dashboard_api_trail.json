@@ -812,6 +812,7 @@
           "gap_pace_s_km": 369.62,
           "garmin_activity_id": 90000000039,
           "gear_id": null,
+          "gear_ids": null,
           "gear_source": null,
           "id": 28,
           "intervals_activity_id": null,
@@ -1142,6 +1143,7 @@
           "energy_race_pacing_integration": "`arc_race_pacing.predict_segments` ne rend NI `speed_ms` NI `_profile` par segment (`_profile` est une clé PRIVÉE de `segment_course`, explicitement retirée par `predict_segments` avant l'export public — voir sa docstring) : seul `predicted_time_s` (dict par scénario `SCENARIOS = ('safe', 'realistic', 'ambitious')`) est exposé. `energy_from_profile` accepte donc, PAR ORDRE DE PRIORITÉ par segment : (1) `speed_ms` explicite (format simple, tests) ; (2) `time_s` explicite ; (3) `predicted_time_s[scenario]` (paramètre `scenario`, défaut `DEFAULT_SCENARIO`, 'realistic') — la vitesse effective du segment est alors `distance_m / time_s` (moyenne du segment, PAS une vitesse par sous-intervalle). Aucune vitesse résolue par aucune de ces trois voies -> `reason_code='no_speed'` pour ce segment (distance comptée, temps/énergie à zéro), jamais une exception ni un kcal=0 silencieux sans explication. Un appelant qui veut la précision point par point (terrain vallonné, voir `arc_race_pacing.ASSUMPTIONS['rolling_terrain']`) doit fournir la clé `_profile`/`profile` (conservée par l'appelant lui-même DEPUIS `segment_course`, avant l'appel à `predict_segments` qui la retire) EN PLUS de `predicted_time_s` — voir `_segment_intervals`. LIMITE CONNUE, documentée honnêtement : faute d'une vitesse par sous-intervalle (le temps du segment est un TOTAL, pas une série), `energy_from_profile` applique la MÊME vitesse moyenne du segment à chaque sous-intervalle du profil — seule la PENTE varie point par point (donc la puissance RE3/marche varie), la vitesse non. Ce n'est PAS une reproduction exacte de l'intégration `Δd / v(pente locale)` d'`arc_race_pacing.predict_segments` (qui, elle, fait varier la vitesse par sous-intervalle depuis le modèle personnel) — seulement une approximation qui capture quand même le surcoût réel d'une montée/descente locale sur un terrain vallonné, jamais la seule pente moyenne du segment.",
           "energy_segmentation": "La pente est calculée par `arc_elevation.grade_series`, appelée avec `window_m=SEGMENT_M` (50 m — décision de projet, fenêtre du script de validation de référence contre 7 séances réelles, plus fine que la fenêtre par défaut du GAP à 30 m) : jamais une seconde implémentation du lissage d'altitude ou de la segmentation par trou de signal (`max_gap_s`), toutes deux déjà partagées par `arc_gap.py`. Un trou de signal n'est jamais traversé, ni par le calcul de pente, ni par l'intégration temporelle ci-dessous.",
           "energy_time_weighting": "L'énergie est une INTÉGRALE dans le temps, pas une moyenne pondérée : à l'intérieur d'un même segment contigu (`arc_elevation.segments_by_gap`, qui garantit par construction un écart <= max_gap_s entre deux échantillons consécutifs du même segment), le `dt` RÉEL vers l'échantillon suivant est intégré TEL QUEL, jamais plafonné à `resolution_s` — un plafond systématique sous-comptait l'énergie sur un enregistrement à pas variable > 5 s (« enregistrement intelligent » Garmin, jusqu'à -38 % observé à un pas de 12 s, revue de code, 1ʳᵉ passe). Seul le DERNIER échantillon d'un segment (pas de suivant avant la fin du segment/de la séance) pèse `resolution_s` — sa propre fenêtre nominale, faute de savoir combien de temps il a réellement duré après la dernière mesure. `counted_s` (résultat) somme tous les `dt` réellement intégrés ; `gap_s` somme les trous de signal, DÉDUCTION FAITE de `resolution_s` par trou (déjà compté dans `counted_s` via la fenêtre nominale du dernier échantillon avant le trou — jamais compté deux fois) — jamais traversés, jamais intégrés comme si une puissance y avait été soutenue.",
+          "equipment_usage": "Matériel hors chaussures (#134, `arc_index.py equipment`) : objets de la section « ### Matériel » du profil (`arc_legacy.parse_equipment`). Attribution : UNIQUEMENT explicite — une activité compte pour un objet si son `gear_ids` (liste de slugs, en plus de `gear_id` qui reste la chaussure) le cite ; aucun objet par défaut, jamais deviné du nom ni de la catégorie (un ceinture cardio portée à chaque séance se déclare par un kit ou dans `gear_ids`). Une activité sans `gear_ids` compte donc pour aucun objet. Sports : chaque catégorie déclarée par « catégorie: … » (jamais devinée) n'use l'objet que sur certains sports (`EQUIPMENT_CATEGORY_SPORTS` : bâtons = trail et randonnée ; gilet, poche, flasques, veste, semelles, lacets = course, trail, randonnée ; frontale, ceinture, autre = tout sport) — approximation du projet, pas une norme fabricant ; une séance d'un autre sport qui cite l'objet n'est pas comptée. Catégorie inconnue ou absente : objet indexé et compté sur toute séance qui le cite, mais AUCUNE alerte inventée — seuls ses déclencheurs déclarés jouent, et il n'y a aucun seuil par défaut pour le matériel (contrairement aux chaussures, 700 km). Compteurs : `distance_m` (somme de `distance_m`), `duration_s` (somme de `duration_s` — la durée totale de la séance, pas le temps en mouvement), `sessions` (nombre de séances comptées), `days` (jours civils écoulés entre `today` et la date de référence, jamais négatifs). Date de référence = `entretien`/`révisé` le plus récent, sinon `depuis` ; sans aucune des deux, `days` n'est pas calculable (déclencheur en jours inopérant, avertissement — jamais 0). Un entretien remet à zéro TOUS les compteurs des déclencheurs : les séances datées jusqu'à la date `entretien` INCLUSE sont exclues, celles datées APRÈS comptent : le coach écrit donc comme `entretien` la date de la DERNIÈRE séance faite avant l'entretien (à défaut, la veille de l'entretien), pour qu'une séance du jour faite après l'entretien reste comptée — la date de référence des jours peut ainsi précéder l'entretien réel de quelques jours (approximation du projet, prudente : l'alerte arrive plutôt plus tôt que trop tard) ; le `départ` (usage antérieur au suivi) est aussi ignoré ; les cumuls à vie restent rendus (`lifetime`). `depuis` ne filtre jamais une attribution explicite (même règle que les chaussures). Le `départ N km|h|séances` s'ajoute aux compteurs correspondants tant qu'aucun entretien n'existe ; il n'existe pas de départ en jours (les jours partent de `depuis`). Déclencheurs : « alerte N km | N h (ou NhMM) | N séances | N jours | N semaines | N mois | N ans » (semaine = 7 j, mois = 30 j, an = 365 j — approximation du projet), un segment `alerte`/`départ` sans unité lisible est ignoré AVEC un avertissement (jamais silencieux, jamais un type deviné), combinables, le premier atteint (valeur ≥ seuil) fait `alert` ; `near_threshold` = un déclencheur à ≥ 90 % sans qu'aucun soit atteint. Objet `(retirée)` : compteurs rendus, jamais d'alerte. Alerte « une seule fois » sans état persistant (`--activities` et/ou `--last-pass` fournis, clé `crossed_in_run` présente seulement alors) : déclencheurs km/h/séances = le cumul HORS les séances désignées était sous le seuil et le total l'atteint (par identifiant de séance, comme les chaussures) ; déclencheur en jours = le seuil est franchi ENTRE `--last-pass` (jour du dernier passage, EXCLU — à l'inverse de `--since` de la commande `energy`, inclus) et `today` (inclus) ; SANS `--last-pass`, un déclencheur en jours ne marque JAMAIS de franchissement (aucun repli « jour exact » : un second passage le ré-émettrait). Le `garmin-daily-sync` n'émet aucune alerte en jours (aucun horodatage fiable du dernier passage réussi) : ils ne se lisent que dans le tableau de bord, `/week`, le rapport hebdomadaire et les contrôles avant séance du coach, qui montrent toujours l'état courant. Kits : « kit: <slug> » sur les objets ; `equipment --kit <slug> --sport <sport>` rend les objets à attribuer à une séance (non retirés, dont la catégorie porte ce sport) et ceux écartés avec la raison. Un `gear_ids` cité sur une activité mais absent du profil (et de la section Chaussures) est rendu sous `unknown`, jamais éliminé (un `gear_ids` qui cite une CHAUSSURE du profil est signalé, pas compté). Sports : walking compte pour bâtons (marche nordique), gilet, poche, flasques, veste. Non soumis à `[health].morning_check`.",
           "form": "Modèle impulsion-réponse de Banister : condition = moyenne exponentielle 42 j de la charge, fatigue = 7 j, forme = condition(j-1) − fatigue(j-1). D'autres outils nomment ces grandeurs CTL, ATL et TSB (marques revendiquées par Peaksware LLC / TrainingPeaks) ; calculées ici sur le TRIMP, nos valeurs ne sont pas comparables aux leurs.",
           "fueling": "Glucides/h et taux de sudation sur les sorties longues (#41), entraînement digestif. `carbs_per_hour_g` (fonction `carbs_per_hour_g`) = `carbs_g` / (`duration_s` en heures), calculé UNIQUEMENT pour les séances de plus de 90 min (`LONG_RUN_MIN_DURATION_S`, la même borne que le repère 60-90 g/h cité aux plans de course) — sous ce seuil, `None` (pas une sortie longue au sens de ce KPI), tout comme si `carbs_g` est absent (jamais 0 par défaut : un `carbs_g` explicitement à 0 reste un 0 g/h légitime, une absence de déclaration n'en est pas un). Sport : `FUELING_SPORTS` (running, trail) SEULEMENT (revue de code #41, blocker) — jamais `GEAR_WEAR_SPORTS`, qui inclut aussi la randonnée pour l'usure de semelle : une randonnée est typiquement bien plus lente qu'un effort de course (allure, FC, dépense horaire), et le vélo a une intensité et une digestion à l'effort différentes ; sans ce filtre, un long vélo à haut débit glucidique gonflerait `max_carbs_per_hour_g` et donc le plafond d'un plan de COURSE À PIED. Durée : `duration_s` (durée TOTALE), la même que `sweat_rate_l_h` ci-dessus — cohérence entre les deux KPI dérivés de la même sortie, tous deux encadrés par la pesée/le ravitaillement sur la sortie entière, arrêts compris. `sweat_rate_l_h` n'est JAMAIS recalculé ici : `fueling_trend` réutilise tel quel le champ déjà dérivé à l'indexation (`arc_metrics.sweat_rate_l_h`), pour ne jamais faire dériver deux définitions du même chiffre. `fueling_trend` agrège les sorties longues des `FUELING_TREND_WEEKS` (12) dernières semaines glissantes (aujourd'hui inclus) : `max_carbs_per_hour_g` (le plus haut débit observé sur une sortie longue de la fenêtre — c'est le seul repère de tolérance dont on dispose : le contrat n'a AUCUN champ de trouble digestif déclaré, donc « toléré » veut seulement dire « ingéré sans qu'un problème n'ait été signalé ailleurs », jamais une vraie mesure de tolérance — à confirmer par l'athlète ou l'agent avant de s'en servir comme plafond dur), `carbs_per_hour_n` (nombre de sorties longues AVEC un `carbs_per_hour_g` défini, pour que l'appelant sache si le maximum repose sur une ou dix séances), `median_sweat_rate_l_h` et `sweat_rate_n` (médiane et effectif des `sweat_rate_l_h` non `None` sur la même fenêtre — une médiane plutôt qu'une moyenne : un seul jour très chaud ne doit pas à lui seul déplacer le repère). Une sortie longue sans aucune des deux valeurs compte quand même dans `long_runs` (nombre total de sorties longues de la fenêtre) : elle prouve qu'un entraînement digestif a eu lieu, même non chiffré. Fenêtre volontairement identique pour les deux KPI (jamais une fenêtre glucides et une fenêtre sudation différentes) : ce sont les mêmes séances qui alimentent les deux courbes du même graphique de tendance. `fueling_carbs_ceiling` = min(`max_carbs_per_hour_g` + `FUELING_MAX_MARGIN_G_H`, max(`FUELING_TARGET_BAND_G_H[1]` (90), `max_carbs_per_hour_g`)), arrondi PAR EXCÈS (`math.ceil`, jamais `round` : un plafond ne doit jamais tomber sous le débit réellement observé) — plafond réaliste proposé à `course-strategist` pour un plan de course, PAS une limite physiologique dure. La marge (`FUELING_MAX_MARGIN_G_H`, 10 g/h) reste une étape de projet CONSERVATRICE, cohérente avec la littérature sur l'entraînement progressif de la tolérance digestive (Jeukendrup 2017, « Training the Gut for Athletes », Sports Medicine ; Costa et al. 2017, revue sur les troubles gastro-intestinaux d'exercice) qui documente une tolérance qui s'accroît par exposition répétée à l'effort, sans fixer de pourcentage de progression consensuel — PAS une valeur tirée telle quelle de ces sources. Le plafond ne dépasse JAMAIS le haut du repère généraliste (90 g/h) sauf si l'athlète a DÉJÀ personnellement démontré un débit supérieur, auquel cas aucune marge supplémentaire n'est ajoutée au-delà de ce qu'il a prouvé (revue de code #41, SHOULD-FIX 3 : sans cette borne, un athlète déjà à 85 g/h recevait un plafond à 95 g/h, au-dessus du haut de la fourchette généraliste sans qu'un dixième gramme au-delà de 90 n'ait jamais été démontré). `None` sans aucune sortie longue chiffrée sur la fenêtre : le stratège garde alors le repère générique 60-90 g/h (`FUELING_TARGET_BAND_G_H`) et doit suggérer un entraînement digestif progressif plutôt que d'inventer un plafond. Moins de 3 sorties longues chiffrées (`carbs_per_hour_n` < 3) : le plafond tient sur trop peu de données pour être présenté comme fiable — `course-strategist`/`nutritionist` doivent le signaler (« repose sur seulement N sortie(s) ») et suggérer de le confirmer à la prochaine sortie longue, plutôt que de le donner pour acquis. Non soumis à `[health].morning_check` : ne dépend d'aucune donnée de santé, seulement des activités déjà indexées.",
           "gear_mileage": "Kilométrage chaussures (#40) : somme de `distance_m` des activités de sport dans `GEAR_WEAR_SPORTS` (running, trail, hiking) — course et randonnée seulement (la marche, `walking`, n'y est délibérément PAS incluse : elle use une semelle bien plus lentement et le contrat ne distingue pas une marche d'entraînement d'une simple promenade), un sport hors de cette liste (vélo, natation, renforcement…) n'est jamais compté, même avec un `gear_id` renseigné par erreur. Attribution : `gear_id` explicite de l'activité si présent — JAMAIS filtré par une date, voir plus bas — sinon la chaussure marquée `(par défaut)` dans le profil si une seule l'est (la première rencontrée si plusieurs, cas non censé arriver mais pas une erreur), sinon la séance est IGNORÉE (ni comptée nulle part, ni signalée) — c'est le comportement documenté par #40 : sans chaussure par défaut déclarée, une activité sans `gear_id` n'a simplement rien à raconter côté matériel. `gear_id` explicite qui ne correspond à AUCUNE chaussure du profil (faute de frappe, chaussure jamais déclarée) : jamais éliminé silencieusement, regroupé sous `unknown` avec son kilométrage — libellé « inconnue » côté tableau de bord. Date `depuis` du profil : filtre l'attribution PAR DÉFAUT SEULEMENT (revue PR #85, blocker 1) — une séance sans `gear_id` datée AVANT le `depuis` de la chaussure `(par défaut)` n'y est PAS attribuée (sans ce filtre, toute activité antérieure à #39, y compris des années d'historique sans `gear_id` au contrat, se retrouverait comptée sur une paire achetée hier) ; sans `depuis` déclaré sur la chaussure par défaut, aucun filtre, comme avant. À l'inverse, une activité portant un `gear_id` EXPLICITE compte quel que soit son rapport à `depuis` (même avant) : l'explicite du `gear_id` prime toujours sur une date de début possiblement oubliée ou approximative — ne pas la compter risquerait de sous-estimer silencieusement l'usure réelle, l'erreur la plus coûteuse ici. Seuil d'alerte : celui de la puce (segment « alerte NNN km », ou « alerte NNN miles/mi » — converti × 1609,344 — voir `arc_legacy.parse_gear`) si renseigné, sinon 700 km par défaut (`GEAR_ALERT_THRESHOLD_M_DEFAULT`) — TOUTE chaussure déclarée peut donc alerter, avec ou sans seuil explicite ; `threshold_m` toujours arrondi à l'entier avant sérialisation (cohérence de type JSON, valeur déclarée ou valeur par défaut). Chaussure `(retirée)` : kilométrage affiché (historique), mais jamais d'alerte, et jamais candidate à l'attribution par défaut même si `(par défaut)` est aussi coché sur la même puce (une chaussure qu'on ne porte plus ne doit pas absorber les séances sans `gear_id`) — priorité documentée : retraite avant défaut. Deux puces qui dérivent le même slug (rachat du même modèle sans `id:` pour les distinguer) : `arc_legacy.parse_gear` renomme les suivantes `-2`, `-3`… plutôt que de laisser la dernière écraser la première dans l'index, et la collision remonte dans `warnings`. Kilométrage de départ (#132) : segment « départ N km » de la puce (`start_m`, « mi » converti) = kilométrage déjà parcouru avant le suivi, AJOUTÉ à `distance_m` (donc au seuil d'alerte, à la prévision et à `near_threshold`), y compris pour une paire `(retirée)` (historique) ; il ne dépend d'aucune date et n'est jamais recalculé depuis les activités — le corriger par chat = réécrire ce seul segment (total déclaré − km déjà comptés par les activités, jamais négatif). Prévision de retraite (#132, `today` fourni) : rythme = km attribués à la paire sur les 28 derniers jours (`today` inclus, séances datées seulement — la même attribution que le cumul) ÷ 28 ; jours restants = (seuil − cumul) ÷ rythme ; date = `today` + ⌈jours⌉ (donc toujours future) et `retire_forecast_weeks` = jours ÷ 7 arrondi à 0,1. Clés OMISES (jamais 0, jamais une date passée) : aucun usage sur 28 jours, paire retirée, seuil déjà atteint (`alert`, le texte dit alors « seuil dépassé »). Approximation linéaire : ne tient pas compte d'un bloc de repos, d'une préparation de course ou d'un changement de rotation ; `near_threshold` (clé présente seulement si vraie) = cumul ≥ 90 % du seuil sans l'avoir atteint. Alerte « une seule fois » (`run_refs`, #132) : `crossed_in_run` (clé présente seulement si `run_refs` est fourni) vaut vrai si le cumul HORS les séances désignées (par `garmin_activity_id`, `intervals_activity_id` ou chemin du fichier) était sous le seuil et que le cumul total l'atteint : la séance qui franchit le seuil est identifiée par son identifiant, jamais par sa date — une seconde synchronisation le même jour, ou la fusion d'une séance déjà synchronisée (que l'appelant ne passe pas), ne ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans la prévision), et le séparateur décimal du départ est toujours le point ou la virgule (« 1.200 km » = 1,2 km ; espace = milliers). #133 : une séance sans `gear_id` marquée `gear_source: \"garmin_unmapped\"` (matériel Garmin non associé, ambigu ou ignoré) est EXCLUE de l'attribution par défaut — ni comptée, ni source de `crossed_in_run` — pour ne jamais créditer en silence une autre paire ; les puces `(ignorée)` ne sont pas des chaussures.",
@@ -6889,6 +6891,165 @@
           "activities": 28,
           "nutrition": 7,
           "reports": 3
+        },
+        "equipment": {
+          "items": [
+            {
+              "alert": false,
+              "category": "batons",
+              "category_known": true,
+              "gear_id": "batons-leki",
+              "kits": [
+                "trail-long"
+              ],
+              "lifetime": {
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              },
+              "maintenance_date": null,
+              "name": "Bâtons Leki",
+              "retired": false,
+              "sports": [
+                "trail",
+                "hiking",
+                "walking"
+              ],
+              "start_date": null,
+              "triggers": [
+                {
+                  "ratio": 0.1,
+                  "reached": false,
+                  "threshold": 1000000.0,
+                  "type": "distance",
+                  "value": 100000
+                }
+              ],
+              "usage": {
+                "days": null,
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              }
+            },
+            {
+              "alert": false,
+              "category": "ceinture",
+              "category_known": true,
+              "gear_id": "ceinture-cardio",
+              "kits": [],
+              "lifetime": {
+                "distance_m": 57000,
+                "duration_s": 18140,
+                "sessions": 6
+              },
+              "maintenance_date": null,
+              "name": "Ceinture cardio",
+              "retired": false,
+              "sports": "all",
+              "start_date": null,
+              "triggers": [
+                {
+                  "ratio": 0.012,
+                  "reached": false,
+                  "threshold": 500,
+                  "type": "sessions",
+                  "value": 6
+                }
+              ],
+              "usage": {
+                "days": null,
+                "distance_m": 57000,
+                "duration_s": 18140,
+                "sessions": 6
+              }
+            },
+            {
+              "alert": true,
+              "category": "frontale",
+              "category_known": true,
+              "gear_id": "frontale-nuit",
+              "kits": [
+                "trail-long"
+              ],
+              "lifetime": {
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              },
+              "maintenance_date": null,
+              "name": "Frontale Petzl",
+              "pre_session_check": "vérifier la batterie avant toute séance de nuit",
+              "retired": false,
+              "sports": "all",
+              "start_date": null,
+              "triggers": [
+                {
+                  "ratio": 3.79,
+                  "reached": true,
+                  "threshold": 10800.0,
+                  "type": "duration",
+                  "value": 40930
+                }
+              ],
+              "usage": {
+                "days": null,
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              }
+            },
+            {
+              "alert": true,
+              "category": "poche",
+              "category_known": true,
+              "gear_id": "poche-eau",
+              "kits": [
+                "trail-long"
+              ],
+              "lifetime": {
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              },
+              "maintenance_date": null,
+              "name": "Poche à eau 2 L",
+              "pre_session_check": "hygiène (rinçage, séchage) avant une sortie longue",
+              "reference_date": "2026-01-01",
+              "retired": false,
+              "sports": [
+                "running",
+                "trail",
+                "hiking",
+                "walking"
+              ],
+              "start_date": "2026-01-01",
+              "triggers": [
+                {
+                  "ratio": 8.833,
+                  "reached": true,
+                  "threshold": 30,
+                  "type": "days",
+                  "value": 265
+                }
+              ],
+              "usage": {
+                "days": 265,
+                "distance_m": 100000,
+                "duration_s": 40930,
+                "sessions": 6
+              }
+            }
+          ],
+          "kits": {
+            "trail-long": [
+              "poche-eau",
+              "frontale-nuit",
+              "batons-leki"
+            ]
+          },
+          "unknown": [],
+          "warnings": []
         },
         "files": {
           "ok": 91

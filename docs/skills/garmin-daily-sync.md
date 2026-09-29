@@ -21,6 +21,12 @@ Il **n'ajoute aucune logique** : il délègue à l'agent `coach` et au skill
    sa `date` est celle de la séance concernée, pas forcément celle du run — la 5<sup>e</sup>
    ligne devient `Pourquoi :` (raison de l'ajustement, #56) au lieu de `Alerte :` —
    jamais les deux, jamais inventée sans fichier `decision` à l'appui
+6. Matériel hors chaussures (#134) : la ligne `Alerte :` porte aussi « Matériel : <nom> a atteint
+   son seuil (…) », une seule fois par franchissement et sans fichier d'état, pour les déclencheurs
+   en km/h/séances des séances de tout sport synchronisées dans ce run (`arc_index.py equipment
+   --activities`) ; aucune séance nouvelle = rien. Les déclencheurs en jours n'alertent jamais ici
+   (aucun horodatage fiable du dernier passage) : ils se lisent dans le tableau de bord, `/week`,
+   le rapport hebdomadaire et les rappels du coach
 
 6. **Matériel (#133, source Garmin)** : pour chaque séance **nouvelle** (un seul
    `get_activity_gear` par séance, jamais pour une séance déjà synchronisée), le matériel

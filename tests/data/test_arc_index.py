@@ -1328,7 +1328,15 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 27)
+        self.assertEqual(I.SCHEMA_VERSION, 28)
+
+    def test_schema_version_28_adds_equipment_table_and_gear_ids_column(self):
+        """#134 : table `equipment` + colonne `activity.gear_ids` — une base d'avant est reconstruite."""
+        self.index()
+        eq_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(equipment)")}
+        self.assertTrue({"gear_id", "category", "threshold_s", "threshold_days", "maintenance_date"} <= eq_cols)
+        act_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(activity)")}
+        self.assertIn("gear_ids", act_cols)
 
     def test_schema_version_26_adds_gear_start_and_usage_columns(self):
         """#132 : `gear` gagne `start_m` et `usage` — une base d'avant ce schéma est reconstruite."""
@@ -2590,7 +2598,7 @@ class TestSchemaMigrationV26ToV27(Workspace):
         legacy.close()
         conn = I.open_db(self.ws, str(db_path))
         try:
-            self.assertEqual(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "27")
+            self.assertEqual(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], str(I.SCHEMA_VERSION))
             cols = {r[1] for r in conn.execute("PRAGMA table_info(gear)")}
             self.assertTrue({"garmin_uuid", "ignored"} <= cols, cols)
             self.assertIn("gear_source", {r[1] for r in conn.execute("PRAGMA table_info(activity)")})

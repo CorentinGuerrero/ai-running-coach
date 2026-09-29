@@ -93,7 +93,7 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    > readiness, resting HR / body battery. If a not-yet-synced file already exists for that
    > date, MERGE the fetched Garmin fields into it — same file, never a second one for the
    > same session — preserving every athlete-declared key it already carries (`carbs_g`,
-   > `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg` on an activity;
+   > `fluid_intake_ml`, `rpe`, `gear_id`, `gear_ids`, `weight_pre_kg`, `weight_post_kg` on an activity;
    > `pain` on a health file) exactly as declared. Persist each file immediately using the
    > workspace conventions (`AGENTS.md`: file names; load the `workspace-data-contract` skill
    > and open every file with its ```arc JSON block — `kind: activity` with
@@ -151,6 +151,23 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    passage (le soir, ou une re-fusion) ne repasse pas ces identifiants et ne ré-émet rien, sans
    fichier d'état. Aucune séance de ce type, ou aucune paire franchie = rien à ajouter. Échec de
    la commande : ignorer silencieusement (non bloquant, jamais `ERREUR :`).
+3c. **Alerte matériel hors chaussures (#134) — une seule fois par franchissement, sans état.**
+   Dresser la liste des séances **de tout sport** (un vélo ou un renforcement comptent pour une
+   frontale ou une ceinture cardio) **synchronisées pour la première fois dans CE run** — même critère
+   qu'en 3b. **Aucune séance nouvelle = ne PAS lancer la commande et ne rien ajouter** (sans
+   `--activities`, la sortie ne porte aucun `crossed_in_run` : rien n'est jamais ré-émis).
+   Sinon lancer `python3 scripts/arc_index.py equipment --activities <id1>,<id2>,…` (mêmes
+   identifiants qu'en 3b) et, pour chaque objet portant `crossed_in_run: true` (déclencheur km/h/séances
+   franchi par ces séances), ajouter « Matériel : <nom> a atteint son seuil (<déclencheur franchi>) » à
+   la ligne `Alerte :` unique (` ; `, jamais une ligne de plus). **Les déclencheurs en jours ne
+   produisent AUCUNE alerte ici** : ils ne dépendent d'aucune séance et aucun horodatage fiable du
+   dernier passage réussi n'existe (`daily-sync.sh` n'écrit que des journaux quotidiens, pas un
+   marqueur de succès ; l'absence de fichier du jour ne prouve rien avec `morning_check = "off"` ni
+   quand `/log` a déjà créé le fichier) — sans cela ils seraient ré-émis à chaque passage ou perdus.
+   Ils apparaissent dans le tableau de bord, `/week`, le rapport hebdomadaire et les contrôles
+   avant séance du coach. N'utiliser jamais `--last-pass` ici. Sans état persistant, sans fichier
+   écrit ; les objets sans déclencheur ne remontent jamais (aucun seuil inventé). Aucune donnée de
+   santé ; non soumis à `[health].morning_check`. Échec de la commande : ignorer silencieusement.
 4. **Garde-fou r5, bilan rouge (#52/#53) — jamais d'écriture de plan ni de push ici.** Si
    un `medical/YYYY-MM-DD_health.md` persisté à l'étape 1 porte `verdict: "red"`, chercher
    dans `planning/` une semaine (`kind: week`) dont une séance de qualité (intensité

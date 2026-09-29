@@ -119,6 +119,41 @@
   - Nike Pegasus — départ 300 km (retirée)
 -->
 
+### Matériel
+
+<!--
+  Tout le reste du matériel (bâtons, gilet, poche à eau, flasques, frontale, ceinture
+  cardio, veste, semelles, lacets…). Même principe que « Chaussures » : une puce de
+  PREMIER NIVEAU par objet, segments séparés par " — ", tout facultatif sauf le nom.
+  Les chaussures restent dans « ### Chaussures » (rien à changer là-bas) :
+    - <nom> — catégorie: <bâtons|gilet|poche|flasques|frontale|ceinture|veste|semelles|lacets|autre> — depuis <AAAA-MM-JJ> — alerte <déclencheurs> — entretien <AAAA-MM-JJ> — kit: <nom-du-kit> — id: <identifiant>
+
+  - "catégorie:" : seule façon de classer un objet (jamais devinée du nom). Elle décide
+    des sports qui comptent : bâtons = trail/randonnée/marche ; gilet, poche, flasques, veste,
+    semelles, lacets = course/trail/randonnée ; frontale, ceinture = tout sport. Autre
+    valeur : l'objet est suivi, sans alerte inventée.
+  - "alerte" : déclencheurs typés, combinables, le premier atteint déclenche —
+    "alerte 800 km", "alerte 100 h", "alerte 40 séances", "alerte 30 jours",
+    "alerte 30 jours ou 40 h", "alerte 1h30", "alerte 6 mois", "alerte 2 ans".
+    Aucun seuil par défaut : sans "alerte", jamais d'alerte.
+    Une unité est obligatoire (un nombre seul est ignoré).
+  - "depuis" : date d'achat ; les jours se comptent depuis cette date.
+  - "entretien" : dernier entretien (nettoyage, réimperméabilisation, changement de
+    pile…) — remet à zéro les compteurs ; mettez la date de la dernière séance faite
+    AVANT l'entretien (celles d'après comptent). Dites simplement au coach « j'ai nettoyé
+    la poche » : il met ce segment à jour.
+  - "départ" : usage avant le suivi — "départ 12 h", "départ 300 km", "départ 8 séances".
+  - "kit:" : regroupe les objets portés ensemble ("kit: trail-long"). Dire « kit trail
+    long » au coach pour une séance les attribue tous d'un coup.
+  - "id:" et "(retirée)" : comme pour les chaussures.
+
+  Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
+  - Poche à eau 2 L — catégorie: poche — depuis 2026-03-01 — alerte 30 jours — kit: trail-long
+  - Frontale Petzl — catégorie: frontale — alerte 100 h — id: frontale-nuit — kit: trail-long
+  - Bâtons Leki — catégorie: bâtons — alerte 800 km — kit: trail-long
+  - Ceinture cardio — catégorie: ceinture — depuis 2026-01-10 — alerte 365 jours
+-->
+
 
 ## Préférences de coaching
 

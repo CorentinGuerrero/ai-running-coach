@@ -398,3 +398,84 @@ class TestGarminGearWhitelist(unittest.TestCase):
         text = (SKILLS / "garmin-sync-efficiency/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("one `get_activity_gear(activity_id)` call per NEW activity", text)
         self.assertIn("include_stats=False", text)
+class TestEquipmentWiring(unittest.TestCase):
+    """#134 — matériel hors chaussures : kits, entretien, alertes une seule fois et contrôle du
+    matériel de course n'existent que par les prompts ; verrouille les commandes citées, les
+    garde-fous (jamais inventer un objet ni un seuil) et la cohérence avec le CLI réel."""
+
+    COACH = REPO / "agents/coach.md"
+    STRATEGIST = REPO / "agents/course-strategist.md"
+    SYNC = REPO / "skills/garmin-daily-sync/SKILL.md"
+    WEEK = REPO / "skills/week/SKILL.md"
+    CONTRACT = REPO / "skills/workspace-data-contract/SKILL.md"
+
+    def read(self, path):
+        return path.read_text(encoding="utf-8")
+
+    def test_strategist_crosses_race_gear_with_inventory(self):
+        text = self.read(self.STRATEGIST)
+        self.assertIn("arc_index.py equipment --race-plan", text)
+        for status in ("missing", "never_used", "alert"):
+            self.assertIn(f"`{status}`", text)
+        self.assertRegex(text, r"(?i)rien de nouveau le jour J")
+        self.assertRegex(text, r"(?i)n'invente aucun objet")
+        self.assertIn("inventory_empty", text)
+
+    def test_strategist_gear_list_is_written_in_the_race_plan_block(self):
+        self.assertIn("`gear` du bloc `arc`", self.read(self.STRATEGIST))
+
+    def test_coach_kit_and_maintenance_rules(self):
+        text = self.read(self.COACH)
+        self.assertIn("arc_index.py equipment --kit", text)
+        self.assertIn("gear_ids", text)
+        self.assertIn("entretien <date>", text)
+        self.assertRegex(text, r"(?i)never add an item of your own")
+        self.assertRegex(text, r"never invent a threshold")
+        self.assertIn("pre_session_check", text)
+
+    def test_gear_ids_preserved_on_garmin_merge(self):
+        for rel in ("skills/garmin-daily-sync/SKILL.md", "skills/garmin-sync-efficiency/SKILL.md"):
+            self.assertIn("`gear_ids`", (REPO / rel).read_text(encoding="utf-8"), rel)
+
+    def test_coach_never_touches_gear_id_for_kits_and_defines_kit_and_maintenance_rule(self):
+        text = self.read(self.COACH)
+        self.assertIn("Never touch `gear_id`/`gear_source`", text)
+        self.assertIn("planned kit", text)
+        self.assertNotIn("usual kit", text)
+        self.assertIn("LAST session done BEFORE the maintenance", text)
+
+    def test_dashboard_shows_category_display_label(self):
+        js = (REPO / "web/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("EQUIP_CATEGORY_LABEL", js)
+        self.assertIn('batons: "bâtons"', js)
+
+    def test_coach_keeps_gear_id_as_the_shoe(self):
+        self.assertIn("never replaces `gear_id`", self.read(self.COACH))
+
+    def test_sync_emits_equipment_alert_once_without_state(self):
+        text = self.read(self.SYNC)
+        self.assertIn("arc_index.py equipment --activities", text)
+        self.assertRegex(text, r"(?i)AUCUNE alerte ici")          # jours : jamais dans le resume
+        self.assertRegex(text, r"(?i)aucune séance nouvelle = ne PAS lancer")
+        self.assertRegex(text, r"(?i)tout sport")
+        self.assertRegex(text, r"(?i)sans état persistant")
+        step3c = text[text.index("3c. **Alerte matériel"):text.index("4. **Garde-fou r5")]
+        self.assertNotIn("--since", step3c.replace("N'utiliser jamais `--last-pass`", ""))
+
+    def test_week_skill_reports_equipment(self):
+        text = self.read(self.WEEK)
+        self.assertIn("arc_index.py equipment", text)
+        self.assertIn("Matériel :", text)
+
+    def test_cited_equipment_flags_exist_in_the_cli(self):
+        cli = (REPO / "scripts/arc_index.py").read_text(encoding="utf-8")
+        for flag in ("--kit", "--race-plan", "--sport", "--since", "--activities"):
+            self.assertIn(f'"{flag}"', cli)
+        for path in (self.COACH, self.STRATEGIST, self.SYNC, self.CONTRACT):
+            for flag in re.findall(r"arc_index\.py equipment[^`\n]*?(--[a-z-]+)", self.read(path)):
+                self.assertIn(f'"{flag}"', cli, f"{path.name} : {flag}")
+
+    def test_contract_documents_gear_ids_and_triggers(self):
+        text = self.read(self.CONTRACT)
+        for needle in ("`gear_ids`", "alerte N km", "N séances", "N jours", "entretien", "kit:", "catégorie:"):
+            self.assertIn(needle, text)
