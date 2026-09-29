@@ -127,6 +127,37 @@ GEAR_WEAR_SPORTS = RUNNING_SPORTS + ("hiking",)
 # Seuil d'alerte par défaut si la puce du profil n'en précise pas (`arc_legacy.parse_gear`,
 # segment « alerte NNN km ») — valeur courante pour une chaussure de route/trail.
 GEAR_ALERT_THRESHOLD_M_DEFAULT = 700_000
+# Prévision de retraite (#132) : fenêtre de rythme récent (jours, `today` inclus) et
+# proportion du seuil à partir de laquelle une paire est dite « proche » du seuil.
+GEAR_FORECAST_WINDOW_DAYS = 28
+GEAR_NEAR_RATIO = 0.9
+
+# Matériel hors chaussures (#134) : sports qui usent/portent chaque catégorie (`None` = tout
+# sport, l'objet est porté quelle que soit la séance). Approximation du projet, voir
+# ASSUMPTIONS["equipment_usage"]. Une catégorie ABSENTE de cette table (inconnue, ou aucune
+# catégorie déclarée) se comporte comme `None` : l'objet est indexé et compté sur les séances
+# qui le citent explicitement, mais aucune alerte n'est inventée — seuls ses déclencheurs
+# déclarés jouent.
+EQUIPMENT_CARRY_SPORTS = GEAR_WEAR_SPORTS + ("walking",)
+EQUIPMENT_CATEGORY_SPORTS: Dict[str, Optional[Tuple[str, ...]]] = {
+    "batons": ("trail", "hiking", "walking"),     # walking : marche nordique
+    "gilet": EQUIPMENT_CARRY_SPORTS,
+    "poche": EQUIPMENT_CARRY_SPORTS,
+    "flasques": EQUIPMENT_CARRY_SPORTS,
+    "veste": EQUIPMENT_CARRY_SPORTS,
+    "semelles": GEAR_WEAR_SPORTS,
+    "lacets": GEAR_WEAR_SPORTS,
+    "frontale": None,
+    "ceinture": None,
+    "autre": None,
+}
+# Contrôle avant séance rappelé au coach (jamais une alerte chiffrée) : catégorie → phrase.
+EQUIPMENT_PRE_SESSION_CHECK = {
+    "frontale": "vérifier la batterie avant toute séance de nuit",
+    "poche": "hygiène (rinçage, séchage) avant une sortie longue",
+    "flasques": "hygiène (rinçage, séchage) avant une sortie longue",
+}
+EQUIPMENT_TRIGGER_TYPES = ("distance", "duration", "sessions", "days")
 
 # Glucides/h et taux de sudation sur les sorties longues (#41) : entraînement digestif.
 # « Sortie longue » = duration_s STRICTEMENT supérieure à 90 min (issue #41), la même
@@ -506,7 +537,78 @@ ASSUMPTIONS = {
                  "porte plus ne doit pas absorber les séances sans `gear_id`) — priorité documentée : retraite "
                  "avant défaut. Deux puces qui dérivent le même slug (rachat du même modèle sans `id:` pour les "
                  "distinguer) : `arc_legacy.parse_gear` renomme les suivantes `-2`, `-3`… plutôt que de laisser "
-                 "la dernière écraser la première dans l'index, et la collision remonte dans `warnings`.",
+                 "la dernière écraser la première dans l'index, et la collision remonte dans `warnings`. "
+                 "Kilométrage de départ (#132) : segment « départ N km » de la puce (`start_m`, « mi » converti) "
+                 "= kilométrage déjà parcouru avant le suivi, AJOUTÉ à `distance_m` (donc au seuil d'alerte, à la "
+                 "prévision et à `near_threshold`), y compris pour une paire `(retirée)` (historique) ; il ne "
+                 "dépend d'aucune date et n'est jamais recalculé depuis les activités — le corriger par chat = "
+                 "réécrire ce seul segment (total déclaré − km déjà comptés par les activités, jamais négatif). "
+                 f"Prévision de retraite (#132, `today` fourni) : rythme = km attribués à la paire sur les "
+                 f"{GEAR_FORECAST_WINDOW_DAYS} derniers jours (`today` inclus, séances datées seulement — la "
+                 "même attribution que le cumul) ÷ 28 ; jours restants = (seuil − cumul) ÷ rythme ; date = "
+                 "`today` + ⌈jours⌉ (donc toujours future) et `retire_forecast_weeks` = jours ÷ 7 arrondi à "
+                 "0,1. Clés OMISES (jamais 0, jamais une date passée) : aucun usage sur 28 jours, paire "
+                 "retirée, seuil déjà atteint (`alert`, le texte dit alors « seuil dépassé »). Approximation "
+                 "linéaire : ne tient pas compte d'un bloc de repos, d'une préparation de course ou d'un "
+                 "changement de rotation ; `near_threshold` (clé présente seulement si vraie) = cumul ≥ 90 % "
+                 "du seuil sans l'avoir atteint. Alerte « une seule fois » (`run_refs`, #132) : `crossed_in_run` "
+                 "(clé présente seulement si `run_refs` est fourni) vaut vrai si le cumul HORS les séances "
+                 "désignées (par `garmin_activity_id`, `intervals_activity_id` ou chemin du fichier) était "
+                 "sous le seuil et que le cumul total l'atteint : la séance qui franchit le seuil est "
+                 "identifiée par son identifiant, jamais par sa date — une seconde synchronisation le même "
+                 "jour, ou la fusion d'une séance déjà synchronisée (que l'appelant ne passe pas), ne "
+                 "ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` "
+                 "quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans "
+                 "la prévision), et le séparateur décimal du départ est toujours le point ou la virgule "
+                 "(« 1.200 km » = 1,2 km ; espace = milliers). #133 : une séance sans `gear_id` marquée "
+                 "`gear_source: \"garmin_unmapped\"` (matériel Garmin non associé, ambigu ou ignoré) est "
+                 "EXCLUE de l'attribution par défaut — ni comptée, ni source de `crossed_in_run` — pour ne "
+                 "jamais créditer en silence une autre paire ; les puces `(ignorée)` ne sont pas des chaussures.",
+    "equipment_usage": "Matériel hors chaussures (#134, `arc_index.py equipment`) : objets de la section « ### Matériel » "
+                 "du profil (`arc_legacy.parse_equipment`). Attribution : UNIQUEMENT explicite — une activité "
+                 "compte pour un objet si son `gear_ids` (liste de slugs, en plus de `gear_id` qui reste la "
+                 "chaussure) le cite ; aucun objet par défaut, jamais deviné du nom ni de la catégorie (un "
+                 "ceinture cardio portée à chaque séance se déclare par un kit ou dans `gear_ids`). Une activité "
+                 "sans `gear_ids` compte donc pour aucun objet. Sports : chaque catégorie déclarée par "
+                 "« catégorie: … » (jamais devinée) n'use l'objet que sur certains sports "
+                 "(`EQUIPMENT_CATEGORY_SPORTS` : bâtons = trail et randonnée ; gilet, poche, flasques, veste, "
+                 "semelles, lacets = course, trail, randonnée ; frontale, ceinture, autre = tout sport) — "
+                 "approximation du projet, pas une norme fabricant ; une séance d'un autre sport qui cite l'objet "
+                 "n'est pas comptée. Catégorie inconnue ou absente : objet indexé et compté sur toute séance qui "
+                 "le cite, mais AUCUNE alerte inventée — seuls ses déclencheurs déclarés jouent, et il n'y a "
+                 "aucun seuil par défaut pour le matériel (contrairement aux chaussures, 700 km). Compteurs : "
+                 "`distance_m` (somme de `distance_m`), `duration_s` (somme de `duration_s` — la durée totale de "
+                 "la séance, pas le temps en mouvement), `sessions` (nombre de séances comptées), `days` (jours "
+                 "civils écoulés entre `today` et la date de référence, jamais négatifs). Date de référence = "
+                 "`entretien`/`révisé` le plus récent, sinon `depuis` ; sans aucune des deux, `days` n'est pas "
+                 "calculable (déclencheur en jours inopérant, avertissement — jamais 0). Un entretien remet à "
+                 "zéro TOUS les compteurs des déclencheurs : les séances datées jusqu'à la date `entretien` "
+                 "INCLUSE sont exclues, celles datées APRÈS comptent : le coach écrit donc comme `entretien` la "
+                 "date de la DERNIÈRE séance faite avant l'entretien (à défaut, la veille de l'entretien), pour "
+                 "qu'une séance du jour faite après l'entretien reste comptée — la date de référence des jours "
+                 "peut ainsi précéder l'entretien réel de quelques jours (approximation du projet, prudente : "
+                 "l'alerte arrive plutôt plus tôt que trop tard) ; le `départ` (usage antérieur au suivi) est aussi ignoré ; les cumuls à vie restent rendus (`lifetime`). `depuis` ne filtre jamais une "
+                 "attribution explicite (même règle que les chaussures). Le `départ N km|h|séances` s'ajoute aux "
+                 "compteurs correspondants tant qu'aucun entretien n'existe ; il n'existe pas de départ en "
+                 "jours (les jours partent de `depuis`). Déclencheurs : « alerte N km | N h (ou NhMM) | "
+                 "N séances | N jours | N semaines | N mois | N ans » (semaine = 7 j, mois = 30 j, an = 365 j — "
+                 "approximation du projet), un segment `alerte`/`départ` sans unité lisible est ignoré AVEC un "
+                 "avertissement (jamais silencieux, jamais un type deviné), combinables, le premier atteint (valeur ≥ seuil) fait `alert` ; `near_threshold` "
+                 "= un déclencheur à ≥ 90 % sans qu'aucun soit atteint. Objet `(retirée)` : compteurs rendus, "
+                 "jamais d'alerte. Alerte « une seule fois » sans état persistant (`--activities` et/ou "
+                 "`--last-pass` fournis, clé `crossed_in_run` présente seulement alors) : déclencheurs km/h/séances "
+                 "= le cumul HORS les séances désignées était sous le seuil et le total l'atteint (par "
+                 "identifiant de séance, comme les chaussures) ; déclencheur en jours = le seuil est franchi "
+                 "ENTRE `--last-pass` (jour du dernier passage, EXCLU — à l'inverse de `--since` de la commande "
+                 "`energy`, inclus) et `today` (inclus) ; SANS `--last-pass`, un déclencheur en jours ne marque "
+                 "JAMAIS de franchissement (aucun repli « jour exact » : un second passage le ré-émettrait). Le "
+                 "`garmin-daily-sync` n'émet aucune alerte en jours (aucun horodatage fiable du dernier "
+                 "passage réussi) : ils ne se lisent que dans le tableau de bord, `/week`, le rapport "
+                 "hebdomadaire et les contrôles avant séance du coach, qui montrent toujours l'état courant. Kits : « kit: <slug> » sur les objets ; "
+                 "`equipment --kit <slug> --sport <sport>` rend les objets à attribuer à une séance (non "
+                 "retirés, dont la catégorie porte ce sport) et ceux écartés avec la raison. Un `gear_ids` "
+                 "cité sur une activité mais absent du profil (et de la section Chaussures) est rendu sous "
+                 "`unknown`, jamais éliminé (un `gear_ids` qui cite une CHAUSSURE du profil est signalé, pas compté). Sports : walking compte pour bâtons (marche nordique), gilet, poche, flasques, veste. Non soumis à `[health].morning_check`.",
     "hr_zones": "Zones FC, temps en zone et polarisation 80/20 (#43) : des APPROXIMATIONS d'entraînement, "
                 "jamais une mesure physiologique directe (pas de test d'effort, pas de lactate, pas de "
                 "seuils ventilatoires mesurés) — voir plus bas pour la polarisation, la plus approximative "
@@ -1637,24 +1739,97 @@ def durability_trend(activities: List[dict], day: date, window_weeks: int = DURA
     }
 
 
-def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
+def resolve_gear_attribution(gear_defs: List[dict], garmin_uuids: List[str],
+                             chat_gear_id: Optional[str] = None) -> dict:
+    """Priorité d'attribution du matériel d'une séance (#133) : `gear_id` déclaré en chat >
+    matériel attaché par Garmin (`get_activity_gear`, rattaché à une puce par son segment
+    `garmin: <uuid>`) > paire `(par défaut)` (calculée à la lecture par `gear_mileage`, donc
+    JAMAIS écrite ici : `gear_id` reste `None`).
+
+    Règles (jamais d'attribution devinée) :
+    - Un uuid Garmin sans puce correspondante est rendu dans `unmapped_garmin` et n'attribue rien.
+    - Plusieurs puces distinctes rattachées par Garmin à la même séance (ou un uuid porté par
+      deux puces) = ambigu (`ambiguous`),
+      aucune attribution Garmin.
+    - Le chat gagne toujours sur Garmin ; si Garmin désignait une AUTRE puce, `conflict`
+      = `{garmin, chat}` (à signaler une fois à l'athlète).
+    - `chat_gear_id` absent du profil : conservé tel quel (le profil est la source de vérité de
+      l'athlète ; `gear_mileage` regroupe déjà les `gear_id` inconnus), jamais remplacé.
+    - Un uuid porté par une puce `(ignorée)` (`ignored`) est « connu mais non suivi » : rendu dans
+      `ignored_garmin`, jamais dans `unmapped_garmin` (plus de signalement), jamais attribué.
+    Sans `gear_id` mais avec un matériel Garmin non attribuable (non associé, ambigu ou ignoré) et
+    sans déclaration de l'athlète, `gear_source = "garmin_unmapped"` : marqueur à écrire SANS
+    `gear_id`, qui exclut la séance de l'attribution par défaut (`gear_mileage`).
+    Sortie : `{gear_id, gear_source ("garmin"|"chat"|"garmin_unmapped"|None), conflict,
+    unmapped_garmin, ignored_garmin, ambiguous}`."""
+    by_uuid: Dict[str, List[str]] = {}
+    ignored_uuids = set()
+    for g in gear_defs:
+        u = (g.get("garmin_uuid") or "").strip().lower()
+        if not u:
+            continue
+        if g.get("ignored"):
+            ignored_uuids.add(u)
+            continue
+        by_uuid.setdefault(u, []).append(g["gear_id"])
+    mapped: List[str] = []
+    unmapped: List[str] = []
+    ignored: List[str] = []
+    for raw in garmin_uuids:
+        u = (raw or "").strip().lower()
+        if not u:
+            continue
+        gids = by_uuid.get(u)
+        if not gids and u in ignored_uuids:
+            if u not in ignored:
+                ignored.append(u)
+            continue
+        if not gids:
+            if u not in unmapped:
+                unmapped.append(u)
+            continue
+        # Un même uuid sur deux puces = ambigu (jamais « la première gagne »).
+        for gid in gids:
+            if gid not in mapped:
+                mapped.append(gid)
+    ambiguous = mapped if len(mapped) > 1 else []
+    garmin_id = mapped[0] if len(mapped) == 1 else None
+    out = {"gear_id": None, "gear_source": None, "conflict": None,
+           "unmapped_garmin": unmapped, "ignored_garmin": ignored, "ambiguous": ambiguous}
+    if chat_gear_id:
+        out["gear_id"], out["gear_source"] = chat_gear_id, "chat"
+        if garmin_id and garmin_id != chat_gear_id:
+            out["conflict"] = {"garmin": garmin_id, "chat": chat_gear_id}
+    elif garmin_id:
+        out["gear_id"], out["gear_source"] = garmin_id, "garmin"
+    elif unmapped or ignored or ambiguous:
+        out["gear_source"] = "garmin_unmapped"
+    return out
+
+
+def gear_mileage(activities: List[dict], gear_defs: List[dict],
+                 today: Optional[date] = None, run_refs: Optional[Iterable[str]] = None) -> dict:
     """Kilométrage cumulé par chaussure (#40). Voir `ASSUMPTIONS["gear_mileage"]`
     pour la méthode complète (attribution, chaussure par défaut, `gear_id` inconnu,
     date `depuis` filtrant l'attribution PAR DÉFAUT seulement, priorité
-    retraite/défaut).
+    retraite/défaut, kilométrage de départ, prévision de retraite).
 
     `activities` : dicts portant au moins `sport`, `distance_m` (optionnel — une
     séance sans distance ne contribue rien), `gear_id` (optionnel) et `date`
     (AAAA-MM-JJ — nécessaire pour filtrer l'attribution par défaut par `depuis`,
     voir plus bas ; son absence n'exclut jamais une activité à `gear_id` explicite).
     `gear_defs` : liste au format `arc_legacy.parse_gear` (`gear_id`, `name`,
-    `start_date`, `threshold_m`, `default`, `retired`, `collision_base`).
+    `start_date`, `threshold_m`, `default`, `retired`, `start_m`, `usage`,
+    `collision_base`).
+    `today` (#132) : jour de référence de la prévision de retraite — sans lui, aucune
+    prévision. `run_refs` (#132) : identifiants des séances synchronisées dans CE run (clé `refs` de chaque
+    activité : garmin_activity_id, intervals_activity_id, chemin) ; ajoute `crossed_in_run`.
 
     Rend `{"shoes": [...], "unknown": [...], "warnings": [...]}` : `shoes` couvre
     TOUTE chaussure déclarée dans le profil, y compris à 0 m (l'athlète voit sa
-    liste complète), chacune avec `distance_m`, `alert` (bool) et les champs du
-    profil ; `unknown` liste les `gear_id` vus sur une activité mais absents du
-    profil, avec leur seul kilométrage (pas de nom, pas de seuil — rien à
+    liste complète), chacune avec `distance_m` (départ compris), `alert` (bool) et
+    les champs du profil ; `unknown` liste les `gear_id` vus sur une activité mais
+    absents du profil, avec leur seul kilométrage (pas de nom, pas de seuil — rien à
     afficher de plus) ; `warnings` signale toute collision de `gear_id` dérivé
     détectée par `arc_legacy.parse_gear` (revue #85 blocker 2)."""
     by_id = {g["gear_id"]: dict(g) for g in gear_defs if g.get("gear_id")}
@@ -1668,35 +1843,69 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
     # est filtrée : un `gear_id` EXPLICITE sur l'activité n'est jamais remis en
     # cause par la date (voir ASSUMPTIONS["gear_mileage"]).
     default_start = default_entry.get("start_date") if default_entry else None
+    window_start = (today - timedelta(days=GEAR_FORECAST_WINDOW_DAYS - 1)).isoformat() if today else None
+    today_iso = today.isoformat() if today else None
 
     totals: Dict[str, float] = {}
+    recent: Dict[str, float] = {}     # 28 derniers jours (prévision)
+    run_set = {str(r) for r in run_refs} if run_refs else set()
+    run_m: Dict[str, float] = {}      # séances de CE run (alerte à franchissement)
     for act in activities:
         if act.get("sport") not in GEAR_WEAR_SPORTS:
             continue
         distance = act.get("distance_m")
         if not distance:
             continue
+        if today_iso and act.get("date") and act["date"] > today_iso:
+            continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
         gear_id = act.get("gear_id")
         if not gear_id:
+            if act.get("gear_source") == "garmin_unmapped":
+                continue    # #133 : matériel Garmin non associé — jamais crédité en silence à la paire par défaut
             if not default_id:
                 continue
             if default_start and (not act.get("date") or act["date"] < default_start):
                 continue    # séance antérieure à l'entrée en service de la chaussure par défaut
             gear_id = default_id
         totals[gear_id] = totals.get(gear_id, 0.0) + distance
+        day = act.get("date")
+        if window_start and day and window_start <= day <= today_iso:
+            recent[gear_id] = recent.get(gear_id, 0.0) + distance
+        if run_set and run_set & {str(r) for r in (act.get("refs") or [])}:
+            run_m[gear_id] = run_m.get(gear_id, 0.0) + distance
 
     shoes = []
     warnings = []
     for gear_id, g in by_id.items():
-        distance_m = round(totals.get(gear_id, 0.0))
+        start_m = round(g.get("start_m") or 0)
+        distance_m = round(totals.get(gear_id, 0.0)) + start_m
         threshold_m = round(g.get("threshold_m") or GEAR_ALERT_THRESHOLD_M_DEFAULT)
         retired = bool(g.get("retired"))
-        shoes.append({
+        alert = (not retired) and distance_m >= threshold_m
+        shoe = {
             "gear_id": gear_id, "name": g.get("name") or gear_id, "distance_m": distance_m,
             "threshold_m": threshold_m, "start_date": g.get("start_date"),
             "default": bool(g.get("default")), "retired": retired,
-            "alert": (not retired) and distance_m >= threshold_m,
-        })
+            "alert": alert,
+        }
+        if g.get("start_m") is not None:
+            shoe["start_m"] = start_m
+        if g.get("usage"):
+            shoe["usage"] = g["usage"]
+        if (not retired) and (not alert) and distance_m >= GEAR_NEAR_RATIO * threshold_m:
+            shoe["near_threshold"] = True
+        recent_m = recent.get(gear_id, 0.0)
+        if today and (not retired) and (not alert) and recent_m > 0:
+            rate_m_day = recent_m / GEAR_FORECAST_WINDOW_DAYS
+            days = (threshold_m - distance_m) / rate_m_day
+            shoe["recent_28d_m"] = round(recent_m)
+            shoe["retire_forecast_date"] = (today + timedelta(days=max(1, math.ceil(days)))).isoformat()
+            shoe["retire_forecast_weeks"] = round(days / 7, 1)
+        if run_set:
+            before = distance_m - round(run_m.get(gear_id, 0.0))
+            if (not retired) and before < threshold_m <= distance_m:
+                shoe["crossed_in_run"] = True
+        shoes.append(shoe)
         collision_base = g.get("collision_base")
         if collision_base:
             warnings.append(
@@ -1708,6 +1917,292 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict]) -> dict:
     unknown.sort(key=lambda s: s["gear_id"])
     warnings.sort()
     return {"shoes": shoes, "unknown": unknown, "warnings": warnings}
+
+
+def _norm_text(text: Any) -> str:
+    """minuscules sans accents (comparaison de libellés)."""
+    return "".join(c for c in unicodedata.normalize("NFD", str(text or "").lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def equipment_sports(category: Optional[str]) -> Optional[Tuple[str, ...]]:
+    """Sports qui comptent pour une catégorie (`None` = tout sport). Voir ASSUMPTIONS["equipment_usage"]."""
+    return EQUIPMENT_CATEGORY_SPORTS.get(category) if category else None
+
+
+def equipment_usage(activities: List[dict], equipment_defs: List[dict], today: Optional[date] = None,
+                    run_refs: Optional[Iterable[str]] = None, last_pass: Optional[date] = None,
+                    known_ids: Iterable[str] = ()) -> dict:
+    """`gear_usage` du matériel hors chaussures (#134) : distance, durée, séances et jours par objet,
+    déclencheurs typés (le premier atteint alerte). Méthode complète et limites :
+    `ASSUMPTIONS["equipment_usage"]`.
+
+    `activities` : dicts `sport`, `date`, `distance_m`, `duration_s`, `gear_ids` (liste de slugs),
+    `refs` (facultatif). `equipment_defs` : format `arc_legacy.parse_equipment`. `known_ids` :
+    `gear_id` de chaussures (ne sont pas rendus « inconnus » s'ils apparaissent dans `gear_ids`).
+    Rend `{"items": [...], "unknown": [...], "kits": {slug: [gear_id]}, "warnings": [...]}`."""
+    by_id = {g["gear_id"]: g for g in equipment_defs if g.get("gear_id")}
+    today_iso = today.isoformat() if today else None
+    run_set = {str(r) for r in run_refs} if run_refs else set()
+    track_cross = bool(run_set) or last_pass is not None
+    shoe_ids = set(known_ids)
+    counters: Dict[str, Dict[str, float]] = {}    # à vie
+    run_part: Dict[str, Dict[str, float]] = {}
+    per_act: Dict[str, List[Tuple[Optional[str], float, float, bool]]] = {}
+    unknown: Dict[str, Dict[str, float]] = {}
+    shoe_in_ids: set = set()
+    for act in activities:
+        ids = act.get("gear_ids") or []
+        if not ids:
+            continue
+        day = act.get("date")
+        if today_iso and day and day > today_iso:
+            continue
+        in_run = bool(run_set and run_set & {str(r) for r in (act.get("refs") or [])})
+        distance = float(act.get("distance_m") or 0)
+        duration = float(act.get("duration_s") or 0)
+        for gid in dict.fromkeys(ids):
+            g = by_id.get(gid)
+            if g is None:
+                if gid in shoe_ids:
+                    shoe_in_ids.add(gid)
+                if gid not in shoe_ids:
+                    u = unknown.setdefault(gid, {"distance_m": 0.0, "duration_s": 0.0, "sessions": 0})
+                    u["distance_m"] += distance
+                    u["duration_s"] += duration
+                    u["sessions"] += 1
+                continue
+            sports = equipment_sports(g.get("category"))
+            if sports is not None and act.get("sport") not in sports:
+                continue
+            per_act.setdefault(gid, []).append((day, distance, duration, in_run))
+
+    items: List[dict] = []
+    warnings: List[str] = []
+    kits: Dict[str, List[str]] = {}
+    for gid, g in by_id.items():
+        retired = bool(g.get("retired"))
+        category = g.get("category")
+        known_cat = category in EQUIPMENT_CATEGORY_SPORTS
+        reference = g.get("maintenance_date") or g.get("start_date")
+        maintenance = g.get("maintenance_date")
+        life = {"distance_m": 0.0, "duration_s": 0.0, "sessions": 0}
+        cur = {"distance_m": 0.0, "duration_s": 0.0, "sessions": 0}
+        run = {"distance_m": 0.0, "duration_s": 0.0, "sessions": 0}
+        for day, distance, duration, in_run in per_act.get(gid, []):
+            life["distance_m"] += distance
+            life["duration_s"] += duration
+            life["sessions"] += 1
+            if maintenance and (not day or day <= maintenance):
+                continue
+            cur["distance_m"] += distance
+            cur["duration_s"] += duration
+            cur["sessions"] += 1
+            if in_run:
+                run["distance_m"] += distance
+                run["duration_s"] += duration
+                run["sessions"] += 1
+        if not maintenance:
+            cur["distance_m"] += g.get("start_m") or 0
+            cur["duration_s"] += g.get("start_s") or 0
+            cur["sessions"] += g.get("start_sessions") or 0
+        days = days_prev = None
+        if reference and today:
+            days = max(0, (today - date.fromisoformat(reference)).days)
+            if last_pass is not None:
+                days_prev = (last_pass - date.fromisoformat(reference)).days
+        values = {"distance": round(cur["distance_m"]), "duration": round(cur["duration_s"]),
+                  "sessions": int(cur["sessions"]), "days": days}
+        thresholds = {"distance": g.get("threshold_m"), "duration": g.get("threshold_s"),
+                      "sessions": g.get("threshold_sessions"), "days": g.get("threshold_days")}
+        run_values = {"distance": cur["distance_m"] - run["distance_m"],
+                      "duration": cur["duration_s"] - run["duration_s"],
+                      "sessions": cur["sessions"] - run["sessions"]}
+        triggers = []
+        any_reached = any_near = crossed = False
+        for ttype in EQUIPMENT_TRIGGER_TYPES:
+            threshold = thresholds[ttype]
+            if not threshold:
+                continue
+            value = values[ttype]
+            trig = {"type": ttype, "threshold": threshold, "value": value}
+            if value is None:
+                trig["unavailable"] = True
+                warnings.append(
+                    f"« {g.get('name') or gid} » : déclencheur en jours sans date de référence — ajoutez "
+                    "« depuis <date> » (ou « entretien <date> ») pour qu'il compte.")
+            else:
+                trig["ratio"] = round(value / threshold, 3)
+                reached = value >= threshold
+                trig["reached"] = reached
+                if reached:
+                    any_reached = True
+                elif value >= GEAR_NEAR_RATIO * threshold:
+                    any_near = True
+                if track_cross and not retired:
+                    if ttype == "days":
+                        # sans `last_pass` : jamais de franchissement (pas de repli « jour exact »)
+                        cross = (last_pass is not None and days_prev is not None
+                                 and days_prev < threshold and reached)
+                    else:
+                        cross = reached and run_values[ttype] < threshold if run_set else False
+                    if cross:
+                        trig["crossed_in_run"] = True
+                        crossed = True
+            triggers.append(trig)
+        item = {
+            "gear_id": gid, "name": g.get("name") or gid, "category": category,
+            "category_known": bool(known_cat), "retired": retired,
+            "sports": list(EQUIPMENT_CATEGORY_SPORTS[category]) if known_cat and EQUIPMENT_CATEGORY_SPORTS[category] else "all",
+            "start_date": g.get("start_date"), "maintenance_date": maintenance,
+            "kits": list(g.get("kits") or []),
+            "usage": {"distance_m": values["distance"], "duration_s": values["duration"],
+                      "sessions": values["sessions"], "days": days},
+            "lifetime": {"distance_m": round(life["distance_m"]), "duration_s": round(life["duration_s"]),
+                         "sessions": int(life["sessions"])},
+            "triggers": triggers,
+            "alert": (not retired) and any_reached,
+        }
+        if reference:
+            item["reference_date"] = reference
+        if (not retired) and (not item["alert"]) and any_near:
+            item["near_threshold"] = True
+        if track_cross:
+            item["crossed_in_run"] = crossed
+        check = EQUIPMENT_PRE_SESSION_CHECK.get(category)
+        if check:
+            item["pre_session_check"] = check
+        items.append(item)
+        for w in g.get("parse_warnings") or []:
+            warnings.append(f"« {g.get('name') or gid} » : {w}")
+        for kit in g.get("kits") or []:
+            kits.setdefault(kit, []).append(gid)
+        if category and not known_cat:
+            warnings.append(
+                f"« {g.get('name') or gid} » : catégorie « {category} » non reconnue — objet indexé, "
+                "compté sur les séances qui le citent, aucune alerte inventée (seuls ses déclencheurs déclarés jouent).")
+        if gid in shoe_ids:
+            warnings.append(f"« {g.get('name') or gid} » : même identifiant qu'une chaussure du profil — "
+                            "ajoutez un `id:` distinct.")
+        if g.get("collision_base"):
+            warnings.append(
+                f"« {g.get('name') or gid} » dérive le même identifiant (« {g['collision_base']} ») qu'un autre "
+                f"objet du profil — renommé « {gid} » automatiquement ; ajoutez un `id:` explicite.")
+    for gid in sorted(shoe_in_ids):
+        warnings.append(f"`gear_ids` cite « {gid} », une chaussure du profil : ignoré — la chaussure va dans "
+                        "`gear_id`, jamais dans `gear_ids`.")
+    items.sort(key=lambda i: i["name"].casefold())
+    unknown_out = [{"gear_id": k, "distance_m": round(v["distance_m"]), "duration_s": round(v["duration_s"]),
+                    "sessions": int(v["sessions"])} for k, v in sorted(unknown.items())]
+    return {"items": items, "unknown": unknown_out, "kits": {k: v for k, v in sorted(kits.items())},
+            "warnings": sorted(set(warnings))}
+
+
+def kit_members(equipment_defs: List[dict], kit: str, sport: Optional[str] = None) -> dict:
+    """Objets à attribuer à une séance quand l'athlète déclare un kit (« kit trail long »).
+    `kit` est comparé après `gear_slug` (l'appelant passe le slug). Un objet `(retirée)` ou dont
+    la catégorie ne porte pas `sport` est écarté avec sa raison ; sans `sport`, aucun filtre de sport.
+    Rend `{kit, known, gear_ids, skipped: [{gear_id, reason}]}` — `known` faux = aucun objet ne
+    déclare ce kit (à dire à l'athlète, jamais à inventer)."""
+    members = [g for g in equipment_defs if kit in (g.get("kits") or [])]
+    out_ids, skipped = [], []
+    for g in members:
+        if g.get("retired"):
+            skipped.append({"gear_id": g["gear_id"], "reason": "retired"})
+            continue
+        sports = equipment_sports(g.get("category"))
+        if sport and sports is not None and sport not in sports:
+            skipped.append({"gear_id": g["gear_id"], "reason": "sport"})
+            continue
+        out_ids.append(g["gear_id"])
+    return {"kit": kit, "known": bool(members), "gear_ids": out_ids, "skipped": skipped}
+
+
+# Chaussures : mots-têtes d'une ligne du plan qui désignent des chaussures (lien de CATÉGORIE seulement).
+_RACE_SHOE_HEADS = ("chaussure", "chaussures", "baskets")
+
+
+def _norm_words(text: Any) -> List[str]:
+    """Mots normalisés (minuscules, sans accents, ponctuation → espace) — même traitement pour
+    l'aiguille et la botte de foin (« Sac Salomon (12 L) » se retrouve lui-même)."""
+    t = _norm_text(text).replace("'", " ")
+    return "".join(c if c.isalnum() else " " for c in t).split()
+
+
+def _sublist(needle: List[str], hay: List[str], prefix: bool = False) -> bool:
+    n = len(needle)
+    if not n or n > len(hay):
+        return False
+    if prefix:
+        return hay[:n] == needle
+    return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+
+
+def race_gear_check(race_gear: List[Any], equipment_items: List[dict], shoes: List[dict]) -> dict:
+    """Croise la liste `gear` d'un plan de course avec l'inventaire (#134). `equipment_items` =
+    `equipment_usage()["items"]`, `shoes` = `gear_mileage()["shoes"]`. Deux niveaux de lien, jamais flous :
+    - **nom/identifiant** (fort) : le nom (ou l'identifiant) d'un objet figure dans la ligne, ou la ligne
+      (au moins un mot) figure dans son nom — mots entiers, ponctuation/accents ignorés ;
+    - **catégorie** (faible) : la ligne COMMENCE par un alias de la catégorie déclarée (le nom commun
+      tête de la ligne, `arc_legacy.EQUIPMENT_CATEGORIES` — sans adjectifs génériques comme « imperméable »).
+    Statut par ligne : `missing` (aucun objet — « non retrouvé dans l'inventaire ») ; `category_match`
+    (seul un lien de catégorie : « à vérifier : spécification », JAMAIS `ok` — une ceinture porte-dossard
+    n'est pas une ceinture cardio, une veste coupe-vent n'est pas forcément l'imperméable exigé) ;
+    sinon, sur les objets à lien fort : `alert`, `never_used` (aucune séance ne cite l'objet — « rien de
+    nouveau le jour J »), ou `ok`. Les objets retirés ne sont jamais rattachés."""
+    from arc_legacy import EQUIPMENT_CATEGORIES   # import local : évite un cycle au chargement
+    results = []
+    for raw in race_gear:
+        entry = raw.get("name") if isinstance(raw, dict) else raw
+        entry = str(entry or "").strip()
+        words = _norm_words(entry)
+        if not words:
+            continue
+        strong: List[dict] = []
+        weak: List[dict] = []
+
+        def match(it, kind, tested, alert):
+            return {"gear_id": it["gear_id"], "name": it["name"], "kind": kind, "tested": tested, "alert": alert}
+
+        for it in equipment_items:
+            if it.get("retired"):
+                continue
+            name_w = _norm_words(it.get("name"))
+            id_w = _norm_words(it["gear_id"])
+            m = match(it, "equipment", it["lifetime"]["sessions"] > 0, bool(it["alert"]))
+            if _sublist(name_w, words) or _sublist(id_w, words) or _sublist(words, name_w):
+                strong.append(m)
+                continue
+            cat = it.get("category")
+            aliases = EQUIPMENT_CATEGORIES.get(cat or "", ()) if cat != "autre" else ()
+            if any(_sublist(_norm_words(a), words, prefix=True) for a in aliases):
+                weak.append(m)
+        for sh in shoes:
+            if sh.get("retired"):
+                continue
+            m = match(sh, "shoe", (sh["distance_m"] - (sh.get("start_m") or 0)) > 0, bool(sh.get("alert")))
+            if _sublist(_norm_words(sh["name"]), words) or _sublist(_norm_words(sh["gear_id"]), words):
+                strong.append(m)
+            elif words[0] in _RACE_SHOE_HEADS:
+                weak.append(m)
+        if strong:
+            if any(m["alert"] for m in strong):
+                status = "alert"
+            elif not any(m["tested"] for m in strong):
+                status = "never_used"
+            else:
+                status = "ok"
+            matches = strong
+        elif weak:
+            status, matches = "category_match", weak
+        else:
+            status, matches = "missing", []
+        results.append({"entry": entry, "status": status, "matches": matches})
+    return {"entries": results,
+            "missing": [r["entry"] for r in results if r["status"] == "missing"],
+            "category_match": [r["entry"] for r in results if r["status"] == "category_match"],
+            "never_used": [r["entry"] for r in results if r["status"] == "never_used"],
+            "alert": [r["entry"] for r in results if r["status"] == "alert"]}
 
 
 def predict_time_vdot(vdot_value: float, distance_m: float) -> Optional[float]:

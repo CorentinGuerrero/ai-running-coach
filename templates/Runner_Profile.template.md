@@ -84,7 +84,7 @@
   facultatif sauf le nom. Segments séparés par un tiret cadratin " — " (le plus
   lisible), ou par un simple tiret ENTOURÉ D'ESPACES " - " (jamais un tiret
   sans espaces, qui peut faire partie du nom, ex. « Ultra-Trail ») :
-    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — id: <identifiant> (par défaut)
+    - <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> — garmin: <uuid> (par défaut)
 
   - "depuis" : date d'achat — AAAA-MM-JJ, ou juste "mars 2026"/"03/2026" (1er du
     mois). Depuis #40, filtre l'attribution automatique des séances SANS
@@ -92,17 +92,66 @@
     n'y est pas rattachée) — sans effet sur une séance qui cite cet id.
   - "alerte" : seuil d'usure propre à cette paire, en km (ou "N miles"/"N mi",
     converti), sinon 700 km par défaut.
+  - "départ" : kilomètres déjà parcourus AVANT le suivi (paire d'occasion, usage
+    antérieur à l'installation) — "départ 300 km" ou "départ 100 mi". Ajouté au
+    cumul, donc à l'alerte et à la prévision de retraite. Vous pouvez aussi le
+    corriger en discutant avec le coach ("mes Pegasus ont en fait ~300 km").
+  - "usage:" (facultatif) : rôle de la paire — course, trail, route, récup — pour
+    que le coach suggère quelle paire porter quand vous en avez deux ou plus.
   - "id:" : identifiant explicite (sinon dérivé automatiquement du nom).
     OBLIGATOIRE si vous rachetez le même modèle (deux puces au même nom sans
     id explicite se voient sinon attribuer un identifiant renommé -2, -3… et
     un avertissement au tableau de bord).
+  - "garmin:" (facultatif) : identifiant (uuid) du matériel dans Garmin Connect, tel que
+    listé par le coach (`get_gear`) — il permet de rattacher automatiquement le matériel
+    que la montre attache à une séance. Le coach vous propose l'association une fois ;
+    il ne la devine jamais.
   - "(par défaut)" : chaussure attribuée aux séances sans matériel précisé.
   - "(retirée)" : sortie de rotation — kilométrage conservé, jamais d'alerte.
+  - "(ignorée)" : matériel Garmin que vous ne suivez pas — puce réduite à `garmin: <uuid>` ; le coach
+    ne le repropose plus et ne le signale plus, et ses séances ne sont jamais créditées à la
+    paire par défaut.
 
   Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
   - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
   - Hoka Speedgoat 5 (grises) — depuis 2026-09-01 — id: speedgoat-grises
-  - Nike Pegasus (retirée)
+  - Salomon S/Lab Ultra — usage: course — départ 20 km — id: slab-ultra
+  - Nike Pegasus — départ 300 km (retirée)
+-->
+
+### Matériel
+
+<!--
+  Tout le reste du matériel (bâtons, gilet, poche à eau, flasques, frontale, ceinture
+  cardio, veste, semelles, lacets…). Même principe que « Chaussures » : une puce de
+  PREMIER NIVEAU par objet, segments séparés par " — ", tout facultatif sauf le nom.
+  Les chaussures restent dans « ### Chaussures » (rien à changer là-bas) :
+    - <nom> — catégorie: <bâtons|gilet|poche|flasques|frontale|ceinture|veste|semelles|lacets|autre> — depuis <AAAA-MM-JJ> — alerte <déclencheurs> — entretien <AAAA-MM-JJ> — kit: <nom-du-kit> — id: <identifiant>
+
+  - "catégorie:" : seule façon de classer un objet (jamais devinée du nom). Elle décide
+    des sports qui comptent : bâtons = trail/randonnée/marche ; gilet, poche, flasques, veste,
+    semelles, lacets = course/trail/randonnée ; frontale, ceinture = tout sport. Autre
+    valeur : l'objet est suivi, sans alerte inventée.
+  - "alerte" : déclencheurs typés, combinables, le premier atteint déclenche —
+    "alerte 800 km", "alerte 100 h", "alerte 40 séances", "alerte 30 jours",
+    "alerte 30 jours ou 40 h", "alerte 1h30", "alerte 6 mois", "alerte 2 ans".
+    Aucun seuil par défaut : sans "alerte", jamais d'alerte.
+    Une unité est obligatoire (un nombre seul est ignoré).
+  - "depuis" : date d'achat ; les jours se comptent depuis cette date.
+  - "entretien" : dernier entretien (nettoyage, réimperméabilisation, changement de
+    pile…) — remet à zéro les compteurs ; mettez la date de la dernière séance faite
+    AVANT l'entretien (celles d'après comptent). Dites simplement au coach « j'ai nettoyé
+    la poche » : il met ce segment à jour.
+  - "départ" : usage avant le suivi — "départ 12 h", "départ 300 km", "départ 8 séances".
+  - "kit:" : regroupe les objets portés ensemble ("kit: trail-long"). Dire « kit trail
+    long » au coach pour une séance les attribue tous d'un coup.
+  - "id:" et "(retirée)" : comme pour les chaussures.
+
+  Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
+  - Poche à eau 2 L — catégorie: poche — depuis 2026-03-01 — alerte 30 jours — kit: trail-long
+  - Frontale Petzl — catégorie: frontale — alerte 100 h — id: frontale-nuit — kit: trail-long
+  - Bâtons Leki — catégorie: bâtons — alerte 800 km — kit: trail-long
+  - Ceinture cardio — catégorie: ceinture — depuis 2026-01-10 — alerte 365 jours
 -->
 
 

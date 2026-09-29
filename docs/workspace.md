@@ -158,25 +158,115 @@ une puce de **premier niveau** par paire (jamais de puce indentée dessous —
 elle serait ignorée), tout facultatif sauf le nom :
 
 ```
-- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — id: <identifiant> (par défaut)
+- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> — garmin: <uuid> (par défaut)
 ```
 
 | Segment | Rôle |
 |---|---|
 | `depuis <date>` | Date d'achat (`AAAA-MM-JJ`, ou « mars 2026 » = 1er du mois). Filtre l'attribution automatique des séances sans matériel précisé à la paire « (par défaut) » — une séance antérieure n'y est pas rattachée. |
 | `alerte <N> km` | Seuil d'usure propre à cette paire (accepte aussi « N miles »/« N mi », converti). Sans lui : **700 km par défaut**. |
+| `départ <N> km` | Kilomètres déjà parcourus **avant** le suivi (paire d'occasion, usage antérieur à l'installation) ; accepte aussi « N mi »/« N miles », converti. Ajouté au kilométrage cumulé : il compte dans l'alerte et dans la prévision de retraite, y compris pour une paire retirée. `départ 0 km` est valide. |
+| `usage: <rôle>` | Facultatif — rôle de la paire (`course`, `trail`, `route`, `récup`), texte libre. Le coach s'en sert pour suggérer une paire, aucun calcul n'en dépend. |
 | `id: <identifiant>` | Identifiant explicite — **obligatoire** si vous rachetez le même modèle (sinon un id `-2`/`-3` est dérivé automatiquement, avec un avertissement au tableau de bord). |
+| `garmin: <uuid>` | Facultatif (#133) — identifiant du matériel dans Garmin Connect (sans effet avec la source intervals.icu), pour rattacher le matériel que la montre attache à une séance. Ajouté par le coach après votre accord, jamais deviné. Voir [Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin). |
 | `(par défaut)` | Chaussure attribuée aux séances sans matériel précisé. |
 | `(retirée)` | Sortie de rotation — kilométrage conservé, plus jamais d'alerte. |
 
 ```
 - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
 - Hoka Speedgoat 5 (grises) — depuis 2026-09-01 — id: speedgoat-grises
-- Nike Pegasus (retirée)
+- Salomon S/Lab Ultra — usage: course — départ 20 km
+- Nike Pegasus — départ 300 km (retirée)
 ```
 
 Le coach nomme, dans ses rapports hebdomadaires, toute paire non retirée
 ayant atteint son seuil (`python3 scripts/arc_index.py gear`).
+
+**Corriger un kilométrage en discutant (#132).** « Mes Pegasus ont en fait ~300
+km » : le coach ne réécrit que le segment `départ` de la puce concernée
+(départ = total déclaré − kilomètres déjà comptés par vos séances, jamais
+négatif) et le confirme en une ligne ; vos séances passées ne sont jamais
+modifiées. Si la paire est ambiguë, il vous demande laquelle.
+
+**Prévision de retraite (#132).** À partir du rythme des 28 derniers jours, le
+tableau de bord et `arc_index.py gear` affichent « ≈ 6 sem. » — le temps restant
+avant le seuil **à ce rythme**, une approximation linéaire (elle ignore un bloc
+de repos ou un changement de rotation). Aucune prévision sans séance sur 28
+jours, ni pour une paire retirée ; une paire au-dessus de son seuil affiche
+« seuil dépassé ».
+
+**Alertes visibles (#132).** Le résumé du `garmin-daily-sync` ajoute une ligne
+quand une séance synchronisée fait franchir son seuil à une paire (une seule
+fois par franchissement, sans fichier d'état) ; le retour de séance du coach
+ajoute « Chaussures : … » quand la paire portée est à 90 % de son seuil ou à
+moins de 4 semaines de la retraite ; `/week` signale les paires au seuil ou
+proches.
+
+**Suggestion de paire (#132).** Dès **deux paires actives** (non retirées) ou
+plus, la validation quotidienne et hebdomadaire du coach ajoute, par séance en
+extérieur, une ligne « Chaussures : … » : paire plus légère pour une séance de
+qualité, paire d'accroche par temps boueux ou pluvieux, ménagement d'une paire
+proche de son seuil. Le budget de rodage de la paire de course (environ 30 à
+50 km avant le jour J, puis préservée) est une **approximation du projet**, pas
+un standard publié. C'est une suggestion, jamais une consigne ; avec une seule
+paire déclarée, rien n'est suggéré.
+
+**Synchronisation du matériel Garmin (#133).** Avec la source Garmin, le coach
+lit le matériel que la montre attache à chaque **nouvelle** séance
+(`get_activity_gear`) et l'inscrit dans `gear_id` quand une puce porte le
+`garmin: <uuid>` correspondant. Priorité : ce que vous déclarez en discutant >
+matériel attaché par Garmin > `(par défaut)` — en cas de désaccord (Garmin dit A, vous dites B),
+c'est vous qui gagnez, et le coach le signale une fois. Un
+matériel Garmin sans puce n'est jamais attribué en silence (la séance n'est pas non plus créditée à
+la paire par défaut) : le coach vous propose une fois de l'associer à une puce existante ou d'en
+créer une ; si vous refusez, une puce `- <nom Garmin> — garmin: <uuid> (ignorée)` fait taire
+propositions et alertes. Voir
+[Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin)
+(y compris la source intervals.icu, où l'attribution par séance reste
+manuelle).
+### Déclarer le reste du matériel (#134)
+
+Bâtons, gilet, poche à eau, flasques, frontale, ceinture cardio, veste, semelles,
+lacets : sous-section « Matériel » (`### Matériel`, à côté de « Chaussures », qu'elle ne
+touche pas — aucun profil existant n'a à changer). Même principe : une puce de
+**premier niveau** par objet, tout facultatif sauf le nom.
+
+```
+- <nom> — catégorie: <bâtons|gilet|poche|flasques|frontale|ceinture|veste|semelles|lacets|autre> — depuis <date> — alerte <déclencheurs> — entretien <date> — kit: <nom> — id: <identifiant>
+```
+
+| Segment | Rôle |
+|---|---|
+| `catégorie: <mot>` | Seule façon de classer l'objet (jamais devinée du nom). Décide des sports qui comptent (voir plus bas). Valeur non reconnue : objet suivi, aucune alerte inventée. |
+| `alerte …` | Déclencheurs typés, combinables — **le premier atteint déclenche** : `N km`, `N h`, `N séances`, `N jours` (`alerte 30 jours ou 40 h`). Aucun seuil par défaut : sans `alerte`, jamais d'alerte. Une unité est obligatoire. |
+| `depuis <date>` | Date d'achat ; les jours se comptent depuis cette date. |
+| `entretien <date>` (ou `révisé`) | Dernier entretien (nettoyage, réimperméabilisation, pile…) : les jours se comptent depuis cette date et **tous les compteurs repartent de zéro** (séances datées jusqu'à cette date incluse exclues, celles d'après comptent). Écrivez-y la date de **la dernière séance faite avant l'entretien** : le coach le fait pour vous. Sans `depuis` ni `entretien`, un déclencheur en jours ne peut pas jouer (dit explicitement). |
+| `départ N km/h/séances` | Usage avant le suivi, ajouté aux compteurs tant qu'aucun entretien n'existe. |
+| `kit: <nom>` | Regroupe les objets portés ensemble (plusieurs kits possibles, séparés par des virgules). |
+| `id: <identifiant>`, `(retirée)` | Comme pour les chaussures. |
+
+**Sports par catégorie** (approximation du projet, pas une norme fabricant) : les bâtons
+ne comptent qu'en trail et randonnée (jamais sur route) ; gilet, poche, flasques, veste,
+semelles et lacets en course, trail et randonnée ; frontale et ceinture cardio sur tout
+sport (la frontale compte ses heures).
+
+**Attribution.** Une séance compte pour un objet seulement si son bloc `arc` le cite
+dans `gear_ids` (liste ; `gear_id` reste la chaussure) — jamais deviné. Le plus simple :
+dire au coach « kit trail long » (ou « avec les bâtons ») après la séance ; il écrit
+`gear_ids` avec les objets du kit qui portent ce sport (les bâtons d'un kit sont écartés
+d'une sortie sur route, et il vous le dit). Dites « j'ai nettoyé la poche » : il note
+l'`entretien` du jour sur la puce.
+
+**Alertes.** Objet sous alerte ou à 90 % d'un déclencheur : ligne « Matériel : … » dans
+le rapport hebdomadaire, `/week` et le retour de séance ; alerte du `garmin-daily-sync`
+une seule fois par franchissement (déclencheurs en jours : au premier passage du jour) ;
+avant une séance de nuit ou une sortie longue, le coach rappelle un contrôle (frontale :
+batterie ; poche et flasques : hygiène). Ligne de commande :
+`python3 scripts/arc_index.py equipment` (`--kit`, `--race-plan`, `--activities`, `--last-pass`). Unités d'`alerte` : km, h (ou `1h30`), séances, jours, semaines, mois, ans (1 mois = 30 j, 1 an = 365 j, approximation du projet) ; un segment illisible produit un avertissement, jamais un silence. Marche (nordique) comprise pour bâtons, gilet, poche, flasques, veste. Le `garmin-daily-sync` n'alerte que sur les km/h/séances ; les déclencheurs en jours se lisent dans le tableau de bord, `/week`, le rapport hebdomadaire et les rappels du coach. Le matériel Garmin hors chaussures n'est pas rattaché (pas de segment `garmin:` sous `### Matériel`).
+
+**Avant la course.** Le `course-strategist` croise le matériel obligatoire de son plan avec
+cet inventaire : **manquant** (non retrouvé), **à vérifier** (seule la catégorie correspond : à confirmer sur la spécification du règlement), **jamais utilisé à l'entraînement** (« rien de
+nouveau le jour J ») ou **sous alerte** — jamais inventé.
 
 ## Les décisions tracées
 

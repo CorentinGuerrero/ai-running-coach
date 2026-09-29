@@ -38,7 +38,7 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
         {
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
-                | "daily_sync_scheduled" | "ntfy_configured",
+                | "daily_sync_scheduled" | "ntfy_configured" | "gear_sync",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -160,6 +160,7 @@ GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/T
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
+    "gear_sync",
 )
 
 
@@ -790,6 +791,129 @@ def _load_config(workspace: Path) -> dict:
         return {}
 
 
+GEAR_TOOLS_REQUIRED = ("get_gear", "get_activity_gear")
+_LEANPROXY_WHITELIST_RE = re.compile(r'GARMIN_ENABLED_TOOLS"?\s*:\s*"([^"]*)"')
+
+
+def _read_gear_whitelist(workspace: Path):
+    """(outils | None, origine) de la liste blanche Garmin, LUE sans jamais contacter Garmin :
+    `.mcp.json` du workspace (mode direct : entrée `garmin`, env `GARMIN_ENABLED_TOOLS`), sinon
+    `~/.config/leanproxy_servers.yaml` (mode passerelle). `None` = liste non lisible (fichier
+    absent, JSON invalide, config manuelle) — l'appelant ne doit alors RIEN affirmer."""
+    mcp = workspace / ".mcp.json"
+    if mcp.is_file():
+        try:
+            data = json.loads(mcp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        if isinstance(servers, dict):
+            garmin = servers.get("garmin")
+            env = garmin.get("env") if isinstance(garmin, dict) else None
+            listed = env.get("GARMIN_ENABLED_TOOLS") if isinstance(env, dict) else None
+            if isinstance(listed, str) and listed.strip():
+                return {t.strip() for t in listed.split(",") if t.strip()}, "mcp_json"
+    yaml_path = Path.home() / ".config" / "leanproxy_servers.yaml"
+    if yaml_path.is_file():
+        try:
+            m = _LEANPROXY_WHITELIST_RE.search(yaml_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            return {t.strip() for t in m.group(1).split(",") if t.strip()}, "leanproxy"
+    return None, None
+
+
+def check_gear_sync(workspace: Path, config: dict) -> dict:
+    """#133 — synchronisation du matériel Garmin, vérifiée STATIQUEMENT (aucun appel Garmin,
+    aucune écriture — même contrat que le reste du script hors `--probe-mcp`) :
+
+    1. la liste blanche `GARMIN_ENABLED_TOOLS` (`.mcp.json`, ou `~/.config/leanproxy_servers.yaml`
+       en mode passerelle) contient `get_gear` et `get_activity_gear`. `install.sh` met `.mcp.json`
+       à jour à chaque relance mais n'écrit `leanproxy_servers.yaml` que s'il est absent : en mode
+       passerelle le correctif est manuel. Liste illisible → on ne dit rien de la liste blanche ;
+    2. profil : segment `garmin:` illisible ou uuid dupliqué entre puces (⚠️), paires actives
+       sans segment `garmin: <uuid>` (ℹ️). Une puce `(ignorée)` (matériel Garmin volontairement non
+       suivi) ou `(retirée)` n'est jamais réclamée. Lister le matériel Garmin sans puce exige
+       `get_gear` : c'est le rôle du coach, jamais du doctor.
+    """
+    check_id = "gear_sync"
+    source = (config.get("data") or {}).get("source", "garmin")
+    if source == "intervals":
+        return build_check(
+            check_id, "info",
+            "[data].source = \"intervals\" — pas de matériel par séance côté intervals.icu "
+            "(inventaire `get_gear_list` en référence seulement) ; attribution via le chat/défaut.",
+            fix=None,
+        )
+    tools, origin = _read_gear_whitelist(workspace)
+    if tools is not None:
+        missing = [t for t in GEAR_TOOLS_REQUIRED if t not in tools]
+        if missing:
+            if origin == "leanproxy":
+                return build_check(
+                    check_id, "warning",
+                    f"Liste blanche leanproxy sans {', '.join(missing)} — `install.sh` n'écrit "
+                    "~/.config/leanproxy_servers.yaml que s'il est absent : l'attribution du matériel Garmin "
+                    "est indisponible.",
+                    fix="éditez GARMIN_ENABLED_TOOLS dans ~/.config/leanproxy_servers.yaml : ajoutez "
+                        "get_gear,get_activity_gear,add_gear_to_activity",
+                )
+            return build_check(
+                check_id, "warning",
+                f"Liste blanche `GARMIN_ENABLED_TOOLS` sans {', '.join(missing)} — l'attribution "
+                "automatique du matériel Garmin est indisponible.",
+                fix="./install.sh (relancez-le : la liste blanche de .mcp.json est mise à jour)",
+            )
+        whitelist_note = ""
+    else:
+        whitelist_note = " (liste blanche non lue : fichier absent ou illisible, mode passerelle ou config manuelle)"
+    rel = config.get("athlete", {}).get("profile", "planning/Runner_Profile.md")
+    path = workspace / rel
+    pairs = []
+    if path.is_file():
+        try:
+            pairs = L.parse_gear(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            pairs = []
+    label = lambda g: g.get("name") or g["gear_id"]   # noqa: E731
+    invalid = [g for g in pairs if g.get("garmin_uuid_invalid")]
+    seen: dict = {}
+    for g in pairs:
+        if g.get("garmin_uuid"):
+            seen.setdefault(g["garmin_uuid"], []).append(label(g))
+    duplicates = {u: names for u, names in seen.items() if len(names) > 1}
+    if invalid or duplicates:
+        problems = []
+        if invalid:
+            problems.append("segment garmin: illisible (" + ", ".join(label(g) for g in invalid) + ")")
+        if duplicates:
+            problems.append("même uuid Garmin sur plusieurs puces (" + " / ".join(
+                " + ".join(names) for names in duplicates.values()) + ")")
+        return build_check(
+            check_id, "warning", " ; ".join(problems) + whitelist_note + " — ces puces ne seront pas associées.",
+            fix=f"corrigez les segments `garmin: <uuid>` de {rel} (uuid recopié de get_gear, un par paire)",
+        )
+    active = [g for g in pairs if not g.get("retired") and not g.get("ignored")]
+    unlinked = [g for g in active if not g.get("garmin_uuid")]
+    if unlinked:
+        names = ", ".join(label(g) for g in unlinked)
+        return build_check(
+            check_id, "info",
+            f"{len(unlinked)} paire(s) active(s) sans segment `garmin: <uuid>` ({names}){whitelist_note} — "
+            "le coach propose l'association au prochain `get_gear` ; rien n'est jamais associé sans votre accord.",
+            fix="demandez au coach « associe mes chaussures à Garmin » (aucun appel n'est fait par le doctor)",
+        )
+    if not active:
+        msg = ("Outils matériel Garmin présents dans la liste blanche ; aucune paire active déclarée."
+               if not whitelist_note else f"Aucune paire active déclarée{whitelist_note}.")
+        return build_check(check_id, "ok", msg, fix=None)
+    return build_check(
+        check_id, "ok",
+        f"{len(active)} paire(s) active(s), toutes associées à Garmin{whitelist_note}.", fix=None,
+    )
+
+
 def check_garmin_check_not_applicable(check_id: str) -> dict:
     """#68 : `[data].source = "intervals"` — ni tokens OAuth Garmin ni serveur
     MCP `garmin` à vérifier ici (aucun des deux n'est installé/enregistré
@@ -824,6 +948,8 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_daily_sync(Path.home(), workspace, config, now)
     if check_id == "ntfy_configured":
         return check_ntfy(config)
+    if check_id == "gear_sync":
+        return check_gear_sync(workspace, config)
     raise ValueError(f"vérification inconnue : {check_id!r}")
 
 

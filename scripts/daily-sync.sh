@@ -68,6 +68,7 @@ if [[ "$SOURCE" == "intervals" ]]; then
     # MD, scripts Python du projet. Rien d'autre. Pas de leanproxy : passerelle
     # garmin uniquement (install.sh refuse déjà --use-leanproxy + --source intervals).
     CLAUDE_TOOLS="mcp__intervals,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    CLAUDE_DISALLOWED=""
     SOURCE_LABEL="Intervals.icu"
     AUTH_CMD_HINT="(cd \"$HOME/.config/ai-running-coach/intervals-icu-mcp\" && intervals-icu-mcp-auth)"
 else
@@ -75,6 +76,13 @@ else
     # délégation au coach (Agent/Task), skills, lecture/écriture des MD, scripts
     # Python du projet. Rien d'autre.
     CLAUDE_TOOLS="mcp__garmin,mcp__leanproxy,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    # #133 : la synchronisation headless ne doit JAMAIS écrire du matériel côté Garmin (personne
+    # ne peut confirmer). `mcp__garmin` autorise tous les outils du serveur : on retire
+    # explicitement les deux outils d'écriture matériel. LIMITE : en mode passerelle, l'appel
+    # passe par `mcp__leanproxy__invoke_tool(server="garmin", tool=...)`, dont l'outil est unique
+    # et ne peut pas être filtré par nom de sous-outil — seule la consigne du skill
+    # (`garmin-daily-sync`) protège alors ; préférer le mode direct pour un run non surveillé.
+    CLAUDE_DISALLOWED="mcp__garmin__add_gear_to_activity,mcp__garmin__remove_gear_from_activity"
     SOURCE_LABEL="Garmin"
     AUTH_CMD_HINT="uv run garmin-mcp-auth"
 fi
@@ -90,6 +98,9 @@ build_command() {
                  --permission-mode acceptEdits
                  --allowedTools "$CLAUDE_TOOLS"
                  --output-format text)
+            if [[ -n "$CLAUDE_DISALLOWED" ]]; then
+                CMD+=(--disallowedTools "$CLAUDE_DISALLOWED")
+            fi
             if [[ -f "$MCP_CONFIG" ]]; then
                 CMD+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
             else
