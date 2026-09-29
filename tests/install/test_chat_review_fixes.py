@@ -190,7 +190,7 @@ class TestReviewFixes(ChatCase):
             seen.append(ctx.config.get("turn_budget_eur"))
             ctx.emit("done", {"reason": "end_turn"})
 
-        self.start(daily_budget_eur=2.0, backend_factory=scripted(behaviour))
+        self.start(daily_budget_eur=2.0, turn_budget_max_eur=0.0, backend_factory=scripted(behaviour))
         self.service.spend.add(0.5)
         self.stream(self.new_session(), "salut")
         self.assertEqual(len(seen), 1)

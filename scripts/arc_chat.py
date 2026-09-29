@@ -83,7 +83,7 @@ CHAT_DEFAULTS = {
     # Délai avant le push ntfy quand un onglet est attaché (SPEC : 60 s). Clé propre au service.
     "ntfy_delay_s": 60,
     # Plafond d'allocation d'un tour (€, 0 = tout le reste du jour, réservé au tour). Voir reserve_turn_budget.
-    "turn_budget_max_eur": 0.0,
+    "turn_budget_max_eur": 1.0,
 }
 
 

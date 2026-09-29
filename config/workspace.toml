@@ -268,8 +268,9 @@ ntfy_token_ttl_s = 1800
 # Délai (s) avant la notification quand la page est ouverte : laisse le temps de
 # répondre à l'écran avant de sonner sur le téléphone.
 ntfy_delay_s = 60
-# Plafond (€) d'allocation d'un tour ; 0 = tout le reste du jour (réservé au tour en cours).
-turn_budget_max_eur = 0.0
+# Plafond (€) de ce qu'un tour peut dépenser : le reste du budget du jour reste disponible
+# pour une autre conversation ou une approbation tardive. 0 = tout le reste du jour.
+turn_budget_max_eur = 1.0
 
 [dashboard]
 # Tableau de bord local (`scripts/dashboard.sh`) : lecture seule, n'écoute que sur

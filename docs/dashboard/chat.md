@@ -203,10 +203,10 @@ chat le dit et n'appelle plus le modèle jusqu'au lendemain. Modifiez-le dans
 `config/workspace.user.toml` ou avec `./install.sh --chat-budget 5`. Les fournisseurs facturent
 en dollars : `usd_eur_rate` (0,92) sert à la conversion.
 
-Le budget restant du jour est **réservé par tour** : une conversation qui répond alloue tout le
-reste du jour, donc une seconde conversation lancée en même temps est refusée (« budget réservé
-par une autre conversation ») jusqu'à la fin du tour. `turn_budget_max_eur` (défaut `0` = pas de
-plafond par tour) borne l'allocation d'un tour et permet ainsi des conversations simultanées.
+Chaque tour **réserve** au plus `turn_budget_max_eur` (1 € par défaut) sur le budget restant du
+jour : un échange qui s'emballe s'arrête là, et le reste demeure disponible pour une autre
+conversation ou une approbation tardive. Avec `0`, un tour réserve tout le reste du jour et une
+seconde conversation simultanée est refusée (« budget réservé par une autre conversation »).
 
 !!! note "Coût inconnu"
     Avec OpenCode, un modèle absent de son catalogue de prix remonte un coût nul : le plafond ne

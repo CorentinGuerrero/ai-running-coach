@@ -66,7 +66,7 @@ class TestRound2(ChatCase):
 
         self.addCleanup(restore)
         from arc_chat_claude import ClaudeBackend
-        service = self.start(daily_budget_eur=2.0, usd_eur_rate=0.92, backend="claude",
+        service = self.start(daily_budget_eur=2.0, usd_eur_rate=0.92, backend="claude", turn_budget_max_eur=0.0,
                              backend_factory=ClaudeBackend)
         service.spend.add(0.5)
         _, _, events = self.stream(self.new_session(), "salut")
@@ -195,6 +195,25 @@ class TestRound2(ChatCase):
 
     # -- N9 : budget réservé par tour ------------------------------------------------------------
 
+    def test_plafond_par_defaut_laisse_place_a_une_autre_conversation(self):
+        release, grants = threading.Event(), {}
+
+        def behaviour(ctx, message):
+            grants[message] = ctx.config.get("turn_budget_eur")
+            if message == "lent":
+                release.wait(5)
+            ctx.emit("done", {"reason": "end_turn"})
+
+        self.start(daily_budget_eur=2.0, backend_factory=scripted(behaviour))  # défaut : 1 € par tour
+        first, second = self.new_session(), self.new_session()
+        box = self.stream_in_thread(first, "lent")
+        self.assertTrue(wait_for(lambda: "lent" in grants))
+        self.stream(second, "autre")
+        release.set()
+        self.assertTrue(box["finished"].wait(3))
+        self.assertAlmostEqual(grants["lent"], 1.0, places=4)
+        self.assertAlmostEqual(grants["autre"], 1.0, places=4)
+
     def test_n9_deux_conversations_ne_recoivent_pas_chacune_tout_le_reste(self):
         release, grants = threading.Event(), {}
 
@@ -204,7 +223,7 @@ class TestRound2(ChatCase):
                 release.wait(5)
             ctx.emit("done", {"reason": "end_turn"})
 
-        self.start(daily_budget_eur=2.0, backend_factory=scripted(behaviour))
+        self.start(daily_budget_eur=2.0, turn_budget_max_eur=0.0, backend_factory=scripted(behaviour))
         first, second = self.new_session(), self.new_session()
         box = self.stream_in_thread(first, "lent")
         self.assertTrue(wait_for(lambda: "lent" in grants))
