@@ -366,9 +366,9 @@ class TestIntervalsCredentials(unittest.TestCase):
 
 class TestIntervalsDownload(unittest.TestCase):
     FIT = b"\x0e\x10FAKE.FIT"
-    META = json.dumps({"id": "i191609072", "source": "OAUTH_CLIENT", "type": "Run"}).encode()
+    META = json.dumps({"id": "i123456789", "source": "OAUTH_CLIENT", "type": "Run"}).encode()
 
-    def _download(self, routes, aid="i191609072", want_json=False):
+    def _download(self, routes, aid="i123456789", want_json=False):
         calls: list = []
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
@@ -379,8 +379,8 @@ class TestIntervalsDownload(unittest.TestCase):
 
     def test_writes_the_fit_under_its_intervals_id(self):
         name, written, gitignore, calls = self._download({
-            "/activity/i191609072": self.META, "/activity/i191609072/fit-file": self.FIT})
-        self.assertEqual(name, "i191609072.fit")
+            "/activity/i123456789": self.META, "/activity/i123456789/fit-file": self.FIT})
+        self.assertEqual(name, "i123456789.fit")
         self.assertEqual(written, self.FIT)
         self.assertIn("*.fit", gitignore)
         auth = calls[0].get_header("Authorization")
@@ -391,7 +391,7 @@ class TestIntervalsDownload(unittest.TestCase):
     def test_gzipped_fit_is_decompressed(self):
         import gzip
         _, written, _, _ = self._download({
-            "/activity/i191609072": self.META, "/activity/i191609072/fit-file": gzip.compress(self.FIT)})
+            "/activity/i123456789": self.META, "/activity/i123456789/fit-file": gzip.compress(self.FIT)})
         self.assertEqual(written, self.FIT)
 
     def test_json_flag_writes_the_canonical_copy_under_the_intervals_id(self):
@@ -421,10 +421,10 @@ class TestIntervalsDownload(unittest.TestCase):
         calls: list = []
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"fitparse": fake}):
             out_dir = Path(tmp)
-            D._download_one_intervals("i191609072", out_dir, True, "k3y", opener=_fake_opener({
-                "/activity/i191609072": self.META, "/activity/i191609072/fit-file": self.FIT}, calls))
-            canonical = json.loads((out_dir / "fit/i191609072.json").read_text(encoding="utf-8"))
-        self.assertEqual(canonical["activity_id"], "i191609072")
+            D._download_one_intervals("i123456789", out_dir, True, "k3y", opener=_fake_opener({
+                "/activity/i123456789": self.META, "/activity/i123456789/fit-file": self.FIT}, calls))
+            canonical = json.loads((out_dir / "fit/i123456789.json").read_text(encoding="utf-8"))
+        self.assertEqual(canonical["activity_id"], "i123456789")
         self.assertEqual([r["cadence_spm"] for r in canonical["records"]], [160.0, 162.0])
 
     def test_strava_import_is_unavailable_and_never_downloads_the_fit(self):
@@ -442,7 +442,7 @@ class TestIntervalsDownload(unittest.TestCase):
     def test_unprefixed_id_is_unavailable_without_any_request(self):
         calls: list = []
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(D.IntervalsUnavailable):
-            D._download_one_intervals("191609072", Path(tmp), False, "k", opener=_fake_opener({}, calls))
+            D._download_one_intervals("123456789", Path(tmp), False, "k", opener=_fake_opener({}, calls))
         self.assertEqual(calls, [])
 
     def test_http_errors_map_to_explicit_reasons(self):

@@ -1984,7 +1984,7 @@ def unknown_activity_reason(ref: Union[int, str]) -> str:
 def parse_activity_selector(value, command: str) -> Optional[Union[int, str]]:
     """`--activity`/argument positionnel des sous-commandes par séance : entier Garmin
     ou `i<chiffres>` Intervals.icu. `None` si absent ; `ConfigError` explicite pour
-    toute autre forme — jamais un `int()` qui planterait sur `i191609072`."""
+    toute autre forme — jamais un `int()` qui planterait sur `i123456789`."""
     if value is None or value == "":
         return None
     ref = S.parse_activity_ref(value)
@@ -3922,7 +3922,7 @@ def main(argv=None) -> int:
     if args.command == "samples":
         if not args.selector:
             raise ConfigError("commande « samples » : identifiant de séance attendu "
-                               "(ex. arc_index.py samples 19287537093, ou samples i191609072).")
+                               "(ex. arc_index.py samples 19287537093, ou samples i123456789).")
         result = samples_by_ref(conn, parse_activity_selector(args.selector, "samples"))
         # `--with-gps` (#49, revue de code, nit) : lat_deg/lon_deg RETIRÉS par défaut de la
         # sortie CLI — même si la position n'est pas une fuite nouvelle en soi (déjà lisible

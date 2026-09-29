@@ -174,7 +174,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Union
 DEFAULT_RESOLUTION_S = 5
 
 # Identifiant Intervals.icu d'une activité importée depuis un fichier (#68) : « i » +
-# chiffres, ex. `i191609072` — voir `parse_activity_ref`.
+# chiffres, ex. `i123456789` — voir `parse_activity_ref`.
 INTERVALS_ID_RE = re.compile(r"^i\d+$")
 
 NORMALISED_KEYS = ("t_s", "distance_m", "altitude_m", "hr_bpm", "speed_ms", "cadence_spm")
@@ -459,7 +459,7 @@ def parse_activity_ref(value) -> Optional[Union[int, str]]:
 
     Les deux espaces ne se chevauchent pas : le préfixe `i` distingue sans ambiguïté
     un identifiant Intervals.icu d'un identifiant Garmin, dans un nom de fichier
-    (`activities/fit/i191609072.json`) comme en argument de CLI."""
+    (`activities/fit/i123456789.json`) comme en argument de CLI."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -474,7 +474,7 @@ def parse_activity_ref(value) -> Optional[Union[int, str]]:
 
 def sample_file_activity_id(path) -> Optional[Union[int, str]]:
     """Identifiant de séance porté par un chemin canonique `<id>.json` (nom de fichier) :
-    entier Garmin (`24070286912.json`) ou chaîne Intervals.icu (`i191609072.json`),
+    entier Garmin (`24070286912.json`) ou chaîne Intervals.icu (`i123456789.json`),
     voir `parse_activity_ref`.
 
     `None` si le nom de fichier n'a aucune de ces deux formes — appelant alors replié

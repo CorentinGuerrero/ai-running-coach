@@ -147,7 +147,7 @@ SEGMENT_ID_CLIMB_MULTIPLIER = 10_000
 # `SEGMENT_ID_CLIMB_MULTIPLIER`, sous `Number.MAX_SAFE_INTEGER` (≈ 9·10¹⁵) pour que le
 # tableau de bord (JavaScript) le manipule sans perte de précision.
 # Alternative écartée pour garder ce changement local : un identifiant de segment
-# TEXTE (ex. `"i191609072-1"`), sans décalage ni borne — mais `climb_segment.id` est
+# TEXTE (ex. `"i123456789-1"`), sans décalage ni borne — mais `climb_segment.id` est
 # un INTEGER dans la base, l'API (`/api/climb-segment/<chiffres>`), le tableau de bord,
 # le CLI (`--segment`) et les liens `#/montee/<id>` déjà mémorisés. À reconsidérer
 # dans une évolution dédiée si un troisième espace d'identifiants apparaît.
@@ -157,7 +157,7 @@ INTERVALS_SEED_OFFSET = 500_000_000_000
 def segment_seed(ref) -> int:
     """Graine entière de `climb_segment.id` pour l'identifiant externe d'une séance :
     le `garmin_activity_id` tel quel, ou `INTERVALS_SEED_OFFSET + chiffres` pour un
-    `intervals_activity_id` (`i191609072` → 500 191 609 072) — voir ASSUMPTIONS["segment_id"]."""
+    `intervals_activity_id` (`i123456789` → 500 123 456 789) — voir ASSUMPTIONS["segment_id"]."""
     if isinstance(ref, str):
         return INTERVALS_SEED_OFFSET + int(ref.lstrip("i"))
     return int(ref)

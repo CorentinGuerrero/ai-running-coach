@@ -28,7 +28,7 @@ Télécharge les fichiers FIT (et leurs records GPS en JSON) en **bypassant le c
 2. **Télécharger** :
    ```bash
    python3 skills/fit-download/scripts/download_fit.py 24070286912 --json --output-dir /tmp/fits/
-   python3 skills/fit-download/scripts/download_fit.py i191609072 --json   # Intervals.icu
+   python3 skills/fit-download/scripts/download_fit.py i123456789 --json   # Intervals.icu
    # --source garmin|intervals → force la source (défaut : [data].source)
    # --json   → écrit aussi <id>.records.json (records GPS/HR/power/cadence, brut)
    #            + <output-dir>/fit/<id>.json (copie normalisée #42, voir scripts/arc_samples.py)

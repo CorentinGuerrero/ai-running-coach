@@ -22,7 +22,7 @@ Usage:
   download_fit.py 12345678901 12345678902 12345678903  # plusieurs
   download_fit.py --from-dir activities/               # lit l'identifiant dans les MD
   download_fit.py 12345678901 --output-dir /tmp/fits/
-  download_fit.py i191609072 --json --source intervals # -> activities/i191609072.fit (+ fit/i191609072.json)
+  download_fit.py i123456789 --json --source intervals # -> activities/i123456789.fit (+ fit/i123456789.json)
 
 Options:
   --source       garmin | intervals (défaut: [data].source du workspace, sinon garmin)
@@ -34,7 +34,7 @@ Options:
 
 Identifiants : un entier pour Garmin (`garmin_activity_id` du bloc ```arc), une
 chaîne `i<chiffres>` pour Intervals.icu (`intervals_activity_id`). La copie
-normalisée porte ce même identifiant dans son nom (`fit/i191609072.json`) : c'est
+normalisée porte ce même identifiant dans son nom (`fit/i123456789.json`) : c'est
 lui qu'`arc_index.py` utilise pour la rattacher à la séance.
 
 Sans `--overwrite`, une séance déjà téléchargée est sautée — avec `--json`, ce
@@ -245,7 +245,7 @@ def _persist_fit(fit: bytes, activity_id, out_dir: Path, want_json: bool) -> Pat
 
 INTERVALS_API = "https://intervals.icu/api/v1"
 # Identifiant d'une activité importée dans Intervals.icu (fichier FIT/TCX/GPX) :
-# « i » + chiffres, ex. `i191609072` — la forme que `get_recent_activities` rend et
+# « i » + chiffres, ex. `i123456789` — la forme que `get_recent_activities` rend et
 # que le contrat stocke dans `intervals_activity_id`. Une activité importée depuis
 # Strava porte, elle, un identifiant sans préfixe — et n'est de toute façon pas
 # redistribuable (voir `IntervalsUnavailable`).

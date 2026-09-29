@@ -30,7 +30,7 @@ import arc_index as I  # noqa: E402
 import arc_samples as S  # noqa: E402
 from tests.lib.synthetic import sample_session  # noqa: E402
 
-INTERVALS_ID = "i191609072"
+INTERVALS_ID = "i123456789"
 GARMIN_ID = 90000000068
 
 # Colonnes KPI de `activity` calculées depuis les échantillons (#43-#48, énergie).
@@ -105,12 +105,12 @@ class TestActivityRef(unittest.TestCase):
     def test_parse_activity_ref_accepts_both_id_spaces_only(self):
         self.assertEqual(S.parse_activity_ref("24070286912"), 24070286912)
         self.assertEqual(S.parse_activity_ref(24070286912), 24070286912)
-        self.assertEqual(S.parse_activity_ref("i191609072"), "i191609072")
-        for bad in ("", "i", "abc", "191609072i", "I123", None, True, 1.5):
+        self.assertEqual(S.parse_activity_ref("i123456789"), "i123456789")
+        for bad in ("", "i", "abc", "123456789i", "I123", None, True, 1.5):
             self.assertIsNone(S.parse_activity_ref(bad), bad)
 
     def test_file_name_carries_the_intervals_id(self):
-        self.assertEqual(S.sample_file_activity_id(Path("activities/fit/i191609072.json")), "i191609072")
+        self.assertEqual(S.sample_file_activity_id(Path("activities/fit/i123456789.json")), "i123456789")
         self.assertEqual(S.sample_file_activity_id(Path("activities/fit/123.json")), 123)
         self.assertIsNone(S.sample_file_activity_id(Path("activities/fit/notes.json")))
 
@@ -122,8 +122,8 @@ class TestActivityRef(unittest.TestCase):
 
     def test_climb_segment_seed_never_collides_and_stays_js_safe(self):
         self.assertEqual(VM.segment_seed(24070286912), 24070286912)
-        seed = VM.segment_seed("i191609072")
-        self.assertEqual(seed, VM.INTERVALS_SEED_OFFSET + 191609072)
+        seed = VM.segment_seed("i123456789")
+        self.assertEqual(seed, VM.INTERVALS_SEED_OFFSET + 123456789)
         self.assertGreater(seed, 10 ** 11, "au-delà de tout identifiant Garmin réaliste")
         self.assertLess(seed * VM.SEGMENT_ID_CLIMB_MULTIPLIER + 9999, 2 ** 53,
                         "Number.MAX_SAFE_INTEGER : le tableau de bord (JS) manipule cet id")

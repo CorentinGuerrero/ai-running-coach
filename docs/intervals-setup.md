@@ -151,7 +151,7 @@ zones FC, allure ajustée à la pente, découplage cardiaque, VAM des montées,
 descente, durabilité, dépense énergétique modèle — et `session-parts-analyzer` :
 
 ```bash
-python3 skills/fit-download/scripts/download_fit.py i191609072 --json   # une séance
+python3 skills/fit-download/scripts/download_fit.py i123456789 --json   # une séance
 python3 skills/fit-download/scripts/download_fit.py --from-dir activities/ --json   # tout l'historique
 python3 scripts/arc_index.py                                            # réindexe
 ```
