@@ -272,7 +272,10 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # `activity_climb`). Sans ce bump, une base déjà construite par une version
 # antérieure n'a ni la colonne ni la table et l'indexation échouerait avec « no such
 # column »/« no such table ».
-SCHEMA_VERSION = 25
+# #132 : `gear` gagne `start_m` (kilométrage de départ, segment « départ N km » de la puce
+# chaussure) et `usage` (rôle facultatif) — sans ce bump, une base déjà construite
+# n'a pas les colonnes et l'insertion échouerait avec « no such column ».
+SCHEMA_VERSION = 26
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -449,7 +452,7 @@ CREATE TABLE athlete (
 );
 CREATE TABLE gear (
     source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL,
-    is_default INTEGER, retired INTEGER, collision_base TEXT
+    is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT
 );
 -- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
 -- section « Indices de performance » du profil (`arc_legacy.
@@ -1039,6 +1042,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "start_date": shoe.get("start_date"), "threshold_m": shoe.get("threshold_m"),
                 "is_default": int(bool(shoe.get("default"))), "retired": int(bool(shoe.get("retired"))),
                 "collision_base": shoe.get("collision_base"),
+                "start_m": shoe.get("start_m"), "usage": shoe.get("usage"),
             })
         for entry in g("performance_index") or []:
             if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
@@ -3081,20 +3085,24 @@ def heat_acclimation_today(conn, conf: dict, today: date) -> dict:
     return M.heat_acclimation(activities, weather_rows, today, conf["heat_threshold_c"], window_days)
 
 
-def gear_mileage(conn) -> dict:
+def gear_mileage(conn, today: Optional[date] = None, since: Optional[str] = None) -> dict:
     """Kilométrage par chaussure (#40) — pour la CLI et pour les agents en headless
     (`coach`, rapport hebdomadaire). N'est pas soumis à `[health].morning_check` :
-    ne dépend d'aucune donnée de santé, seulement du profil et des activités."""
+    ne dépend d'aucune donnée de santé, seulement du profil et des activités.
+
+    #132 : départ (`start_m`) compris dans le cumul ; prévision de retraite calculée
+    contre `today` (défaut : la date du jour, comme les autres KPI) ; `since`
+    (AAAA-MM-JJ) ajoute `crossed_since` — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]`."""
     gear_defs = [dict(r) for r in conn.execute(
-        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base "
-        "FROM gear")]
+        "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
+        "start_m, usage FROM gear")]
     activities = [dict(r) for r in conn.execute(
         # `date` : indispensable à `M.gear_mileage` pour filtrer l'attribution par
         # défaut par `depuis` (revue PR #85, blocker 1) — jamais utilisée pour
         # exclure une activité à `gear_id` explicite.
         "SELECT sport, distance_m, gear_id, date FROM activity WHERE gear_id IS NOT NULL OR sport IN "
         f"({', '.join('?' for _ in M.GEAR_WEAR_SPORTS)})", M.GEAR_WEAR_SPORTS).fetchall()]
-    return M.gear_mileage(activities, gear_defs)
+    return M.gear_mileage(activities, gear_defs, today or date.today(), since)
 
 
 def performance_index(conn, today: Optional[date] = None) -> dict:
@@ -3752,7 +3760,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "terminant à --today (défaut : toutes les décisions connues)")
     parser.add_argument("--since", metavar="AAAA-MM-JJ",
                         help="commande « energy » : toutes les séances éligibles depuis cette date "
-                             "(incluse), ordre chronologique — incompatible avec --activity/--date")
+                             "(incluse), ordre chronologique — incompatible avec --activity/--date ; "
+                             "commande « gear » : ajoute `crossed_since` (paire dont le seuil est franchi "
+                             "par les séances datées >= cette date, #132)")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="commande « energy » : nombre de dernières séances éligibles à rendre "
                              "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
@@ -3821,7 +3831,8 @@ def main(argv=None) -> int:
         print(json.dumps(heat_acclimation_today(conn, conf, today_date), ensure_ascii=False))
         return 0
     if args.command == "gear":
-        print(json.dumps(gear_mileage(conn), ensure_ascii=False))
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(gear_mileage(conn, today_date, args.since), ensure_ascii=False))
         return 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

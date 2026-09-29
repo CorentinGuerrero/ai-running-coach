@@ -1348,5 +1348,113 @@ class TestFuelingCarbsCeiling(unittest.TestCase):
         self.assertEqual(ceiling, 99)
 
 
+class TestGearStartAndForecast(unittest.TestCase):
+    """#132 — départ dans le cumul, prévision de retraite, `crossed_since`."""
+
+    TODAY = date(2026, 9, 29)
+
+    def shoe(self, gear_id, **kw):
+        return {"gear_id": gear_id, "name": kw.pop("name", gear_id), **kw}
+
+    def act(self, day, distance_m=10000, gear_id="a", sport="running"):
+        return {"sport": sport, "distance_m": distance_m, "gear_id": gear_id, "date": day}
+
+    def by_id(self, result):
+        return {s["gear_id"]: s for s in result["shoes"]}
+
+    def test_start_added_to_cumulative_and_alert(self):
+        gear = [self.shoe("a", start_m=300000, threshold_m=310000)]
+        result = M.gear_mileage([self.act("2026-09-01", 10000)], gear)
+        s = result["shoes"][0]
+        self.assertEqual(s["distance_m"], 310000)
+        self.assertEqual(s["start_m"], 300000)
+        self.assertTrue(s["alert"])
+
+    def test_start_kept_for_retired_pair(self):
+        result = M.gear_mileage([], [self.shoe("a", start_m=250000, retired=True)])
+        s = result["shoes"][0]
+        self.assertEqual(s["distance_m"], 250000)
+        self.assertFalse(s["alert"])
+
+    def test_no_start_key_when_not_declared(self):
+        self.assertNotIn("start_m", M.gear_mileage([], [self.shoe("a")])["shoes"][0])
+
+    def test_near_threshold_flag(self):
+        gear = [self.shoe("a", start_m=630000, threshold_m=700000)]
+        self.assertTrue(M.gear_mileage([], gear)["shoes"][0]["near_threshold"])
+        gear = [self.shoe("a", start_m=600000, threshold_m=700000)]
+        self.assertNotIn("near_threshold", M.gear_mileage([], gear)["shoes"][0])
+
+    def test_no_forecast_without_today(self):
+        gear = [self.shoe("a", threshold_m=100000)]
+        s = M.gear_mileage([self.act("2026-09-28")], gear)["shoes"][0]
+        self.assertNotIn("retire_forecast_date", s)
+
+    def test_no_forecast_without_recent_usage(self):
+        gear = [self.shoe("a", threshold_m=100000)]
+        acts = [self.act("2026-08-01", 40000)]   # 59 j avant : hors fenêtre de 28 j
+        s = M.gear_mileage(acts, gear, self.TODAY)["shoes"][0]
+        for key in ("retire_forecast_date", "retire_forecast_weeks", "recent_28d_m"):
+            self.assertNotIn(key, s)
+
+    def test_window_boundaries(self):
+        gear = [self.shoe("a", threshold_m=100000)]
+        inside = M.gear_mileage([self.act("2026-09-02", 28000)], gear, self.TODAY)["shoes"][0]   # J-27
+        outside = M.gear_mileage([self.act("2026-09-01", 28000)], gear, self.TODAY)["shoes"][0]  # J-28
+        self.assertEqual(inside["recent_28d_m"], 28000)
+        self.assertNotIn("recent_28d_m", outside)
+
+    def test_regular_usage_forecast(self):
+        # 28 km sur 28 j = 1 km/j ; reste 100 - 28 = 72 km -> 72 jours -> ≈ 10,3 sem.
+        gear = [self.shoe("a", threshold_m=100000)]
+        s = M.gear_mileage([self.act("2026-09-10", 28000)], gear, self.TODAY)["shoes"][0]
+        self.assertEqual(s["retire_forecast_date"], (self.TODAY + timedelta(days=72)).isoformat())
+        self.assertEqual(s["retire_forecast_weeks"], 10.3)
+        self.assertEqual(s["recent_28d_m"], 28000)
+
+    def test_forecast_uses_start_and_is_never_in_the_past(self):
+        gear = [self.shoe("a", start_m=99999, threshold_m=100000)]
+        s = M.gear_mileage([self.act("2026-09-28", 0.0001 + 1)], gear, self.TODAY)["shoes"][0]
+        # 1 m cumulé -> cumul 100000 : seuil atteint, pas de prévision
+        self.assertTrue(s["alert"])
+        self.assertNotIn("retire_forecast_date", s)
+        gear = [self.shoe("a", start_m=90000, threshold_m=100000)]
+        s = M.gear_mileage([self.act("2026-09-29", 5000)], gear, self.TODAY)["shoes"][0]
+        self.assertGreater(s["retire_forecast_date"], self.TODAY.isoformat())
+
+    def test_no_forecast_when_over_threshold(self):
+        gear = [self.shoe("a", threshold_m=10000)]
+        s = M.gear_mileage([self.act("2026-09-20", 20000)], gear, self.TODAY)["shoes"][0]
+        self.assertTrue(s["alert"])
+        for key in ("retire_forecast_date", "retire_forecast_weeks"):
+            self.assertNotIn(key, s)
+
+    def test_no_forecast_when_retired(self):
+        gear = [self.shoe("a", threshold_m=100000, retired=True)]
+        s = M.gear_mileage([self.act("2026-09-20", 20000)], gear, self.TODAY)["shoes"][0]
+        self.assertNotIn("retire_forecast_date", s)
+
+    def test_forecast_attribution_follows_default_pair(self):
+        gear = [self.shoe("a", default=True, threshold_m=100000), self.shoe("b", threshold_m=100000)]
+        acts = [{"sport": "trail", "distance_m": 14000, "date": "2026-09-20"}]
+        by_id = self.by_id(M.gear_mileage(acts, gear, self.TODAY))
+        self.assertIn("retire_forecast_date", by_id["a"])
+        self.assertNotIn("retire_forecast_date", by_id["b"])
+
+    def test_crossed_since_only_for_the_crossing_activity(self):
+        gear = [self.shoe("a", threshold_m=20000)]
+        acts = [self.act("2026-09-10", 15000), self.act("2026-09-28", 6000)]
+        crossing = M.gear_mileage(acts, gear, self.TODAY, "2026-09-28")["shoes"][0]
+        self.assertTrue(crossing["crossed_since"])
+        after = M.gear_mileage(acts, gear, self.TODAY, "2026-09-29")["shoes"][0]
+        self.assertNotIn("crossed_since", after)   # déjà franchi avant `since` : pas de re-alerte
+        self.assertNotIn("crossed_since", M.gear_mileage(acts, gear, self.TODAY)["shoes"][0])
+
+    def test_crossed_since_never_for_retired(self):
+        gear = [self.shoe("a", threshold_m=1000, retired=True)]
+        s = M.gear_mileage([self.act("2026-09-28", 6000)], gear, self.TODAY, "2026-09-28")["shoes"][0]
+        self.assertNotIn("crossed_since", s)
+
+
 if __name__ == "__main__":
     unittest.main()

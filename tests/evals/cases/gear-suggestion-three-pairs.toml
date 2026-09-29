@@ -1,0 +1,34 @@
+# Chaussures : suggestion de paire dans la validation du jour (#132).
+#
+# Fixture `gear-three-pairs/` : trois paires actives (Speedgoat `usage: trail`,
+# Pegasus `usage: route`, S/Lab Ultra `usage: course` — la paire de course, départ
+# 10 km, à ménager avant le jour J) et une séance de TEMPO SUR ROUTE prévue
+# aujourd'hui (`planning/0d_semaine.md`). Dès 2 paires actives, la validation
+# quotidienne doit contenir UNE ligne « Chaussures : … » ; pour un tempo sur route,
+# la paire route (Pegasus) est la suggestion cohérente, et la paire de course n'est
+# pas dépensée sur une séance que l'autre paire peut faire.
+#
+# `must_match` : une ligne « Chaussures : » qui nomme la Pegasus (ou « route »)
+# avant la fin de la ligne. `must_not_match` : la ligne ne doit pas SUGGÉRER la
+# S/Lab comme paire du jour (le motif exige le nom juste après « Chaussures : » —
+# une mention ultérieure « pas les S/Lab, préservées » reste permise) ; ni une
+# formulation impérative (« tu dois porter », « obligatoire »), la suggestion
+# n'étant jamais une consigne.
+id = "gear-suggestion-three-pairs"
+prompt = "Valide ma séance de tempo d'aujourd'hui."
+fixture = "gear-three-pairs"
+
+[config.health]
+morning_check = "off"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "Chaussures?\\s*:[^\\n]{0,120}(Pegasus|route)",
+]
+must_not_match = [
+  "Chaussures?\\s*:\\s*[*_]*\\s*(Salomon|S/Lab)",
+  "tu dois (porter|mettre|chausser)|(port|chauss)e[rz]? obligatoire",
+]

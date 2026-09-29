@@ -158,13 +158,15 @@ une puce de **premier niveau** par paire (jamais de puce indentée dessous —
 elle serait ignorée), tout facultatif sauf le nom :
 
 ```
-- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — id: <identifiant> (par défaut)
+- <nom> — depuis <AAAA-MM-JJ> — alerte <N> km — départ <N> km — usage: <rôle> — id: <identifiant> (par défaut)
 ```
 
 | Segment | Rôle |
 |---|---|
 | `depuis <date>` | Date d'achat (`AAAA-MM-JJ`, ou « mars 2026 » = 1er du mois). Filtre l'attribution automatique des séances sans matériel précisé à la paire « (par défaut) » — une séance antérieure n'y est pas rattachée. |
 | `alerte <N> km` | Seuil d'usure propre à cette paire (accepte aussi « N miles »/« N mi », converti). Sans lui : **700 km par défaut**. |
+| `départ <N> km` | Kilomètres déjà parcourus **avant** le suivi (paire d'occasion, usage antérieur à l'installation) ; accepte aussi « N mi »/« N miles », converti. Ajouté au kilométrage cumulé : il compte dans l'alerte et dans la prévision de retraite, y compris pour une paire retirée. `départ 0 km` est valide. |
+| `usage: <rôle>` | Facultatif — rôle de la paire (`course`, `trail`, `route`, `récup`), texte libre. Le coach s'en sert pour suggérer une paire, aucun calcul n'en dépend. |
 | `id: <identifiant>` | Identifiant explicite — **obligatoire** si vous rachetez le même modèle (sinon un id `-2`/`-3` est dérivé automatiquement, avec un avertissement au tableau de bord). |
 | `(par défaut)` | Chaussure attribuée aux séances sans matériel précisé. |
 | `(retirée)` | Sortie de rotation — kilométrage conservé, plus jamais d'alerte. |
@@ -172,11 +174,41 @@ elle serait ignorée), tout facultatif sauf le nom :
 ```
 - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
 - Hoka Speedgoat 5 (grises) — depuis 2026-09-01 — id: speedgoat-grises
-- Nike Pegasus (retirée)
+- Salomon S/Lab Ultra — usage: course — départ 20 km
+- Nike Pegasus — départ 300 km (retirée)
 ```
 
 Le coach nomme, dans ses rapports hebdomadaires, toute paire non retirée
 ayant atteint son seuil (`python3 scripts/arc_index.py gear`).
+
+**Corriger un kilométrage en discutant (#132).** « Mes Pegasus ont en fait ~300
+km » : le coach ne réécrit que le segment `départ` de la puce concernée
+(départ = total déclaré − kilomètres déjà comptés par vos séances, jamais
+négatif) et le confirme en une ligne ; vos séances passées ne sont jamais
+modifiées. Si la paire est ambiguë, il vous demande laquelle.
+
+**Prévision de retraite (#132).** À partir du rythme des 28 derniers jours, le
+tableau de bord et `arc_index.py gear` affichent « ≈ 6 sem. » — le temps restant
+avant le seuil **à ce rythme**, une approximation linéaire (elle ignore un bloc
+de repos ou un changement de rotation). Aucune prévision sans séance sur 28
+jours, ni pour une paire retirée ; une paire au-dessus de son seuil affiche
+« seuil dépassé ».
+
+**Alertes visibles (#132).** Le résumé du `garmin-daily-sync` ajoute une ligne
+quand une séance synchronisée fait franchir son seuil à une paire (une seule
+fois par franchissement, sans fichier d'état) ; le retour de séance du coach
+ajoute « Chaussures : … » quand la paire portée est à 90 % de son seuil ou à
+moins de 4 semaines de la retraite ; `/week` signale les paires au seuil ou
+proches.
+
+**Suggestion de paire (#132).** Dès **deux paires actives** (non retirées) ou
+plus, la validation quotidienne et hebdomadaire du coach ajoute, par séance en
+extérieur, une ligne « Chaussures : … » : paire plus légère pour une séance de
+qualité, paire d'accroche par temps boueux ou pluvieux, ménagement d'une paire
+proche de son seuil. Le budget de rodage de la paire de course (environ 30 à
+50 km avant le jour J, puis préservée) est une **approximation du projet**, pas
+un standard publié. C'est une suggestion, jamais une consigne ; avec une seule
+paire déclarée, rien n'est suggéré.
 
 ## Les décisions tracées
 

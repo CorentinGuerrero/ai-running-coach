@@ -286,3 +286,42 @@ class TestGuardrailsWiring(unittest.TestCase):
         text = self.SCHEDULING_SKILL.read_text(encoding="utf-8")
         self.assertIn("Exit 1", text, "le skill de push doit nommer explicitement l'issue « block » (exit 1)")
         self.assertIn("Exit 2", text, "le skill de push doit nommer explicitement l'issue « erreur d'entrée » (exit 2)")
+
+
+class TestGearAlertsWiring(unittest.TestCase):
+    """#132 — l'alerte d'usure des chaussures, la correction par chat et la
+    suggestion de paire n'existent que par les prompts : verrouille que le coach,
+    `garmin-daily-sync` et `/week` citent bien les commandes et les garde-fous
+    (une seule alerte par franchissement, suggestion seulement à partir de deux
+    paires actives, jamais imposée, source du rodage honnête)."""
+
+    COACH = REPO / "agents/coach.md"
+    SYNC = REPO / "skills/garmin-daily-sync/SKILL.md"
+    WEEK = REPO / "skills/week/SKILL.md"
+
+    def test_coach_cites_the_gear_command_and_chat_correction(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("scripts/arc_index.py gear", text)
+        self.assertIn("départ", text)
+        self.assertIn("never negative", text)
+
+    def test_coach_suggestion_needs_two_active_pairs_and_is_not_imposed(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("SHOE SUGGESTION MANDATE", text)
+        self.assertIn("at least 2 non-retired pairs", text)
+        self.assertIn("SUGGESTION, never an instruction", text)
+
+    def test_coach_break_in_budget_is_labelled_as_a_project_approximation(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("approximation du projet", text)
+
+    def test_daily_sync_alerts_once_per_crossing(self):
+        text = self.SYNC.read_text(encoding="utf-8")
+        self.assertIn("arc_index.py gear --since", text)
+        self.assertIn("crossed_since", text)
+        self.assertIn("une seule fois", text)
+
+    def test_week_skill_mentions_pairs_over_or_near_threshold(self):
+        text = self.WEEK.read_text(encoding="utf-8")
+        self.assertIn("arc_index.py gear", text)
+        self.assertIn("near_threshold", text)

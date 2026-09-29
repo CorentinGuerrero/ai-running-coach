@@ -244,6 +244,17 @@ function gearTile(gear) {
   return `<p class="weather">${chip("gear", "orange", "Chaussures à surveiller")} <span>${names}</span></p>`;
 }
 
+// Prévision de retraite (#132) : « ≈ 6 sem. » (clé omise côté API = pas de prévision, on
+// n'affiche rien) ; seuil dépassé → « seuil dépassé » ; « proche » à ≥ 90 % du seuil.
+function gearForecast(s) {
+  if (s.retired) return "";
+  if (s.alert) return `<span class="tag">seuil dépassé</span>`;
+  const near = s.near_threshold ? `${chip("gear", "orange", "Proche du seuil")} ` : "";
+  if (s.retire_forecast_weeks == null) return near;
+  const weeks = Math.max(1, Math.round(s.retire_forecast_weeks));
+  return `${near}<span class="tag" title="Rythme des 28 derniers jours — approximation linéaire, retraite estimée le ${F.esc(s.retire_forecast_date)}">≈ ${weeks} sem.</span>`;
+}
+
 // Détail complet du kilométrage chaussures (vue Performance) : toutes les paires
 // déclarées (retirées comprises, en fin de tableau), plus une ligne « inconnue »
 // par `gear_id` vu sur une activité mais absent du profil (#40 — ne jamais
@@ -255,10 +266,10 @@ function gearSection(gear) {
   if (!shoes.length && !unknown.length) return "";
   const sorted = [...shoes].sort((a, b) => (a.retired === b.retired ? 0 : a.retired ? 1 : -1));
   const rows = sorted.map((s) => `<tr${s.retired ? ` class="muted"` : ""}>
-      <th scope="row">${F.esc(s.name)}${s.default ? ` <span class="tag">défaut</span>` : ""}${s.retired ? ` <span class="tag">retirée</span>` : ""}</th>
-      <td class="num">${F.distance(s.distance_m, 0)}</td>
+      <th scope="row">${F.esc(s.name)}${s.default ? ` <span class="tag">défaut</span>` : ""}${s.retired ? ` <span class="tag">retirée</span>` : ""}${s.usage ? ` <span class="tag">${F.esc(s.usage)}</span>` : ""}</th>
+      <td class="num">${F.distance(s.distance_m, 0)}${s.start_m ? ` <span class="muted">(dont ${F.distance(s.start_m, 0)} de départ)</span>` : ""}</td>
       <td class="num">${F.distance(s.threshold_m, 0)}</td>
-      <td>${s.alert ? chip("gear", "orange", "À surveiller") : ""}</td></tr>`).join("");
+      <td>${s.alert ? chip("gear", "orange", "À surveiller") : ""} ${gearForecast(s)}</td></tr>`).join("");
   const unknownRows = unknown.map((u) => `<tr><th scope="row">${F.esc(u.gear_id)} <span class="tag">inconnue</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td class="num">—</td><td></td></tr>`).join("");
   return `<section class="band"><h2>Matériel</h2><table class="data data--compact">
       <thead><tr><th scope="col">Chaussure</th><th scope="col" class="num">Kilométrage</th><th scope="col" class="num">Seuil d'alerte</th><th scope="col">Statut</th></tr></thead>
