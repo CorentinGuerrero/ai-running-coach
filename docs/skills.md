@@ -97,6 +97,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `heat-acclimation` | Séances « chaudes » sur 14 jours vs `[health].heat_threshold_c` (#38) |
 | `gear` | Kilométrage des chaussures et seuils d'alerte (#40) |
 | `gear-attribution` | Priorité d'attribution du matériel d'une séance : déclaration de l'athlète > Garmin > défaut (`--garmin-gear`, `--chat-gear`, #133) |
+| `equipment` | Matériel hors chaussures : usage (km, h, séances, jours), déclencheurs typés, kits (`--kit`), alerte unique (`--activities`, `--since`), contrôle du matériel d'un plan de course (`--race-plan`) (#134) |
 | `performance-index` | Lecture des indices ITRA/UTMB déclarés au profil (#62) |
 | `fueling` | Plafond de glucides/h réellement toléré (sorties longues running/trail, #41) |
 | `samples` | Échantillons FIT bruts d'une activité (`--activity`) |

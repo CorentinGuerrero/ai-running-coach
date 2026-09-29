@@ -300,6 +300,12 @@ class Store:
         with self.lock:
             return I.gear_mileage(self.conn, today)
 
+    def equipment_usage(self, today: date) -> dict:
+        """Réutilise `arc_index.equipment_usage` (#134, matériel hors chaussures) — voir aussi la
+        CLI `equipment`. `gear_mileage` (chaussures) reste inchangé."""
+        with self.lock:
+            return I.equipment_usage(self.conn, today)
+
     def performance_index(self, today: date) -> dict:
         """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
         `performance-index`. `today` : recalcule l'avertissement de date
@@ -399,6 +405,7 @@ def api_summary(store: Store, q: dict) -> dict:
         "today": today.isoformat(), "settings": settings, "objective": objective, "athlete": athlete,
         "form": latest, "health": health, "sleep_debt": sleep_debt, "heat_acclimation": heat_acclimation,
         "gear": store.gear_mileage(today),
+        "equipment": store.equipment_usage(today),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,

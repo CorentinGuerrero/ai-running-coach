@@ -763,7 +763,7 @@ _GEAR_START_VALUE_RE = re.compile(
     r"^~?\s*(\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?)\s*(km|mi(?:les?)?)?\s*$", re.I)
 
 
-def _gear_section(text: str) -> Optional[str]:
+def _gear_section(text: str, heading_re: Optional["re.Pattern"] = None) -> Optional[str]:
     """Texte de la sous-section « ### Chaussures » (n'importe quel niveau de
     titre entre `##` et `####`), jusqu'au prochain titre ou la fin du fichier.
     `None` si la section est absente (rien à lire, pas une erreur : la plupart
@@ -773,7 +773,7 @@ def _gear_section(text: str) -> Optional[str]:
     (`templates/Runner_Profile.template.md`) ne soit jamais lu comme une
     chaussure réellement déclarée."""
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-    m = _GEAR_HEADING_RE.search(text)
+    m = (heading_re or _GEAR_HEADING_RE).search(text)
     if not m:
         return None
     rest = text[m.end():]
@@ -937,6 +937,165 @@ def parse_gear(text: str) -> List[Dict[str, Any]]:
             "threshold_m": threshold_m, "default": is_default or None, "retired": is_retired or None,
             "start_m": start_m, "usage": usage, "garmin_uuid": garmin_uuid,
             "garmin_uuid_invalid": garmin_invalid or None, "ignored": is_ignored or None,
+        }
+        if n > 1:
+            entry["collision_base"] = base_id
+        out.append(_drop_none(entry))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Matériel hors chaussures (#134) : sous-section « ### Matériel » du profil
+# (`## Matériel & lieux` → `### Matériel`), même principe libre que « Chaussures »
+# (une puce de premier niveau par objet, segments séparés par « — »).
+#   - Poche à eau 2 L — catégorie: poche — depuis 2026-03-01 — alerte 30 jours — kit: trail-long
+#   - Frontale Petzl — catégorie: frontale — alerte 100 h — id: frontale-nuit
+#   - Bâtons Leki — catégorie: bâtons — alerte 800 km — kit: trail-long
+# Déclencheurs typés (`alerte`) : « N km » | « N h » | « N séances » | « N jours »,
+# combinables (le premier atteint déclenche) — voir `arc_metrics.equipment_usage`.
+# La catégorie n'est lue QUE du segment « catégorie: … » : jamais devinée du nom.
+# `### Chaussures` n'est pas touchée : elle garde son propre analyseur (`parse_gear`).
+# ---------------------------------------------------------------------------
+_EQUIP_HEADING_RE = re.compile(r"^\s{0,3}#{3,4}\s*mat[ée]riel\s*$", re.I | re.M)
+_EQUIP_KEYWORDS = (r"depuis\b|alerte\b|d[ée]part\b|id\s*:|cat[ée]gorie\s*:|kit\s*:|entretien\b|"
+                   r"r[ée]vis[ée]e?\b")
+_EQUIP_SEGMENT_SPLIT_RE = re.compile(
+    rf"\s+-\s+(?={_EQUIP_KEYWORDS})|\s*[—–]\s*|\s*:\s*(?={_EQUIP_KEYWORDS})", re.I)
+# « <nombre> <unité> » : seule une unité explicite compte pour le matériel (jamais un nombre nu,
+# contrairement aux chaussures où « alerte 700 » vaut 700 km — ici l'unité décide du type de
+# déclencheur, la deviner serait inventer une alerte).
+_EQUIP_TRIGGER_RE = re.compile(
+    r"(\d+(?:[   ]\d{3})*(?:[.,]\d+)?)\s*(km|mi(?:les?)?|h|heures?|s[ée]ances?|sorties?|jours?|j)\b",
+    re.I)
+# Catégories reconnues (clé canonique → alias, sans accent, minuscules, singulier ou pluriel).
+EQUIPMENT_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "batons": ("baton", "batons", "baton de trail", "batons de trail"),
+    "gilet": ("gilet", "gilets", "sac d'hydratation", "gilet d'hydratation"),
+    "poche": ("poche", "poches", "poche a eau", "poches a eau"),
+    "flasques": ("flasque", "flasques", "softflask", "softflasks", "gourde", "gourdes"),
+    "frontale": ("frontale", "frontales", "lampe frontale"),
+    "ceinture": ("ceinture", "ceintures", "ceinture cardio", "ceinture fc"),
+    "veste": ("veste", "vestes", "coupe-vent", "coupe vent", "impermeable"),
+    "semelles": ("semelle", "semelles"),
+    "lacets": ("lacet", "lacets"),
+    "autre": ("autre", "autres"),
+}
+
+
+def normalize_equipment_category(raw: Optional[str]) -> Optional[str]:
+    """Valeur brute du segment « catégorie: … » → clé canonique (`EQUIPMENT_CATEGORIES`) ;
+    une valeur non reconnue est gardée en slug (l'objet est indexé, `arc_metrics` la dit
+    inconnue et n'invente aucune alerte) ; vide → `None`."""
+    text = normalize_label(raw or "").strip()
+    if not text:
+        return None
+    for key, aliases in EQUIPMENT_CATEGORIES.items():
+        if text == key or text in aliases:
+            return key
+    return gear_slug(text) or None
+
+
+def _equip_triggers(value: str) -> Dict[str, float]:
+    """« 30 jours ou 40 h » → `{days: 30, duration_s: 144000}` (clés : distance_m, duration_s,
+    sessions, days). Un même type répété : le dernier gagne ; texte sans unité : ignoré."""
+    out: Dict[str, float] = {}
+    for m in _EQUIP_TRIGGER_RE.finditer(value):
+        number = parse_fr_number(m.group(1))
+        if number is None or number <= 0:
+            continue
+        unit = m.group(2).lower()
+        if unit.startswith("mi"):
+            out["distance_m"] = round(number * 1609.344)
+        elif unit == "km":
+            out["distance_m"] = round(number * 1000)
+        elif unit.startswith("h"):
+            out["duration_s"] = round(number * 3600)
+        elif unit.startswith("s"):
+            out["sessions"] = int(round(number))
+        else:
+            out["days"] = int(round(number))
+    return out
+
+
+def parse_equipment(text: str) -> List[Dict[str, Any]]:
+    """Sous-section « Matériel » du profil → liste de dicts `{gear_id, name, category, start_date,
+    maintenance_date, retired, kits, threshold_m, threshold_s, threshold_sessions, threshold_days,
+    start_m, start_s, start_sessions, collision_base}` (clés absentes plutôt que `None`).
+
+    Segments (tous facultatifs sauf le nom) : `depuis <date>`, `catégorie: <mot>`,
+    `alerte <N km|N h|N séances|N jours>` (combinables : « alerte 30 jours ou 40 h », ou plusieurs
+    segments `alerte`), `départ <N km|N h|N séances>` (usage antérieur au suivi — un départ en
+    jours n'existe pas : les jours partent de `depuis`), `entretien <date>` / `révisé <date>`
+    (dernier entretien — remet à zéro les compteurs, voir `arc_metrics.ASSUMPTIONS["equipment_usage"]`),
+    `kit: <slug>[, <slug>…]`, `id: <identifiant>`, `(retirée)`. `id` et collisions : même règle que
+    `parse_gear` (`arc_contract.gear_slug`, suffixe `-2`, `-3`…)."""
+    section = _gear_section(text, _EQUIP_HEADING_RE)
+    if not section:
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Dict[str, int] = {}
+    for raw in _gear_bullets(section):
+        raw = raw.replace("**", "").strip()
+        is_retired = bool(_GEAR_RETIRED_RE.search(raw))
+        raw = _GEAR_RETIRED_RE.sub("", raw).strip()
+        segments = [s for s in _EQUIP_SEGMENT_SPLIT_RE.split(raw) if s.strip()]
+        if not segments:
+            continue
+        name = segments[0].strip()
+        explicit_id = None
+        category = None
+        start_date = None
+        maintenance_date = None
+        kits: List[str] = []
+        thresholds: Dict[str, float] = {}
+        starts: Dict[str, float] = {}
+        for segment in segments[1:]:
+            stripped = segment.strip()
+            m = re.match(r"depuis\b\s*:?\s*(.*)$", stripped, re.I)
+            if m:
+                start_date = parse_fr_date(m.group(1).strip())
+                continue
+            m = re.match(r"alerte\b\s*:?\s*(.*)$", stripped, re.I)
+            if m:
+                thresholds.update(_equip_triggers(m.group(1)))
+                continue
+            m = re.match(r"d[ée]part\b\s*:?\s*(.*)$", stripped, re.I)
+            if m:
+                starts.update({k: v for k, v in _equip_triggers(m.group(1)).items() if k != "days"})
+                continue
+            m = re.match(r"id\s*:\s*(.*)$", stripped, re.I)
+            if m:
+                explicit_id = m.group(1).strip() or None
+                continue
+            m = re.match(r"cat[ée]gorie\s*:\s*(.*)$", stripped, re.I)
+            if m:
+                category = normalize_equipment_category(m.group(1))
+                continue
+            m = re.match(r"kit\s*:\s*(.*)$", stripped, re.I)
+            if m:
+                for part in re.split(r"[,;/]", m.group(1)):
+                    slug = gear_slug(part)
+                    if slug and slug not in kits:
+                        kits.append(slug)
+                continue
+            m = re.match(r"(?:entretien|r[ée]vis[ée]e?)\b\s*:?\s*(.*)$", stripped, re.I)
+            if m:
+                d = parse_fr_date(m.group(1).strip())
+                if d and (maintenance_date is None or d > maintenance_date):
+                    maintenance_date = d
+        base_id = gear_slug(explicit_id) if explicit_id else gear_slug(name)
+        if not base_id:
+            continue
+        seen[base_id] = seen.get(base_id, 0) + 1
+        n = seen[base_id]
+        gear_id = base_id if n == 1 else f"{base_id}-{n}"
+        entry = {
+            "gear_id": gear_id, "name": name or None, "category": category, "start_date": start_date,
+            "maintenance_date": maintenance_date, "retired": is_retired or None, "kits": kits or None,
+            "threshold_m": thresholds.get("distance_m"), "threshold_s": thresholds.get("duration_s"),
+            "threshold_sessions": thresholds.get("sessions"), "threshold_days": thresholds.get("days"),
+            "start_m": starts.get("distance_m"), "start_s": starts.get("duration_s"),
+            "start_sessions": starts.get("sessions"),
         }
         if n > 1:
             entry["collision_base"] = base_id
@@ -1190,6 +1349,9 @@ def parse_profile(text: str) -> Dict[str, Any]:
     gear = parse_gear(text)
     if gear:
         out["gear"] = gear
+    equipment = parse_equipment(text)
+    if equipment:
+        out["equipment"] = equipment
     performance_index, performance_index_warnings = parse_performance_index(text)
     if performance_index:
         out["performance_index"] = performance_index

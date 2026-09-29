@@ -350,6 +350,25 @@ Produis une checklist détaillée :
 - Trousse de secours : strapp, compeed, antalgique, pastilles eau
 - Nutrition embarquée : liste des produits avec quantités par segment
 
+**Contrôle du matériel de course (#134) :** la liste du matériel obligatoire/conseillé de
+ce plan (règlement + checklist ci-dessus) est écrite dans `gear` du bloc `arc` (une chaîne courte
+par objet : « Frontale », « Bâtons », « Couverture de survie »…). Une fois le plan écrit, lance
+`python3 scripts/arc_index.py` puis `python3 scripts/arc_index.py equipment --race-plan <chemin du plan>`
+(sans valeur = prochain plan) : la commande croise chaque ligne avec l'inventaire du profil
+(`### Chaussures` + `### Matériel`) par correspondance textuelle stricte et rend un statut par
+ligne. Ajoute au plan (langue des documents) une section « Contrôle du matériel » :
+- `missing` — « non retrouvé dans votre inventaire » : à acheter/emprunter ou à déclarer dans le
+  profil si vous le possédez déjà ; jamais présumé possédé.
+- `never_used` — dans l'inventaire mais aucune séance ne le cite dans `gear_ids` (ou chaussure jamais
+  portée) : « rien de nouveau le jour J », proposer de le tester en sortie longue avant la course.
+- `alert` — sous alerte d'usure/entretien : à remplacer ou entretenir avant le départ.
+- `ok` : une ligne de synthèse suffit.
+Si `inventory_empty` est vrai, dis que l'inventaire n'est pas déclaré (`### Matériel` du profil)
+au lieu de tout marquer manquant comme un constat. Ne complète jamais l'inventaire de ton cru,
+n'invente aucun objet ni aucune séance d'essai ; une ligne du plan que la commande ne sait pas
+rattacher reste `missing` (l'athlète corrige le profil). Ce contrôle ne dépend ni de
+`[health].morning_check` ni de `[data].source` (fichiers du workspace uniquement).
+
 #### ÉTAPE 8 : UPLOAD GARMIN
 
 1. **Enrichis le GPX** : ajoute les waypoints des ravitaillements (officiels + OSM validés)

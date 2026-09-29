@@ -244,6 +244,13 @@ function gearTile(gear) {
   return `<p class="weather">${chip("gear", "orange", "Chaussures à surveiller")} <span>${names}</span></p>`;
 }
 
+// Tuile « Aujourd'hui » : objets hors chaussures sous alerte (#134), même règle que `gearTile`.
+function equipmentTile(eq) {
+  const alerts = (eq?.items || []).filter((i) => i.alert);
+  if (!alerts.length) return "";
+  return `<p class="weather">${chip("gear", "orange", "Matériel à contrôler")} <span>${alerts.map((i) => F.esc(i.name)).join(", ")}</span></p>`;
+}
+
 // Prévision de retraite (#132) : « ≈ 6 sem. » (clé omise côté API = pas de prévision, on
 // n'affiche rien) ; seuil dépassé → « seuil dépassé » ; « proche » à ≥ 90 % du seuil.
 function gearForecast(s) {
@@ -275,6 +282,42 @@ function gearSection(gear) {
       <thead><tr><th scope="col">Chaussure</th><th scope="col" class="num">Kilométrage</th><th scope="col" class="num">Seuil</th><th scope="col">Statut</th></tr></thead>
       <tbody>${rows}${unknownRows}</tbody></table></div>
       ${unknown.length ? note("« inconnue » : gear_id vu sur une séance mais absent de la section « Chaussures » du profil (faute de frappe, paire jamais déclarée).") : ""}
+      ${warnings.map((w) => note(F.esc(w))).join("")}</section>`;
+}
+
+// Matériel hors chaussures (#134) : une valeur d'usage par type de déclencheur. Un déclencheur
+// non déclaré n'est jamais affiché (aucun seuil inventé) ; « en jours » sans date de référence
+// (`unavailable`) est dit comme tel plutôt que présenté comme 0.
+const EQUIP_TRIGGER = {
+  distance: (v) => F.distance(v, 0),
+  duration: (v) => F.hours(v),
+  sessions: (v) => `${F.num(v, 0)} séance${v > 1 ? "s" : ""}`,
+  days: (v) => `${F.num(v, 0)} j`,
+};
+function equipmentTriggers(item) {
+  if (!item.triggers?.length) return `<span class="muted">aucun seuil déclaré</span>`;
+  return item.triggers.map((t) => {
+    if (t.unavailable) return `<span class="tag" title="Ajoutez « depuis <date> » ou « entretien <date> » au profil">jours : date de référence manquante</span>`;
+    const fmt = EQUIP_TRIGGER[t.type] || ((v) => F.num(v, 0));
+    return `<span class="tag${t.reached ? " tag--alert" : ""}">${fmt(t.value)} / ${fmt(t.threshold)}</span>`;
+  }).join(" ");
+}
+function equipmentSection(eq) {
+  const items = eq?.items || [];
+  const unknown = eq?.unknown || [];
+  const warnings = eq?.warnings || [];
+  if (!items.length && !unknown.length) return "";
+  const sorted = [...items].sort((a, b) => (a.retired === b.retired ? 0 : a.retired ? 1 : -1));
+  const rows = sorted.map((it) => `<tr${it.retired ? ` class="muted"` : ""}>
+      <th scope="row">${F.esc(it.name)}${it.category ? ` <span class="tag">${F.esc(it.category)}</span>` : ""}${it.retired ? ` <span class="tag">retiré</span>` : ""}${(it.kits || []).map((k) => ` <span class="tag">kit ${F.esc(k)}</span>`).join("")}</th>
+      <td class="num">${F.distance(it.usage.distance_m, 0)}<br><small class="muted">${F.hours(it.usage.duration_s)} · ${F.num(it.usage.sessions, 0)} séance${it.usage.sessions > 1 ? "s" : ""}${it.usage.days != null ? ` · ${F.num(it.usage.days, 0)} j` : ""}</small></td>
+      <td>${equipmentTriggers(it)}</td>
+      <td>${it.alert ? chip("gear", "orange", "À surveiller") : it.near_threshold ? chip("gear", "orange", "Proche du seuil") : ""}</td></tr>`).join("");
+  const unknownRows = unknown.map((u) => `<tr><th scope="row">${F.esc(u.gear_id)} <span class="tag">inconnu</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td></td><td></td></tr>`).join("");
+  return `<section class="band"><h2>Équipement</h2><div class="table-wrap"><table class="data data--compact">
+      <thead><tr><th scope="col">Objet</th><th scope="col" class="num">Usage</th><th scope="col">Déclencheurs</th><th scope="col">Statut</th></tr></thead>
+      <tbody>${rows}${unknownRows}</tbody></table></div>
+      ${unknown.length ? note("« inconnu » : identifiant cité dans <code>gear_ids</code> d'une séance mais absent de la section « Matériel » du profil.") : ""}
       ${warnings.map((w) => note(F.esc(w))).join("")}</section>`;
 }
 
@@ -567,7 +610,7 @@ async function viewToday() {
     ? `<p class="weather">${weatherChip(weather.category)} <span>${F.esc(weather.location)} · ${F.num(weather.temp_max_c)} °C max · vent ${F.num(weather.wind_kmh)} km/h</span>${weather.best_slot ? ` <span class="slot">Créneau : <strong>${F.SLOT[weather.best_slot]}</strong></span>` : ""}</p>${weather.slot_reason ? `<p class="muted">${F.esc(weather.slot_reason)}</p>` : ""}`
     : "";
   const heatHtml = heatTile(s.heat_acclimation);
-  const gearHtml = gearTile(s.gear);
+  const gearHtml = gearTile(s.gear) + equipmentTile(s.equipment);
   const injuryRiskHtml = injuryRiskTile(injuryRisk);
 
   const f = form.series[form.series.length - 1];
@@ -1647,6 +1690,7 @@ async function viewPerformance(params) {
       <div><h2>Records</h2>${rec}</div></section>
     ${slopeHtml}
     ${gearSection(SUMMARY.gear)}
+    ${equipmentSection(SUMMARY.equipment)}
     ${indexHtml}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));

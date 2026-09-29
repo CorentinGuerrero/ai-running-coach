@@ -16,7 +16,7 @@ L'agent suit un workflow structuré en 8 étapes pour construire la stratégie d
 4. **Synthèse allures et temps de passage** — 3 scénarios (ambitieux, réaliste, sécurité), par segment depuis le modèle personnel pente → allure quand un GPX est fourni (`scripts/arc_race_pacing.py`, #59) ; règles génériques en repli (URL seule, sans GPX)
 5. **Plan de nutrition** — objectif glucides/h (plafonné au débit toléré à l'entraînement, #41), hydratation, produits réels si un catalogue est fourni
 6. **Météo** — si la course est à ≤ 14 jours, ajustements automatiques et acclimatation à la chaleur (#38)
-7. **Équipement et vêtements** — checklist détaillée (lampe frontale, chaussures, hydratation, matériel obligatoire)
+7. **Équipement et vêtements** — checklist détaillée (lampe frontale, chaussures, hydratation, matériel obligatoire), puis **contrôle du matériel de course** (#134) : la liste `gear` du plan est croisée avec l'inventaire du profil (`arc_index.py equipment --race-plan`) — objets **manquants** (« non retrouvé dans votre inventaire »), **jamais utilisés à l'entraînement** (« rien de nouveau le jour J ») ou **sous alerte** ; le rapprochement est textuel strict et rien n'est jamais inventé (inventaire non déclaré = dit tel quel)
 8. **Upload Garmin** — GPX enrichi (waypoints des ravitaillements) téléversé via `upload_course`
 
 ## Alignement avec l'objectif

@@ -1,0 +1,31 @@
+# Contrôle du matériel de course : frontale absente de l'inventaire → signalée (#134).
+#
+# Fixture `race-gear-check/` : plan de course déjà persisté (`planning/plan-collines-fictives.md`,
+# `gear` = Frontale, Bâtons, Couverture de survie) et un inventaire qui ne contient NI frontale NI
+# couverture de survie — seulement des bâtons et une poche à eau, portés lors d'une sortie
+# passée (`5d_trail.md`, `gear_ids`). Le `course-strategist` (ou le coach à défaut) doit
+# lancer `arc_index.py equipment --race-plan` et dire que la frontale et la couverture de survie
+# ne sont pas retrouvées dans l'inventaire — sans jamais les présumer possédées — et que les
+# bâtons, eux, ont déjà servi à l'entraînement.
+#
+# `must_match` : « frontale » liée (à 160 caractères) à un mot d'absence — jamais deux mentions
+# indépendantes. `must_not_match` : ne doit pas affirmer que l'athlète possède une frontale.
+id = "race-gear-missing-head-torch"
+prompt = """Fais le contrôle du matériel obligatoire de mon plan de course \
+(planning/plan-collines-fictives.md) face à mon inventaire du profil : qu'est-ce qui manque ?"""
+fixture = "race-gear-check"
+
+[config.health]
+morning_check = "off"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "(frontale[^\\n]{0,160}(manqu|absent|non retrouv|pas (dans|d)[^\\n]{0,20}inventaire|n['’]est pas))|((manqu|absent|non retrouv)[^\\n]{0,160}frontale)",
+  "(couverture de survie[^\\n]{0,160}(manqu|absent|non retrouv|pas (dans|d)[^\\n]{0,20}inventaire|n['’]est pas))|((manqu|absent|non retrouv)[^\\n]{0,160}couverture de survie)",
+]
+must_not_match = [
+  "((tu as|vous avez) d[ée]j[àa]|tu poss[eè]des|vous poss[eé]dez)[^\\n]{0,30}frontale",
+]

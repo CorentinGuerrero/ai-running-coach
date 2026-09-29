@@ -278,7 +278,10 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # #133 : `gear` gagne `garmin_uuid` (segment « garmin: <uuid> » de la puce chaussure) et
 # `activity` gagne `gear_source` (« garmin »/« chat », provenance du `gear_id`) — sans ce
 # bump, une base déjà construite n'a pas les colonnes (« no such column »).
-SCHEMA_VERSION = 27
+# #134 : nouvelle table `equipment` (section « ### Matériel » du profil, `arc_legacy.parse_equipment`)
+# et `activity` gagne `gear_ids` (liste JSON des slugs de matériel porté) — sans ce bump, une base
+# déjà construite n'a ni la table ni la colonne (« no such table »/« no such column »).
+SCHEMA_VERSION = 28
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports")
 
@@ -458,6 +461,14 @@ CREATE TABLE gear (
     is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT,
     garmin_uuid TEXT, ignored INTEGER
 );
+-- Matériel hors chaussures (#134) : une ligne par puce de « ### Matériel » du profil.
+-- `kits` : liste JSON de slugs ; seuils typés (`threshold_m`, `threshold_s`, `threshold_sessions`,
+-- `threshold_days`), départs typés (`start_m`, `start_s`, `start_sessions`).
+CREATE TABLE equipment (
+    source_path TEXT, gear_id TEXT, name TEXT, category TEXT, start_date TEXT, maintenance_date TEXT,
+    retired INTEGER, kits TEXT, threshold_m REAL, threshold_s REAL, threshold_sessions INTEGER,
+    threshold_days INTEGER, start_m REAL, start_s REAL, start_sessions INTEGER, collision_base TEXT
+);
 -- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
 -- section « Indices de performance » du profil (`arc_legacy.
 -- parse_performance_index`). `category` est NULL pour un indice général
@@ -502,6 +513,7 @@ CREATE TABLE activity (
     descent_reference_source TEXT, durability_gap_fade_pct REAL, durability_ef_fade_pct REAL,
     durability_hr_first_third_bpm REAL, durability_hr_middle_third_bpm REAL,
     durability_hr_last_third_bpm REAL, durability_reason TEXT, durability_reason_code TEXT,
+    gear_ids TEXT,
     body_md TEXT, data_json TEXT
 );
 CREATE INDEX activity_date ON activity(date);
@@ -803,7 +815,7 @@ CREATE TABLE slope_model_meta (
 # Tables alimentées par fichier (colonne `source_path`) : purgées à la réindexation d'un fichier.
 PER_FILE_TABLES = (
     "athlete", "objective", "health_day", "weather_day", "week", "planned_session",
-    "nutrition_day", "report", "course_eval", "race_plan", "aid_station", "gear",
+    "nutrition_day", "report", "course_eval", "race_plan", "aid_station", "gear", "equipment",
     "performance_index", "performance_index_warning", "decision", "decision_rule",
 )
 
@@ -1049,6 +1061,19 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "start_m": shoe.get("start_m"), "usage": shoe.get("usage"),
                 "garmin_uuid": shoe.get("garmin_uuid"), "ignored": int(bool(shoe.get("ignored"))),
             })
+        for item in g("equipment") or []:
+            if not isinstance(item, dict) or not item.get("gear_id"):
+                continue
+            _insert(conn, "equipment", {
+                "source_path": rel, "gear_id": item["gear_id"], "name": item.get("name"),
+                "category": item.get("category"), "start_date": item.get("start_date"),
+                "maintenance_date": item.get("maintenance_date"), "retired": int(bool(item.get("retired"))),
+                "kits": _j(item.get("kits")), "threshold_m": item.get("threshold_m"),
+                "threshold_s": item.get("threshold_s"), "threshold_sessions": item.get("threshold_sessions"),
+                "threshold_days": item.get("threshold_days"), "start_m": item.get("start_m"),
+                "start_s": item.get("start_s"), "start_sessions": item.get("start_sessions"),
+                "collision_base": item.get("collision_base"),
+            })
         for entry in g("performance_index") or []:
             if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
                 continue
@@ -1082,6 +1107,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
             "rpe": g("rpe"), "missing_reason": _j(g("missing_reason")),
             "gear_id": g("gear_id"), "gear_source": g("gear_source"), "carbs_g": g("carbs_g"), "fluid_intake_ml": g("fluid_intake_ml"),
             "weight_pre_kg": g("weight_pre_kg"), "weight_post_kg": g("weight_post_kg"),
+            "gear_ids": _j(g("gear_ids")),
             "body_md": body,
             "data_json": _data_json(data),
         })
@@ -3140,6 +3166,75 @@ def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str
     return M.gear_mileage(activities, gear_defs, today or date.today(), run_refs)
 
 
+def _equipment_defs(conn) -> List[dict]:
+    defs = []
+    for r in conn.execute(
+            "SELECT gear_id, name, category, start_date, maintenance_date, retired, kits, threshold_m, "
+            "threshold_s, threshold_sessions, threshold_days, start_m, start_s, start_sessions, "
+            "collision_base FROM equipment"):
+        d = {k: v for k, v in dict(r).items() if v is not None}
+        d["kits"] = json.loads(d["kits"]) if d.get("kits") else []
+        d["retired"] = bool(d.get("retired"))
+        defs.append(d)
+    return defs
+
+
+def _equipment_activities(conn) -> List[dict]:
+    activities = [dict(r) for r in conn.execute(
+        "SELECT sport, date, distance_m, duration_s, gear_ids, garmin_activity_id, intervals_activity_id, "
+        "source_path FROM activity WHERE gear_ids IS NOT NULL")]
+    for a in activities:
+        try:
+            a["gear_ids"] = [g for g in json.loads(a["gear_ids"]) if isinstance(g, str)]
+        except (TypeError, ValueError):
+            a["gear_ids"] = []
+        a["refs"] = [str(v) for v in (a.pop("garmin_activity_id"), a.pop("intervals_activity_id"),
+                                       a.pop("source_path")) if v is not None]
+    return activities
+
+
+def equipment_usage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None,
+                    since: Optional[date] = None) -> dict:
+    """Matériel hors chaussures (#134) — commande « equipment » : usage (distance, durée, séances,
+    jours), déclencheurs typés, kits. N'est PAS soumis à `[health].morning_check` (aucune donnée de
+    santé). `gear` (chaussures) reste inchangé. Voir `arc_metrics.ASSUMPTIONS["equipment_usage"]`."""
+    defs = _equipment_defs(conn)
+    shoe_ids = [r["gear_id"] for r in conn.execute("SELECT gear_id FROM gear")]
+    return M.equipment_usage(_equipment_activities(conn), defs, today or date.today(), run_refs, since, shoe_ids)
+
+
+def equipment_kit(conn, kit: str, sport: Optional[str]) -> dict:
+    """Commande « equipment --kit » : objets à attribuer à la séance quand l'athlète déclare un kit."""
+    return M.kit_members(_equipment_defs(conn), C.gear_slug(kit), sport)
+
+
+def equipment_race_check(conn, race_plan: Optional[str], today: date) -> dict:
+    """Commande « equipment --race-plan » : croise le `gear` du plan de course (chemin du fichier ou
+    « » = prochain plan dont `race_date` >= today, sinon le plus récent) avec l'inventaire. Rend
+    `{"race_plan": <chemin>, "race_name": ..., "gear": [...], ...}` ou `{"error": ...}`."""
+    if race_plan:
+        rows = conn.execute("SELECT source_path, race_name, race_date, data_json FROM race_plan "
+                            "WHERE source_path = ? OR source_path LIKE ?", (race_plan, f"%{race_plan}")).fetchall()
+    else:
+        rows = conn.execute("SELECT source_path, race_name, race_date, data_json FROM race_plan "
+                            "WHERE race_date >= ? ORDER BY race_date", (today.isoformat(),)).fetchall()
+        if not rows:
+            rows = conn.execute("SELECT source_path, race_name, race_date, data_json FROM race_plan "
+                                "ORDER BY race_date DESC").fetchall()
+    if not rows:
+        return {"error": "aucun plan de course indexé" if not race_plan else f"plan de course introuvable : {race_plan}"}
+    row = rows[0]
+    try:
+        gear = json.loads(row["data_json"] or "{}").get("gear") or []
+    except ValueError:
+        gear = []
+    usage = equipment_usage(conn, today)
+    shoes = gear_mileage(conn, today)["shoes"]
+    check = M.race_gear_check(gear, usage["items"], shoes)
+    return {"race_plan": row["source_path"], "race_name": row["race_name"], "race_date": row["race_date"],
+            "inventory_empty": not usage["items"] and not shoes, **check}
+
+
 def performance_index(conn, today: Optional[date] = None) -> dict:
     """Indices de performance ITRA/UTMB (#62) — pour la CLI (`arc_index.py
     performance-index`) et le tableau de bord (`/api/performance-index`,
@@ -3763,7 +3858,7 @@ def build_parser() -> argparse.ArgumentParser:
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
                                  "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
-                                 "climb-history", "decisions", "slope-model", "trail-shape", "energy"))
+                                 "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -3795,7 +3890,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "terminant à --today (défaut : toutes les décisions connues)")
     parser.add_argument("--since", metavar="AAAA-MM-JJ",
                         help="commande « energy » : toutes les séances éligibles depuis cette date "
-                             "(incluse), ordre chronologique — incompatible avec --activity/--date")
+                             "(incluse), ordre chronologique — incompatible avec --activity/--date ; "
+                             "commande « equipment » (#134) : jour du dernier passage (exclu), pour "
+                             "n'émettre qu'une fois un déclencheur en jours franchi depuis")
     parser.add_argument("--activities", metavar="ID[,ID…]",
                         help="commande « gear » (#132) : séances synchronisées dans CE run "
                              "(garmin_activity_id, intervals_activity_id ou chemin du fichier, séparés par "
@@ -3805,6 +3902,15 @@ def build_parser() -> argparse.ArgumentParser:
                              "get_gear), séparés par des virgules")
     parser.add_argument("--chat-gear", metavar="GEAR_ID",
                         help="commande « gear-attribution » (#133) : gear_id déclaré par l'athlète en chat")
+    parser.add_argument("--kit", metavar="SLUG",
+                        help="commande « equipment » (#134) : objets à attribuer à une séance pour ce kit "
+                             "(« trail-long »), filtrés par --sport")
+    parser.add_argument("--sport", metavar="SPORT",
+                        help="commande « equipment --kit » : sport de la séance (écarte les objets dont la "
+                             "catégorie ne le porte pas, ex. bâtons sur route)")
+    parser.add_argument("--race-plan", nargs="?", const="", metavar="FICHIER",
+                        help="commande « equipment » (#134) : croise le matériel obligatoire d'un plan de "
+                             "course (chemin, ou sans valeur le prochain plan) avec l'inventaire")
     parser.add_argument("--limit", type=int, metavar="N",
                         help="commande « energy » : nombre de dernières séances éligibles à rendre "
                              "sans --activity/--date/--since (défaut 10) — incompatible avec ces trois")
@@ -3879,6 +3985,17 @@ def main(argv=None) -> int:
         return 0
     if args.command == "gear-attribution":
         print(json.dumps(gear_attribution(conn, args.garmin_gear, args.chat_gear), ensure_ascii=False))
+        return 0
+    if args.command == "equipment":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        if args.kit:
+            print(json.dumps(equipment_kit(conn, args.kit, args.sport), ensure_ascii=False))
+        elif args.race_plan is not None:
+            print(json.dumps(equipment_race_check(conn, args.race_plan, today_date), ensure_ascii=False))
+        else:
+            run_refs = [r.strip() for r in args.activities.split(",") if r.strip()] if args.activities else None
+            since_date = date.fromisoformat(args.since) if args.since else None
+            print(json.dumps(equipment_usage(conn, today_date, run_refs, since_date), ensure_ascii=False))
         return 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

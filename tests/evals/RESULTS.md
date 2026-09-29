@@ -27,6 +27,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `daily-sync-red-why` | — | — |
 | `daily-sync-resume-block` | — | — |
 | `doctor-token-expiring` | — | — |
+| `equipment-kit-attribution` | — | — |
 | `feedback-with-fit` | — | — |
 | `feedback-without-fit` | — | — |
 | `gear-correction` | — | — |
@@ -51,6 +52,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `no-medical-no-delegation` | — | — |
 | `race-countdown-trail-shape` | — | — |
 | `race-debrief` | — | — |
+| `race-gear-missing-head-torch` | — | — |
 | `race-plan-personal-model` | — | — |
 | `setup-first-run` | — | — |
 | `setup-idempotent` | — | — |

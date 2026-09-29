@@ -151,6 +151,20 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    passage (le soir, ou une re-fusion) ne repasse pas ces identifiants et ne ré-émet rien, sans
    fichier d'état. Aucune séance de ce type, ou aucune paire franchie = rien à ajouter. Échec de
    la commande : ignorer silencieusement (non bloquant, jamais `ERREUR :`).
+3c. **Alerte matériel hors chaussures (#134) — une seule fois par franchissement, sans état.**
+   Même liste de séances « synchronisées pour la première fois dans CE run » qu'en 3b. Lancer
+   `python3 scripts/arc_index.py equipment --activities <id1>,<id2>,…` (mêmes identifiants) :
+   pour chaque objet portant `crossed_in_run: true` (déclencheur km/h/séances franchi par ces séances),
+   ajouter « Matériel : <nom> a atteint son seuil (<déclencheur franchi>) » à la ligne `Alerte :`
+   unique (` ; `, jamais une ligne de plus). **Déclencheurs en jours** (poche à eau : hygiène tous les
+   30 jours…) : ils ne dépendent d'aucune séance, donc uniquement au **premier passage du jour** —
+   aucun fichier `activities/<aujourd'hui>_*` ni `medical/<aujourd'hui>_*` n'existait avant ce run —
+   en ajoutant `--since <date du plus récent fichier activities/ ou medical/ antérieur à aujourd'hui>`
+   (rattrape un jour manqué, une seule fois, jamais deux fois car le passage suivant du même jour
+   n'est pas un premier passage). Un second passage le même jour n'évalue donc pas les jours.
+   Sans état persistant, sans écrire de fichier. Les objets sans déclencheur ne remontent jamais
+   (aucun seuil inventé). Aucune donnée de santé ; non soumis à `[health].morning_check`.
+   Échec de la commande : ignorer silencieusement (non bloquant).
 4. **Garde-fou r5, bilan rouge (#52/#53) — jamais d'écriture de plan ni de push ici.** Si
    un `medical/YYYY-MM-DD_health.md` persisté à l'étape 1 porte `verdict: "red"`, chercher
    dans `planning/` une semaine (`kind: week`) dont une séance de qualité (intensité

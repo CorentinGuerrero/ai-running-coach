@@ -52,12 +52,14 @@ If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
 > on record. Finally run `python3 scripts/arc_index.py gear` and, only if a
 > non-retired pair is over its alert threshold (`alert`) or at ≥ 90 % of it
 > (`near_threshold`), add one line « Chaussures : <nom> <km>/<seuil> km » per
-> such pair (« seuil dépassé » when over) — nothing at all otherwise.
+> such pair (« seuil dépassé » when over) — nothing at all otherwise. Same rule for
+> `python3 scripts/arc_index.py equipment` (#134): one « Matériel : <nom> <valeur>/<seuil> » line
+> per non-retired item with `alert` or `near_threshold` (« seuil dépassé » when over) — nothing otherwise.
 
 If `coach` is not enabled, or if you cannot delegate at all (no `task`/
 subagent tool available, e.g. running as a bare Gemini CLI command), find the
 week file(s) and run the guardrails check yourself, plus the same
-`arc_index.py gear` line rule as above.
+`arc_index.py gear` line rule as above, and the `arc_index.py equipment` (#134) line rule.
 
 ## Output contract
 
@@ -85,6 +87,11 @@ A compact table, one row per session:
 pair over its threshold (« seuil dépassé ») or at ≥ 90 % of it, from
 `python3 scripts/arc_index.py gear` (`alert`/`near_threshold`). Omit the line
 when no pair qualifies; it is derived mileage, never a plan change.
+
+**Equipment line (#134)** — same discipline for gear beyond shoes: one « Matériel : … » line per
+non-retired item with `alert`/`near_threshold` in `python3 scripts/arc_index.py equipment`
+(trigger value/threshold in its own unit: km, h, séances, jours). Omit it when nothing qualifies;
+never invent a threshold for an item that declares none.
 
 No week file found for the current week: say so in one line rather than
 inventing sessions or falling back to a past/future week silently.

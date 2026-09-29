@@ -224,6 +224,49 @@ propositions et alertes. Voir
 [Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin)
 (y compris la source intervals.icu, où l'attribution par séance reste
 manuelle).
+### Déclarer le reste du matériel (#134)
+
+Bâtons, gilet, poche à eau, flasques, frontale, ceinture cardio, veste, semelles,
+lacets : sous-section « Matériel » (`### Matériel`, à côté de « Chaussures », qu'elle ne
+touche pas — aucun profil existant n'a à changer). Même principe : une puce de
+**premier niveau** par objet, tout facultatif sauf le nom.
+
+```
+- <nom> — catégorie: <bâtons|gilet|poche|flasques|frontale|ceinture|veste|semelles|lacets|autre> — depuis <date> — alerte <déclencheurs> — entretien <date> — kit: <nom> — id: <identifiant>
+```
+
+| Segment | Rôle |
+|---|---|
+| `catégorie: <mot>` | Seule façon de classer l'objet (jamais devinée du nom). Décide des sports qui comptent (voir plus bas). Valeur non reconnue : objet suivi, aucune alerte inventée. |
+| `alerte …` | Déclencheurs typés, combinables — **le premier atteint déclenche** : `N km`, `N h`, `N séances`, `N jours` (`alerte 30 jours ou 40 h`). Aucun seuil par défaut : sans `alerte`, jamais d'alerte. Une unité est obligatoire. |
+| `depuis <date>` | Date d'achat ; les jours se comptent depuis cette date. |
+| `entretien <date>` (ou `révisé`) | Dernier entretien (nettoyage, réimperméabilisation, pile…) : les jours se comptent depuis cette date et **tous les compteurs repartent de zéro** (séances datées jusqu'à ce jour incluses exclues). Sans `depuis` ni `entretien`, un déclencheur en jours ne peut pas jouer (dit explicitement). |
+| `départ N km/h/séances` | Usage avant le suivi, ajouté aux compteurs tant qu'aucun entretien n'existe. |
+| `kit: <nom>` | Regroupe les objets portés ensemble (plusieurs kits possibles, séparés par des virgules). |
+| `id: <identifiant>`, `(retirée)` | Comme pour les chaussures. |
+
+**Sports par catégorie** (approximation du projet, pas une norme fabricant) : les bâtons
+ne comptent qu'en trail et randonnée (jamais sur route) ; gilet, poche, flasques, veste,
+semelles et lacets en course, trail et randonnée ; frontale et ceinture cardio sur tout
+sport (la frontale compte ses heures).
+
+**Attribution.** Une séance compte pour un objet seulement si son bloc `arc` le cite
+dans `gear_ids` (liste ; `gear_id` reste la chaussure) — jamais deviné. Le plus simple :
+dire au coach « kit trail long » (ou « avec les bâtons ») après la séance ; il écrit
+`gear_ids` avec les objets du kit qui portent ce sport (les bâtons d'un kit sont écartés
+d'une sortie sur route, et il vous le dit). Dites « j'ai nettoyé la poche » : il note
+l'`entretien` du jour sur la puce.
+
+**Alertes.** Objet sous alerte ou à 90 % d'un déclencheur : ligne « Matériel : … » dans
+le rapport hebdomadaire, `/week` et le retour de séance ; alerte du `garmin-daily-sync`
+une seule fois par franchissement (déclencheurs en jours : au premier passage du jour) ;
+avant une séance de nuit ou une sortie longue, le coach rappelle un contrôle (frontale :
+batterie ; poche et flasques : hygiène). Ligne de commande :
+`python3 scripts/arc_index.py equipment` (`--kit`, `--race-plan`, `--activities`, `--since`).
+
+**Avant la course.** Le `course-strategist` croise le matériel obligatoire de son plan avec
+cet inventaire : **manquant** (non retrouvé), **jamais utilisé à l'entraînement** (« rien de
+nouveau le jour J ») ou **sous alerte** — jamais inventé.
 
 ## Les décisions tracées
 

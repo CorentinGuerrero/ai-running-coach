@@ -102,6 +102,22 @@ crédité à la paire par défaut (`gear_source: garmin_unmapped`) ; `(ignorée)
 chat peut être poussée vers Garmin (`add_gear_to_activity`) — jamais en headless. Source
 intervals.icu : pas de matériel par séance, attribution par chat/défaut uniquement.
 Détails : [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
+### Matériel hors chaussures, kits et entretien (#134)
+
+La sous-section `### Matériel` du profil (voir `docs/workspace.md`) déclare bâtons,
+gilet, poche, frontale, ceinture, veste… avec des **déclencheurs typés** (`alerte N km |
+N h | N séances | N jours`, le premier atteint déclenche). Le coach :
+
+- attribue un **kit** à une séance quand vous le dites (« kit trail long ») : il lance
+  `arc_index.py equipment --kit trail-long --sport <sport>` et écrit `gear_ids` (jamais un
+  objet de son cru ; les objets retirés ou dont la catégorie ne porte pas le sport sont
+  écartés et signalés) ;
+- note l'**entretien** du jour sur la puce quand vous dites « j'ai nettoyé la poche » (seul
+  ce segment change) ;
+- ajoute une ligne « Matériel : … » au rapport hebdomadaire et au retour de séance pour
+  tout objet sous alerte ou à 90 %, jamais un seuil que vous n'avez pas déclaré ;
+- rappelle avant une séance de nuit (batterie de la frontale) ou une sortie longue (hygiène
+  de la poche et des flasques) — un rappel, jamais un blocage.
 
 ### Débrief post-course (#61)
 

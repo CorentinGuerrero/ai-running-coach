@@ -123,6 +123,7 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `carbs_g` | nombre | glucides ingérés pendant l'effort, 0-1000 g |
 | `fluid_intake_ml` | nombre | liquide ingéré pendant l'effort, 0-10 000 ml |
 | `weight_pre_kg`, `weight_post_kg` | nombre | pesée avant / après effort, 30-200 kg |
+| `gear_ids` | liste de textes | matériel hors chaussures porté sur la séance (slugs, mêmes règles que `gear_id`, 30 max, sans doublon) — voir « Matériel hors chaussures » ci-dessous |
 | `missing_reason` | objet | clé absente → cause |
 | `gap_pace_s_km` | nombre | GAP global de la séance, s/km — voir « Champs KPI FIT » |
 | `decoupling_pct` | nombre (signe libre) | découplage aérobie Pa:HR, % — voir « Champs KPI FIT » |
@@ -249,6 +250,65 @@ méthode complète. En résumé :
   pour les distinguer) : la première garde le slug nu, les suivantes reçoivent
   `-2`, `-3`… et une collision signalée dans `gear_mileage().warnings` — pour
   l'éviter, donnez un `id:` explicite à chaque paire du même modèle.
+
+**Matériel hors chaussures (#134).** La sous-section `### Matériel` (sous `## Matériel &
+lieux`, à côté de `### Chaussures`, qu'elle ne modifie en rien) déclare bâtons, gilet,
+poche à eau, flasques, frontale, ceinture cardio, veste, semelles, lacets… Une puce de
+premier niveau par objet, langage libre, mêmes séparateurs que les chaussures :
+
+```markdown
+### Matériel
+
+- Poche à eau 2 L — catégorie: poche — depuis 2026-03-01 — alerte 30 jours — kit: trail-long
+- Frontale Petzl — catégorie: frontale — alerte 100 h — id: frontale-nuit — kit: nuit
+- Bâtons Leki — catégorie: bâtons — alerte 800 km — kit: trail-long
+- Veste imperméable — catégorie: veste — alerte 40 h ou 180 jours — entretien 2026-05-10
+```
+
+Segments, tous facultatifs sauf le nom : `depuis <date>`, `catégorie: <mot>`, `alerte <déclencheurs>`,
+`départ <N km|N h|N séances>`, `entretien <date>` (ou `révisé <date>`), `kit: <slug>[, <slug>…]`,
+`id: <texte>`, `(retirée)`. La **catégorie** n'est lue que du segment `catégorie:` — jamais
+devinée du nom — parmi `bâtons`, `gilet`, `poche`, `flasques`, `frontale`, `ceinture`, `veste`,
+`semelles`, `lacets`, `autre` (accents, singulier/pluriel et quelques synonymes acceptés,
+`arc_legacy.EQUIPMENT_CATEGORIES`) ; une autre valeur est gardée telle quelle : objet indexé, aucune
+alerte inventée.
+
+- **Déclencheurs typés** (`alerte`) : `N km` (ou `N mi`), `N h`, `N séances`, `N jours`, combinables dans
+  un segment (`alerte 30 jours ou 40 h`) ou en plusieurs segments — le premier atteint (valeur ≥ seuil)
+  déclenche. Seule une unité explicite compte : un nombre nu est ignoré (jamais de type deviné). Il
+  n'existe aucun seuil par défaut pour le matériel.
+- **Jours** : comptés depuis la date de référence = `entretien`/`révisé` le plus récent, sinon `depuis`.
+  Sans aucune des deux, un déclencheur en jours ne peut pas jouer (avertissement, jamais 0). **Remise à
+  zéro après entretien** : quand l'athlète dit « j'ai nettoyé la poche » ou « j'ai réimperméabilisé la
+  veste », le coach réécrit ou ajoute le segment `entretien <date du jour>` sur la puce (jamais le
+  reste de la puce) ; tous les compteurs des déclencheurs repartent de cette date (séances du jour
+  d'entretien exclues, `départ` ignoré) ; les cumuls à vie restent visibles (`lifetime`).
+- **Heures** = somme de `duration_s` des séances comptées (durée totale, pas le temps en mouvement).
+- **Attribution explicite uniquement** : une séance compte pour un objet si son `gear_ids` le cite ;
+  aucun objet par défaut (une ceinture cardio portée à chaque séance se met dans un kit).
+  Compatibilité : `gear_id` reste LA chaussure (inchangé, un seul slug) ; `gear_ids` est facultatif —
+  toute activité écrite avant #134 reste valide et compte pour aucun objet.
+- **Sports par catégorie** (`arc_metrics.EQUIPMENT_CATEGORY_SPORTS`, approximation du projet) : bâtons =
+  trail/randonnée ; gilet, poche, flasques, veste, semelles, lacets = course/trail/randonnée ; frontale,
+  ceinture, autre = tout sport. Catégorie inconnue ou absente : compté sur toute séance qui cite l'objet,
+  aucune alerte hors de ses déclencheurs déclarés.
+- **Kits** : `kit: trail-long` sur les objets qui le composent. Quand l'athlète dit « kit trail long » pour
+  une séance, le coach exécute `python3 scripts/arc_index.py equipment --kit trail-long --sport <sport>`
+  et écrit la liste `gear_ids` rendue (objets non retirés dont la catégorie porte le sport ; les autres
+  sont listés dans `skipped` avec leur raison, à dire à l'athlète) — jamais un objet de son cru. Kit
+  inconnu (`known: false`) : le dire, ne rien écrire.
+- **Lecture** : `arc_index.py equipment` (et `/api/summary.equipment`) rend, par objet, `usage`
+  (`distance_m`, `duration_s`, `sessions`, `days`), `lifetime`, `triggers` (valeur, seuil, `reached`),
+  `alert`, `near_threshold` (≥ 90 %), `pre_session_check` (frontale : batterie avant une séance de nuit ;
+  poche/flasques : hygiène avant une sortie longue), plus `kits`, `unknown` (`gear_ids` cité mais absent du
+  profil) et `warnings`. `arc_index.py gear` (chaussures) est inchangé. **Alerte une seule fois, sans
+  fichier d'état** : `equipment --activities ID[,ID…] [--since AAAA-MM-JJ]` ajoute `crossed_in_run` (par
+  objet et par déclencheur) — km/h/séances : le cumul hors les séances désignées était sous le seuil ;
+  jours : seuil franchi entre `--since` (exclu) et aujourd'hui, ou, sans `--since`, exactement ce jour-là.
+- **Contrôle du matériel de course** : `equipment --race-plan [FICHIER]` croise le `gear` d'un plan de
+  course avec l'inventaire (`missing`, `never_used` = aucune séance ne cite l'objet, `alert`) ; le
+  rapprochement est textuel strict (catégorie, nom ou identifiant contenu dans la ligne du plan), jamais flou.
+- Méthode et limites : `arc_metrics.ASSUMPTIONS["equipment_usage"]`.
 
 **Indices de performance ITRA/UTMB (#62).** La section `## Indices de
 performance (ITRA / UTMB)` du profil (voir `templates/
