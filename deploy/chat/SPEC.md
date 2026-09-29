@@ -152,7 +152,17 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
   `python3 scripts/arc_race_pacing.py`, `python3 scripts/analyze_gpx.py`,
   `python3 scripts/compare_course.py`, `python3 scripts/download_fit.py`, …) with no shell
   metacharacters (`; | & $ \` > < ( ) \n`); deny otherwise.
-- `web.fetch`: allow listed domains (`wttr.in`, `overpass-api.de`, `nominatim.openstreetmap.org`); deny otherwise. `web.search`: deny.
+  Shell hardening: no `\ ~ * ? [ ] { } ! #` either; every option must be declared for the
+  script in `[shell.scripts."scripts/x.py"]` (`flags`, `value_options`, `read_options`,
+  `output_options`; unknown option → deny); every path-like argument must resolve inside the
+  workspace (no absolute path, no secret, no `.arc/`) and output options must land under
+  `[fs].write_dirs`. `coach_doctor.py` is not allowlisted (reads Garmin tokens).
+- `fs.list`: `path` as `fs.read`, plus the `glob` key (string or list) is checked against
+  `secret_patterns` (either direction fnmatch, real expansion under data dirs); `pattern`
+  (search regex) is not a path.
+- `web.fetch`: allow listed domains (`wttr.in`, `overpass-api.de`, `nominatim.openstreetmap.org`)
+  — http(s) only, parsed with `urlsplit`, no `\`, `%` or userinfo in the authority, ASCII host,
+  default port, hostname equal to or a true subdomain of a listed domain; deny otherwise. `web.search`: deny.
 - `task`, `skill`: allow (agents limited by `[agents].enabled` already).
 - `mcp:garmin.*` / `mcp:intervals.*`: reads allow; writes **ask** (explicit list:
   `schedule_workout(s)`, `schedule_week`, `delete_workout(s)`, `unschedule_workout`,
