@@ -171,9 +171,15 @@ class ShellBypassTest(PolicyBase):
 
     def test_option_inconnue_refusee(self):
         for command in ("python3 scripts/arc_log.py --evil x", "python3 scripts/arc_index.py --python /bin/sh",
-                        "python3 scripts/arc_log.py -o planning/x.json", "python3 scripts/download_fit.py --python x",
+                        "python3 scripts/arc_log.py -o planning/x.json", "python3 skills/fit-download/scripts/download_fit.py --python x",
                         "python3 scripts/arc_log.py --output"):
             self.assertEqual(self.sh(command), "deny", command)
+
+    def test_scripts_des_skills_au_chemin_reel(self):
+        # Les skills appellent leurs scripts sous skills/*/scripts/ (SKILL.md).
+        self.assertEqual(self.sh("python3 skills/gpx-analysis/scripts/analyze_gpx.py planning/trace.gpx"), "allow")
+        self.assertEqual(self.sh("python3 skills/fit-download/scripts/download_fit.py --output-dir activities/fit"), "allow")
+        self.assertEqual(self.sh("python3 scripts/analyze_gpx.py planning/trace.gpx"), "deny")
 
     def test_sorties_uniquement_dans_les_dossiers_de_donnees(self):
         self.assertEqual(self.sh("python3 scripts/arc_log.py --output activities/o.json"), "allow")

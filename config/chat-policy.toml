@@ -20,9 +20,9 @@ allowed_prefixes = [
   "python3 scripts/arc_index.py",
   "python3 scripts/arc_log.py",
   "python3 scripts/arc_race_pacing.py",
-  "python3 scripts/analyze_gpx.py",
-  "python3 scripts/compare_course.py",
-  "python3 scripts/download_fit.py",
+  "python3 skills/gpx-analysis/scripts/analyze_gpx.py",
+  "python3 skills/course-comparison/scripts/compare_course.py",
+  "python3 skills/fit-download/scripts/download_fit.py",
   "python3 scripts/arc_energy.py",
 ]
 
@@ -49,18 +49,18 @@ value_options = ["--today", "--band", "--months", "--segment-m", "--race-date", 
 read_options = ["--gpx", "--workspace", "--aid-stations", "--weather-file"]
 output_options = ["--db"]
 
-[shell.scripts."scripts/analyze_gpx.py"]
+[shell.scripts."skills/gpx-analysis/scripts/analyze_gpx.py"]
 flags = ["--quiet"]
 value_options = ["--name", "--target-distance", "--target-dp", "--smooth", "--min-gain", "--min-grade", "--min-climb-dist"]
 read_options = ["--gpx"]
 output_options = ["--output", "--json"]
 
-[shell.scripts."scripts/compare_course.py"]
+[shell.scripts."skills/course-comparison/scripts/compare_course.py"]
 value_options = ["--lieu", "--aliases", "--ref", "--dates", "--exclude-dates", "--loop-length", "--tolerance", "--min-climb"]
 read_options = ["--dir", "--workspace"]
 output_options = ["--output", "--json"]
 
-[shell.scripts."scripts/download_fit.py"]
+[shell.scripts."skills/fit-download/scripts/download_fit.py"]
 flags = ["--json", "--overwrite"]
 read_options = ["--from-dir"]
 output_options = ["--output-dir"]
