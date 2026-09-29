@@ -1727,6 +1727,11 @@ persist_llm() {
     llm_set sync runner "$sync_runner"
     llm_set sync model "$sync_model"
     llm_set sync base_url "$base_url"
+    # Runner claude déjà en place : la seule différence est la facturation. `llm_set` ne signale
+    # pas un passage de « vide » à « rempli » ; ici, si : abonnement → clé API facturée au token.
+    if [[ "$sync_runner" == "claude" && -z "$(effective_value sync api_key_env)" ]]; then
+        warn "[sync].api_key_env : (vide) → $key_var — la synchronisation quitte l'abonnement : abonnement → clé API facturée au token ([sync].daily_budget_eur la plafonne). Pour revenir : videz [sync].api_key_env dans config/workspace.user.toml (ancienne valeur : vide)."
+    fi
     llm_set sync api_key_env "$key_var"
     ensure_llm_env "$key_var"
     if [[ "$key_var" == "ANTHROPIC_API_KEY" ]]; then
