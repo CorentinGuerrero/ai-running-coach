@@ -167,6 +167,18 @@ installe dans l'environnement `intervals-icu-mcp` — sur une installation
 antérieure, relancez simplement cette commande (elle ajoute `fitparse` sans
 réinstaller le serveur).
 
+## Matériel et attribution par séance
+
+Vérifié dans le code source du serveur épinglé (`INTERVALS_MCP_REF`, `tools/gear.py`) : il expose
+un **inventaire** de matériel (`get_gear_list` : id, nom, type, `usage.total_distance_km`, rappels)
+et des outils d'écriture (`create_gear`, `update_gear`, `delete_gear`, `create_gear_reminder`). En
+revanche les activités (`tools/activities.py`, `tools/activity_analysis.py`) ne portent **aucun champ
+matériel** : l'attribution par séance n'est donc **pas disponible** avec cette source. Le coach
+n'attribue jamais un matériel de lui-même : `gear_id` reste déclaré par vous en chat ou tombe
+sur la paire `(par défaut)`. `get_gear_list` n'est qu'une référence de lecture (par exemple pour
+vérifier un kilométrage) — jamais une source d'attribution, et le segment `garmin: <uuid>` du
+profil n'a aucun effet ici. Voir [Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin).
+
 ## Passer d'une source à l'autre
 
 ```bash

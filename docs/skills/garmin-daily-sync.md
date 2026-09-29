@@ -21,6 +21,21 @@ Il **n'ajoute aucune logique** : il délègue à l'agent `coach` et au skill
    sa `date` est celle de la séance concernée, pas forcément celle du run — la 5<sup>e</sup>
    ligne devient `Pourquoi :` (raison de l'ajustement, #56) au lieu de `Alerte :` —
    jamais les deux, jamais inventée sans fichier `decision` à l'appui
+6. Matériel hors chaussures (#134) : la ligne `Alerte :` porte aussi « Matériel : <nom> a atteint
+   son seuil (…) », une seule fois par franchissement et sans fichier d'état, pour les déclencheurs
+   en km/h/séances des séances de tout sport synchronisées dans ce run (`arc_index.py equipment
+   --activities`) ; aucune séance nouvelle = rien. Les déclencheurs en jours n'alertent jamais ici
+   (aucun horodatage fiable du dernier passage) : ils se lisent dans le tableau de bord, `/week`,
+   le rapport hebdomadaire et les rappels du coach
+
+6. **Matériel (#133, source Garmin)** : pour chaque séance **nouvelle** (un seul
+   `get_activity_gear` par séance, jamais pour une séance déjà synchronisée), le matériel
+   attaché par la montre alimente `gear_id` **si une puce du profil porte le `garmin: <uuid>`
+   correspondant** ; la règle (déclaration de l'athlète > matériel Garmin > `(par défaut)`) est exécutée par `arc_index.py gear-attribution`. Un `gear_id` déjà déclaré est
+   conservé ; un matériel Garmin sans puce n'est **jamais** attribué (mentionné sur la ligne
+   `Alerte :`, une fois par run ; `gear_source: "garmin_unmapped"` l'exclut de la paire par défaut ;
+   une puce `(ignorée)` fait taire l'alerte). Aucune écriture côté Garmin (`add_gear_to_activity`) en headless, jamais. Voir
+   [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
 
 ## Fichier source
 

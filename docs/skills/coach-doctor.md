@@ -42,6 +42,7 @@ n'apparaît jamais littéralement en sortie.)
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme | ⚠️ si non nul |
 | `daily_sync_scheduled` | Tâche cron (Linux) ou LaunchAgent (macOS) du daily-sync ; en mode `watch`, dernier passage de `scripts/garmin_watch.py` | ℹ️ si non installé (choix valide) ; ⚠️ si le watcher est installé mais muet depuis plus de 3 intervalles |
 | `ntfy_configured` | Notifications push configurées, si activées | ℹ️ si désactivées, ⚠️ si mal configurées |
+| `gear_sync` | Synchronisation du matériel Garmin (#133) : la liste blanche `GARMIN_ENABLED_TOOLS` de `.mcp.json` contient `get_gear` et `get_activity_gear`, et les paires actives du profil portent un segment `garmin: <uuid>`. **Statique — le doctor n'appelle jamais Garmin** ; lister le matériel Garmin sans puce est fait par le coach (`get_gear`) | ⚠️ si la liste blanche est antérieure à #133 (relancer `./install.sh`), ℹ️ si des paires actives ne sont pas associées (ou liste blanche illisible en mode passerelle), ℹ️ sous la source intervals.icu |
 | `fit_reader` | `fitparse` présent dans l'environnement MCP de la source (`garmin-mcp` ou `intervals-icu-mcp`), pour lire les FIT téléchargés | ⚠️ si absent : zones, GAP, VAM… restent vides — relancer `./install.sh --source <source>` |
 
 Un ❌ fait échouer la commande (code de sortie non nul). Un ⚠️ ou un ℹ️ jamais —

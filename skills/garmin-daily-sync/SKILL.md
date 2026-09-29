@@ -50,11 +50,24 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
 - **Idempotence** : ne récupérer que les dates dont le fichier MD manque dans `activities/`
   ou `medical/` (règle 1 de `garmin-sync-efficiency`). Une date déjà persistée n'est jamais
   re-synchronisée.
-- **Matériel, glucides, hydratation, pesées (#39)** : `gear_id`, `carbs_g`, `fluid_intake_ml`,
-  `weight_pre_kg`, `weight_post_kg` ne viennent JAMAIS de Garmin — seule une déclaration de
-  l'athlète les remplit (voir `agents/coach.md`). Ce skill tourne sans personne pour répondre :
-  ne JAMAIS les demander, ne JAMAIS les deviner. Les laisser absents du bloc ```arc est le
-  comportement normal d'une synchronisation headless, pas un manque à signaler.
+- **Glucides, hydratation, pesées (#39)** : `carbs_g`, `fluid_intake_ml`, `weight_pre_kg`,
+  `weight_post_kg` ne viennent JAMAIS de Garmin — seule une déclaration de l'athlète les
+  remplit (voir `agents/coach.md`). Ce skill tourne sans personne pour répondre : ne JAMAIS les
+  demander, ne JAMAIS les deviner. Les laisser absents du bloc ```arc est le comportement
+  normal d'une synchronisation headless, pas un manque à signaler.
+- **Matériel (#133, source `garmin` uniquement)** : `gear_id` peut venir du matériel que la
+  montre a attaché à la séance (`get_activity_gear`), et seulement si une puce du profil porte
+  le `garmin: <uuid>` correspondant. Priorité : `gear_id` déjà déclaré par l'athlète (`/log`, chat) >
+  matériel attaché par Garmin > paire `(par défaut)` calculée à la lecture. **Un `gear_id` déjà
+  présent dans un fichier à fusionner est conservé tel quel** ; si Garmin indique une autre
+  paire, le signaler dans la ligne `Alerte :`. Un matériel Garmin sans puce (ou ambigu, ou
+  `(ignorée)`) n'est JAMAIS attribué (ni deviné, ni créé en headless) : `gear_id` reste absent,
+  `gear_source: "garmin_unmapped"` est écrit (la séance n'est alors jamais créditée à la paire par
+  défaut) et le résumé le mentionne — sauf s'il est `(ignorée)` : aucune alerte. Une seule mention
+  par matériel et par run ; pour ne plus être alerté, l'athlète associe ou marque `(ignorée)` (le
+  coach le propose en session interactive). **Aucune écriture côté Garmin en headless** : `add_gear_to_activity` ne
+  s'appelle jamais ici, personne ne peut confirmer. Avec `[data].source = "intervals"`, aucun
+  matériel par séance n'est lisible (voir `AGENTS.md`) : `gear_id` reste absent, jamais deviné.
 
 - **Déclencheurs (`trigger=…`, facultatif)** : posés par `scripts/garmin_watch.py` quand la
   surveillance (`[sync].mode = "watch"`) a vu du neuf chez Garmin — `morning` (sommeil du
@@ -82,12 +95,23 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    > readiness, resting HR / body battery. If a not-yet-synced file already exists for that
    > date, MERGE the fetched Garmin fields into it — same file, never a second one for the
    > same session — preserving every athlete-declared key it already carries (`carbs_g`,
-   > `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg` on an activity;
+   > `fluid_intake_ml`, `rpe`, `gear_id`, `gear_ids`, `weight_pre_kg`, `weight_post_kg` on an activity;
    > `pain` on a health file) exactly as declared. Persist each file immediately using the
    > workspace conventions (`AGENTS.md`: file names; load the `workspace-data-contract` skill
    > and open every file with its ```arc JSON block — `kind: activity` with
    > `garmin_activity_id`, `location` and `splits`, `kind: health` with `morning_check` set to
-   > the configured mode. For TODAY's `medical/YYYY-MM-DD_health.md`, when `morning_check` is
+   > the configured mode. **Gear (#133, `[data].source = "garmin"` only):** for each activity
+   > that is NEW in this run (never for a file that already carried its Garmin data —
+   > `garmin-sync-efficiency`, one `get_activity_gear(activity_id)` call per new activity, no
+   > more), pass the `uuid` values of its shoes (`gearTypeName` shoes only; ignore other gear types) to
+   > `python3 scripts/arc_index.py gear-attribution --garmin-gear <uuid1,uuid2>` (add
+   > `--chat-gear <gear_id>` when the file being merged already carries an athlete-declared
+   > `gear_id`) and write the returned `gear_id` + `gear_source` into the block **as returned**
+   > (when `gear_id` is null but `gear_source` is `garmin_unmapped`, write only `gear_source`; otherwise omit both). Never re-derive the rule yourself. The tool answers
+   > "No gear data found…" when nothing is attached: then write nothing. Report a non-empty
+   > `conflict` (Garmin says A, athlete says B — athlete kept) and any `unmapped_garmin` /
+   > `ambiguous` result (NOT `ignored_garmin`: those stay silent) in your summary, once per gear, by gear NAME (from `get_activity_gear`'s `displayName`,
+   > never a raw uuid), never attribute them. NEVER call `add_gear_to_activity` here. For TODAY's `medical/YYYY-MM-DD_health.md`, when `morning_check` is
    > `full` or `minimal`, record the gatekeeper `verdict` (`green`/`amber`/`red`) and
    > `verdict_reason` per the morning-check rules (`agents/medical.md`) — never leave it to
    > chance, step 4 below depends on it; document language from `config/workspace.toml` for
@@ -114,6 +138,38 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    façon (« 1 fichier hors contrat — medical/2026-09-20_health.md »). Cette même commande
    ingère aussi les échantillons FIT déposés à l'étape 2 (`activity_sample`, aucune action
    supplémentaire requise).
+3b. **Alerte d'usure des chaussures (#132) — une seule fois par franchissement, sans état.**
+   Dresser la liste des séances running/trail/hiking **synchronisées pour la première fois dans
+   CE run** : fichier d'activité créé à l'étape 1, ou fichier « pas encore synchronisé »
+   (`/log`, #67) qui reçoit ses premiers champs Garmin. Une séance dont le fichier portait déjà
+   ses données Garmin (simple re-fusion, second passage le même jour) n'en fait **jamais** partie.
+   Lancer `python3 scripts/arc_index.py gear --activities <id1>,<id2>,…` avec, pour chacune, son
+   `garmin_activity_id` (ou `intervals_activity_id`, ou à défaut le chemin `activities/….md`).
+   Pour chaque paire du JSON qui porte `crossed_in_run: true`, ajouter le segment
+   « Chaussures : <nom> a atteint son seuil (<distance_m/1000> km) » à la ligne `Alerte :`
+   unique (concaténé avec ` ; `, jamais une ligne de plus). Méthode : `crossed_in_run` n'est vrai
+   que si le cumul HORS ces séances était encore SOUS le seuil et que le cumul avec elles
+   l'atteint — le franchissement est identifié par la séance, pas par une date : un second
+   passage (le soir, ou une re-fusion) ne repasse pas ces identifiants et ne ré-émet rien, sans
+   fichier d'état. Aucune séance de ce type, ou aucune paire franchie = rien à ajouter. Échec de
+   la commande : ignorer silencieusement (non bloquant, jamais `ERREUR :`).
+3c. **Alerte matériel hors chaussures (#134) — une seule fois par franchissement, sans état.**
+   Dresser la liste des séances **de tout sport** (un vélo ou un renforcement comptent pour une
+   frontale ou une ceinture cardio) **synchronisées pour la première fois dans CE run** — même critère
+   qu'en 3b. **Aucune séance nouvelle = ne PAS lancer la commande et ne rien ajouter** (sans
+   `--activities`, la sortie ne porte aucun `crossed_in_run` : rien n'est jamais ré-émis).
+   Sinon lancer `python3 scripts/arc_index.py equipment --activities <id1>,<id2>,…` (mêmes
+   identifiants qu'en 3b) et, pour chaque objet portant `crossed_in_run: true` (déclencheur km/h/séances
+   franchi par ces séances), ajouter « Matériel : <nom> a atteint son seuil (<déclencheur franchi>) » à
+   la ligne `Alerte :` unique (` ; `, jamais une ligne de plus). **Les déclencheurs en jours ne
+   produisent AUCUNE alerte ici** : ils ne dépendent d'aucune séance et aucun horodatage fiable du
+   dernier passage réussi n'existe (`daily-sync.sh` n'écrit que des journaux quotidiens, pas un
+   marqueur de succès ; l'absence de fichier du jour ne prouve rien avec `morning_check = "off"` ni
+   quand `/log` a déjà créé le fichier) — sans cela ils seraient ré-émis à chaque passage ou perdus.
+   Ils apparaissent dans le tableau de bord, `/week`, le rapport hebdomadaire et les contrôles
+   avant séance du coach. N'utiliser jamais `--last-pass` ici. Sans état persistant, sans fichier
+   écrit ; les objets sans déclencheur ne remontent jamais (aucun seuil inventé). Aucune donnée de
+   santé ; non soumis à `[health].morning_check`. Échec de la commande : ignorer silencieusement.
 4. **Garde-fou r5, bilan rouge (#52/#53) — jamais d'écriture de plan ni de push ici.** Si
    un `medical/YYYY-MM-DD_health.md` persisté à l'étape 1 porte `verdict: "red"`, chercher
    dans `planning/` une semaine (`kind: week`) dont une séance de qualité (intensité
@@ -160,7 +216,10 @@ dans la langue des documents, sans Markdown à l'intérieur. C'est ce bloc que
 `scripts/daily-sync.sh` extrait mot pour mot pour la notification push.
 
 **Une seule ligne `Alerte :` au total**, jamais une par source : si plusieurs
-alertes s'appliquent en même temps (FIT non téléchargé, fichier hors contrat…),
+alertes s'appliquent en même temps (FIT non téléchargé, fichier hors contrat, chaussure
+ayant atteint son seuil — étape 3b, matériel Garmin non associé ou en désaccord avec la
+déclaration de l'athlète, #133 — « Matériel : Brooks Ghost non associée (à lier via le coach) »
+ou « Matériel : Garmin indique Nike Pegasus, ta déclaration (Salomon S/Lab) est conservée »…),
 les concaténer sur cette même ligne, séparées par ` ; ` — le budget de 5
 lignes ne laisse la place à aucune ligne `Alerte :` supplémentaire. `Alerte :
 aucune` seulement quand aucune des sources ci-dessus n'a de signal à ce

@@ -90,6 +90,8 @@ RULE_ID_RE = re.compile(r"^r\d+_[a-z][a-z0-9_]*$")
 # Matériel, sudation, glucides pendant l'effort (#39 — champs consommés par #40
 # kilométrage chaussures, #41 KPI glucides/h et taux de sudation).
 GEAR_ID_MAX_LEN = 40
+# `activity.gear_ids` (#134) : nombre maximal d'objets par séance (un kit complet tient largement).
+GEAR_IDS_MAX = 30
 # Format slug : minuscules, chiffres, tirets simples, jamais en tête/fin — même
 # convention que la plupart des identifiants stables lisibles par un humain
 # (ex. "hoka-speedgoat-5-bleue"). La section « Matériel & lieux » du profil
@@ -184,6 +186,9 @@ DECOUPLING_PCT_PLAUSIBLE = (-50.0, 100.0)
 # ---------------------------------------------------------------------------
 
 
+GEAR_SOURCES = ("garmin", "chat", "garmin_unmapped")
+
+
 def _enum(values) -> str:
     return "enum:" + "|".join(values)
 
@@ -228,10 +233,20 @@ SCHEMA = {
             "splits_cols": "list",
             "splits": "list",
             "gear_id": "gear_id",
+            # #133 : provenance du `gear_id` — « garmin » (matériel attaché par la montre,
+            # `get_activity_gear`) ou « chat » (déclaré par l'athlète) ; « garmin_unmapped » =
+            # la montre a attaché un matériel SANS puce correspondante (ou ambigu/ignoré) : SANS
+            # `gear_id`, et exclu de l'attribution par défaut (`arc_metrics.gear_mileage`).
+            # Jamais « default » : sans `gear_id`, la paire par défaut est calculée à la lecture.
+            "gear_source": _enum(GEAR_SOURCES),
             "carbs_g": "carbs_g",
             "fluid_intake_ml": "fluid_ml",
             "weight_pre_kg": "body_weight_kg",
             "weight_post_kg": "body_weight_kg",
+            # #134 : matériel hors chaussures porté sur la séance (liste de slugs, `gear_id` reste
+            # LA chaussure). Absent = aucun objet attribué, jamais « aucun » écrit en liste vide
+            # (une liste vide est acceptée mais sans effet). Ancien fichier sans `gear_ids` : valide.
+            "gear_ids": "gear_id_list",
             "missing_reason": "obj",
             # KPI FIT (#51, épopée #21) : snapshot narratif écrit par le coach APRÈS
             # avoir lu la sortie des CLI dédiées (`scripts/arc_index.py gap/decoupling/
@@ -688,6 +703,24 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
             fail(f"un identifiant de matériel au format slug (minuscules, chiffres, tirets, "
                  f"{GEAR_ID_MAX_LEN} caractères max)")
         return
+    if spec == "gear_id_list":
+        if not isinstance(value, list):
+            fail("une liste d'identifiants de matériel (slugs)")
+            return
+        if len(value) > GEAR_IDS_MAX:
+            fail(f"{GEAR_IDS_MAX} identifiants de matériel au plus")
+            return
+        seen = set()
+        for i, gid in enumerate(value):
+            if not isinstance(gid, str) or len(gid) > GEAR_ID_MAX_LEN or not GEAR_ID_RE.match(gid):
+                errors.append(f"{where}[{i}] : un identifiant de matériel au format slug (minuscules, chiffres, "
+                              f"tirets, {GEAR_ID_MAX_LEN} caractères max) attendu, "
+                              f"{json.dumps(gid, ensure_ascii=False)} trouvé")
+            elif gid in seen:
+                errors.append(f"{where}[{i}] : identifiant « {gid} » en double")
+            else:
+                seen.add(gid)
+        return
     if spec == "carbs_g":
         if not _is_number(value) or not 0 <= value <= CARBS_G_PLAUSIBLE_MAX:
             fail(f"une quantité de glucides en g (0-{CARBS_G_PLAUSIBLE_MAX:g})")
@@ -1033,6 +1066,11 @@ def validate(data: dict) -> tuple:
             # Garmin (ex. BMR quotidien entier collé sur une activité courte),
             # jamais une valeur physiologiquement plausible à laisser passer.
             errors.append("activity.calories_bmr_kcal : ne peut dépasser calories_kcal")
+        source = data.get("gear_source")
+        if source in ("garmin", "chat") and not data.get("gear_id"):
+            errors.append(f"activity.gear_source : « {source} » exige un gear_id")
+        if source == "garmin_unmapped" and data.get("gear_id"):
+            errors.append("activity.gear_source : « garmin_unmapped » exclut gear_id (matériel Garmin non associé)")
         pre, post = data.get("weight_pre_kg"), data.get("weight_post_kg")
         if _is_number(pre) and _is_number(post) and post > pre + WEIGHT_POST_TOLERANCE_KG:
             # Pas une erreur : une pesée maison a de l'imprécision (habits, balance), et le

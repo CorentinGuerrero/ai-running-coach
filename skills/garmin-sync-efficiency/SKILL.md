@@ -41,9 +41,11 @@ or `upload_workout` — see the correspondence table in `AGENTS.md`.
    source-specific health marker exists). Its presence must never suppress
    that day's fetch. Once fetched, MERGE the fetched fields into that SAME file — never write
    a second file for the same date/session — and **never overwrite an athlete-declared key**:
-   `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg`
-   (activity) and `pain` (health) come only from the athlete, neither source has such a field, so
-   the merge is a plain union — add the new keys, keep the declared ones byte-for-byte.
+   `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `gear_ids`, `weight_pre_kg`, `weight_post_kg`
+   (activity) and `pain` (health) come from the athlete, so the merge is a plain union — add the
+   new keys, keep the declared ones byte-for-byte. Exception to "neither source has such a field"
+   (#133): Garmin can attach gear to an activity (`get_activity_gear`, see rule 7) — but a
+   `gear_id` already in the file always stays, the Garmin gear never overrides it.
    A file that already carries the marker (a real prior sync) is fresh and final — merge
    never applies to it, only to a not-yet-synced one. A synced health file that genuinely has
    no HRV/RHR that day (the source returned nothing, e.g. watch not worn overnight), or a manual
@@ -56,6 +58,18 @@ or `upload_workout` — see the correspondence table in `AGENTS.md`.
 5. **One sync per day.** Garmin data for a past date does not change — if a file for that date exists AND is already synced (rule 1a's marker present), trust it.
 6. **Batch writes, not fetches.** When multiple days are missing or not-yet-synced, fetch day-by-day and write/merge each file as you go, rather than accumulating responses in context.
 
+7. **Gear (#133): one `get_activity_gear(activity_id)` call per NEW activity, never more.**
+   Only for an activity being synced for the first time in this run (rule 1a marker absent
+   before the fetch) — an already-synced activity's gear is in its file, trust it (rule 5).
+   `get_gear` (the inventory) is called only for the one-time mapping proposal in
+   `agents/coach.md`, with `include_stats=False` (`True` costs one extra Garmin API call per
+   piece of gear) unless lifetime totals are needed to seed `départ`. Both are read-only;
+   `add_gear_to_activity` is a WRITE on Garmin: never in a headless run, only after the athlete
+   confirmed in the conversation. `get_activity_gear` answers with a plain text
+   ("No gear data found for activity with ID N") when nothing is attached — that is "no gear",
+   not an error. The attribution rule itself (athlete's declaration > Garmin > default) lives in
+   `python3 scripts/arc_index.py gear-attribution`, never re-derived by hand.
+
 ## Minimal Extraction Pattern
 
 For each day, extract only what the file's ```arc block needs (schema: the
@@ -66,6 +80,7 @@ For each day, extract only what the file's ```arc block needs (schema: the
 - **Resting HR** → `resting_hr_bpm` — **always** when `[health].morning_check = "full"`, never "if relevant". Safety rules depend on it, and it is what separates autonomic stress from systemic overload.
 - **Readiness** → `readiness_score`, `readiness_factors`
 - **Activity** → `garmin_activity_id`, `sport`, `duration_s`, `moving_duration_s` (`[data].source = "intervals"` : `elapsed_time_seconds` / `moving_time_seconds` of `get_activity_details` — never `duration_s` from `get_recent_activities`, which only returns the moving time, see `AGENTS.md`), `distance_m`, `elevation_gain_m` / `elevation_loss_m`, `avg_hr_bpm` / `max_hr_bpm`, `recovery_hr_bpm`, `training_effect_aerobic` / `training_effect_anaerobic`, `calories_kcal`, `calories_bmr_kcal` (copy `get_activity`'s `bmr_calories` field verbatim, never recomputed; `[data].source = "intervals"` has no known equivalent field, see the correspondence table in `AGENTS.md` — omit the key rather than guess), and the per-km `splits`
+- **Gear** (#133, garmin source, new activities only) → `gear_id` + `gear_source`, taken from `arc_index.py gear-attribution`'s output, never from your own reading of `get_activity_gear`
 - **Body** → `weight_kg`, `stress_avg`, `body_battery_high` / `body_battery_low` (if relevant)
 
 Which health keys are expected follows `[health].morning_check`: `minimal` → readiness

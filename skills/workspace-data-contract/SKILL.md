@@ -119,9 +119,11 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `splits_cols` | liste | en-tête des splits, voir ci-dessous |
 | `splits` | liste | une ligne par km, dans l'ordre de `splits_cols` |
 | `gear_id` | texte | identifiant matériel (slug), voir ci-dessous |
+| `gear_source` | `garmin` \| `chat` \| `garmin_unmapped` | (#133) provenance du `gear_id` : matériel attaché par la montre (`get_activity_gear`, rattaché à la puce par son segment `garmin:`) ou déclaré par l'athlète en chat. `garmin` et `chat` exigent un `gear_id` ; `garmin_unmapped` l'EXCLUT : la montre a attaché un matériel sans puce correspondante (non associé, ambigu ou `(ignorée)`) — la séance n'est alors jamais créditée à la paire `(par défaut)` ; jamais `default` — sans `gear_id`, la paire `(par défaut)` est calculée à la lecture, pas écrite. Clé omise = provenance inconnue (séances antérieures à #133) |
 | `carbs_g` | nombre | glucides ingérés pendant l'effort, 0-1000 g |
 | `fluid_intake_ml` | nombre | liquide ingéré pendant l'effort, 0-10 000 ml |
 | `weight_pre_kg`, `weight_post_kg` | nombre | pesée avant / après effort, 30-200 kg |
+| `gear_ids` | liste de textes | matériel hors chaussures porté sur la séance (slugs, mêmes règles que `gear_id`, 30 max, sans doublon) — voir « Matériel hors chaussures » ci-dessous |
 | `missing_reason` | objet | clé absente → cause |
 | `gap_pace_s_km` | nombre | GAP global de la séance, s/km — voir « Champs KPI FIT » |
 | `decoupling_pct` | nombre (signe libre) | découplage aérobie Pa:HR, % — voir « Champs KPI FIT » |
@@ -156,7 +158,8 @@ seul le nom est obligatoire :
 
 - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)
 - Adidas Adizero SL — alerte 500 km
-- Nike Pegasus (retirée)
+- Nike Pegasus — départ 300 km (retirée)
+- Salomon S/Lab Ultra — usage: course — départ 20 km
 ```
 
 Une puce de **premier niveau** par paire — une puce indentée en dessous n'est
@@ -167,9 +170,16 @@ d'espaces** (` - ` : un nom de modèle peut légitimement contenir un trait
 d'union SANS espaces, ex. « Salomon S/Lab Ultra-Trail », qui reste intact),
 ou par un deux-points suivi d'un mot-clé reconnu : `depuis AAAA-MM-JJ` (ou
 « mars 2026 »/« 03/2026 », 1er du mois — date d'achat), `alerte N km` (ou
-`N miles`/`N mi`, convertis), `id: <texte>` (identifiant explicite, passé par
-`gear_slug` comme n'importe quel `gear_id`). `(par défaut)` et `(retirée)`
-peuvent être accolés n'importe où sur la ligne. `arc_legacy.parse_gear` lit
+`N miles`/`N mi`, convertis), `départ N km` (ou `N mi`, converti — #132 : kilométrage
+déjà parcouru AVANT le suivi, voir plus bas), `usage: <texte libre>` (#132,
+facultatif : `course`, `trail`, `route`, `récup`… — rôle de la paire, lu par le
+coach pour suggérer une paire, jamais par un KPI), `id: <texte>` (identifiant explicite, passé par
+`gear_slug` comme n'importe quel `gear_id`), `garmin: <uuid>` (#133, facultatif :
+identifiant du matériel côté Garmin Connect, recopié de `get_gear` → `uuid`, jeton
+alphanumérique/tirets de 8 à 64 caractères, comparé sans casse ; sert à rattacher le
+matériel attaché par la montre à une activité à CETTE puce — jamais deviné, voir
+« Priorité d'attribution » ci-dessous). `(par défaut)`, `(retirée)` et
+`(ignorée)` (#133, matériel Garmin non suivi) peuvent être accolés n'importe où sur la ligne. `arc_legacy.parse_gear` lit
 cette sous-section ; `scripts/arc_index.py` l'indexe dans la table dérivée
 `gear` (une ligne par chaussure) ; `arc_metrics.gear_mileage` calcule le
 kilométrage cumulé — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]` pour la
@@ -195,10 +205,130 @@ méthode complète. En résumé :
 - `(retirée)` : kilométrage toujours affiché (historique), jamais d'alerte,
   jamais candidate à l'attribution par défaut (priorité retraite avant
   défaut, même si `(par défaut)` est aussi coché sur la même puce).
+- `départ N km` (#132) : ajouté au cumul (`start_m` dans la table `gear`,
+  `distance_m` de `gear_mileage` = activités + départ), donc compté dans le
+  seuil d'alerte, la prévision et `near_threshold` ; conservé pour une paire
+  `(retirée)`. Seule la forme `[~]N [km|mi]` est lue (« départ usine 2025 » ou une
+  valeur négative restent du texte libre ignoré) ; point et virgule sont toujours
+  décimaux (`1.200 km` = 1,2 km), l'espace sépare les milliers ; l'unité peut être
+  collée (`186mi`) ;
+  `départ 0 km` est valide. Le corriger par chat (« mes Pegasus ont en fait ~300
+  km ») = réécrire ce SEUL segment de la puce (départ = total déclaré − km déjà
+  comptés par les activités, plancher 0), jamais les activités passées.
+- Priorité d'attribution (#133) : déclaration de l'athlète (`gear_id` cité en chat) >
+  matériel attaché par Garmin à l'activité (`get_activity_gear`, puce reconnue par
+  `garmin: <uuid>`) > paire `(par défaut)`. Résolue par `python3 scripts/arc_index.py
+  gear-attribution --garmin-gear UUID[,UUID…] [--chat-gear GEAR_ID]`
+  (`arc_metrics.resolve_gear_attribution`) qui rend `{gear_id, gear_source,
+  conflict, unmapped_garmin, ignored_garmin, ambiguous}` — le coach écrit
+  `gear_id` et `gear_source` tels quels, sans refaire la règle. Conflit (Garmin dit A,
+  l'athlète dit B) : l'athlète gagne (`gear_source: "chat"`), `conflict` est
+  signalé une fois. Uuid Garmin sans puce, ambigu ou `(ignorée)` : `gear_id` omis et
+  `gear_source: "garmin_unmapped"` — jamais attribué en silence, et jamais crédité à la paire
+  `(par défaut)` (`arc_metrics.gear_mileage`, y compris `--activities`/`crossed_in_run`). Le
+  segment `(ignorée)` (puce `- <nom Garmin> — garmin: <uuid> (ignorée)`) fait taire les
+  propositions et alertes pour ce matériel ; ces puces ne sont pas des chaussures suivies
+  (colonne `gear.ignored`). Déclaration en chat sur une séance DÉJÀ synchronisée : le côté Garmin
+  est son `gear_id` stocké quand `gear_source` vaut `garmin` (passer l'uuid de cette puce à
+  `--garmin-gear`, sans nouvel appel Garmin) ; `chat-gear` est normalisé (id du profil, nom, ou slug
+  valide au contrat) et toute valeur `--garmin-gear` qui n'a pas la forme d'un uuid est ignorée.
+  Seule la paire `(par défaut)` reste calculée à la lecture.
+- Prévision de retraite (#132) : `arc_index.py gear` (et `/api/summary.gear`)
+  ajoute par paire non retirée et sous son seuil, si elle a roulé dans les 28
+  derniers jours (borne `--today`, sinon aujourd'hui) : `recent_28d_m`,
+  `retire_forecast_weeks` (semaines, 0,1 près) et `retire_forecast_date`
+  (toujours future). Clés OMISES sans usage sur 28 jours, pour une paire retirée
+  ou déjà au seuil (`alert` : « seuil dépassé »). `near_threshold: true` dès 90 %
+  du seuil. `arc_index.py gear --activities ID[,ID…]` (garmin_activity_id,
+  intervals_activity_id ou chemin du fichier des séances synchronisées dans CE run) ajoute
+  `crossed_in_run: true` à la paire dont elles font franchir le seuil — base de
+  l'alerte unique du `garmin-daily-sync` (par séance, pas par date : un second
+  passage le même jour ne ré-émet rien), sans fichier d'état. Avec `--today`
+  dans le passé, le cumul ignore les séances postérieures. Méthode et limites :
+  `arc_metrics.ASSUMPTIONS["gear_mileage"]`.
 - Deux puces qui dérivent le même `gear_id` (même modèle racheté sans `id:`
   pour les distinguer) : la première garde le slug nu, les suivantes reçoivent
   `-2`, `-3`… et une collision signalée dans `gear_mileage().warnings` — pour
   l'éviter, donnez un `id:` explicite à chaque paire du même modèle.
+
+**Matériel hors chaussures (#134).** La sous-section `### Matériel` (sous `## Matériel &
+lieux`, à côté de `### Chaussures`, qu'elle ne modifie en rien) déclare bâtons, gilet,
+poche à eau, flasques, frontale, ceinture cardio, veste, semelles, lacets… Une puce de
+premier niveau par objet, langage libre, mêmes séparateurs que les chaussures :
+
+```markdown
+### Matériel
+
+- Poche à eau 2 L — catégorie: poche — depuis 2026-03-01 — alerte 30 jours — kit: trail-long
+- Frontale Petzl — catégorie: frontale — alerte 100 h — id: frontale-nuit — kit: nuit
+- Bâtons Leki — catégorie: bâtons — alerte 800 km — kit: trail-long
+- Veste imperméable — catégorie: veste — alerte 40 h ou 180 jours — entretien 2026-05-10
+```
+
+Segments, tous facultatifs sauf le nom : `depuis <date>`, `catégorie: <mot>`, `alerte <déclencheurs>`,
+`départ <N km|N h|N séances>`, `entretien <date>` (ou `révisé <date>`), `kit: <slug>[, <slug>…]`,
+`id: <texte>`, `(retirée)`. La **catégorie** n'est lue que du segment `catégorie:` — jamais
+devinée du nom — parmi `bâtons`, `gilet`, `poche`, `flasques`, `frontale`, `ceinture`, `veste`,
+`semelles`, `lacets`, `autre` (accents, singulier/pluriel et quelques synonymes acceptés,
+`arc_legacy.EQUIPMENT_CATEGORIES`) ; une autre valeur est gardée telle quelle : objet indexé, aucune
+alerte inventée.
+
+- **Déclencheurs typés** (`alerte`) : `N km` (ou `N mi`), `N h` (ou `NhMM` : `1h30`), `N séances`,
+  `N jours`, `N semaines`, `N mois`, `N ans`, combinables dans un segment (`alerte 30 jours ou 40 h`) ou en
+  plusieurs segments — le premier atteint (valeur ≥ seuil) déclenche. Les durées calendaires sont
+  converties en jours : 1 semaine = 7 j, 1 mois = 30 j, 1 an = 365 j (approximation du projet). Seule une
+  unité explicite compte : un nombre nu (`alerte 800`) n'est jamais interprété (aucun type deviné) et un
+  segment `alerte`/`départ` dont rien n'est lisible produit un **avertissement** (index, `equipment`,
+  tableau de bord), jamais un silence. Il n'existe aucun seuil par défaut pour le matériel.
+- **Jours** : comptés depuis la date de référence = `entretien`/`révisé` le plus récent, sinon `depuis`.
+  Sans aucune des deux, un déclencheur en jours ne peut pas jouer (avertissement, jamais 0). **Remise à
+  zéro après entretien** : quand l'athlète dit « j'ai nettoyé la poche » ou « j'ai réimperméabilisé la
+  veste », le coach réécrit ou ajoute le segment `entretien <date>` sur la puce (jamais le reste de la puce) avec
+  **la date de la dernière séance faite AVANT l'entretien** (cherchée dans `activities/`, à défaut la
+  veille de l'entretien). Règle de comptage : les séances datées jusqu'à cette date incluse sont
+  exclues, celles datées **strictement après** comptent — une séance faite après l'entretien le même
+  jour reste ainsi comptée. Conséquence assumée (approximation du projet) : la date de référence des
+  jours peut précéder l'entretien réel de quelques jours, l'alerte arrive plutôt plus tôt que trop tard.
+  Le `départ` est alors ignoré ; les cumuls à vie restent visibles (`lifetime`).
+- **Heures** = somme de `duration_s` des séances comptées (durée totale, pas le temps en mouvement).
+- **Attribution explicite uniquement** : une séance compte pour un objet si son `gear_ids` le cite ;
+  aucun objet par défaut (une ceinture cardio portée à chaque séance se met dans un kit).
+  Compatibilité : `gear_id` reste LA chaussure (inchangé, un seul slug) ; `gear_ids` est facultatif —
+  toute activité écrite avant #134 reste valide et compte pour aucun objet. **Déclarer un kit ou des
+  objets n'écrit, ne modifie et ne supprime JAMAIS `gear_id` ni `gear_source`** (#133 : chaussure et
+  provenance Garmin/chat) ; un slug de chaussure dans `gear_ids` est ignoré avec un avertissement.
+  **Matériel Garmin hors chaussures** : `### Matériel` n'a ni segment `garmin:` ni `(ignorée)` — le
+  rattachement du matériel Garmin non-chaussure n'est pas pris en charge (hors périmètre de #134) ; un
+  `(ignorée)` écrit sur une puce de `### Matériel` est retiré (avertissement), jamais laissé dans l'id.
+- **Sports par catégorie** (`arc_metrics.EQUIPMENT_CATEGORY_SPORTS`, approximation du projet) : bâtons =
+  trail/randonnée/marche (marche nordique) ; gilet, poche, flasques, veste = course/trail/randonnée/marche ;
+  semelles, lacets = course/trail/randonnée ; frontale,
+  ceinture, autre = tout sport. Catégorie inconnue ou absente : compté sur toute séance qui cite l'objet,
+  aucune alerte hors de ses déclencheurs déclarés.
+- **Kits** : `kit: trail-long` sur les objets qui le composent. Quand l'athlète dit « kit trail long » pour
+  une séance, le coach exécute `python3 scripts/arc_index.py equipment --kit trail-long --sport <sport>`
+  et écrit la liste `gear_ids` rendue (objets non retirés dont la catégorie porte le sport ; les autres
+  sont listés dans `skipped` avec leur raison, à dire à l'athlète) — jamais un objet de son cru. Kit
+  inconnu (`known: false`) : le dire, ne rien écrire.
+- **Lecture** : `arc_index.py equipment` (et `/api/summary.equipment`) rend, par objet, `usage`
+  (`distance_m`, `duration_s`, `sessions`, `days`), `lifetime`, `triggers` (valeur, seuil, `reached`),
+  `alert`, `near_threshold` (≥ 90 %), `pre_session_check` (frontale : batterie avant une séance de nuit ;
+  poche/flasques : hygiène avant une sortie longue), plus `kits`, `unknown` (`gear_ids` cité mais absent du
+  profil) et `warnings`. `arc_index.py gear` (chaussures) est inchangé. **Alerte une seule fois, sans
+  fichier d'état** : `equipment --activities ID[,ID…] [--last-pass AAAA-MM-JJ]` ajoute `crossed_in_run` (par
+  objet et par déclencheur) — km/h/séances : le cumul hors les séances désignées était sous le seuil ;
+  jours : seuil franchi entre `--last-pass` (jour du dernier passage, **exclu** — à l'inverse de `--since`
+  de `energy`, inclus) et aujourd'hui ; sans `--last-pass`, un déclencheur en jours ne marque jamais de
+  franchissement. Le `garmin-daily-sync` n'émet donc aucune alerte en jours (pas d'horodatage fiable du
+  dernier passage réussi).
+- **Contrôle du matériel de course** : `equipment --race-plan [FICHIER]` croise le `gear` d'un plan de
+  course avec l'inventaire : `missing` (non retrouvé), `category_match` (« à vérifier : spécification » —
+  seul le nom commun de tête de la ligne rejoint la catégorie d'un objet, jamais `ok` : une ceinture
+  porte-dossard n'est pas une ceinture cardio), `never_used` (aucune séance ne cite l'objet), `alert`, `ok`
+  (nom ou identifiant de l'objet trouvé dans la ligne). Rapprochement textuel strict par mots entiers,
+  accents et ponctuation ignorés, jamais flou ; le chemin passé à `--race-plan` peut être absolu, `./…` ou
+  relatif au workspace. `--sport` de `--kit` est normalisé (casse) et validé (sport inconnu : erreur).
+- Méthode et limites : `arc_metrics.ASSUMPTIONS["equipment_usage"]`.
 
 **Indices de performance ITRA/UTMB (#62).** La section `## Indices de
 performance (ITRA / UTMB)` du profil (voir `templates/

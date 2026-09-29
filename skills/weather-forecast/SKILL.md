@@ -78,6 +78,7 @@ Garder les autres champs en mémoire seulement si utile (visibilité, pression).
 
 - 🟠 Difficile → suggérer **réduction 10-20 % durée/intensité** + hydratation × 1.2.
 - 🔴 Dangereux → **reporter** la séance outdoor OU **basculer indoor** (home trainer, tapis, force à la salle).
+- Sol boueux/mouillé (pluie récente ou prévue) : donnée d'entrée de la suggestion de paire du `coach` (#132, `SHOE SUGGESTION MANDATE`, seulement à partir de 2 paires actives) — signaler « conditions humides » dans la section météo, la suggestion elle-même reste au `coach`.
 - Pluie modérée (🟡) → OK si matériel imperméable ; vent fort → allure GPS compromise, courir **au cardio** (pas au GPS).
 - Chaleur 🟠 + séance longue (> 90 min) → emporter ≥ 1L/h + électrolytes + casquette.
 

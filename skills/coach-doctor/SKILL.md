@@ -28,6 +28,7 @@ commande de correction sous chaque ligne non ✅ :
 | `out_of_contract` | Nombre de fichiers sans bloc ```` ```arc ```` conforme |
 | `daily_sync_scheduled` | Tâche cron ou LaunchAgent du daily-sync installée ; en mode `[sync].mode = "watch"`, passage récent de `garmin_watch.py` (⚠ après 3 intervalles de silence) |
 | `ntfy_configured` | Notifications push configurées (si activées) |
+| `gear_sync` | (#133) Liste blanche `GARMIN_ENABLED_TOOLS` de `.mcp.json` avec `get_gear`/`get_activity_gear` ; paires actives du profil sans segment `garmin: <uuid>` (ℹ️). **Statique : aucun appel Garmin** — lister le matériel Garmin sans puce est le rôle du coach (`get_gear`) |
 | `fit_reader` | `fitparse` importable dans l'environnement MCP de `[data].source` (`garmin-mcp` ou `intervals-icu-mcp`) — sans lui, les FIT téléchargés ne sont pas lus et les KPI fins restent vides. Correctif : `./install.sh --source <source>` |
 
 Un ❌ fait échouer la commande (code de sortie non nul) ; un ⚠️ ou un ℹ️ jamais

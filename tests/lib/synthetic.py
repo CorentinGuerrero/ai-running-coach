@@ -625,6 +625,13 @@ def build(root: Path, days: int = 120, today: date | None = None, sport: str = "
 - Hoka Speedgoat 5 (bleue) — depuis 2026-01-01 — alerte 700 km — id: hoka-speedgoat-5-bleue (par défaut)
 - Adidas Adizero SL — alerte 50 km — id: adizero-sl
 - Nike Pegasus (retirée)
+
+### Matériel
+
+- Poche à eau 2 L — catégorie: poche — depuis 2026-01-01 — alerte 30 jours — id: poche-eau — kit: trail-long
+- Frontale Petzl — catégorie: frontale — alerte 3 h — id: frontale-nuit — kit: trail-long
+- Bâtons Leki — catégorie: bâtons — alerte 1000 km — id: batons-leki — kit: trail-long
+- Ceinture cardio — catégorie: ceinture — alerte 500 séances — id: ceinture-cardio
 """, encoding="utf-8")
     (root / "planning/active_objective.md").write_text(f"""# Objectif actif
 
@@ -733,6 +740,13 @@ def build(root: Path, days: int = 120, today: date | None = None, sport: str = "
         # ci-dessus) plutôt que l'identifiant explicite sur toutes les séances.
         if plan == "quality":
             data["gear_id"] = "adizero-sl"
+            data["gear_ids"] = ["ceinture-cardio"]
+        # Matériel hors chaussures (#134) : `gear_ids` posé sur `plan` (jamais un tirage `rng`,
+        # même précaution que `gear_id`). Sorties longues -> kit trail-long complet ; les
+        # heures cumulées de frontale dépassent TOUJOURS 3 h (alerte verrouillée dans les
+        # goldens) et la poche dépasse toujours 30 jours depuis 2026-01-01.
+        if plan == "long":
+            data["gear_ids"] = ["poche-eau", "frontale-nuit", "batons-leki"]
         # Glucides/fluide/pesées sur certaines sorties longues (#41, entraînement
         # digestif) : motifs déterministes sur `i` uniquement, JAMAIS un nouveau tirage
         # `rng` — même précaution que `weight_kg`/`gear_id` ci-dessus, sans quoi ajouter

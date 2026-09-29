@@ -1,0 +1,46 @@
+# Matériel hors chaussures : « kit trail long » attribue tous les objets du kit (#134).
+#
+# Fixture `equipment-kit/` : profil avec la chaussure par défaut (Speedgoat) et quatre objets
+# sous `### Matériel` — poche à eau, frontale et bâtons portent `kit: trail-long`, la veste
+# imperméable porte `kit: hiver` (hors kit demandé). Aucune activité pré-existante ce jour-là :
+# le coach crée le journal de la sortie (un fichier NOUVEAU, donc vérifiable par
+# `file_contains_any`, contrairement à l'édition d'un fichier apporté par la fixture).
+#
+# Le coach doit passer par `arc_index.py equipment --kit trail-long --sport trail` et écrire
+# `gear_ids` avec les trois slugs du kit (`poche-eau`, `frontale-nuit`, `batons-leki`) — jamais
+# la veste. Limite du harnais : « la veste n'est PAS dans le fichier » n'est pas exprimable
+# (`file_contains_any` ne sait dire que « contient au moins un de ») ; on vérifie ce qui l'est
+# — chacun des trois objets du kit est présent dans le fichier créé — et que la réponse ne
+# prétend pas que le kit est inconnu.
+id = "equipment-kit-attribution"
+prompt = """Crée le journal de ma sortie trail d'aujourd'hui dans activities/ (14 km, 2 h, 900 m de D+). \
+J'avais le kit trail long."""
+fixture = "equipment-kit"
+
+[config.health]
+morning_check = "off"
+
+[config.language]
+responses = "fr"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+must_not_match = [
+  "kit\\s+(trail[- ]long\\s+)?(inconnu|introuvable)|je ne connais pas (ce|le) kit",
+]
+
+[[expect.file_contains_any]]
+glob = "activities/*.md"
+any = ["poche-eau"]
+
+[[expect.file_contains_any]]
+glob = "activities/*.md"
+any = ["frontale-nuit"]
+
+[[expect.file_contains_any]]
+glob = "activities/*.md"
+any = ["batons-leki"]
+
+[[expect.file_contains_any]]
+glob = "activities/*.md"
+any = ["gear_ids"]
