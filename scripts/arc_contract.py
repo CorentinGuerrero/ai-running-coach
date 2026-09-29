@@ -184,7 +184,7 @@ DECOUPLING_PCT_PLAUSIBLE = (-50.0, 100.0)
 # ---------------------------------------------------------------------------
 
 
-GEAR_SOURCES = ("garmin", "chat")
+GEAR_SOURCES = ("garmin", "chat", "garmin_unmapped")
 
 
 def _enum(values) -> str:
@@ -232,8 +232,10 @@ SCHEMA = {
             "splits": "list",
             "gear_id": "gear_id",
             # #133 : provenance du `gear_id` — « garmin » (matériel attaché par la montre,
-            # `get_activity_gear`) ou « chat » (déclaré par l'athlète). Jamais « default » :
-            # sans `gear_id`, la paire par défaut est calculée à la lecture, pas écrite.
+            # `get_activity_gear`) ou « chat » (déclaré par l'athlète) ; « garmin_unmapped » =
+            # la montre a attaché un matériel SANS puce correspondante (ou ambigu/ignoré) : SANS
+            # `gear_id`, et exclu de l'attribution par défaut (`arc_metrics.gear_mileage`).
+            # Jamais « default » : sans `gear_id`, la paire par défaut est calculée à la lecture.
             "gear_source": _enum(GEAR_SOURCES),
             "carbs_g": "carbs_g",
             "fluid_intake_ml": "fluid_ml",
@@ -1040,8 +1042,11 @@ def validate(data: dict) -> tuple:
             # Garmin (ex. BMR quotidien entier collé sur une activité courte),
             # jamais une valeur physiologiquement plausible à laisser passer.
             errors.append("activity.calories_bmr_kcal : ne peut dépasser calories_kcal")
-        if data.get("gear_source") is not None and not data.get("gear_id"):
-            errors.append("activity.gear_source : exige un gear_id (la provenance d'un matériel absent n'a pas de sens)")
+        source = data.get("gear_source")
+        if source in ("garmin", "chat") and not data.get("gear_id"):
+            errors.append(f"activity.gear_source : « {source} » exige un gear_id")
+        if source == "garmin_unmapped" and data.get("gear_id"):
+            errors.append("activity.gear_source : « garmin_unmapped » exclut gear_id (matériel Garmin non associé)")
         pre, post = data.get("weight_pre_kg"), data.get("weight_post_kg")
         if _is_number(pre) and _is_number(post) and post > pre + WEIGHT_POST_TOLERANCE_KG:
             # Pas une erreur : une pesée maison a de l'imprécision (habits, balance), et le

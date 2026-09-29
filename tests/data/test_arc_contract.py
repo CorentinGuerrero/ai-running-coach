@@ -105,6 +105,13 @@ class TestGearSweatFuel(unittest.TestCase):
         errors, _ = C.validate(self.base(gear_source="garmin"))
         self.assertTrue(any("gear_source" in e and "gear_id" in e for e in errors), errors)
 
+    def test_gear_source_garmin_unmapped_excludes_gear_id(self):
+        """#133 : marqueur « garmin_unmapped » — accepté SANS gear_id, refusé avec."""
+        errors, _ = C.validate(self.base(gear_source="garmin_unmapped"))
+        self.assertEqual(errors, [])
+        errors, _ = C.validate(self.base(gear_id="pegasus", gear_source="garmin_unmapped"))
+        self.assertTrue(any("garmin_unmapped" in e for e in errors), errors)
+
     def test_gear_id_must_be_a_slug(self):
         errors, _ = C.validate(self.base(gear_id="Hoka Speedgoat 5"))
         self.assertTrue(any("gear_id" in e for e in errors), errors)

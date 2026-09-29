@@ -144,11 +144,17 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
   réponse, le matériel n'est simplement pas attribué. Le total Garmin d'une paire qui précède
   votre suivi peut alimenter son `départ` (départ = total Garmin − kilomètres déjà comptés par vos
   séances, jamais négatif : aucun double comptage).
-- **Priorité d'attribution.** Matériel attaché par la montre à la séance (un seul
-  `get_activity_gear` par séance **nouvelle**) > paire citée en chat > `(par défaut)`. Si Garmin
+- **Priorité d'attribution.** Votre déclaration en chat > matériel attaché par la montre
+  à la séance (un seul `get_activity_gear` par séance **nouvelle**) > `(par défaut)`. Si Garmin
   dit A et que vous dites B, vous gagnez et le coach le signale une fois. Un matériel Garmin sans
-  puce n'est jamais attribué en silence. La provenance est tracée dans `gear_source`
-  (`garmin`/`chat`) ; règle exécutée par `python3 scripts/arc_index.py gear-attribution`.
+  puce n'est jamais attribué en silence ni crédité à la paire par défaut (`gear_source:
+  garmin_unmapped`) ; une puce `- <nom Garmin> — garmin: <uuid> (ignorée)` fait taire propositions
+  et alertes. La provenance est tracée dans `gear_source` (`garmin`/`chat`/`garmin_unmapped`) ; règle exécutée par `python3 scripts/arc_index.py gear-attribution`.
+- **Synchronisation automatique.** `scripts/daily-sync.sh` passe `--disallowedTools` pour
+  `add_gear_to_activity` et `remove_gear_from_activity` : le run non surveillé ne peut pas écrire
+  chez Garmin. **Limite** : en mode passerelle l'appel passe par l'outil unique
+  `mcp__leanproxy__invoke_tool`, qui ne peut pas être filtré par sous-outil — seule la consigne du skill
+  protège alors ; préférez le mode direct pour un run non surveillé.
 - **Retour vers Garmin (facultatif).** Une attribution faite en chat peut être poussée vers Garmin
   si vous le confirmez ; sans confirmation, rien n'est écrit.
 - **Installations existantes.** Relancez `./install.sh` : la liste blanche de `.mcp.json` est

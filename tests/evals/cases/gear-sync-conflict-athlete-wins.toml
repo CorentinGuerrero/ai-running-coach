@@ -3,8 +3,9 @@
 # (`gear_id: slab`, `gear_source: chat`) et le désaccord est signalé dans la réponse.
 # Aucune écriture côté Garmin : rien n'a été confirmé.
 #
-# `must_match` : la réponse met Garmin/montre et Pegasus dans la même phrase (le conflit est
-# nommé) — 120 caractères max entre les deux pour ne pas valider sur deux paragraphes distincts.
+# `must_match` (les deux doivent passer) : (1) « Garmin/montre <verbe d'attribution> … Pegasus » —
+# ce que la montre a attaché, pas une simple mention de la paire par défaut ; (2) un mot qui dit
+# le conflit ou son arbitrage (conservée, déclaration, différent, conflit, désaccord…).
 id = "gear-sync-conflict-athlete-wins"
 prompt = "Synchronise ma dernière séance (la sortie longue d'avant-hier). Je l'ai faite avec mes Salomon S/Lab."
 fixture = "gear-sync"
@@ -16,7 +17,8 @@ file = "gear-activity-pegasus.json"
 files_with_arc_block = ["activities/*.md"]
 tools_not_called = ["add_gear_to_activity"]
 must_match = [
-  "((Garmin|montre)[^\\n]{0,120}Pegasus)|(Pegasus[^\\n]{0,120}(Garmin|montre))",
+  "(Garmin|montre)[^\\n]{0,40}(indique|dit|attach|enregistr|signale|associ|li[ée])[^\\n]{0,80}Pegasus",
+  "(conserv|d[ée]claration|diff[ée]rent|conflit|d[ée]saccord|prime|prioritaire)",
 ]
 
 [[expect.arc_field]]

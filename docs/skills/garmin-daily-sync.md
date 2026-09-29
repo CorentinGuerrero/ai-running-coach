@@ -25,10 +25,10 @@ Il **n'ajoute aucune logique** : il délègue à l'agent `coach` et au skill
 6. **Matériel (#133, source Garmin)** : pour chaque séance **nouvelle** (un seul
    `get_activity_gear` par séance, jamais pour une séance déjà synchronisée), le matériel
    attaché par la montre alimente `gear_id` **si une puce du profil porte le `garmin: <uuid>`
-   correspondant** ; la règle (Garmin > déclaration de l'athlète > `(par défaut)`, l'athlète gagne
-   un conflit) est exécutée par `arc_index.py gear-attribution`. Un `gear_id` déjà déclaré est
+   correspondant** ; la règle (déclaration de l'athlète > matériel Garmin > `(par défaut)`) est exécutée par `arc_index.py gear-attribution`. Un `gear_id` déjà déclaré est
    conservé ; un matériel Garmin sans puce n'est **jamais** attribué (mentionné sur la ligne
-   `Alerte :`). Aucune écriture côté Garmin (`add_gear_to_activity`) en headless, jamais. Voir
+   `Alerte :`, une fois par run ; `gear_source: "garmin_unmapped"` l'exclut de la paire par défaut ;
+   une puce `(ignorée)` fait taire l'alerte). Aucune écriture côté Garmin (`add_gear_to_activity`) en headless, jamais. Voir
    [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
 
 ## Fichier source

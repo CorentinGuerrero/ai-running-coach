@@ -1,7 +1,7 @@
 # Matériel Garmin (#133) : la synchronisation lit le matériel attaché par la montre
 # (`get_activity_gear`) et l'inscrit dans `gear_id` quand une puce du profil porte le
 # `garmin: <uuid>` correspondant (fixture `gear-sync/`, stub : Nike Pegasus attachée à
-# l'activité canned 99000001). Priorité Garmin > chat > défaut : ici seul Garmin parle.
+# l'activité canned 99000001). Priorité athlète (chat) > Garmin > défaut : ici seul Garmin parle.
 id = "gear-sync-garmin-attached"
 prompt = "/garmin-daily-sync"
 fixture = "gear-sync"

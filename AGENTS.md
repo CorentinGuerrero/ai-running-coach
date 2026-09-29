@@ -154,7 +154,7 @@ source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
 | Événements planifiés | `get_calendar_events` / `get_scheduled_workouts` | `get_calendar_events` / `get_upcoming_workouts` | |
 | Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | Ne renvoie que id/date/name/category/description/type/metrics — jamais de structure de séance. |
 | Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | **Pas un remplacement direct** — charger le skill `intervals-icu-best-practices` (pas `garmin-workout-scheduling`) : `create_event`/`update_event` n'ont PAS de paramètre structuré (pas de `workout_doc`) ; les cibles (#60) s'écrivent en texte dans `description` ; aucun upsert n'existe (vérifier `get_calendar_events` avant chaque push, pas de réutilisation de `workout_id`) ; la vérification post-push ne porte que sur les champs que `get_event` renvoie réellement. |
-| Matériel (inventaire) | `get_gear` (`include_stats=False` par défaut) | `get_gear_list` | **Référence seulement** côté intervals.icu (id, nom, type, `usage.total_distance_km`) — jamais une attribution. Voir « Matériel » sous la table (#133). |
+| Matériel (inventaire) | `get_gear` (appeler avec `include_stats=False` : le défaut du serveur est `True`, un appel API par matériel) | `get_gear_list` | **Référence seulement** côté intervals.icu (id, nom, type, `usage.total_distance_km`) — jamais une attribution. Voir « Matériel » sous la table (#133). |
 | Matériel attaché à une activité | `get_activity_gear` | **aucun équivalent** | Le serveur intervals.icu n'a aucun champ matériel sur les activités : `gear_id` reste déclaré en chat ou `(par défaut)`, jamais deviné. |
 | Attacher un matériel à une activité | `add_gear_to_activity` (ÉCRITURE Garmin, confirmation explicite, jamais en headless) | **aucun équivalent** | Voir « Matériel » sous la table. |
 | Modifier/supprimer une séance planifiée | `delete_workout` / `unschedule_workout` | `update_event` / `delete_event` | `update_event` exige un `event_id` déjà existant — jamais un upsert. |
@@ -165,9 +165,11 @@ source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
 (lecture) et `add_gear_to_activity` (écriture) sont dans la liste blanche `GARMIN_TOOL_WHITELIST`.
 Le coach associe **une fois** (proposition, jamais devinée) chaque matériel Garmin à une puce
 `### Chaussures` du profil par un segment `garmin: <uuid>`, puis attribue `gear_id` avec la
-priorité **matériel Garmin > `gear_id` déclaré en chat > `(par défaut)`** (règle exécutée par
-`python3 scripts/arc_index.py gear-attribution`, l'athlète gagne un conflit, signalé une fois,
-provenance dans `gear_source`). Un seul `get_activity_gear` par activité NOUVELLE. Aucune
+priorité **déclaration de l'athlète (chat) > matériel attaché par Garmin > `(par défaut)`** (règle
+exécutée par `python3 scripts/arc_index.py gear-attribution` ; un désaccord Garmin/athlète est
+signalé une fois ; provenance dans `gear_source` ; un matériel Garmin non associé, ambigu ou
+`(ignorée)` laisse `gear_id` absent avec `gear_source: "garmin_unmapped"` : la séance n'est alors
+jamais créditée à la paire par défaut). Un seul `get_activity_gear` par activité NOUVELLE. Aucune
 écriture Garmin sans confirmation dans la conversation, jamais en headless. **Avec
 `[data].source = "intervals"`** : le serveur épinglé expose `get_gear_list` (inventaire, à titre
 de référence — jamais utilisé pour attribuer) mais **aucun matériel par activité**

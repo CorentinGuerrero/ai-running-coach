@@ -791,7 +791,8 @@ class TestGearSync(InstallAsserts):
             self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n")
             check = self._check(sb)
             self.assertEqual(check["status"], "ok")
-            self.assertIn("non lisible", check["message"])
+            self.assertIn("non lue", check["message"])
+            self.assertNotIn("autoris", check["message"])
 
     def test_intervals_source_is_info(self):
         with Sandbox() as sb:
@@ -800,6 +801,50 @@ class TestGearSync(InstallAsserts):
             check = self._check(sb)
             self.assertEqual(check["status"], "info")
             self.assertIn("get_gear_list", check["message"])
+
+    def test_invalid_mcp_json_never_claims_the_tools_are_allowed(self):
+        with Sandbox() as sb:
+            (sb.repo / ".mcp.json").write_text("{pas du json")
+            self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n")
+            check = self._check(sb)
+            self.assertNotIn("autoris", check["message"])
+            self.assertIn("non lue", check["message"])
+
+    def test_leanproxy_yaml_whitelist_is_read_and_fix_is_manual(self):
+        with Sandbox() as sb:
+            yaml_path = sb.home / ".config" / "leanproxy_servers.yaml"
+            yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_path.write_text('servers:\n  - name: garmin\n    env:\n      - GARMIN_ENABLED_TOOLS: "get_activities"\n')
+            check = self._check(sb)
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("leanproxy", check["message"])
+            self.assertIn("leanproxy_servers.yaml", check["fix"])
+            self.assertIn("n'écrit", check["message"])
+
+    def test_malformed_garmin_segment_is_flagged_not_reported_missing(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_gear,get_activity_gear")
+            self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: abc\n- Salomon S/Lab\n")
+            check = self._check(sb)
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("illisible", check["message"])
+            self.assertIn("Nike Pegasus", check["message"])
+
+    def test_duplicate_uuid_across_bullets_is_flagged(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_gear,get_activity_gear")
+            uuid = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+            self._profile(sb, f"# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: {uuid}\n- Salomon S/Lab — garmin: {uuid}\n")
+            check = self._check(sb)
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("même uuid", check["message"])
+
+    def test_ignored_pair_is_never_reclaimed(self):
+        with Sandbox() as sb:
+            self._mcp(sb, "get_gear,get_activity_gear")
+            self._profile(sb, "# P\n\n### Chaussures\n\n- Nike Pegasus — garmin: a1b2c3d4e5f60718293a4b5c6d7e8f90\n"
+                          "- Brooks Ghost — garmin: c0ffee00c0ffee00c0ffee00c0ffee00 (ignorée)\n")
+            self.assertEqual(self._check(sb)["status"], "ok")
 
 
 class TestJsonSchema(InstallAsserts):

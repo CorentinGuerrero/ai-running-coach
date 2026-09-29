@@ -456,7 +456,7 @@ CREATE TABLE athlete (
 CREATE TABLE gear (
     source_path TEXT, gear_id TEXT, name TEXT, start_date TEXT, threshold_m REAL,
     is_default INTEGER, retired INTEGER, collision_base TEXT, start_m REAL, usage TEXT,
-    garmin_uuid TEXT
+    garmin_uuid TEXT, ignored INTEGER
 );
 -- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
 -- section « Indices de performance » du profil (`arc_legacy.
@@ -1047,7 +1047,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "is_default": int(bool(shoe.get("default"))), "retired": int(bool(shoe.get("retired"))),
                 "collision_base": shoe.get("collision_base"),
                 "start_m": shoe.get("start_m"), "usage": shoe.get("usage"),
-                "garmin_uuid": shoe.get("garmin_uuid"),
+                "garmin_uuid": shoe.get("garmin_uuid"), "ignored": int(bool(shoe.get("ignored"))),
             })
         for entry in g("performance_index") or []:
             if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
@@ -3091,11 +3091,28 @@ def heat_acclimation_today(conn, conf: dict, today: date) -> dict:
 
 
 def gear_attribution(conn, garmin_gear: Optional[str], chat_gear: Optional[str]) -> dict:
-    """Commande « gear-attribution » (#133) : priorité Garmin > chat > défaut, résolue par
+    """Commande « gear-attribution » (#133) : priorité athlète (chat) > Garmin > défaut, résolue par
     `arc_metrics.resolve_gear_attribution` à partir des puces du profil (colonne `garmin_uuid`)."""
-    gear_defs = [dict(r) for r in conn.execute("SELECT gear_id, garmin_uuid FROM gear")]
-    uuids = [u.strip() for u in (garmin_gear or "").split(",") if u.strip()]
-    return M.resolve_gear_attribution(gear_defs, uuids, (chat_gear or "").strip() or None)
+    gear_defs = [dict(r) for r in conn.execute(
+        "SELECT gear_id, name, garmin_uuid, ignored FROM gear")]
+    # Tout ce qui n'a pas la forme d'un uuid (ex. le texte « No gear data found for activity… » de
+    # `get_activity_gear`) est ignoré : jamais interprété comme un matériel.
+    uuids = [u.strip() for u in (garmin_gear or "").split(",") if L.GEAR_GARMIN_UUID_RE.match(u.strip())]
+    chat = None
+    if chat_gear and chat_gear.strip():
+        # `gear_id` toujours valide au contrat : un id du profil tel quel, sinon un nom du profil
+        # (« Nike Pegasus »), sinon le slug du libellé (paire absente du profil, regroupée « inconnue »).
+        raw = chat_gear.strip()
+        ids = {g["gear_id"] for g in gear_defs if not g["ignored"]}
+        slug = C.gear_slug(raw)
+        if raw in ids:
+            chat = raw
+        elif slug in ids:
+            chat = slug
+        else:
+            by_name = [g["gear_id"] for g in gear_defs if not g["ignored"] and C.gear_slug(g["name"] or "") == slug]
+            chat = by_name[0] if len(by_name) == 1 else (slug or None)
+    return M.resolve_gear_attribution(gear_defs, uuids, chat)
 
 
 def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None) -> dict:
@@ -3109,12 +3126,12 @@ def gear_mileage(conn, today: Optional[date] = None, run_refs: Optional[List[str
     ajoute `crossed_in_run` — voir `arc_metrics.ASSUMPTIONS["gear_mileage"]`."""
     gear_defs = [dict(r) for r in conn.execute(
         "SELECT gear_id, name, start_date, threshold_m, is_default AS \"default\", retired, collision_base, "
-        "start_m, usage FROM gear")]
+        "start_m, usage FROM gear WHERE ignored = 0")]
     activities = [dict(r) for r in conn.execute(
         # `date` : indispensable à `M.gear_mileage` pour filtrer l'attribution par
         # défaut par `depuis` (revue PR #85, blocker 1) — jamais utilisée pour
         # exclure une activité à `gear_id` explicite.
-        "SELECT sport, distance_m, gear_id, date, garmin_activity_id, intervals_activity_id, source_path "
+        "SELECT sport, distance_m, gear_id, gear_source, date, garmin_activity_id, intervals_activity_id, source_path "
         "FROM activity WHERE gear_id IS NOT NULL OR sport IN "
         f"({', '.join('?' for _ in M.GEAR_WEAR_SPORTS)})", M.GEAR_WEAR_SPORTS).fetchall()]
     for a in activities:

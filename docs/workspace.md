@@ -214,11 +214,13 @@ paire déclarée, rien n'est suggéré.
 **Synchronisation du matériel Garmin (#133).** Avec la source Garmin, le coach
 lit le matériel que la montre attache à chaque **nouvelle** séance
 (`get_activity_gear`) et l'inscrit dans `gear_id` quand une puce porte le
-`garmin: <uuid>` correspondant. Priorité : matériel Garmin > paire que vous
-avez citée en discutant > `(par défaut)` — en cas de désaccord (Garmin dit A,
-vous dites B), c'est vous qui gagnez, et le coach le signale une fois. Un
-matériel Garmin sans puce n'est jamais attribué en silence : le coach vous
-propose une fois de l'associer à une puce existante ou d'en créer une. Voir
+`garmin: <uuid>` correspondant. Priorité : ce que vous déclarez en discutant >
+matériel attaché par Garmin > `(par défaut)` — en cas de désaccord (Garmin dit A, vous dites B),
+c'est vous qui gagnez, et le coach le signale une fois. Un
+matériel Garmin sans puce n'est jamais attribué en silence (la séance n'est pas non plus créditée à
+la paire par défaut) : le coach vous propose une fois de l'associer à une puce existante ou d'en
+créer une ; si vous refusez, une puce `- <nom Garmin> — garmin: <uuid> (ignorée)` fait taire
+propositions et alertes. Voir
 [Synchronisation du matériel Garmin](garmin-setup.md#synchronisation-du-materiel-garmin)
 (y compris la source intervals.icu, où l'attribution par séance reste
 manuelle).

@@ -364,6 +364,25 @@ class TestGarminGearWhitelist(unittest.TestCase):
             with self.subTest(file=f.name):
                 self.assertRegex(f.read_text(encoding="utf-8"), r"(?i)confirm")
 
+    def test_daily_sync_script_disallows_gear_writes(self):
+        text = (REPO / "scripts/daily-sync.sh").read_text(encoding="utf-8")
+        self.assertIn("mcp__garmin__add_gear_to_activity", text)
+        self.assertIn("mcp__garmin__remove_gear_from_activity", text)
+        self.assertIn("--disallowedTools", text)
+        # Limite documentée : en mode passerelle l'outil `invoke_tool` n'est pas filtrable par sous-outil.
+        self.assertRegex(text, r"(?i)invoke_tool[^\n]*\n[^\n]*filtr")
+
+    def test_priority_wording_is_consistent_everywhere(self):
+        """Priorité = déclaration de l'athlète > Garmin > défaut ; jamais « Garmin > chat »."""
+        for rel in ("AGENTS.md", "agents/coach.md", "skills/garmin-daily-sync/SKILL.md",
+                    "skills/garmin-sync-efficiency/SKILL.md", "skills/workspace-data-contract/SKILL.md",
+                    "docs/garmin-setup.md", "docs/workspace.md", "docs/agents/coach.md", "docs/skills.md",
+                    "docs/skills/garmin-daily-sync.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(file=rel):
+                self.assertNotRegex(text, r"(?i)garmin\s*>\s*(gear_id|chat|d[ée]claration)")
+                self.assertNotRegex(text, r"(?i)matériel garmin\s*>\s*(gear_id|paire (que|cit)|chat|d[ée]claration)")
+
     def test_headless_sync_never_writes_gear(self):
         text = (SKILLS / "garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
         self.assertRegex(text, r"NEVER call `add_gear_to_activity`")

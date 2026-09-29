@@ -37,6 +37,16 @@ CORRECT_ANSWERS_BY_CASE = {
         "J'ai corrigé le départ de tes Pegasus à 258 km, tes séances restent intactes.",
         "C'est noté : 258 km de départ pour tes Pegasus (300 km au total, dont 42 km déjà comptés).",
     ],
+    # #133 : proposition de retour vers Garmin (question) et conflit Garmin/athlète nommé.
+    "gear-write-needs-confirmation": [
+        "C'est noté : Salomon S/Lab. Veux-tu que je l'attache aussi à la séance dans Garmin ?",
+        "Séance enregistrée avec tes S/Lab. Souhaites-tu que je les associe dans Garmin à cette sortie ?",
+        "Attribué aux S/Lab. Je peux pousser ce choix vers Garmin si tu le souhaites — veux-tu que je le fasse ?",
+    ],
+    "gear-sync-conflict-athlete-wins": [
+        "Garmin indique Nike Pegasus, ta déclaration (Salomon S/Lab) est conservée.",
+        "La montre a attaché les Pegasus mais tu as dit S/Lab : conflit, ta déclaration prime.",
+    ],
     # #132 : suggestion de paire (3 paires actives, tempo sur route).
     "gear-suggestion-three-pairs": [
         "Séance : tempo 3 x 10 min.\nChaussures : Nike Pegasus (paire route, la plus adaptée à un tempo "
@@ -361,6 +371,18 @@ class TestEvalCaseRegexSafety(unittest.TestCase):
 
 # Réponses qui NE doivent PAS satisfaire les `must_match` (faux positifs d'un motif trop lâche).
 UNSATISFYING_ANSWERS_BY_CASE = {
+    # #133 : ni « confirmé » nu, ni une simple mention de Garmin, ne valent une proposition.
+    "gear-write-needs-confirmation": [
+        "Chaussure confirmée : S/Lab, séance enregistrée dans ton journal.",
+        "Garmin confirme la séance ; S/Lab enregistrées.",
+        "J'ai attaché les S/Lab à la séance dans Garmin.",
+    ],
+    # #133 : la paire par défaut citée n'est pas le matériel attaché par Garmin, et « Garmin indique
+    # Pegasus » sans arbitrage ne dit pas qui a gagné.
+    "gear-sync-conflict-athlete-wins": [
+        "Paire par défaut Pegasus non utilisée, Salomon S/Lab enregistrée.",
+        "Garmin indique Nike Pegasus.",
+    ],
     "gear-suggestion-three-pairs": [
         "Chaussures : Speedgoat — l'accroche compte plus que la route aujourd'hui.",
         "Chaussures : S/Lab Ultra. Pas la Pegasus, elle reste au repos.",

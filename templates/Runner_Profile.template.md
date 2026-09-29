@@ -108,6 +108,9 @@
     il ne la devine jamais.
   - "(par défaut)" : chaussure attribuée aux séances sans matériel précisé.
   - "(retirée)" : sortie de rotation — kilométrage conservé, jamais d'alerte.
+  - "(ignorée)" : matériel Garmin que vous ne suivez pas — puce réduite à `garmin: <uuid>` ; le coach
+    ne le repropose plus et ne le signale plus, et ses séances ne sont jamais créditées à la
+    paire par défaut.
 
   Exemple (à adapter, effacer les lignes que vous ne remplissez pas) :
   - Hoka Speedgoat 5 (bleues) — depuis 2026-03-01 — alerte 700 km — id: speedgoat-bleues (par défaut)

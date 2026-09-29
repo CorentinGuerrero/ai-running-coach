@@ -67,7 +67,7 @@ or `upload_workout` — see the correspondence table in `AGENTS.md`.
    `add_gear_to_activity` is a WRITE on Garmin: never in a headless run, only after the athlete
    confirmed in the conversation. `get_activity_gear` answers with a plain text
    ("No gear data found for activity with ID N") when nothing is attached — that is "no gear",
-   not an error. The attribution rule itself (Garmin > chat > default) lives in
+   not an error. The attribution rule itself (athlete's declaration > Garmin > default) lives in
    `python3 scripts/arc_index.py gear-attribution`, never re-derived by hand.
 
 ## Minimal Extraction Pattern

@@ -533,7 +533,10 @@ ASSUMPTIONS = {
                  "ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` "
                  "quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans "
                  "la prévision), et le séparateur décimal du départ est toujours le point ou la virgule "
-                 "(« 1.200 km » = 1,2 km ; espace = milliers).",
+                 "(« 1.200 km » = 1,2 km ; espace = milliers). #133 : une séance sans `gear_id` marquée "
+                 "`gear_source: \"garmin_unmapped\"` (matériel Garmin non associé, ambigu ou ignoré) est "
+                 "EXCLUE de l'attribution par défaut — ni comptée, ni source de `crossed_in_run` — pour ne "
+                 "jamais créditer en silence une autre paire ; les puces `(ignorée)` ne sont pas des chaussures.",
     "hr_zones": "Zones FC, temps en zone et polarisation 80/20 (#43) : des APPROXIMATIONS d'entraînement, "
                 "jamais une mesure physiologique directe (pas de test d'effort, pas de lactate, pas de "
                 "seuils ventilatoires mesurés) — voir plus bas pour la polarisation, la plus approximative "
@@ -1660,9 +1663,9 @@ def durability_trend(activities: List[dict], day: date, window_weeks: int = DURA
 
 def resolve_gear_attribution(gear_defs: List[dict], garmin_uuids: List[str],
                              chat_gear_id: Optional[str] = None) -> dict:
-    """Priorité d'attribution du matériel d'une séance (#133) : matériel attaché par Garmin
-    (`get_activity_gear`, rattaché à une puce par son segment `garmin: <uuid>`) > `gear_id`
-    déclaré en chat > paire `(par défaut)` (calculée à la lecture par `gear_mileage`, donc
+    """Priorité d'attribution du matériel d'une séance (#133) : `gear_id` déclaré en chat >
+    matériel attaché par Garmin (`get_activity_gear`, rattaché à une puce par son segment
+    `garmin: <uuid>`) > paire `(par défaut)` (calculée à la lecture par `gear_mileage`, donc
     JAMAIS écrite ici : `gear_id` reste `None`).
 
     Règles (jamais d'attribution devinée) :
@@ -1674,19 +1677,35 @@ def resolve_gear_attribution(gear_defs: List[dict], garmin_uuids: List[str],
       = `{garmin, chat}` (à signaler une fois à l'athlète).
     - `chat_gear_id` absent du profil : conservé tel quel (le profil est la source de vérité de
       l'athlète ; `gear_mileage` regroupe déjà les `gear_id` inconnus), jamais remplacé.
-    Sortie : `{gear_id, gear_source ("garmin"|"chat"|None), conflict, unmapped_garmin, ambiguous}`."""
+    - Un uuid porté par une puce `(ignorée)` (`ignored`) est « connu mais non suivi » : rendu dans
+      `ignored_garmin`, jamais dans `unmapped_garmin` (plus de signalement), jamais attribué.
+    Sans `gear_id` mais avec un matériel Garmin non attribuable (non associé, ambigu ou ignoré) et
+    sans déclaration de l'athlète, `gear_source = "garmin_unmapped"` : marqueur à écrire SANS
+    `gear_id`, qui exclut la séance de l'attribution par défaut (`gear_mileage`).
+    Sortie : `{gear_id, gear_source ("garmin"|"chat"|"garmin_unmapped"|None), conflict,
+    unmapped_garmin, ignored_garmin, ambiguous}`."""
     by_uuid: Dict[str, List[str]] = {}
+    ignored_uuids = set()
     for g in gear_defs:
         u = (g.get("garmin_uuid") or "").strip().lower()
-        if u:
-            by_uuid.setdefault(u, []).append(g["gear_id"])
+        if not u:
+            continue
+        if g.get("ignored"):
+            ignored_uuids.add(u)
+            continue
+        by_uuid.setdefault(u, []).append(g["gear_id"])
     mapped: List[str] = []
     unmapped: List[str] = []
+    ignored: List[str] = []
     for raw in garmin_uuids:
         u = (raw or "").strip().lower()
         if not u:
             continue
         gids = by_uuid.get(u)
+        if not gids and u in ignored_uuids:
+            if u not in ignored:
+                ignored.append(u)
+            continue
         if not gids:
             if u not in unmapped:
                 unmapped.append(u)
@@ -1698,13 +1717,15 @@ def resolve_gear_attribution(gear_defs: List[dict], garmin_uuids: List[str],
     ambiguous = mapped if len(mapped) > 1 else []
     garmin_id = mapped[0] if len(mapped) == 1 else None
     out = {"gear_id": None, "gear_source": None, "conflict": None,
-           "unmapped_garmin": unmapped, "ambiguous": ambiguous}
+           "unmapped_garmin": unmapped, "ignored_garmin": ignored, "ambiguous": ambiguous}
     if chat_gear_id:
         out["gear_id"], out["gear_source"] = chat_gear_id, "chat"
         if garmin_id and garmin_id != chat_gear_id:
             out["conflict"] = {"garmin": garmin_id, "chat": chat_gear_id}
     elif garmin_id:
         out["gear_id"], out["gear_source"] = garmin_id, "garmin"
+    elif unmapped or ignored or ambiguous:
+        out["gear_source"] = "garmin_unmapped"
     return out
 
 
@@ -1761,6 +1782,8 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
             continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
         gear_id = act.get("gear_id")
         if not gear_id:
+            if act.get("gear_source") == "garmin_unmapped":
+                continue    # #133 : matériel Garmin non associé — jamais crédité en silence à la paire par défaut
             if not default_id:
                 continue
             if default_start and (not act.get("date") or act["date"] < default_start):

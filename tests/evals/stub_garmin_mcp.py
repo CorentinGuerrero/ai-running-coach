@@ -137,18 +137,20 @@ CANNED = {
     # defaults, gear: [{uuid, name, full_name, type, status, date_begin, date_end, max_distance_km?,
     # is_default_for?, stats?}]}` ; `get_activity_gear` rend la liste brute de `garminconnect`
     # (`uuid`, `displayName`, `customMakeModel`, `gearTypeName`, `gearStatusName`…) ou, sans matériel
-    # attaché, le TEXTE « No gear data found for activity with ID N ». Par défaut : aucun matériel
+    # attaché, le TEXTE BRUT (non JSON) « No gear data found for activity with ID N ». `defaults` /
+    # `is_default_for` : noms de `ACTIVITY_TYPE_MAPPING` (« Running », « Hiking »…, `activity_<pk>`
+    # pour un pk inconnu), jamais les `typeKey` de `get_activities` (`trail_running`). Par défaut : aucun matériel
     # attaché (les cas qui en ont besoin scriptent `[stub.garmin.get_activity_gear]`).
     "get_gear": {
         "gear_count": 2, "active_count": 2, "retired_count": 0,
-        "defaults": {"running": "Nike Pegasus"},
+        "defaults": {"Running": "Nike Pegasus", "Hiking": "Salomon S/Lab"},
         "gear": [
             {"uuid": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "name": "Nike Pegasus", "full_name": "Nike Pegasus 41",
              "type": "Shoes", "status": "active", "date_begin": "2026-01-10", "date_end": None,
-             "max_distance_km": 700.0, "is_default_for": ["running"]},
+             "max_distance_km": 700.0, "is_default_for": ["Running"]},
             {"uuid": "0f9e8d7c6b5a49382716f5e4d3c2b1a0", "name": "Salomon S/Lab", "full_name": "Salomon S/Lab Ultra 3",
              "type": "Shoes", "status": "active", "date_begin": "2026-03-01", "date_end": None,
-             "max_distance_km": 600.0, "is_default_for": ["trail_running"]},
+             "max_distance_km": 600.0, "is_default_for": ["Hiking"]},
         ],
     },
     "get_activity_gear": "No gear data found for activity with ID 99000001",
