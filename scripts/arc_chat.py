@@ -196,6 +196,11 @@ def load_llm_env(path: Optional[Path] = None, environ=None) -> tuple:
 def host_allowlist(port: int, cfg: dict) -> set:
     """En-têtes Host acceptés : boucle locale, `allowed_hosts`, à défaut le nom de `public_url`."""
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+    if cfg.get("auth", "local") == "local":
+        # En mode local, la page vient du tableau de bord (autre port) qui relaie
+        # `/api/chat/*` en conservant son propre Host : tout nom de boucle locale,
+        # quel que soit le port, est accepté. Jamais en mode proxy.
+        hosts.update({"127.0.0.1", "localhost", "[::1]"})
     declared = [h for h in cfg.get("allowed_hosts", []) if str(h).strip()]
     if not declared and cfg.get("public_url"):
         declared = [urlparse(cfg["public_url"]).netloc]

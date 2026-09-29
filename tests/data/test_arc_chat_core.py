@@ -211,8 +211,17 @@ class TestHttpGuards(unittest.TestCase):
         self.assertTrue(C.host_ok("coach.example.com", allowed))
         self.assertTrue(C.host_ok("COACH.example.com:443", allowed))
         self.assertFalse(C.host_ok("evil.example", allowed))
-        self.assertFalse(C.host_ok("127.0.0.1:1", allowed))
         self.assertFalse(C.host_ok("", allowed))
+
+    def test_host_boucle_locale_tout_port_en_mode_local_seulement(self):
+        # Le tableau de bord (port 8765) relaie /api/chat avec son propre Host.
+        local = C.host_allowlist(8766, self.cfg(auth="local"))
+        self.assertTrue(C.host_ok("127.0.0.1:8765", local))
+        self.assertTrue(C.host_ok("localhost:8765", local))
+        self.assertFalse(C.host_ok("evil.example:8765", local))
+        proxy = C.host_allowlist(8766, self.cfg(auth="proxy", public_url="https://coach.example.com"))
+        self.assertFalse(C.host_ok("127.0.0.1:1", proxy))
+        self.assertTrue(C.host_ok("127.0.0.1:8766", proxy))
 
     def test_allowed_hosts_prime_sur_public_url(self):
         allowed = C.host_allowlist(1, self.cfg(allowed_hosts=["a.example"], public_url="https://b.example"))
