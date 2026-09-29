@@ -11,6 +11,7 @@ Verrouille ce qui doit rester cohérent sans lancer quoi que ce soit :
 from __future__ import annotations
 
 import os
+import sys
 import re
 import unittest
 from pathlib import Path
@@ -87,7 +88,7 @@ class TestTraefikExample(unittest.TestCase):
         self.assertIn("SSO_MIDDLEWARE_A_REMPLACER@file", self.chat)
 
     def test_approve_router_has_no_sso_but_a_rate_limit(self):
-        self.assertIn("PathRegexp(`^/api/chat/approve/[A-Za-z0-9_-]+/(allow|deny)$`)", self.approve)
+        self.assertIn("PathRegexp(", self.approve)
         self.assertIn("Method(`POST`)", self.approve)
         self.assertNotIn("SSO_MIDDLEWARE", self.approve)
         self.assertNotIn("authentik", self.approve.lower())
@@ -99,11 +100,39 @@ class TestTraefikExample(unittest.TestCase):
         approve_prio = int(re.search(r"priority: (\d+)", self.approve).group(1))
         self.assertGreater(approve_prio, chat_prio)
 
-    def test_approve_pattern_matches_token_urlsafe(self):
-        pattern = re.compile(r"^/api/chat/approve/[A-Za-z0-9_-]+/(allow|deny)$")
-        self.assertTrue(pattern.match("/api/chat/approve/Ab3_-x9Zq/allow"))
-        self.assertFalse(pattern.match("/api/chat/approve/Ab3/allow/../../status"))
-        self.assertFalse(pattern.match("/api/chat/approve/Ab3/maybe"))
+    def _router_regex(self) -> "re.Pattern":
+        """Le motif RÉEL du routeur, extrait de dynamic.yml (jamais recopié dans le test)."""
+        match = re.search(r"PathRegexp\(`([^`]+)`\)", self.approve)
+        self.assertIsNotNone(match, "PathRegexp introuvable dans le routeur d'approbation")
+        return re.compile(match.group(1))
+
+    def test_approve_pattern_matches_a_real_token(self):
+        """Régression : le jeton du service est `<id>.<secret>` ; un motif sans « . » renvoyait au SSO."""
+        import tempfile
+        sys.path.insert(0, str(REPO / "scripts"))
+        import arc_chat
+        pattern = self._router_regex()
+        with tempfile.TemporaryDirectory() as tmp:
+            store = arc_chat.ApprovalStore(Path(tmp) / "approvals.json")
+            _, tokens = store.create("sess-1234567", "mcp:garmin.schedule_workouts", {"a": 1}, "x", [],
+                                     3600, 1800)
+            for action in ("allow", "deny"):
+                with self.subTest(action=action):
+                    self.assertRegex(tokens[action], r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
+                    self.assertTrue(pattern.match(f"/api/chat/approve/{tokens[action]}/{action}"),
+                                    "le routeur sans SSO ne reconnaît pas un vrai jeton")
+
+    def test_approve_pattern_stays_strict(self):
+        pattern = self._router_regex()
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3/allow"))          # pas de point
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3.x9/allow/../../status"))
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3.x9/maybe"))
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3.x9.zz/allow"))
+        self.assertFalse(pattern.match("/api/chat/approve/.x9/allow"))
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3./allow"))
+        self.assertFalse(pattern.match("/api/chat/approve/A/b.c/allow"))
+        self.assertFalse(pattern.match("/api/chat/approve/Ab3.x9/allow/"))
+        self.assertTrue(pattern.match("/api/chat/approve/Ab3_-x9Zq.k-_9/deny"))
 
 
 class TestChatScripts(unittest.TestCase):

@@ -13,7 +13,7 @@ qu'une origine (pas de CORS, cookie de session SSO unique).
 | Routeur | Règle | SSO | Pourquoi |
 |---|---|---|---|
 | `arc-chat` | `Host(...) && PathPrefix(/api/chat)` | **oui, obligatoire** | Tout le chat : sessions, messages, approbations depuis la page. |
-| `arc-chat-approve` | `Host(...) && PathRegexp(^/api/chat/approve/<jeton>/(allow\|deny)$) && Method(POST)` | non, limité en débit | Les boutons « Appliquer / Refuser » des notifications ntfy. |
+| `arc-chat-approve` | `Host(...) && PathRegexp(^/api/chat/approve/<id>.<secret>/(allow\|deny)$) && Method(POST)` | non, limité en débit | Les boutons « Appliquer / Refuser » des notifications ntfy. |
 
 Priorités explicites (300 et 200) : elles passent devant le routeur du tableau de bord,
 dont la règle `Host(...)` seule est plus courte.
@@ -31,6 +31,15 @@ L'autorisation vient du **jeton** contenu dans l'URL :
 - de courte durée (`[chat].ntfy_token_ttl_s`, 30 min par défaut) ;
 - seul le hash sha256 est stocké côté service ;
 - exigé avec l'en-tête `X-ARC-Chat: 1` (posé par le bouton ntfy).
+
+**Le jeton voyage dans la notification** : quiconque peut lire le sujet ntfy peut appuyer
+sur le bouton. Le service n'envoie donc les boutons « Appliquer / Refuser » que si
+`[notifications].ntfy_token_file` est renseigné (sujet à accès contrôlé, jeton d'accès
+ntfy). Sans lui, seul le bouton « Ouvrir » (page derrière le SSO) est envoyé et un
+avertissement est journalisé une fois. Réservez donc ce routeur aux sujets protégés.
+
+Le jeton a la forme `<id>.<secret>` (deux segments `[A-Za-z0-9_-]` séparés par un point) :
+le motif du routeur l'exige, un point dans le jeton est donc indispensable.
 
 Le routeur est donc limité à **POST** et à ce motif exact, et un middleware `rateLimit`
 freine toute tentative de devinette. Tout le reste de `/api/chat` reste derrière le SSO.
@@ -82,5 +91,5 @@ python3 scripts/coach_doctor.py --check chat_service
 ```
 
 Après le SSO, `GET /api/chat/status` répond en JSON. Une requête `POST` vers
-`/api/chat/approve/x/allow` sans en-tête `X-ARC-Chat` ou avec un jeton inconnu est refusée
+`/api/chat/approve/x.y/allow` sans en-tête `X-ARC-Chat` ou avec un jeton inconnu est refusée
 par le service, pas par Traefik.
