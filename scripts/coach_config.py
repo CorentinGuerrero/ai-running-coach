@@ -95,6 +95,8 @@ def toml_encode(value) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
+    if isinstance(value, float):
+        return repr(value)
     if isinstance(value, list):
         return "[" + ", ".join(toml_encode(v) for v in value) + "]"
     escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
@@ -154,6 +156,8 @@ def _parse_scalar(value: str):
         return value == "true"
     if re.fullmatch(r"-?\d+", value):
         return int(value)
+    if re.fullmatch(r"-?\d+\.\d+", value):
+        return float(value)
     return value.strip('"')
 
 
@@ -281,6 +285,8 @@ def cmd_set(args) -> int:
         value = args.value.lower() in ("1", "true", "oui", "yes")
     elif args.type == "int":
         value = int(args.value)
+    elif args.type == "float":
+        value = float(args.value)
     else:
         value = args.value
     changed = set_toml_key(user, args.section, args.key, value)
@@ -470,7 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     setter.add_argument("--key", required=True)
     setter.add_argument("--value", default="")
     setter.add_argument("--list", action="append", help="répéter pour un tableau de chaînes")
-    setter.add_argument("--type", choices=("string", "bool", "int"), default="string")
+    setter.add_argument("--type", choices=("string", "bool", "int", "float"), default="string")
     setter.set_defaults(func=cmd_set)
 
     return parser
