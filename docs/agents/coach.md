@@ -112,8 +112,8 @@ N h | N séances | N jours`, le premier atteint déclenche). Le coach :
   `arc_index.py equipment --kit trail-long --sport <sport>` et écrit `gear_ids` (jamais un
   objet de son cru ; les objets retirés ou dont la catégorie ne porte pas le sport sont
   écartés et signalés) ;
-- note l'**entretien** du jour sur la puce quand vous dites « j'ai nettoyé la poche » (seul
-  ce segment change) ;
+- note l'**entretien** sur la puce quand vous dites « j'ai nettoyé la poche » (seul ce segment
+  change ; il y met la date de la dernière séance faite avant l'entretien, celles d'après comptent) ;
 - ajoute une ligne « Matériel : … » au rapport hebdomadaire et au retour de séance pour
   tout objet sous alerte ou à 90 %, jamais un seuil que vous n'avez pas déclaré ;
 - rappelle avant une séance de nuit (batterie de la frontale) ou une sortie longue (hygiène

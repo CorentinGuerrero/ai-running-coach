@@ -2598,7 +2598,7 @@ class TestSchemaMigrationV26ToV27(Workspace):
         legacy.close()
         conn = I.open_db(self.ws, str(db_path))
         try:
-            self.assertEqual(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "27")
+            self.assertEqual(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], str(I.SCHEMA_VERSION))
             cols = {r[1] for r in conn.execute("PRAGMA table_info(gear)")}
             self.assertTrue({"garmin_uuid", "ignored"} <= cols, cols)
             self.assertIn("gear_source", {r[1] for r in conn.execute("PRAGMA table_info(activity)")})

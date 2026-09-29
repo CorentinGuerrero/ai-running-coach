@@ -963,10 +963,13 @@ _EQUIP_SEGMENT_SPLIT_RE = re.compile(
     rf"\s+-\s+(?={_EQUIP_KEYWORDS})|\s*[—–]\s*|\s*:\s*(?={_EQUIP_KEYWORDS})", re.I)
 # « <nombre> <unité> » : seule une unité explicite compte pour le matériel (jamais un nombre nu,
 # contrairement aux chaussures où « alerte 700 » vaut 700 km — ici l'unité décide du type de
-# déclencheur, la deviner serait inventer une alerte).
+# déclencheur, la deviner serait inventer une alerte). Durées calendaires : semaine = 7 jours,
+# mois = 30 jours, an = 365 jours (approximation du projet, voir `arc_metrics.ASSUMPTIONS`).
+# « 1h30 »/« 2 h 30 » (heures + minutes) est lu avant, par `_EQUIP_HM_RE`.
 _EQUIP_TRIGGER_RE = re.compile(
-    r"(\d+(?:[   ]\d{3})*(?:[.,]\d+)?)\s*(km|mi(?:les?)?|h|heures?|s[ée]ances?|sorties?|jours?|j)\b",
-    re.I)
+    r"(\d+(?:[   ]\d{3})*(?:[.,]\d+)?)\s*"
+    r"(km|mi(?:les?)?|h|heures?|s[ée]ances?|sorties?|semaines?|mois|jours?|j|ans?)\b", re.I)
+_EQUIP_HM_RE = re.compile(r"(\d+)\s*h\s*([0-5]\d)\b", re.I)
 # Catégories reconnues (clé canonique → alias, sans accent, minuscules, singulier ou pluriel).
 EQUIPMENT_CATEGORIES: Dict[str, Tuple[str, ...]] = {
     "batons": ("baton", "batons", "baton de trail", "batons de trail"),
@@ -975,7 +978,7 @@ EQUIPMENT_CATEGORIES: Dict[str, Tuple[str, ...]] = {
     "flasques": ("flasque", "flasques", "softflask", "softflasks", "gourde", "gourdes"),
     "frontale": ("frontale", "frontales", "lampe frontale"),
     "ceinture": ("ceinture", "ceintures", "ceinture cardio", "ceinture fc"),
-    "veste": ("veste", "vestes", "coupe-vent", "coupe vent", "impermeable"),
+    "veste": ("veste", "vestes"),
     "semelles": ("semelle", "semelles"),
     "lacets": ("lacet", "lacets"),
     "autre": ("autre", "autres"),
@@ -997,21 +1000,31 @@ def normalize_equipment_category(raw: Optional[str]) -> Optional[str]:
 
 def _equip_triggers(value: str) -> Dict[str, float]:
     """« 30 jours ou 40 h » → `{days: 30, duration_s: 144000}` (clés : distance_m, duration_s,
-    sessions, days). Un même type répété : le dernier gagne ; texte sans unité : ignoré."""
+    sessions, days). « 1h30 » = 1,5 h ; semaines/mois/ans → jours (7/30/365). Un même type répété :
+    le dernier gagne ; texte sans unité : ignoré (l'appelant avertit quand rien n'est lu)."""
     out: Dict[str, float] = {}
+    for m in _EQUIP_HM_RE.finditer(value):
+        out["duration_s"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60
+    value = _EQUIP_HM_RE.sub(" ", value)
     for m in _EQUIP_TRIGGER_RE.finditer(value):
         number = parse_fr_number(m.group(1))
         if number is None or number <= 0:
             continue
         unit = m.group(2).lower()
-        if unit.startswith("mi"):
-            out["distance_m"] = round(number * 1609.344)
-        elif unit == "km":
+        if unit == "km":
             out["distance_m"] = round(number * 1000)
+        elif unit.startswith("mi") and unit != "mois":
+            out["distance_m"] = round(number * 1609.344)
         elif unit.startswith("h"):
             out["duration_s"] = round(number * 3600)
-        elif unit.startswith("s"):
+        elif unit.startswith(("séance", "seance", "sortie")):
             out["sessions"] = int(round(number))
+        elif unit.startswith("semaine"):
+            out["days"] = int(round(number * 7))
+        elif unit == "mois":
+            out["days"] = int(round(number * 30))
+        elif unit.startswith("an"):
+            out["days"] = int(round(number * 365))
         else:
             out["days"] = int(round(number))
     return out
@@ -1038,6 +1051,12 @@ def parse_equipment(text: str) -> List[Dict[str, Any]]:
         raw = raw.replace("**", "").strip()
         is_retired = bool(_GEAR_RETIRED_RE.search(raw))
         raw = _GEAR_RETIRED_RE.sub("", raw).strip()
+        warns: List[str] = []
+        if _GEAR_IGNORED_RE.search(raw):
+            # `(ignorée)` (#133) est une notion de matériel Garmin des CHAUSSURES : sans effet ici.
+            raw = _GEAR_IGNORED_RE.sub("", raw).strip()
+            warns.append("« (ignorée) » n'existe que pour les chaussures — retiré de la puce ; le matériel "
+                         "Garmin hors chaussures n'est pas rattaché (pas de segment `garmin:`).")
         segments = [s for s in _EQUIP_SEGMENT_SPLIT_RE.split(raw) if s.strip()]
         if not segments:
             continue
@@ -1057,11 +1076,19 @@ def parse_equipment(text: str) -> List[Dict[str, Any]]:
                 continue
             m = re.match(r"alerte\b\s*:?\s*(.*)$", stripped, re.I)
             if m:
-                thresholds.update(_equip_triggers(m.group(1)))
+                got = _equip_triggers(m.group(1))
+                if not got:
+                    warns.append(f"segment « {stripped} » sans déclencheur lisible — ajoutez une unité "
+                                 "(km, h, séances, jours, semaines, mois, ans) ; ignoré.")
+                thresholds.update(got)
                 continue
             m = re.match(r"d[ée]part\b\s*:?\s*(.*)$", stripped, re.I)
             if m:
-                starts.update({k: v for k, v in _equip_triggers(m.group(1)).items() if k != "days"})
+                got = {k: v for k, v in _equip_triggers(m.group(1)).items() if k != "days"}
+                if not got:
+                    warns.append(f"segment « {stripped} » sans départ lisible — km, h ou séances (pas de "
+                                 "départ en jours : les jours partent de `depuis`) ; ignoré.")
+                starts.update(got)
                 continue
             m = re.match(r"id\s*:\s*(.*)$", stripped, re.I)
             if m:
@@ -1095,7 +1122,7 @@ def parse_equipment(text: str) -> List[Dict[str, Any]]:
             "threshold_m": thresholds.get("distance_m"), "threshold_s": thresholds.get("duration_s"),
             "threshold_sessions": thresholds.get("sessions"), "threshold_days": thresholds.get("days"),
             "start_m": starts.get("distance_m"), "start_s": starts.get("duration_s"),
-            "start_sessions": starts.get("sessions"),
+            "start_sessions": starts.get("sessions"), "parse_warnings": warns or None,
         }
         if n > 1:
             entry["collision_base"] = base_id

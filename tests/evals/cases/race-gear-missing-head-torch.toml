@@ -8,8 +8,11 @@
 # ne sont pas retrouvées dans l'inventaire — sans jamais les présumer possédées — et que les
 # bâtons, eux, ont déjà servi à l'entraînement.
 #
-# `must_match` : « frontale » liée (à 160 caractères) à un mot d'absence — jamais deux mentions
-# indépendantes. `must_not_match` : ne doit pas affirmer que l'athlète possède une frontale.
+# `must_match` : « frontale » (puis « couverture de survie ») liée à un mot d'ABSENCE dans la
+# même proposition — fenêtre bornée par `[^\n.;|]` (ni point, ni point-virgule, ni barre de
+# tableau : « Frontale : présente ✅ ; couverture de survie : manquante » ne doit pas passer) — et
+# « ne manque »/« n'est pas » sont exclus (« rien ne manque » n'est pas une absence).
+# `must_not_match` : jamais de frontale donnée pour possédée/OK/testée, ni « rien ne manque ».
 id = "race-gear-missing-head-torch"
 prompt = """Fais le contrôle du matériel obligatoire de mon plan de course \
 (planning/plan-collines-fictives.md) face à mon inventaire du profil : qu'est-ce qui manque ?"""
@@ -23,9 +26,11 @@ responses = "fr"
 
 [expect]
 must_match = [
-  "(frontale[^\\n]{0,160}(manqu|absent|non retrouv|pas (dans|d)[^\\n]{0,20}inventaire|n['’]est pas))|((manqu|absent|non retrouv)[^\\n]{0,160}frontale)",
-  "(couverture de survie[^\\n]{0,160}(manqu|absent|non retrouv|pas (dans|d)[^\\n]{0,20}inventaire|n['’]est pas))|((manqu|absent|non retrouv)[^\\n]{0,160}couverture de survie)",
+  "(frontale[^\\n.;|]{0,80}((?<!ne )(?<!n['’])manqu|absent|non retrouv|introuvable|pas (dans|d)[^\\n.;|]{0,20}inventaire))|(((?<!ne )(?<!n['’])manqu|absent|non retrouv|introuvable)[^\\n.;|]{0,80}frontale)",
+  "(couverture de survie[^\\n.;|]{0,80}((?<!ne )(?<!n['’])manqu|absent|non retrouv|introuvable|pas (dans|d)[^\\n.;|]{0,20}inventaire))|(((?<!ne )(?<!n['’])manqu|absent|non retrouv|introuvable)[^\\n.;|]{0,80}couverture de survie)",
 ]
 must_not_match = [
-  "((tu as|vous avez) d[ée]j[àa]|tu poss[eè]des|vous poss[eé]dez)[^\\n]{0,30}frontale",
+  "((tu as|vous avez) d[ée]j[àa]|tu poss[eè]des|vous poss[eé]dez)[^\\n.;|]{0,30}frontale",
+  "frontale[^\\n.;|]{0,40}(\\bok\\b|✅|test[ée]e|(?<!non )(?<!pas )pr[ée]sente)",
+  "rien ne manque|aucun (mat[ée]riel )?manquant|vous l['’]avez|tu l['’]as\\b",
 ]

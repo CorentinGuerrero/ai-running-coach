@@ -294,6 +294,8 @@ const EQUIP_TRIGGER = {
   sessions: (v) => `${F.num(v, 0)} séance${v > 1 ? "s" : ""}`,
   days: (v) => `${F.num(v, 0)} j`,
 };
+const EQUIP_CATEGORY_LABEL = { batons: "bâtons", gilet: "gilet", poche: "poche", flasques: "flasques",
+  frontale: "frontale", ceinture: "ceinture", veste: "veste", semelles: "semelles", lacets: "lacets", autre: "autre" };
 function equipmentTriggers(item) {
   if (!item.triggers?.length) return `<span class="muted">aucun seuil déclaré</span>`;
   return item.triggers.map((t) => {
@@ -309,7 +311,7 @@ function equipmentSection(eq) {
   if (!items.length && !unknown.length) return "";
   const sorted = [...items].sort((a, b) => (a.retired === b.retired ? 0 : a.retired ? 1 : -1));
   const rows = sorted.map((it) => `<tr${it.retired ? ` class="muted"` : ""}>
-      <th scope="row">${F.esc(it.name)}${it.category ? ` <span class="tag">${F.esc(it.category)}</span>` : ""}${it.retired ? ` <span class="tag">retiré</span>` : ""}${(it.kits || []).map((k) => ` <span class="tag">kit ${F.esc(k)}</span>`).join("")}</th>
+      <th scope="row">${F.esc(it.name)}${it.category ? ` <span class="tag">${F.esc(EQUIP_CATEGORY_LABEL[it.category] || it.category)}</span>` : ""}${it.retired ? ` <span class="tag">retiré</span>` : ""}${(it.kits || []).map((k) => ` <span class="tag">kit ${F.esc(k)}</span>`).join("")}</th>
       <td class="num">${F.distance(it.usage.distance_m, 0)}<br><small class="muted">${F.hours(it.usage.duration_s)} · ${F.num(it.usage.sessions, 0)} séance${it.usage.sessions > 1 ? "s" : ""}${it.usage.days != null ? ` · ${F.num(it.usage.days, 0)} j` : ""}</small></td>
       <td>${equipmentTriggers(it)}</td>
       <td>${it.alert ? chip("gear", "orange", "À surveiller") : it.near_threshold ? chip("gear", "orange", "Proche du seuil") : ""}</td></tr>`).join("");

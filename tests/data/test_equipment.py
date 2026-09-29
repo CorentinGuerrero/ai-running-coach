@@ -224,7 +224,7 @@ class TestEquipmentUsage(unittest.TestCase):
         self.assertEqual(items["batons-leki"]["usage"]["sessions"], 1)     # bâtons : pas de route, ni vélo
         self.assertEqual(items["frontale"]["usage"]["sessions"], 2)        # frontale : tout sport
         self.assertEqual(items["poche-a-eau-2-l"]["usage"]["sessions"], 1)  # poche : course, pas vélo
-        self.assertEqual(items["batons-leki"]["sports"], ["trail", "hiking"])
+        self.assertEqual(items["batons-leki"]["sports"], ["trail", "hiking", "walking"])
         self.assertEqual(items["frontale"]["sports"], "all")
 
     def test_unattributed_activity_counts_for_nothing_and_unknown_id_is_surfaced(self):
@@ -268,36 +268,44 @@ class TestOnceOnly(unittest.TestCase):
         nothing = by_id(M.equipment_usage(acts, self.d(), TODAY))["frontale"]
         self.assertNotIn("crossed_in_run", nothing)
 
-    def test_days_trigger_fires_only_on_the_exact_day_without_since(self):
+    def test_days_trigger_never_crosses_without_last_pass(self):
+        """Scénario du doublon (revue #134) : sans `--last-pass`, jamais de franchissement en jours —
+        ni le jour exact, ni un second passage ; l'état courant reste en alerte."""
         # depuis 2026-09-01 + 20 jours = 2026-09-21
-        fires = by_id(M.equipment_usage([], self.d(), date(2026, 9, 21), run_refs=["x"]))["poche"]
-        self.assertTrue(fires["crossed_in_run"])
-        after = by_id(M.equipment_usage([], self.d(), date(2026, 9, 22), run_refs=["x"]))["poche"]
-        self.assertFalse(after["crossed_in_run"])
-        self.assertTrue(after["alert"])                 # l'état courant reste en alerte, seule l'émission est unique
+        for day in (20, 21, 22):
+            item = by_id(M.equipment_usage([], self.d(), date(2026, 9, day), run_refs=["x"]))["poche"]
+            self.assertFalse(item["crossed_in_run"], day)
+        self.assertTrue(item["alert"])
+        # deux passages successifs le jour exact : toujours rien à émettre
+        again = by_id(M.equipment_usage([], self.d(), date(2026, 9, 21), run_refs=["x", "y"]))["poche"]
+        self.assertFalse(again["crossed_in_run"])
+
+    def test_empty_run_marks_no_crossing_key(self):
+        item = by_id(M.equipment_usage([], self.d(), date(2026, 9, 21)))["poche"]
+        self.assertNotIn("crossed_in_run", item)
 
     def test_days_trigger_with_since_catches_a_missed_day_once(self):
         # dernier passage le 2026-09-19, aujourd'hui le 2026-09-23 : franchi entre les deux
-        fired = by_id(M.equipment_usage([], self.d(), date(2026, 9, 23), since=date(2026, 9, 19)))["poche"]
+        fired = by_id(M.equipment_usage([], self.d(), date(2026, 9, 23), last_pass=date(2026, 9, 19)))["poche"]
         self.assertTrue(fired["crossed_in_run"])
         # passage suivant (since = 09-23) : plus rien
-        quiet = by_id(M.equipment_usage([], self.d(), date(2026, 9, 24), since=date(2026, 9, 23)))["poche"]
+        quiet = by_id(M.equipment_usage([], self.d(), date(2026, 9, 24), last_pass=date(2026, 9, 23)))["poche"]
         self.assertFalse(quiet["crossed_in_run"])
         self.assertTrue(quiet["alert"])
         # since déjà après le franchissement
-        before = by_id(M.equipment_usage([], self.d(), date(2026, 9, 18), since=date(2026, 9, 15)))["poche"]
+        before = by_id(M.equipment_usage([], self.d(), date(2026, 9, 18), last_pass=date(2026, 9, 15)))["poche"]
         self.assertFalse(before["crossed_in_run"])
 
     def test_maintenance_rearms_the_day_trigger(self):
         d = L.parse_equipment("### Matériel\n\n- Poche — catégorie: poche — depuis 2026-01-01 — "
                               "alerte 20 jours — entretien 2026-09-03\n")
-        item = by_id(M.equipment_usage([], d, date(2026, 9, 23), since=date(2026, 9, 22)))["poche"]
+        item = by_id(M.equipment_usage([], d, date(2026, 9, 23), last_pass=date(2026, 9, 22)))["poche"]
         self.assertTrue(item["crossed_in_run"])    # 09-03 + 20 j = 09-23
-        self.assertFalse(by_id(M.equipment_usage([], d, date(2026, 9, 22), since=date(2026, 9, 21)))["poche"]["alert"])
+        self.assertFalse(by_id(M.equipment_usage([], d, date(2026, 9, 22), last_pass=date(2026, 9, 21)))["poche"]["alert"])
 
     def test_retired_never_crosses(self):
         d = L.parse_equipment("### Matériel\n\n- Poche — depuis 2026-09-01 — alerte 20 jours (retirée)\n")
-        item = by_id(M.equipment_usage([], d, date(2026, 9, 21), since=date(2026, 9, 20)))["poche"]
+        item = by_id(M.equipment_usage([], d, date(2026, 9, 21), last_pass=date(2026, 9, 20)))["poche"]
         self.assertFalse(item["crossed_in_run"])
 
 
@@ -404,7 +412,7 @@ class TestEquipmentIndex(EquipmentWorkspace):
                                         capture_output=True, text=True, check=True).stdout)
         self.assertNotIn("batons-leki", out["gear_ids"])
         self.assertIn("frontale", out["gear_ids"])
-        out = json.loads(subprocess.run(base + ["--since", "2026-08-29"], capture_output=True, text=True,
+        out = json.loads(subprocess.run(base + ["--last-pass", "2026-08-29"], capture_output=True, text=True,
                                         check=True).stdout)
         poche = by_id(out)["poche-a-eau-2-l"]        # depuis 2026-08-01 + 30 j = 2026-08-31
         self.assertTrue(poche["crossed_in_run"])
@@ -430,15 +438,25 @@ class TestRaceGearCheck(EquipmentWorkspace):
         self.assertEqual(status["Couverture de survie"], "missing")        # jamais inventée
         self.assertEqual(status["Veste imperméable"], "missing")           # aucune veste déclarée
         self.assertEqual(status["Ceinture cardio"], "never_used")
-        self.assertEqual(status["Chaussures de trail"], "ok")              # speedgoat (par défaut) a roulé
+        self.assertEqual(status["Chaussures de trail"], "category_match")  # « chaussures » seul : à vérifier
         self.assertEqual(out["missing"], ["Couverture de survie", "Veste imperméable"])
 
     def test_used_item_is_ok(self):
         self.activity("2026-09-05", ids=["frontale"], sport="running")
-        self.race_plan(["Lampe frontale"])
+        self.race_plan(["Frontale"])
         self.index()
         [entry] = I.equipment_race_check(self.conn, "", TODAY)["entries"]
         self.assertEqual(entry["status"], "ok")
+
+    def test_absolute_and_dot_slash_paths(self):
+        self.race_plan(["Frontale"])
+        self.index()
+        for ref in (str(self.ws / "planning/2026-10-01_plan_course_test.md"),
+                    "./planning/2026-10-01_plan_course_test.md", "planning/2026-10-01_plan_course_test.md"):
+            with self.subTest(ref=ref):
+                out = I.equipment_race_check(self.conn, ref, TODAY, self.ws)
+                self.assertNotIn("error", out)
+                self.assertEqual(out["race_name"], "Trail Test")
 
     def test_no_plan(self):
         self.index()
@@ -462,3 +480,124 @@ class TestRaceGearCheck(EquipmentWorkspace):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRaceGearMatchingStrictness(unittest.TestCase):
+    """Revue #134 : jamais de `ok` sur un simple lien de catégorie (risque de disqualification)."""
+
+    def check(self, lines, bullets):
+        items = M.equipment_usage([act("2026-09-01", ids=[i["gear_id"] for i in L.parse_equipment(bullets)])],
+                                  L.parse_equipment(bullets), TODAY)["items"]
+        return {e["entry"]: e for e in M.race_gear_check(lines, items, [])["entries"]}
+
+    def test_generic_adjective_is_not_a_category_link(self):
+        out = self.check(["Pantalon imperméable"], "### Matériel\n\n- Veste Decathlon — catégorie: veste\n")
+        self.assertEqual(out["Pantalon imperméable"]["status"], "missing")
+
+    def test_windbreaker_and_waterproof_do_not_cross(self):
+        one = self.check(["Coupe-vent"], "### Matériel\n\n- Veste imperméable — catégorie: veste\n")
+        self.assertEqual(one["Coupe-vent"]["status"], "missing")
+        two = self.check(["Veste imperméable"], "### Matériel\n\n- Veste coupe-vent — catégorie: veste\n")
+        self.assertEqual(two["Veste imperméable"]["status"], "category_match")
+
+    def test_bib_belt_is_not_the_hr_strap(self):
+        out = self.check(["Ceinture porte-dossard"], "### Matériel\n\n- Polar H10 — catégorie: ceinture\n")
+        self.assertEqual(out["Ceinture porte-dossard"]["status"], "category_match")
+        self.assertNotEqual(out["Ceinture porte-dossard"]["status"], "ok")
+
+    def test_punctuation_is_normalised_on_both_sides(self):
+        b = "### Matériel\n\n- Sac Salomon (12 L) — catégorie: gilet\n- Veste — id: coupe-vent\n"
+        out = self.check(["Sac Salomon (12 L)", "Coupe-vent obligatoire"], b)
+        self.assertEqual(out["Sac Salomon (12 L)"]["status"], "ok")
+        self.assertEqual(out["Coupe-vent obligatoire"]["status"], "ok")     # via l'id « coupe-vent »
+
+    def test_name_link_is_ok_and_head_noun_only_is_category_match(self):
+        b = "### Matériel\n\n- Frontale Petzl — catégorie: frontale\n"
+        out = self.check(["Frontale", "Lampe frontale 300 lm"], b)
+        self.assertEqual(out["Frontale"]["status"], "ok")
+        self.assertEqual(out["Lampe frontale 300 lm"]["status"], "category_match")
+
+    def test_category_word_not_at_head_does_not_match(self):
+        out = self.check(["Étui pour ceinture"], "### Matériel\n\n- Ceinture cardio — catégorie: ceinture\n")
+        self.assertEqual(out["Étui pour ceinture"]["status"], "missing")
+
+
+class TestTriggerWordings(unittest.TestCase):
+    """Revue #134 : formulations courantes, jamais silencieusement perdues."""
+
+    def one(self, bullet):
+        [item] = L.parse_equipment(f"### Matériel\n\n{bullet}\n")
+        return item
+
+    def test_calendar_units_become_days(self):
+        self.assertEqual(self.one("- X — alerte 12 mois")["threshold_days"], 360)
+        self.assertEqual(self.one("- X — alerte 2 ans")["threshold_days"], 730)
+        self.assertEqual(self.one("- X — alerte 1 an")["threshold_days"], 365)
+        self.assertEqual(self.one("- X — alerte 4 semaines")["threshold_days"], 28)
+        self.assertEqual(self.one("- X — alerte 6 mois ou 40 h")["threshold_s"], 144000)
+
+    def test_hours_and_minutes(self):
+        self.assertEqual(self.one("- X — alerte 1h30")["threshold_s"], 5400)
+        self.assertEqual(self.one("- X — alerte 2 h 30")["threshold_s"], 9000)
+        self.assertEqual(self.one("- X — départ 2h30")["start_s"], 9000)
+        self.assertEqual(self.one("- X — alerte 40h")["threshold_s"], 144000)
+
+    def test_mois_is_not_miles(self):
+        item = self.one("- X — alerte 3 mois")
+        self.assertNotIn("threshold_m", item)
+
+    def test_unreadable_segments_warn(self):
+        for bullet in ("- X — alerte 800", "- X — alerte bientôt", "- X — départ 20 jours", "- X — départ beaucoup"):
+            with self.subTest(bullet=bullet):
+                item = self.one(bullet)
+                self.assertTrue(item.get("parse_warnings"), item)
+        self.assertNotIn("parse_warnings", self.one("- X — alerte 800 km"))
+
+    def test_warnings_reach_usage_output(self):
+        d = L.parse_equipment("### Matériel\n\n- Poche — alerte 800\n")
+        result = M.equipment_usage([], d, TODAY)
+        self.assertTrue(any("sans déclencheur lisible" in w for w in result["warnings"]))
+
+    def test_ignoree_is_stripped_from_id_with_warning(self):
+        item = self.one("- Frontale Petzl (ignorée) — catégorie: frontale")
+        self.assertEqual(item["gear_id"], "frontale-petzl")
+        self.assertTrue(any("ignorée" in w for w in item["parse_warnings"]))
+
+
+class TestReviewFixes(unittest.TestCase):
+    def test_walking_counts_for_poles_vest_flasks_jacket(self):
+        d = L.parse_equipment("### Matériel\n\n- Bâtons — catégorie: bâtons\n- Gilet — catégorie: gilet\n"
+                              "- Semelles — catégorie: semelles\n")
+        acts = [act("2026-09-01", sport="walking", ids=["batons", "gilet", "semelles"])]
+        items = by_id(M.equipment_usage(acts, d, TODAY))
+        self.assertEqual(items["batons"]["usage"]["sessions"], 1)
+        self.assertEqual(items["gilet"]["usage"]["sessions"], 1)
+        self.assertEqual(items["semelles"]["usage"]["sessions"], 0)
+
+    def test_shoe_slug_in_gear_ids_is_warned_not_counted(self):
+        result = M.equipment_usage([act("2026-09-01", ids=["speedgoat"])], defs(), TODAY, known_ids=["speedgoat"])
+        self.assertTrue(any("speedgoat" in w and "gear_id" in w for w in result["warnings"]))
+        self.assertEqual(result["unknown"], [])
+
+    def test_maintenance_rule_strictly_after(self):
+        """`entretien` = date de la dernière séance AVANT l'entretien : la séance du même jour faite
+        APRÈS l'entretien (donc datée le lendemain de cette date, ou plus tard) compte."""
+        d = L.parse_equipment("### Matériel\n\n- Poche — catégorie: poche — alerte 9 séances — entretien 2026-09-10\n")
+        acts = [act("2026-09-10", ids=["poche"]), act("2026-09-11", ids=["poche"])]
+        self.assertEqual(by_id(M.equipment_usage(acts, d, TODAY))["poche"]["usage"]["sessions"], 1)
+
+    def test_sport_validation_in_cli(self):
+        tmp = Path(tempfile.mkdtemp(prefix="arc-sport-"))
+        try:
+            (tmp / "planning").mkdir()
+            (tmp / "planning/Runner_Profile.md").write_text(PROFILE, encoding="utf-8")
+            base = [sys.executable, str(REPO / "scripts/arc_index.py"), "equipment", "--workspace", str(tmp),
+                    "--memory", "--today", "2026-09-23", "--kit", "trail-long"]
+            ok = subprocess.run(base + ["--sport", "TRAIL"], capture_output=True, text=True)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("batons-leki", json.loads(ok.stdout)["gear_ids"])
+            bad = subprocess.run(base + ["--sport", "trial"], capture_output=True, text=True)
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("sport inconnu", bad.stdout + bad.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

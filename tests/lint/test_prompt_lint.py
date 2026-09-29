@@ -428,10 +428,26 @@ class TestEquipmentWiring(unittest.TestCase):
         text = self.read(self.COACH)
         self.assertIn("arc_index.py equipment --kit", text)
         self.assertIn("gear_ids", text)
-        self.assertIn("entretien <today>", text)
+        self.assertIn("entretien <date>", text)
         self.assertRegex(text, r"(?i)never add an item of your own")
         self.assertRegex(text, r"never invent a threshold")
         self.assertIn("pre_session_check", text)
+
+    def test_gear_ids_preserved_on_garmin_merge(self):
+        for rel in ("skills/garmin-daily-sync/SKILL.md", "skills/garmin-sync-efficiency/SKILL.md"):
+            self.assertIn("`gear_ids`", (REPO / rel).read_text(encoding="utf-8"), rel)
+
+    def test_coach_never_touches_gear_id_for_kits_and_defines_kit_and_maintenance_rule(self):
+        text = self.read(self.COACH)
+        self.assertIn("Never touch `gear_id`/`gear_source`", text)
+        self.assertIn("planned kit", text)
+        self.assertNotIn("usual kit", text)
+        self.assertIn("LAST session done BEFORE the maintenance", text)
+
+    def test_dashboard_shows_category_display_label(self):
+        js = (REPO / "web/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("EQUIP_CATEGORY_LABEL", js)
+        self.assertIn('batons: "bâtons"', js)
 
     def test_coach_keeps_gear_id_as_the_shoe(self):
         self.assertIn("never replaces `gear_id`", self.read(self.COACH))
@@ -439,9 +455,12 @@ class TestEquipmentWiring(unittest.TestCase):
     def test_sync_emits_equipment_alert_once_without_state(self):
         text = self.read(self.SYNC)
         self.assertIn("arc_index.py equipment --activities", text)
-        self.assertIn("--since", text)
-        self.assertRegex(text, r"(?i)premier passage du jour")
+        self.assertRegex(text, r"(?i)AUCUNE alerte ici")          # jours : jamais dans le resume
+        self.assertRegex(text, r"(?i)aucune séance nouvelle = ne PAS lancer")
+        self.assertRegex(text, r"(?i)tout sport")
         self.assertRegex(text, r"(?i)sans état persistant")
+        step3c = text[text.index("3c. **Alerte matériel"):text.index("4. **Garde-fou r5")]
+        self.assertNotIn("--since", step3c.replace("N'utiliser jamais `--last-pass`", ""))
 
     def test_week_skill_reports_equipment(self):
         text = self.read(self.WEEK)

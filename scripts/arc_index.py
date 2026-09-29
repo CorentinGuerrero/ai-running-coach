@@ -467,7 +467,8 @@ CREATE TABLE gear (
 CREATE TABLE equipment (
     source_path TEXT, gear_id TEXT, name TEXT, category TEXT, start_date TEXT, maintenance_date TEXT,
     retired INTEGER, kits TEXT, threshold_m REAL, threshold_s REAL, threshold_sessions INTEGER,
-    threshold_days INTEGER, start_m REAL, start_s REAL, start_sessions INTEGER, collision_base TEXT
+    threshold_days INTEGER, start_m REAL, start_s REAL, start_sessions INTEGER, collision_base TEXT,
+    parse_warnings TEXT
 );
 -- Indices de performance ITRA/UTMB (#62) : une ligne par relevé daté de la
 -- section « Indices de performance » du profil (`arc_legacy.
@@ -1072,7 +1073,7 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
                 "threshold_s": item.get("threshold_s"), "threshold_sessions": item.get("threshold_sessions"),
                 "threshold_days": item.get("threshold_days"), "start_m": item.get("start_m"),
                 "start_s": item.get("start_s"), "start_sessions": item.get("start_sessions"),
-                "collision_base": item.get("collision_base"),
+                "collision_base": item.get("collision_base"), "parse_warnings": _j(item.get("parse_warnings")),
             })
         for entry in g("performance_index") or []:
             if not isinstance(entry, dict) or not entry.get("date") or not entry.get("kind"):
@@ -3171,9 +3172,10 @@ def _equipment_defs(conn) -> List[dict]:
     for r in conn.execute(
             "SELECT gear_id, name, category, start_date, maintenance_date, retired, kits, threshold_m, "
             "threshold_s, threshold_sessions, threshold_days, start_m, start_s, start_sessions, "
-            "collision_base FROM equipment"):
+            "collision_base, parse_warnings FROM equipment"):
         d = {k: v for k, v in dict(r).items() if v is not None}
         d["kits"] = json.loads(d["kits"]) if d.get("kits") else []
+        d["parse_warnings"] = json.loads(d["parse_warnings"]) if d.get("parse_warnings") else []
         d["retired"] = bool(d.get("retired"))
         defs.append(d)
     return defs
@@ -3194,24 +3196,39 @@ def _equipment_activities(conn) -> List[dict]:
 
 
 def equipment_usage(conn, today: Optional[date] = None, run_refs: Optional[List[str]] = None,
-                    since: Optional[date] = None) -> dict:
+                    last_pass: Optional[date] = None) -> dict:
     """Matériel hors chaussures (#134) — commande « equipment » : usage (distance, durée, séances,
     jours), déclencheurs typés, kits. N'est PAS soumis à `[health].morning_check` (aucune donnée de
     santé). `gear` (chaussures) reste inchangé. Voir `arc_metrics.ASSUMPTIONS["equipment_usage"]`."""
     defs = _equipment_defs(conn)
     shoe_ids = [r["gear_id"] for r in conn.execute("SELECT gear_id FROM gear")]
-    return M.equipment_usage(_equipment_activities(conn), defs, today or date.today(), run_refs, since, shoe_ids)
+    return M.equipment_usage(_equipment_activities(conn), defs, today or date.today(), run_refs, last_pass, shoe_ids)
 
 
 def equipment_kit(conn, kit: str, sport: Optional[str]) -> dict:
-    """Commande « equipment --kit » : objets à attribuer à la séance quand l'athlète déclare un kit."""
+    """Commande « equipment --kit » : objets à attribuer à la séance quand l'athlète déclare un kit.
+    `sport` : normalisé (casse) et validé contre `arc_contract.SPORTS` — inconnu → `ConfigError`."""
+    if sport is not None:
+        sport = sport.strip().lower()
+        if sport not in C.SPORTS:
+            raise ConfigError(f"--sport : sport inconnu « {sport} » (attendu : {', '.join(C.SPORTS)}).")
     return M.kit_members(_equipment_defs(conn), C.gear_slug(kit), sport)
 
 
-def equipment_race_check(conn, race_plan: Optional[str], today: date) -> dict:
+def equipment_race_check(conn, race_plan: Optional[str], today: date,
+                         workspace: Optional[Path] = None) -> dict:
     """Commande « equipment --race-plan » : croise le `gear` du plan de course (chemin du fichier ou
     « » = prochain plan dont `race_date` >= today, sinon le plus récent) avec l'inventaire. Rend
     `{"race_plan": <chemin>, "race_name": ..., "gear": [...], ...}` ou `{"error": ...}`."""
+    if race_plan and workspace is not None and (os.path.isabs(race_plan) or race_plan.startswith(".")):
+        # chemin absolu ou « ./… » : ramené au chemin relatif au workspace, comme `source_path`
+        if os.path.isabs(race_plan):
+            try:
+                race_plan = Path(race_plan).resolve().relative_to(Path(workspace).resolve()).as_posix()
+            except ValueError:
+                pass
+        else:
+            race_plan = os.path.normpath(race_plan).replace(os.sep, "/")
     if race_plan:
         rows = conn.execute("SELECT source_path, race_name, race_date, data_json FROM race_plan "
                             "WHERE source_path = ? OR source_path LIKE ?", (race_plan, f"%{race_plan}")).fetchall()
@@ -3891,8 +3908,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--since", metavar="AAAA-MM-JJ",
                         help="commande « energy » : toutes les séances éligibles depuis cette date "
                              "(incluse), ordre chronologique — incompatible avec --activity/--date ; "
-                             "commande « equipment » (#134) : jour du dernier passage (exclu), pour "
-                             "n'émettre qu'une fois un déclencheur en jours franchi depuis")
+                             "commande « equipment » : non utilisé (voir --last-pass)")
+    parser.add_argument("--last-pass", metavar="AAAA-MM-JJ",
+                        help="commande « equipment » (#134) : jour du dernier passage, EXCLU (à l'inverse de "
+                             "--since de « energy », inclus) — un déclencheur en jours franchi entre ce jour "
+                             "et --today marque `crossed_in_run` ; sans cette option, jamais")
     parser.add_argument("--activities", metavar="ID[,ID…]",
                         help="commande « gear » (#132) : séances synchronisées dans CE run "
                              "(garmin_activity_id, intervals_activity_id ou chemin du fichier, séparés par "
@@ -3991,10 +4011,10 @@ def main(argv=None) -> int:
         if args.kit:
             print(json.dumps(equipment_kit(conn, args.kit, args.sport), ensure_ascii=False))
         elif args.race_plan is not None:
-            print(json.dumps(equipment_race_check(conn, args.race_plan, today_date), ensure_ascii=False))
+            print(json.dumps(equipment_race_check(conn, args.race_plan, today_date, workspace), ensure_ascii=False))
         else:
             run_refs = [r.strip() for r in args.activities.split(",") if r.strip()] if args.activities else None
-            since_date = date.fromisoformat(args.since) if args.since else None
+            since_date = date.fromisoformat(args.last_pass) if args.last_pass else None
             print(json.dumps(equipment_usage(conn, today_date, run_refs, since_date), ensure_ascii=False))
         return 0
     if args.command == "performance-index":

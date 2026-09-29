@@ -41,7 +41,7 @@ or `upload_workout` — see the correspondence table in `AGENTS.md`.
    source-specific health marker exists). Its presence must never suppress
    that day's fetch. Once fetched, MERGE the fetched fields into that SAME file — never write
    a second file for the same date/session — and **never overwrite an athlete-declared key**:
-   `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `weight_pre_kg`, `weight_post_kg`
+   `carbs_g`, `fluid_intake_ml`, `rpe`, `gear_id`, `gear_ids`, `weight_pre_kg`, `weight_post_kg`
    (activity) and `pain` (health) come from the athlete, so the merge is a plain union — add the
    new keys, keep the declared ones byte-for-byte. Exception to "neither source has such a field"
    (#133): Garmin can attach gear to an activity (`get_activity_gear`, see rule 7) — but a

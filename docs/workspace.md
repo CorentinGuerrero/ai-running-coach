@@ -240,7 +240,7 @@ touche pas — aucun profil existant n'a à changer). Même principe : une puce 
 | `catégorie: <mot>` | Seule façon de classer l'objet (jamais devinée du nom). Décide des sports qui comptent (voir plus bas). Valeur non reconnue : objet suivi, aucune alerte inventée. |
 | `alerte …` | Déclencheurs typés, combinables — **le premier atteint déclenche** : `N km`, `N h`, `N séances`, `N jours` (`alerte 30 jours ou 40 h`). Aucun seuil par défaut : sans `alerte`, jamais d'alerte. Une unité est obligatoire. |
 | `depuis <date>` | Date d'achat ; les jours se comptent depuis cette date. |
-| `entretien <date>` (ou `révisé`) | Dernier entretien (nettoyage, réimperméabilisation, pile…) : les jours se comptent depuis cette date et **tous les compteurs repartent de zéro** (séances datées jusqu'à ce jour incluses exclues). Sans `depuis` ni `entretien`, un déclencheur en jours ne peut pas jouer (dit explicitement). |
+| `entretien <date>` (ou `révisé`) | Dernier entretien (nettoyage, réimperméabilisation, pile…) : les jours se comptent depuis cette date et **tous les compteurs repartent de zéro** (séances datées jusqu'à cette date incluse exclues, celles d'après comptent). Écrivez-y la date de **la dernière séance faite avant l'entretien** : le coach le fait pour vous. Sans `depuis` ni `entretien`, un déclencheur en jours ne peut pas jouer (dit explicitement). |
 | `départ N km/h/séances` | Usage avant le suivi, ajouté aux compteurs tant qu'aucun entretien n'existe. |
 | `kit: <nom>` | Regroupe les objets portés ensemble (plusieurs kits possibles, séparés par des virgules). |
 | `id: <identifiant>`, `(retirée)` | Comme pour les chaussures. |
@@ -262,10 +262,10 @@ le rapport hebdomadaire, `/week` et le retour de séance ; alerte du `garmin-dai
 une seule fois par franchissement (déclencheurs en jours : au premier passage du jour) ;
 avant une séance de nuit ou une sortie longue, le coach rappelle un contrôle (frontale :
 batterie ; poche et flasques : hygiène). Ligne de commande :
-`python3 scripts/arc_index.py equipment` (`--kit`, `--race-plan`, `--activities`, `--since`).
+`python3 scripts/arc_index.py equipment` (`--kit`, `--race-plan`, `--activities`, `--last-pass`). Unités d'`alerte` : km, h (ou `1h30`), séances, jours, semaines, mois, ans (1 mois = 30 j, 1 an = 365 j, approximation du projet) ; un segment illisible produit un avertissement, jamais un silence. Marche (nordique) comprise pour bâtons, gilet, poche, flasques, veste. Le `garmin-daily-sync` n'alerte que sur les km/h/séances ; les déclencheurs en jours se lisent dans le tableau de bord, `/week`, le rapport hebdomadaire et les rappels du coach. Le matériel Garmin hors chaussures n'est pas rattaché (pas de segment `garmin:` sous `### Matériel`).
 
 **Avant la course.** Le `course-strategist` croise le matériel obligatoire de son plan avec
-cet inventaire : **manquant** (non retrouvé), **jamais utilisé à l'entraînement** (« rien de
+cet inventaire : **manquant** (non retrouvé), **à vérifier** (seule la catégorie correspond : à confirmer sur la spécification du règlement), **jamais utilisé à l'entraînement** (« rien de
 nouveau le jour J ») ou **sous alerte** — jamais inventé.
 
 ## Les décisions tracées

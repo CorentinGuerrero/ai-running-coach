@@ -361,6 +361,9 @@ par objet : « Frontale », « Bâtons », « Couverture de survie »…). Une f
 ligne. Ajoute au plan (langue des documents) une section « Contrôle du matériel » :
 - `missing` — « non retrouvé dans votre inventaire » : à acheter/emprunter ou à déclarer dans le
   profil si vous le possédez déjà ; jamais présumé possédé.
+- `category_match` — seule la catégorie correspond (ex. « ceinture porte-dossard » face à une ceinture
+  cardio, veste « coupe-vent » face à une veste imperméable) : « à vérifier : spécification » — ne
+  jamais le donner pour acquis (un matériel obligatoire non conforme peut disqualifier).
 - `never_used` — dans l'inventaire mais aucune séance ne le cite dans `gear_ids` (ou chaussure jamais
   portée) : « rien de nouveau le jour J », proposer de le tester en sortie longue avant la course.
 - `alert` — sous alerte d'usure/entretien : à remplacer ou entretenir avant le départ.
