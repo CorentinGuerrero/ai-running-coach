@@ -260,5 +260,70 @@ class FsListGlobTest(PolicyBase):
         self.assertEqual(self.d("fs.list", {"glob": "planning/*"}), "deny")
 
 
+class Round2PolicyTest(PolicyBase):
+    """Revue 2 : options multi-valeurs, accolades, casse, recherche de contenu."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    CC = "python3 skills/course-comparison/scripts/compare_course.py --lieu x --ref 2026-01-01"
+
+    def test_b1_option_multivaleur_n_avale_pas_l_option_suivante(self):
+        # argparse : aliases=[] et output=AGENTS.md — la politique doit voir la même chose.
+        self.assertEqual(self.sh(self.CC + " --aliases --output AGENTS.md"), "deny")
+        self.assertEqual(self.sh(self.CC + " --aliases a b --output AGENTS.md"), "deny")
+        self.assertEqual(self.sh(self.CC + " --exclude-dates --output scripts/x.py"), "deny")
+        self.assertEqual(self.sh(self.CC + " --aliases a b --output rapports/c.md"), "allow")
+        self.assertEqual(self.sh(self.CC + " --aliases 'Tournai Trail' x --exclude-dates 2026-01-02 2026-01-03"), "allow")
+        self.assertEqual(self.sh("python3 scripts/arc_index.py --validate activities/a.md activities/b.md"), "allow")
+        self.assertEqual(self.sh("python3 scripts/arc_index.py --validate activities/a.md config/workspace.user.toml"),
+                         "deny")
+
+    def test_b1_valeur_commencant_par_tiret_refusee(self):
+        for command in ("python3 scripts/arc_log.py --output --input",
+                        "python3 scripts/arc_index.py --today --db",
+                        "python3 scripts/arc_index.py --today=--db",
+                        "python3 scripts/arc_index.py --days -5",
+                        self.CC + " --dates --output"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_n2_workspace_jamais_accepte(self):
+        for script in ("scripts/arc_index.py", "scripts/arc_log.py", "scripts/arc_race_pacing.py",
+                       "skills/course-comparison/scripts/compare_course.py"):
+            self.assertEqual(self.sh(f"python3 {script} --workspace planning"), "deny", script)
+            self.assertEqual(self.sh(f"python3 {script} --workspace=planning"), "deny", script)
+
+    def test_b2_accolades_trop_larges_ou_trop_imbriquees_refusees(self):
+        many = ",".join(f"x{i}" for i in range(70))
+        self.assertEqual(self.d("fs.list", {"glob": "{" + many + ",config/workspace.user.toml}"}), "deny")
+        self.assertEqual(self.d("fs.list", {"glob": "{a,{b,{c,{d,e}}}}"}), "deny")
+        two = ",".join(f"a{i}" for i in range(9))
+        self.assertEqual(self.d("fs.list", {"glob": "{" + two + "}{" + two + "}{" + two + "}"}), "deny")
+        self.assertEqual(self.d("fs.list", {"glob": "*.{md,json}"}), "allow")
+
+    def test_s1_casse_ignoree_pour_les_secrets_et_arc(self):
+        for path in ("config/WORKSPACE.user.toml", ".ARC/chat/approvals.json", "Planning/.ENV", "x/A.TOKEN"):
+            self.assertEqual(self.d("fs.read", {"path": path}), "deny", path)
+        for command in ("python3 scripts/arc_log.py --input .ARC/coach.db",
+                        "python3 scripts/arc_index.py --validate config/WORKSPACE.USER.TOML"):
+            self.assertEqual(self.sh(command), "deny", command)
+        for tool_input in ({"glob": ".ARC/**"}, {"glob": ".ARC/*.json"}, {"path": ".ARC", "glob": "*"},
+                           {"glob": "config/WORKSPACE.user.toml"}):
+            self.assertEqual(self.d("fs.list", tool_input), "deny", tool_input)
+        self.assertEqual(self.d("fs.write", {"path": "PLANNING/x.md"}), "deny")
+        self.assertEqual(self.d("fs.write", {"path": "planning/WORKSPACE.USER.TOML"}), "deny")
+
+    def test_s3_recherche_de_contenu_limitee_aux_dossiers_surs(self):
+        for tool_input in ({"pattern": "token"}, {"path": ".", "pattern": "x"}, {"path": "config", "pattern": "x"},
+                           {"path": ".arc", "pattern": "x"}, {"path": "scripts", "pattern": "x"}):
+            self.assertEqual(self.d("fs.list", tool_input), "deny", tool_input)
+        for tool_input in ({"path": "planning", "pattern": "x"}, {"path": "docs", "pattern": "x"},
+                           {"path": "resources/running", "pattern": "x"}, {"path": "skills", "pattern": "x"}):
+            (self.ws / tool_input["path"]).mkdir(parents=True, exist_ok=True)
+            self.assertEqual(self.d("fs.list", tool_input), "allow", tool_input)
+        # noms seulement : la racine reste permise
+        self.assertEqual(self.d("fs.list", {"path": ".", "glob": "*.md"}), "allow")
+
+
 if __name__ == "__main__":
     unittest.main()

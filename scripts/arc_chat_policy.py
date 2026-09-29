@@ -45,6 +45,10 @@ GLOB_SCAN_LIMIT = 20000
 
 WILDCARDS = "*?["
 
+# Bornes de l'expansion d'accolades d'un glob (fs.list) : au-delà, refus (jamais de troncature).
+BRACE_MAX_EXPANSION = 64
+BRACE_MAX_DEPTH = 3
+
 # Valeurs de repli si le fichier est absent ou incomplet : elles reproduisent
 # `config/chat-policy.toml` (le refus reste le comportement par défaut).
 DEFAULTS = {
@@ -52,6 +56,8 @@ DEFAULTS = {
         "write_dirs": ["activities", "medical", "nutrition", "planning", "rapports"],
         "secret_patterns": ["workspace.user.toml", ".env", "*.env", "*.token", ".garminconnect",
                             "llm.env", "*.pem", "*.key"],
+        # Dossiers où une recherche de contenu (grep, `pattern`) est permise, en plus de write_dirs.
+        "search_dirs": ["resources", "skills", "agents", "templates", "docs"],
     },
     "shell": {"allowed_prefixes": ["python3 scripts/arc_index.py", "python3 scripts/arc_log.py"]},
     "web": {"fetch_domains": ["wttr.in", "overpass-api.de", "nominatim.openstreetmap.org"]},
@@ -69,11 +75,12 @@ DEFAULT_SCRIPTS = {
         "flags": ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active"],
         "value_options": ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since",
                           "--limit", "--trigger", "--outcome", "--months", "--band"],
-        "read_options": ["--workspace", "--validate"],
+        "read_options": ["--validate"],
+        "multi_value_options": ["--validate"],
         "output_options": ["--db"],
     },
     "scripts/arc_log.py": {
-        "read_options": ["--input", "--workspace"],
+        "read_options": ["--input"],
         "output_options": ["--output"],
     },
 }
@@ -120,6 +127,7 @@ class Policy:
                 merged.setdefault(section, {}).update(values)
         self.write_dirs = _as_list(merged["fs"].get("write_dirs"))
         self.secret_patterns = _as_list(merged["fs"].get("secret_patterns"))
+        self.search_dirs = _as_list(merged["fs"].get("search_dirs")) + list(self.write_dirs)
         self.shell_prefixes = _as_list(merged["shell"].get("allowed_prefixes"))
         self.shell_scripts = _script_rules(rules or {}) or {k: dict(v) for k, v in DEFAULT_SCRIPTS.items()}
         self.fetch_domains = [d.lower() for d in _as_list(merged["web"].get("fetch_domains"))]
@@ -168,12 +176,15 @@ class Policy:
         return "deny"           # web.search, other:*, inconnu
 
     def _secret(self, rel: str) -> bool:
-        parts = [p for p in rel.split("/") if p]
-        return any(fnmatch.fnmatch(part, pattern) for part in parts for pattern in self.secret_patterns)
+        # Comparaison insensible à la casse des deux côtés (macOS : `.ARC` et `.arc` sont le même dossier).
+        parts = [p.casefold() for p in rel.split("/") if p]
+        return any(fnmatch.fnmatchcase(part, pattern.casefold())
+                   for part in parts for pattern in self.secret_patterns)
 
     @staticmethod
     def _in_arc(rel: str) -> bool:
-        return rel == ".arc" or rel.startswith(".arc/")
+        low = rel.casefold()
+        return low == ".arc" or low.startswith(".arc/")
 
     def _fs_read(self, tool_input: dict) -> str:
         raw = tool_input.get("path")
@@ -195,21 +206,44 @@ class Policy:
     # -- fs.list : filtres de fichiers (glob) ----------------------------------------
 
     @staticmethod
-    def _expand_braces(glob: str) -> list:
-        """`*.{md,toml}` → [`*.md`, `*.toml`] (récursif, borné)."""
-        match = re.search(r"\{([^{}]*)\}", glob)
-        if not match:
-            return [glob]
-        out: list = []
-        for alt in match.group(1).split(","):
-            out.extend(Policy._expand_braces(glob[:match.start()] + alt + glob[match.end():]))
-        return out[:64]
+    def _expand_braces(glob: str) -> Optional[list]:
+        """`*.{md,toml}` → [`*.md`, `*.toml`] ; None si l'expansion dépasse la borne ou si
+        l'imbrication dépasse le maximum : l'appelant refuse (jamais de troncature silencieuse)."""
+        depth = level = 0
+        for ch in glob:
+            if ch == "{":
+                level += 1
+                depth = max(depth, level)
+            elif ch == "}":
+                level = max(0, level - 1)
+        if depth > BRACE_MAX_DEPTH:
+            return None
+        out = [glob]
+        while True:
+            nxt: list = []
+            changed = False
+            for item in out:
+                match = re.search(r"\{([^{}]*)\}", item)
+                if not match:
+                    nxt.append(item)
+                    continue
+                changed = True
+                for alt in match.group(1).split(","):
+                    nxt.append(item[:match.start()] + alt + item[match.end():])
+                if len(nxt) > BRACE_MAX_EXPANSION:
+                    return None
+            out = nxt
+            if len(out) > BRACE_MAX_EXPANSION:
+                return None
+            if not changed:
+                return out
 
     def _component_may_match_secret(self, component: str) -> bool:
         """Un composant de glob peut-il désigner un secret ? Comparaison dans les deux sens."""
         if not component:
             return False
-        return any(fnmatch.fnmatch(pattern, component) or fnmatch.fnmatch(component, pattern)
+        comp = component.casefold()
+        return any(fnmatch.fnmatchcase(pattern.casefold(), comp) or fnmatch.fnmatchcase(comp, pattern.casefold())
                    for pattern in self.secret_patterns)
 
     def _fs_list(self, tool_input: dict) -> str:
@@ -220,13 +254,23 @@ class Policy:
         globs = [globs] if isinstance(globs, str) else (list(globs) if isinstance(globs, (list, tuple)) else [])
         raw = tool_input.get("path")
         base = "" if raw in (None, "", ".") else (resolve_workspace_path(self.workspace, str(raw)) or "")
+        if tool_input.get("pattern") and not self._search_dir_ok(base):
+            return "deny"                                   # grep : le contenu des fichiers serait lu
         for glob in globs:
             if not isinstance(glob, str) or not glob.strip():
                 continue
-            for one in self._expand_braces(glob.strip()):
+            expanded = self._expand_braces(glob.strip())
+            if expanded is None:
+                return "deny"
+            for one in expanded:
                 if not self._glob_ok(base, one):
                     return "deny"
         return "allow"
+
+    def _search_dir_ok(self, base: str) -> bool:
+        """Une recherche de contenu ne porte que sur un dossier de `[fs].search_dirs` (ou un sous-dossier)."""
+        first = base.split("/", 1)[0] if base else ""
+        return bool(first) and first in self.search_dirs
 
     def _glob_ok(self, base: str, glob: str) -> bool:
         if glob.startswith(("/", "~")) or "\\" in glob or ".." in glob.split("/"):
@@ -234,8 +278,8 @@ class Policy:
         parts = [p for p in glob.split("/") if p and p != "."]
         if not parts:
             return True
-        if any(not _has_wildcard(p) and self._secret(p) for p in parts):
-            return False                                    # nom de secret cité tel quel
+        if any(not _has_wildcard(p) and (self._secret(p) or self._in_arc(p)) for p in parts):
+            return False                                    # nom de secret (ou `.arc`) cité tel quel
         if any(self._component_may_match_secret(p) for p in parts[-1:]) or any(
                 not set(p) <= {"*"} and self._component_may_match_secret(p) for p in parts[:-1]):
             # Joker large ou proche d'un secret : toléré seulement dans un dossier de données
@@ -292,28 +336,42 @@ class Policy:
         outputs = set(rules.get("output_options", []))
         reads = set(rules.get("read_options", []))
         valued = outputs | reads | set(rules.get("value_options", []))
+        multi = set(rules.get("multi_value_options", []))   # nargs "*" / "+" : plusieurs valeurs à la suite
         i = 0
         while i < len(args):
             token = args[i]
             i += 1
-            if token.startswith("-") and token != "-":
+            if self._option_like(token):
                 name, eq, inline = token.partition("=")
                 if name in flags and not eq:
                     continue
                 if name not in valued:
                     return "deny"                           # option inconnue : refusée
+                kind = "write" if name in outputs else "read" if name in reads else "plain"
+                values: list = []
                 if eq:
-                    value = inline
+                    values = [inline]
+                elif name in multi:
+                    while i < len(args) and not self._option_like(args[i]):
+                        values.append(args[i])
+                        i += 1
                 elif i < len(args):
-                    value, i = args[i], i + 1
+                    values, i = [args[i]], i + 1
                 else:
                     return "deny"
-                kind = "write" if name in outputs else "read" if name in reads else "plain"
+                # Jamais de valeur qui commence par « - » : argparse la lirait comme une autre option
+                # (ou l'avalerait) et la politique ne verrait plus ce qui s'exécute vraiment.
+                if any(v.startswith("-") for v in values):
+                    return "deny"
             else:
-                value, kind = token, "plain"
-            if not self._shell_value(value, kind):
+                values, kind = [token], "plain"
+            if not all(self._shell_value(v, kind) for v in values):
                 return "deny"
         return "allow"
+
+    @staticmethod
+    def _option_like(token: str) -> bool:
+        return token.startswith("-") and token != "-"
 
     def _shell_value(self, value: str, kind: str) -> bool:
         """Argument acceptable ? Les chemins restent dans le workspace, hors secrets et `.arc/`."""
