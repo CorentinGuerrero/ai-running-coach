@@ -37,8 +37,8 @@ from typing import Any, Optional
 
 from arc_chat_backend import (SYSTEM_ADDENDUM, BackendError, ChatBackend, TurnContext,
                               resolve_workspace_path)
-from arc_chat_tools import (REFUSAL_DENY, display_input, gate, short, summarize_tool,
-                            usd_to_eur)
+from arc_chat_tools import (REFUSAL_DENY, display_input, fs_list_input, gate, map_leanproxy, short,
+                            summarize_tool, usd_to_eur)
 
 SDK_TESTED_VERSION = "0.2.161"
 DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -48,7 +48,8 @@ DISALLOWED_TOOLS = ["AskUserQuestion", "TodoWrite", "EnterPlanMode", "ExitPlanMo
 
 _FS_WRITE = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 _FS_LIST = ("Glob", "Grep", "LS")
-_LEANPROXY_META = ("list_servers", "list_tools", "search_tools")
+HOOK_TIMEOUT_MARGIN_S = 120      # marge au-dessus de approval_wait_s pour le délai du hook PreToolUse
+DEFAULT_APPROVAL_WAIT_S = 600
 
 
 def canonical_tool(name: str, tool_input: Optional[dict]) -> tuple:
@@ -61,10 +62,11 @@ def canonical_tool(name: str, tool_input: Optional[dict]) -> tuple:
         out["path"] = inp.get("file_path") or inp.get("notebook_path") or ""
         return "fs.write", out
     if name in _FS_LIST:
-        out = {"path": inp.get("path") or "."}
-        if inp.get("pattern"):
-            out["pattern"] = inp["pattern"]
-        return "fs.list", out
+        if name == "Glob":   # `pattern` de Glob = filtre de fichiers, pas une regex
+            return "fs.list", fs_list_input(inp.get("path"), None, inp.get("pattern"))
+        if name == "Grep":   # `pattern` = regex ; `glob` = filtre de fichiers
+            return "fs.list", fs_list_input(inp.get("path"), inp.get("pattern"), inp.get("glob"))
+        return "fs.list", fs_list_input(inp.get("path"))
     if name == "Bash":
         return "shell", {"command": inp.get("command", "")}
     if name == "WebFetch":
@@ -79,17 +81,20 @@ def canonical_tool(name: str, tool_input: Optional[dict]) -> tuple:
         parts = name.split("__", 2)
         server = parts[1].lower() if len(parts) > 1 else ""
         tool = parts[2] if len(parts) > 2 else ""
-        # Passerelle leanproxy : leanproxy_invoke_tool(server=…, tool=…, arguments={…}).
-        if server.startswith("leanproxy") and tool.endswith("invoke_tool") and inp.get("server") \
-                and inp.get("tool"):
-            args = inp.get("arguments")
-            if args is None:
-                args = inp.get("args")
-            return f"mcp:{str(inp['server']).lower()}.{inp['tool']}", dict(args or {})
-        if server.startswith("leanproxy") and tool in _LEANPROXY_META:
-            return f"mcp:{server}.{tool}", inp
+        if server.startswith("leanproxy"):
+            mapped = map_leanproxy(tool, inp)
+            if mapped:
+                return mapped
         return f"mcp:{server}.{tool}", inp
     return f"other:{name}", inp
+
+
+class _Flight:
+    """Décision d'UN tool_use_id : en cours (`done` non posé) ou terminée (`result`)."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.result: Optional[tuple] = None
 
 
 class _Turn:
@@ -98,27 +103,53 @@ class _Turn:
     def __init__(self, ctx: TurnContext, workspace: Path):
         self.ctx = ctx
         self.workspace = workspace
-        self.cache: dict = {}            # tool_use_id -> (décision, message)
+        self.cache: dict = {}            # tool_use_id -> _Flight
         self.cache_lock = threading.Lock()
         self.tools: dict = {}            # tool_use_id -> (canonique, entrée)
         self.pending = False
         self.streamed_text = False
         self.usage_emitted = False
+        self.tokens = {"input": 0, "output": 0, "cache_read": 0}
+        self.seen_messages: set = set()  # message_id dont l'usage est déjà compté
+        self.budget_hit = False
+
+    def cached_result(self, tool_use_id: Optional[str]) -> Optional[tuple]:
+        with self.cache_lock:
+            flight = self.cache.get(tool_use_id) if tool_use_id else None
+        return flight.result if flight else None
 
     def gate_sync(self, tool_use_id: Optional[str], name: str, tool_input: dict) -> tuple:
-        """Politique + approbation (bloquant, exécuté dans un thread)."""
+        """Politique + approbation (bloquant, exécuté dans un thread).
+
+        Le hook PreToolUse et `can_use_tool` peuvent porter sur le MÊME appel (et se
+        chevaucher si le hook expire pendant une attente d'approbation) : la première voie
+        crée un « vol » dans le cache, la seconde attend SA décision au lieu d'ouvrir une
+        seconde approbation (donc jamais deux écritures Garmin).
+        """
+        flight: Optional[_Flight] = None
+        owner = True
         if tool_use_id:
             with self.cache_lock:
-                hit = self.cache.get(tool_use_id)
-            if hit is not None:
-                return hit
-        tool, cinput = canonical_tool(name, tool_input)
-        result = gate(self.ctx, tool, cinput)
-        if result[0] == "pending":
-            self.pending = True
-        if tool_use_id:
-            with self.cache_lock:
-                self.cache[tool_use_id] = result
+                flight = self.cache.get(tool_use_id)
+                if flight is None:
+                    flight = self.cache[tool_use_id] = _Flight()
+                else:
+                    owner = False
+        if not owner and flight is not None:
+            while not flight.done.wait(0.25):
+                if self.ctx.cancelled.is_set():
+                    return "deny", REFUSAL_DENY
+            return flight.result or ("deny", REFUSAL_DENY)
+        result: tuple = ("deny", REFUSAL_DENY)
+        try:
+            tool, cinput = canonical_tool(name, tool_input)
+            result = gate(self.ctx, tool, cinput)
+            if result[0] == "pending":
+                self.pending = True
+        finally:
+            if flight is not None:
+                flight.result = result
+                flight.done.set()
         return result
 
 
@@ -129,6 +160,30 @@ class ClaudeBackend(ChatBackend):
         super().__init__(workspace, config)
 
     # -- configuration -------------------------------------------------
+
+    def _hook_timeout(self) -> float:
+        """Délai du hook PreToolUse (SDK : `HookMatcher.timeout`, 60 s par défaut) : doit
+        dépasser l'attente d'approbation en ligne, sinon le CLI passe à `can_use_tool`."""
+        try:
+            wait = float(self.config.get("approval_wait_s") or DEFAULT_APPROVAL_WAIT_S)
+        except (TypeError, ValueError):
+            wait = float(DEFAULT_APPROVAL_WAIT_S)
+        return wait + HOOK_TIMEOUT_MARGIN_S
+
+    def _budget_usd(self) -> Optional[float]:
+        """Plafond du tour en USD (`ClaudeAgentOptions.max_budget_usd`) ; None = pas de plafond."""
+        raw = self.config.get("turn_budget_eur")
+        try:
+            eur = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if eur <= 0:
+            return None
+        try:
+            rate = float(self.config.get("usd_eur_rate") or 0.92)
+        except (TypeError, ValueError):
+            rate = 0.92
+        return round(eur / rate, 6)
 
     def _api_key_env(self) -> str:
         return str(self.config.get("api_key_env") or DEFAULT_API_KEY_ENV)
@@ -181,7 +236,8 @@ class ClaudeBackend(ChatBackend):
             setting_sources=["project"],
             system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_ADDENDUM},
             can_use_tool=can_use_tool,
-            hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[pre_tool_use])]},
+            hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[pre_tool_use],
+                                                   timeout=self._hook_timeout())]},
             include_partial_messages=True,
             permission_mode="default",
             disallowed_tools=list(DISALLOWED_TOOLS),
@@ -191,6 +247,9 @@ class ClaudeBackend(ChatBackend):
             kwargs["model"] = str(cfg["model"])
         if cfg.get("max_turns"):
             kwargs["max_turns"] = int(cfg["max_turns"])
+        cap_usd = self._budget_usd()
+        if cap_usd is not None:
+            kwargs["max_budget_usd"] = cap_usd
         if resume:
             kwargs["resume"] = resume
         return sdk.ClaudeAgentOptions(**kwargs)
@@ -235,8 +294,8 @@ class ClaudeBackend(ChatBackend):
         watcher: Optional[asyncio.Task] = None
         result: Any = None
         assistant_error: Optional[str] = None
-        await client.connect()
         try:
+            await client.connect()
             async def watch_cancel() -> None:
                 while True:
                     await asyncio.sleep(0.1)
@@ -258,11 +317,17 @@ class ClaudeBackend(ChatBackend):
                     self._on_stream_event(turn, message)
                 elif kind == "AssistantMessage":
                     assistant_error = getattr(message, "error", None) or assistant_error
+                    self._count_usage(turn, message)
                     self._on_assistant(turn, message)
                 elif kind == "UserMessage":
                     self._on_user(turn, message)
                 elif kind == "ResultMessage":
                     result = message
+        except BaseException:
+            # Tour interrompu par une exception du SDK : le coût partiel n'est pas perdu.
+            if result is not None or any(turn.tokens.values()):
+                self._emit_usage(turn, result)
+            raise
         finally:
             if watcher:
                 watcher.cancel()
@@ -308,7 +373,7 @@ class ClaudeBackend(ChatBackend):
                 continue
             tool, cinput = turn.tools.get(block.tool_use_id, ("other:inconnu", {}))
             ok = not bool(block.is_error)
-            cached = turn.cache.get(block.tool_use_id)
+            cached = turn.cached_result(block.tool_use_id)
             if not ok and cached and cached[0] != "allow":
                 summary = "Refusé" if cached[0] == "deny" else "En attente de confirmation"
             else:
@@ -319,17 +384,38 @@ class ClaudeBackend(ChatBackend):
                 if rel:
                     turn.ctx.emit("file_written", {"path": rel})
 
+    @staticmethod
+    def _count_usage(turn: _Turn, message: Any) -> None:
+        """Cumule les jetons des messages assistant (une fois par message_id) — repli si le
+        `ResultMessage` n'arrive jamais ; son coût, lui, n'est connu qu'à la fin."""
+        usage = getattr(message, "usage", None)
+        mid = getattr(message, "message_id", None)
+        if not isinstance(usage, dict) or (mid and mid in turn.seen_messages):
+            return
+        if mid:
+            turn.seen_messages.add(mid)
+        turn.tokens["input"] += int(usage.get("input_tokens") or 0)
+        turn.tokens["output"] += int(usage.get("output_tokens") or 0)
+        turn.tokens["cache_read"] += int(usage.get("cache_read_input_tokens") or 0)
+
+    def _emit_usage(self, turn: _Turn, result: Any) -> None:
+        """Émet `usage` une seule fois, avec ce qui est connu (jetons cumulés, coût du résultat)."""
+        if turn.usage_emitted:
+            return
+        turn.usage_emitted = True
+        usage = (getattr(result, "usage", None) or {}) if result is not None else {}
+        tokens = turn.tokens
+        turn.ctx.emit("usage", {
+            "input_tokens": int(usage.get("input_tokens") or tokens["input"]),
+            "output_tokens": int(usage.get("output_tokens") or tokens["output"]),
+            "cache_read_tokens": int(usage.get("cache_read_input_tokens") or tokens["cache_read"]),
+            "cost_eur": usd_to_eur(getattr(result, "total_cost_usd", None) if result is not None else None,
+                                   self.config.get("usd_eur_rate")),
+        })
+
     def _finish(self, turn: _Turn, result: Any, assistant_error: Optional[str]) -> None:
         ctx = turn.ctx
-        if result is not None:
-            usage = getattr(result, "usage", None) or {}
-            ctx.emit("usage", {
-                "input_tokens": int(usage.get("input_tokens") or 0),
-                "output_tokens": int(usage.get("output_tokens") or 0),
-                "cache_read_tokens": int(usage.get("cache_read_input_tokens") or 0),
-                "cost_eur": usd_to_eur(getattr(result, "total_cost_usd", None),
-                                       self.config.get("usd_eur_rate")),
-            })
+        self._emit_usage(turn, result)
         if assistant_error == "authentication_failed":
             raise BackendError("Clé API Anthropic refusée (401) : vérifier la clé dans llm.env.")
         if assistant_error == "billing_error":
@@ -337,6 +423,10 @@ class ClaudeBackend(ChatBackend):
         if assistant_error == "rate_limit":
             raise BackendError("Limite de débit Anthropic atteinte : réessaie dans un instant.")
         subtype = getattr(result, "subtype", "") if result is not None else ""
+        if subtype == "error_max_budget_usd":
+            ctx.emit("text_delta", {"text": "\n\nLe budget du jour est atteint : je m'arrête ici."})
+            ctx.emit("done", {"reason": "budget"})
+            return
         if result is not None and getattr(result, "is_error", False) and subtype != "error_max_turns":
             detail = short(getattr(result, "result", None) or subtype or "erreur inconnue", 200)
             raise BackendError(f"Le backend Claude a échoué : {detail}")

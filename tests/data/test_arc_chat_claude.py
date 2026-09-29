@@ -53,6 +53,8 @@ def make_fake_sdk(script: list, record: dict) -> types.ModuleType:
         model: str = "fake"
         parent_tool_use_id: Optional[str] = None
         error: Optional[str] = None
+        usage: Optional[dict] = None
+        message_id: Optional[str] = None
         session_id: Optional[str] = None
 
     @dataclass
@@ -89,6 +91,7 @@ def make_fake_sdk(script: list, record: dict) -> types.ModuleType:
         disallowed_tools: list = field(default_factory=list)
         env: dict = field(default_factory=dict)
         max_turns: Any = None
+        max_budget_usd: Any = None
         resume: Any = None
 
     @dataclass
@@ -139,6 +142,8 @@ def make_fake_sdk(script: list, record: dict) -> types.ModuleType:
             for step in script:
                 if step[0] == "msg":
                     yield step[1]
+                elif step[0] == "raise":
+                    raise step[1]
                 elif step[0] == "wait_cancel":
                     for _ in range(100):
                         if record["interrupted"]:
@@ -243,8 +248,10 @@ class TestCanonicalNames(unittest.TestCase):
             ("Edit", {"file_path": "planning/x.md", "old_string": "a", "new_string": "b"}, "fs.write", None),
             ("MultiEdit", {"file_path": "p"}, "fs.write", None),
             ("NotebookEdit", {"notebook_path": "n.ipynb"}, "fs.write", None),
-            ("Glob", {"pattern": "*.md"}, "fs.list", {"path": ".", "pattern": "*.md"}),
+            ("Glob", {"pattern": "*.md"}, "fs.list", {"path": ".", "glob": "*.md"}),
+            ("Glob", {"pattern": "**/*.token", "path": "config"}, "fs.list", {"path": "config", "glob": "**/*.token"}),
             ("Grep", {"pattern": "x", "path": "activities"}, "fs.list", {"path": "activities", "pattern": "x"}),
+            ("Grep", {"pattern": "tok", "glob": ".env*"}, "fs.list", {"path": ".", "pattern": "tok", "glob": ".env*"}),
             ("LS", {"path": "."}, "fs.list", {"path": "."}),
             ("Bash", {"command": "ls"}, "shell", {"command": "ls"}),
             ("WebFetch", {"url": "https://wttr.in"}, "web.fetch", {"url": "https://wttr.in"}),
@@ -274,6 +281,25 @@ class TestCanonicalNames(unittest.TestCase):
             C.canonical_tool("mcp__leanproxy__invoke_tool", {"server": "Garmin", "tool": "get_rhr_day"}),
             ("mcp:garmin.get_rhr_day", {}))
         self.assertEqual(C.canonical_tool("mcp__leanproxy__list_tools", {})[0], "mcp:leanproxy.list_tools")
+
+    def test_gateway_only_maps_arguments(self):
+        # `args` n'est PAS `arguments` : on ne devine pas -> other: (refusé par la politique)
+        tool, inp = C.canonical_tool("mcp__leanproxy__invoke_tool",
+                                     {"server": "garmin", "tool": "schedule_week", "args": {"w": 1}})
+        self.assertTrue(tool.startswith("other:"), tool)
+        self.assertEqual(inp["args"], {"w": 1})
+        tool, inp = C.canonical_tool("mcp__leanproxy__invoke_tool",
+                                     {"server": "garmin", "tool": "schedule_week",
+                                      "arguments": {"w": 2}, "args": {"w": 1}})
+        self.assertEqual((tool, inp), ("mcp:garmin.schedule_week", {"w": 2}))
+
+    def test_leanproxy_direct_exposed_tools(self):
+        self.assertEqual(C.canonical_tool("mcp__leanproxy__garmin__get_rhr_day", {"d": 1}),
+                         ("mcp:garmin.get_rhr_day", {"d": 1}))
+        self.assertEqual(C.canonical_tool("mcp__leanproxy__garmin__schedule_workouts", {})[0],
+                         "mcp:garmin.schedule_workouts")
+        self.assertEqual(C.canonical_tool("mcp__leanproxy__Intervals_icu__add_or_update_event_76a553387d", {})[0],
+                         "mcp:intervals.add_or_update_event")
 
 
 class TestRunTurn(ClaudeBackendCase):
@@ -431,6 +457,135 @@ class TestRunTurn(ClaudeBackendCase):
         with self.assertRaises(BackendError) as cm:
             backend.run_turn(Harness(self.ws).ctx, "x")
         self.assertIn("402", str(cm.exception))
+
+
+class TestApprovalDedupe(ClaudeBackendCase):
+    def _turn(self, approval_hook):
+        h = Harness(self.ws, {"mcp:garmin.schedule_week": "ask"})
+        calls: list = []
+
+        def request(tool, tinput, summary, diff):
+            calls.append(tool)
+            return approval_hook()
+        h.ctx.request_approval = request
+        return C._Turn(h.ctx, self.ws), calls
+
+    def test_concurrent_paths_share_one_approval(self):
+        release = threading.Event()
+        turn, calls = self._turn(lambda: (release.wait(5), "allow")[1])
+        out: list = []
+
+        def go():
+            out.append(turn.gate_sync("tu1", "mcp__garmin__schedule_week", {"w": 1}))
+        t1 = threading.Thread(target=go)
+        t1.start()
+        for _ in range(100):
+            if calls:
+                break
+            threading.Event().wait(0.02)
+        t2 = threading.Thread(target=go)  # 2e voie (can_use_tool après expiration du hook)
+        t2.start()
+        threading.Event().wait(0.3)
+        self.assertEqual(len(calls), 1)   # la seconde voie attend, n'ouvre rien
+        release.set()
+        t1.join(5)
+        t2.join(5)
+        self.assertEqual(out, [("allow", ""), ("allow", "")])
+        self.assertEqual(len(calls), 1)
+
+    def test_second_path_gets_pending_and_cancel_releases_waiter(self):
+        release = threading.Event()
+        turn, calls = self._turn(lambda: (release.wait(5), "pending")[1])
+        t1 = threading.Thread(target=lambda: turn.gate_sync("tu2", "mcp__garmin__schedule_week", {}))
+        t1.start()
+        for _ in range(100):
+            if calls:
+                break
+            threading.Event().wait(0.02)
+        res: list = []
+        t2 = threading.Thread(target=lambda: res.append(turn.gate_sync("tu2", "mcp__garmin__schedule_week", {})))
+        t2.start()
+        release.set()
+        t1.join(5)
+        t2.join(5)
+        self.assertEqual(res[0][0], "pending")
+        self.assertEqual(len(calls), 1)
+        # annulation : le second waiter ne reste pas bloqué
+        block = threading.Event()
+        turn2, calls2 = self._turn(lambda: (block.wait(5), "allow")[1])
+        t3 = threading.Thread(target=lambda: turn2.gate_sync("tu3", "mcp__garmin__schedule_week", {}))
+        t3.start()
+        for _ in range(100):
+            if calls2:
+                break
+            threading.Event().wait(0.02)
+        res2: list = []
+        t4 = threading.Thread(target=lambda: res2.append(turn2.gate_sync("tu3", "mcp__garmin__schedule_week", {})))
+        t4.start()
+        turn2.ctx.cancelled.set()
+        t4.join(3)
+        self.assertFalse(t4.is_alive())
+        self.assertEqual(res2[0][0], "deny")
+        block.set()
+        t3.join(5)
+
+    def test_hook_timeout_exceeds_approval_wait(self):
+        backend, sdk, rec = self.backend([("msg", MB.ResultMessage())], {"approval_wait_s": 600})
+        backend.run_turn(Harness(self.ws).ctx, "x")
+        self.assertEqual(rec["options"].hooks["PreToolUse"][0].timeout, 600 + C.HOOK_TIMEOUT_MARGIN_S)
+        backend2, _, rec2 = self.backend([("msg", MB.ResultMessage())], {})
+        backend2.run_turn(Harness(self.ws).ctx, "x")
+        self.assertGreater(rec2["options"].hooks["PreToolUse"][0].timeout, 600)
+
+
+class TestBudget(ClaudeBackendCase):
+    def test_partial_usage_emitted_on_sdk_exception(self):
+        script = [("msg", MB.AssistantMessage([MB.TextBlock("a")], message_id="m1",
+                                              usage={"input_tokens": 10, "output_tokens": 4})),
+                  ("msg", MB.AssistantMessage([MB.TextBlock("a")], message_id="m1",
+                                              usage={"input_tokens": 10, "output_tokens": 4})),
+                  ("raise", RuntimeError("boom"))]
+        backend, sdk, _ = self.backend(script)
+        h = Harness(self.ws)
+        with self.assertRaises(BackendError):
+            backend.run_turn(h.ctx, "x")
+        usage = h.of("usage")
+        self.assertEqual(len(usage), 1)
+        self.assertEqual((usage[0]["input_tokens"], usage[0]["output_tokens"]), (10, 4))  # dédupliqué par message_id
+
+    def test_no_usage_when_nothing_known(self):
+        backend, sdk, _ = self.backend([("raise", RuntimeError("boom"))])
+        h = Harness(self.ws)
+        with self.assertRaises(BackendError):
+            backend.run_turn(h.ctx, "x")
+        self.assertEqual(h.of("usage"), [])
+
+    def test_result_error_still_reports_cost(self):
+        script = [("msg", MB.ResultMessage(is_error=True, subtype="error_during_execution", total_cost_usd=0.2,
+                                           result="x"))]
+        backend, sdk, _ = self.backend(script)
+        h = Harness(self.ws)
+        with self.assertRaises(BackendError):
+            backend.run_turn(h.ctx, "x")
+        self.assertAlmostEqual(h.of("usage")[0]["cost_eur"], 0.18, places=4)
+
+    def test_turn_budget_passed_to_sdk_in_usd(self):
+        backend, sdk, rec = self.backend([("msg", MB.ResultMessage())],
+                                         {"turn_budget_eur": 0.45, "usd_eur_rate": 0.9})
+        backend.run_turn(Harness(self.ws).ctx, "x")
+        self.assertAlmostEqual(rec["options"].max_budget_usd, 0.5, places=4)
+        backend2, _, rec2 = self.backend([("msg", MB.ResultMessage())], {})
+        backend2.run_turn(Harness(self.ws).ctx, "x")
+        self.assertIsNone(rec2["options"].max_budget_usd)
+
+    def test_budget_result_ends_with_budget_done(self):
+        script = [("msg", MB.ResultMessage(subtype="error_max_budget_usd", is_error=True, total_cost_usd=0.5))]
+        backend, sdk, _ = self.backend(script, {"turn_budget_eur": 0.45})
+        h = Harness(self.ws)
+        backend.run_turn(h.ctx, "x")
+        self.assertEqual(h.of("done"), [{"reason": "budget"}])
+        self.assertIn("budget", "".join(p["text"] for p in h.of("text_delta")).lower())
+        self.assertAlmostEqual(h.of("usage")[0]["cost_eur"], 0.45, places=4)
 
 
 class TestPreconditions(ClaudeBackendCase):
