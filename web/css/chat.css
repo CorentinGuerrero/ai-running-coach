@@ -1,9 +1,7 @@
-/* Prototype de la vue « Coach » (chat) — s'appuie sur les tokens de app.css.
+/* Vue « Coach » (chat) — s'appuie sur les tokens de app.css.
    Lime réservé à l'action principale et à l'état courant (One Accent Rule). */
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-
-.proto-badge { justify-self: end; padding: 0.2rem 0.65rem; border: 1px dashed rgba(231, 237, 233, 0.4); border-radius: 2rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #b8c4bd; }
 
 /* ---------------------------------------------------------------- mise en page */
 
@@ -67,9 +65,11 @@
 .btn { padding: 0.5rem 1.1rem; border-radius: 2rem; border: 1px solid transparent; font: 600 0.88rem/1.2 var(--text); cursor: pointer; transition: background 150ms ease, border-color 150ms ease; }
 .btn--primary { background: var(--lime); color: var(--pine-deep); }
 .btn--primary:hover { background: #b6f04a; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn--small { padding: 0.3rem 0.8rem; font-size: 0.8rem; }
 .btn--ghost { background: transparent; border-color: var(--line-strong); color: var(--ink); }
 .btn--ghost:hover { background: var(--surface-2); }
-.btn:focus-visible, .quick__btn:focus-visible, .composer__send:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.btn:focus-visible, .quick__btn:focus-visible, .composer__send:focus-visible, .composer__stop:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .files { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
 .files__label { color: var(--ink-faint); }
@@ -87,6 +87,9 @@
 .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 1rem/1.5 var(--text); padding: 0.35rem 0; max-height: 9rem; }
 .composer__send { flex: none; display: grid; place-items: center; width: 2.3rem; height: 2.3rem; border: 0; border-radius: 50%; background: var(--pine); color: var(--on-pine); cursor: pointer; }
 .composer__send svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
+.composer__stop { flex: none; display: grid; place-items: center; width: 2.3rem; height: 2.3rem; border: 1px solid var(--line-strong); border-radius: 50%; background: transparent; color: var(--ink); cursor: pointer; }
+.composer__stop[hidden] { display: none; }
+.composer__stop svg { width: 1rem; height: 1rem; fill: currentColor; }
 .composer__send:disabled { opacity: 0.45; cursor: default; }
 .composer__meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.78rem; color: var(--ink-faint); }
 .backend { display: inline-flex; align-items: center; gap: 0.4rem; }
@@ -121,9 +124,50 @@
   .chat { height: calc(100vh - 6.4rem); padding-top: 0.75rem; }
 }
 @media (max-width: 36em) {
-  .proto-badge { display: none; }
   .checkup { gap: 0.35rem; }
   .kpi { padding: 0.5rem; }
   .kpi strong { font-size: 1rem; }
   .msg__avatar { display: none; }
 }
+
+/* ---------------------------------------------------------------- ajouts (page réelle) */
+
+.chat__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-bottom: 0.6rem; }
+.chat__bar select { flex: 1; min-width: 0; max-width: 24rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: 500 0.85rem/1.2 var(--text); padding: 0.4rem 0.5rem; }
+.chat__bar select:disabled { opacity: 0.6; }
+.chat__empty { margin: 2rem 0; text-align: center; color: var(--ink-faint); }
+.chat__empty .btn { margin-top: 0.75rem; }
+.pinned:empty { display: none; }
+.pinned { padding-bottom: 0.5rem; }
+.banner { margin: 0 0 0.75rem; padding: 0.6rem 0.9rem; border-radius: var(--radius-sm); background: var(--bad-bg); color: var(--ink); font-size: 0.9rem; }
+.banner[hidden] { display: none; }
+.banner--info { background: var(--warn-bg); }
+.disabled-panel { max-width: 34rem; margin: 3rem auto; padding: 1.25rem 1.5rem; border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.disabled-panel h2 { margin: 0 0 0.5rem; font: 700 1.1rem/1.3 var(--display); }
+.disabled-panel p { margin: 0 0 0.5rem; color: var(--ink-soft); }
+
+.msg--coach.is-streaming .msg__text > :last-child::after { content: "▍"; color: var(--moss); animation: blink 900ms steps(2) infinite; }
+.msg__text ul, .msg__text ol { margin: 0 0 0.7rem; padding-left: 1.4rem; line-height: 1.6; }
+.msg__text > div { margin: 0; }
+.msg__bubble { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg__body { overflow-wrap: anywhere; }
+.trace__ko { color: var(--bad); font-size: 0.78rem; margin-left: 0.3rem; }
+.trace li { overflow-wrap: anywhere; }
+.trace__sum { color: var(--ink-faint); }
+.note { margin: 0 0 0.7rem; font-size: 0.85rem; color: var(--ink-soft); }
+.action__head strong { overflow-wrap: anywhere; }
+.action__head .action__tool { display: block; margin-top: 0.1rem; font-size: 0.78rem; font-weight: 400; color: var(--ink-faint); }
+.action__head .action__state { color: var(--warn); }
+.diff__pre { margin: 0; padding: 0.5rem 0.7rem; background: var(--surface-2); white-space: pre-wrap; font: 0.82rem/1.5 "JetBrains Mono", ui-monospace, monospace; }
+.diff__row { overflow-wrap: anywhere; }
+.action.is-refused { border-color: var(--line-strong); }
+.action.is-pending { border-color: var(--warn); }
+.action__result--pending { color: var(--warn); }
+.file-chip { overflow-wrap: anywhere; }
+a.file-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.backend { color: var(--ink-faint); }
+.kpi-line { margin: 0.2rem 0 0.5rem; font-size: 0.84rem; color: var(--ink-soft); }
+.ctx-session-title { margin: 0; font-weight: 600; }
+.bar__fill { width: 0; }
+.perms li::before { content: "· "; }
+.staff .dot { margin-right: 0.45rem; }

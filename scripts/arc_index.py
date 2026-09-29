@@ -418,6 +418,8 @@ def settings(config: Dict[str, dict]) -> dict:
         "profile": config.get("athlete", {}).get("profile", "planning/Runner_Profile.md"),
         "hr_zones": _hr_zone_method(config),
         "language": config.get("language", {}).get("documents", "fr") or "fr",
+        # Page « Coach » (chat) : n'affiche l'entrée de nav que si le service est activé.
+        "chat_enabled": bool(config.get("chat", {}).get("enabled", False)),
         # VAM sur les montées détectées (#46, critère d'acceptation : « montée
         # minimale configurable (D+, pente) ») — `climb_min_grade_pct` en points de
         # pourcentage au workspace (ex. 5, pas 0.05), converti ici en fraction pour
