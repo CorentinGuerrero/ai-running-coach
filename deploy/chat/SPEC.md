@@ -27,7 +27,7 @@ paths, config keys, protocol. The interface code is `scripts/arc_chat_backend.py
 |---|---|---|
 | Contract | `scripts/arc_chat_backend.py`, this file | lead (already written) |
 | Chat service core | `scripts/arc_chat.py` (HTTP/SSE server, sessions, auth, CSRF, rate limit, budget, approvals, ntfy), `scripts/arc_chat_policy.py`, `scripts/arc_chat_mock.py`, `config/chat-policy.toml`, `tests/data/test_arc_chat_*.py` (core), `tests/install/test_chat_service.py` | agent **core** |
-| Backends | `scripts/arc_chat_claude.py`, `scripts/arc_chat_opencode.py`, `tests/data/test_arc_chat_claude.py`, `tests/data/test_arc_chat_opencode.py`, `tests/data/fixtures/chat/*` | agent **backends** |
+| Backends | `scripts/arc_chat_claude.py`, `scripts/arc_chat_opencode.py`, `scripts/arc_chat_tools.py`, `tests/data/test_arc_chat_claude.py`, `tests/data/test_arc_chat_opencode.py`, `tests/data/fixtures/chat/*` | agent **backends** |
 | Frontend | `web/chat.html`, `web/js/chat.js`, `web/css/chat.css`, nav item in `web/js/app.js`, `chat_enabled` in `arc_index.settings()`, local `/api/chat/*` proxy in `scripts/arc_serve.py`, delete `web/chat-prototype.*`, related tests + goldens | agent **frontend** |
 | Ops / cron | `config/workspace.toml` (`[chat]` + `[sync]` additions), `scripts/daily-sync.sh` (`opencode` runner, API-key mode, budget), `scripts/coach-chat.sh` (service), `install.sh` (`--llm`, `--chat`, budget flags), `scripts/coach_doctor.py` checks, `deploy/chat/traefik/*`, `.gitignore` if needed, their tests, docs for cron/install (`docs/mobile.md`, `docs/configuration.md` `[sync]`/`[chat]` keys) | agent **ops** |
 | Chat docs | `docs/dashboard/chat.md`, mkdocs nav, README/index mentions | lead, after integration |

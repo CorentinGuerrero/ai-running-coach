@@ -32,9 +32,11 @@ fetch_domains = ["wttr.in", "overpass-api.de", "nominatim.openstreetmap.org"]
 [mcp]
 # Serveurs MCP connus : lectures autorisées, écritures soumises à approbation.
 # Tout autre serveur est refusé.
-servers = ["garmin", "intervals"]
+# « leanproxy » : méta-outils de la passerelle (list_/search_) ; ses appels
+# invoke_tool sont ramenés au serveur réel par le backend (mcp:garmin.<outil>).
+servers = ["garmin", "intervals", "Intervals_icu", "leanproxy"]
 # Lectures : préfixes de noms d'outils.
-read_prefixes = ["get_", "count_", "list_", "download_"]
+read_prefixes = ["get_", "count_", "list_", "download_", "search_"]
 # Écritures : noms exacts ou motifs `*`. Un outil inconnu d'un serveur connu demande aussi l'approbation.
 write_tools = [
   "schedule_workout", "schedule_workouts", "schedule_week",

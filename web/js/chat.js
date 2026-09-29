@@ -300,7 +300,7 @@ function diffRows(diff) {
 const RESOLVED = {
   allow: "applied", allowed: "applied", applied: "applied", approved: "applied",
   deny: "refused", denied: "refused", refused: "refused", rejected: "refused", rejected_by_athlete: "refused",
-  pending: "pending", expired: "expired",
+  waiting: "waiting", pending: "pending", expired: "expired",
 };
 
 function buildApprovalCard(d) {
@@ -341,9 +341,13 @@ function setApprovalStatus(entry, status) {
   const norm = RESOLVED[String(status || "").toLowerCase()] || "pending";
   card.classList.remove("is-done", "is-refused", "is-pending");
   btns.replaceChildren();
-  if (norm === "pending") {
-    card.classList.add("is-pending");
-    hint.textContent = "En attente — confirmez depuis la notification ou ici";
+  if (norm === "waiting" || norm === "pending") {
+    // « waiting » : le coach attend la réponse dans ce tour ; « pending » : délai
+    // d'attente écoulé, la proposition reste ouverte (page ou notification).
+    card.classList.toggle("is-pending", norm === "pending");
+    hint.textContent = norm === "waiting"
+      ? "Confirmation nécessaire avant toute écriture"
+      : "En attente — confirmez depuis la notification ou ici";
     addApprovalButtons(entry);
     return;
   }
@@ -391,7 +395,7 @@ function onApprovalRequest(d) {
   state.approvals.set(id, built);
   t.body.appendChild(built.card);
   t.text = null;
-  setApprovalStatus(built, d.status || "pending");
+  setApprovalStatus(built, d.status || "waiting");
   scrollDown();
 }
 

@@ -265,6 +265,9 @@ approval_ttl_s = 86400
 ntfy_approvals = true
 ntfy_quick_approve = true
 ntfy_token_ttl_s = 1800
+# Délai (s) avant la notification quand la page est ouverte : laisse le temps de
+# répondre à l'écran avant de sonner sur le téléphone.
+ntfy_delay_s = 60
 
 [dashboard]
 # Tableau de bord local (`scripts/dashboard.sh`) : lecture seule, n'écoute que sur
