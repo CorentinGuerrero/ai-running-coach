@@ -38,7 +38,7 @@ class PolicyTest(PolicyBase):
         self.assertEqual(self.d("fs.list", {}), "allow")
 
     def test_lecture_hors_workspace_ou_secrete_refusee(self):
-        for path in ("../etc/passwd", "/etc/passwd", "config/workspace.user.toml", ".env",
+        for path in ("../etc/passwd", "/etc/passwd", "config/llm.env", ".env",
                      "x/garmin.token", ".garminconnect/oauth.json", ".arc/chat/approvals.json"):
             self.assertEqual(self.d("fs.read", {"path": path}), "deny", path)
 
@@ -193,11 +193,11 @@ class ShellBypassTest(PolicyBase):
             self.assertEqual(self.sh(command), "deny", command)
 
     def test_lecture_de_secrets_ou_hors_workspace_refusee(self):
-        for command in ("python3 scripts/arc_log.py --input config/workspace.user.toml",
+        for command in ("python3 scripts/arc_log.py --input config/llm.env",
                         "python3 scripts/arc_log.py --input .arc/chat/approvals.json",
                         "python3 scripts/arc_log.py --input ../secret.json",
                         "python3 scripts/arc_index.py --validate .garminconnect/oauth1_token.json",
-                        "python3 scripts/arc_index.py workspace.user.toml"):
+                        "python3 scripts/arc_index.py llm.env"):
             self.assertEqual(self.sh(command), "deny", command)
 
     def test_lien_symbolique_sortant_refuse(self):
@@ -228,21 +228,21 @@ class WebFetchBypassTest(PolicyBase):
 class FsListGlobTest(PolicyBase):
     def test_glob_visant_un_secret_refuse(self):
         (self.ws / "config").mkdir()
-        (self.ws / "config" / "workspace.user.toml").write_text("x", encoding="utf-8")
-        for tool_input in ({"path": "config", "glob": "workspace.user.toml"},
-                           {"glob": "config/workspace.user.toml"},
-                           {"path": "config", "glob": "*.toml"},
+        (self.ws / "config" / "llm.env").write_text("x", encoding="utf-8")
+        for tool_input in ({"path": "config", "glob": "llm.env"},
+                           {"glob": "config/llm.env"},
+                           {"path": "config", "glob": "*.env"},
                            {"path": "config", "glob": "*"},
-                           {"glob": "**/*.toml"},
+                           {"glob": "**/*.env"},
                            {"glob": "**"},
                            {"glob": "*"},
-                           {"glob": "**/workspace.user.*"},
-                           {"glob": "*.{md,toml}"},
-                           {"glob": ["*.md", "workspace.user.toml"]},
-                           {"glob": "workspace.user.to?l"},
+                           {"glob": "**/llm.*"},
+                           {"glob": "*.{md,env}"},
+                           {"glob": ["*.md", "llm.env"]},
+                           {"glob": "llm.en?"},
                            {"glob": ".garminconnect/*"},
                            {"glob": ".g*/oauth*"},
-                           {"glob": "*/*.toml"},
+                           {"glob": "*/*.env"},
                            {"glob": ".e*"}, {"glob": "*.env"}, {"glob": "*.token"}, {"glob": "*.pem"},
                            {"glob": "/etc/*"}, {"glob": "../*"}, {"glob": ".arc/**"}):
             self.assertEqual(self.d("fs.list", tool_input), "deny", tool_input)
@@ -251,7 +251,7 @@ class FsListGlobTest(PolicyBase):
         (self.ws / "activities").mkdir()
         for tool_input in ({"glob": "*.md"}, {"path": "activities", "glob": "*"}, {"glob": "planning/*.md"},
                            {"glob": "**/*.md"}, {"glob": ["*.md", "*.json"]}, {"glob": "*.{md,json}"},
-                           {"path": "activities", "glob": "2026-*.md", "pattern": "workspace.user.toml"}):
+                           {"path": "activities", "glob": "2026-*.md", "pattern": "llm.env"}):
             self.assertEqual(self.d("fs.list", tool_input), "allow", tool_input)
 
     def test_secret_reel_dans_un_dossier_de_donnees_detecte(self):
@@ -276,7 +276,7 @@ class Round2PolicyTest(PolicyBase):
         self.assertEqual(self.sh(self.CC + " --aliases a b --output rapports/c.md"), "allow")
         self.assertEqual(self.sh(self.CC + " --aliases 'Tournai Trail' x --exclude-dates 2026-01-02 2026-01-03"), "allow")
         self.assertEqual(self.sh("python3 scripts/arc_index.py --validate activities/a.md activities/b.md"), "allow")
-        self.assertEqual(self.sh("python3 scripts/arc_index.py --validate activities/a.md config/workspace.user.toml"),
+        self.assertEqual(self.sh("python3 scripts/arc_index.py --validate activities/a.md config/llm.env"),
                          "deny")
 
     def test_b1_valeur_commencant_par_tiret_refusee(self):
@@ -295,23 +295,23 @@ class Round2PolicyTest(PolicyBase):
 
     def test_b2_accolades_trop_larges_ou_trop_imbriquees_refusees(self):
         many = ",".join(f"x{i}" for i in range(70))
-        self.assertEqual(self.d("fs.list", {"glob": "{" + many + ",config/workspace.user.toml}"}), "deny")
+        self.assertEqual(self.d("fs.list", {"glob": "{" + many + ",config/llm.env}"}), "deny")
         self.assertEqual(self.d("fs.list", {"glob": "{a,{b,{c,{d,e}}}}"}), "deny")
         two = ",".join(f"a{i}" for i in range(9))
         self.assertEqual(self.d("fs.list", {"glob": "{" + two + "}{" + two + "}{" + two + "}"}), "deny")
         self.assertEqual(self.d("fs.list", {"glob": "*.{md,json}"}), "allow")
 
     def test_s1_casse_ignoree_pour_les_secrets_et_arc(self):
-        for path in ("config/WORKSPACE.user.toml", ".ARC/chat/approvals.json", "Planning/.ENV", "x/A.TOKEN"):
+        for path in ("config/LLM.ENV", ".ARC/chat/approvals.json", "Planning/.ENV", "x/A.TOKEN"):
             self.assertEqual(self.d("fs.read", {"path": path}), "deny", path)
         for command in ("python3 scripts/arc_log.py --input .ARC/coach.db",
-                        "python3 scripts/arc_index.py --validate config/WORKSPACE.USER.TOML"):
+                        "python3 scripts/arc_index.py --validate config/LLM.ENV"):
             self.assertEqual(self.sh(command), "deny", command)
         for tool_input in ({"glob": ".ARC/**"}, {"glob": ".ARC/*.json"}, {"path": ".ARC", "glob": "*"},
-                           {"glob": "config/WORKSPACE.user.toml"}):
+                           {"glob": "config/LLM.ENV"}):
             self.assertEqual(self.d("fs.list", tool_input), "deny", tool_input)
         self.assertEqual(self.d("fs.write", {"path": "PLANNING/x.md"}), "deny")
-        self.assertEqual(self.d("fs.write", {"path": "planning/WORKSPACE.USER.TOML"}), "deny")
+        self.assertEqual(self.d("fs.write", {"path": "planning/LLM.ENV"}), "deny")
 
     def test_s3_recherche_de_contenu_limitee_aux_dossiers_surs(self):
         for tool_input in ({"pattern": "token"}, {"path": ".", "pattern": "x"}, {"path": "config", "pattern": "x"},
@@ -355,6 +355,77 @@ class GearPolicyTest(PolicyBase):
             self.assertEqual(self.sh(command), "allow", command)
         for command in ("python3 scripts/arc_index.py equipment --race-plan /etc/passwd",
                         "python3 scripts/arc_index.py equipment --race-plan ~/x.md",
-                        "python3 scripts/arc_index.py equipment --race-plan config/workspace.user.toml",
+                        "python3 scripts/arc_index.py equipment --race-plan config/llm.env",
                         "python3 scripts/arc_index.py equipment --race-plan --output planning/x.md"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+
+class ReadableWorkspaceTest(unittest.TestCase):
+    """Installation réelle : AGENTS.md, config/workspace.toml, agents/, skills/, scripts/ sont des
+    LIENS vers le moteur (install.sh). Le coach doit pouvoir les lire — sans rien écrire ailleurs."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name).resolve()
+        self.engine, self.ws, outside = root / "engine", root / "ws", root / "ailleurs"
+        for d in (self.engine / "skills" / "meteo", self.engine / "config", self.ws / "config",
+                  self.ws / "planning", outside):
+            d.mkdir(parents=True)
+        (self.engine / "AGENTS.md").write_text("x", encoding="utf-8")
+        (self.engine / "skills" / "meteo" / "SKILL.md").write_text("x", encoding="utf-8")
+        (self.engine / "config" / "workspace.toml").write_text("x", encoding="utf-8")
+        (self.engine / "config" / "llm.env").write_text("x", encoding="utf-8")
+        (outside / "id_rsa").write_text("x", encoding="utf-8")
+        (self.ws / "AGENTS.md").symlink_to(self.engine / "AGENTS.md")
+        (self.ws / "skills").symlink_to(self.engine / "skills")
+        (self.ws / "config" / "workspace.toml").symlink_to(self.engine / "config" / "workspace.toml")
+        (self.ws / "config" / "workspace.user.toml").write_text("x", encoding="utf-8")
+        (self.ws / "planning" / "cle").symlink_to(outside / "id_rsa")
+        (self.ws / "planning" / "env").symlink_to(self.engine / "config" / "llm.env")
+        self.policy = Policy(self.ws, {}, engine=self.engine)
+
+    def d(self, tool, tool_input):
+        return self.policy.decide(tool, tool_input)
+
+    def test_liens_vers_le_moteur_lisibles(self):
+        for path in ("AGENTS.md", "config/workspace.toml", "skills/meteo/SKILL.md",
+                     str(self.ws / "config" / "workspace.toml"), str(self.engine / "skills" / "meteo" / "SKILL.md"),
+                     "config/workspace.user.toml"):
+            self.assertEqual(self.d("fs.read", {"path": path}), "allow", path)
+        self.assertEqual(self.d("fs.list", {"path": "skills", "pattern": "météo"}), "allow")
+
+    def test_liens_vers_ailleurs_ou_vers_un_secret_refuses(self):
+        for path in ("planning/cle", "planning/env", str(self.engine / "config" / "llm.env"), "~/x", "../ailleurs/id_rsa"):
+            self.assertEqual(self.d("fs.read", {"path": path}), "deny", path)
+
+    def test_ecriture_jamais_dans_le_moteur_ni_la_config(self):
+        for path in ("skills/meteo/SKILL.md", "AGENTS.md", "config/workspace.user.toml", "config/workspace.toml"):
+            self.assertEqual(self.d("fs.write", {"path": path}), "deny", path)
+
+
+class StdinScriptTest(PolicyBase):
+    """`/log` : arc_log.py lit son JSON sur l'entrée standard (`echo '<json>' | …`, SKILL.md).
+    Deux formes sans expansion acceptées, pour les seuls `[shell].stdin_scripts`."""
+
+    J = '{"catalogue_paths": ["resources/nutrition/x.md"], "nutrition_items": [{"product": "gel", "qty": "2"}]}'
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_formes_sures_autorisees(self):
+        self.assertEqual(self.sh(f"echo '{self.J}' | python3 scripts/arc_log.py"), "allow")
+        self.assertEqual(self.sh(f"python3 scripts/arc_log.py << 'JSONEOF'\n{self.J}\nJSONEOF"), "allow")
+        self.assertEqual(self.sh(f"echo '{self.J}' | python3 scripts/arc_log.py --output activities/o.json"), "allow")
+
+    def test_formes_dangereuses_refusees(self):
+        for command in (f'echo "{self.J}" | python3 scripts/arc_log.py',            # guillemets : $() interprété
+                        f"python3 scripts/arc_log.py << JSONEOF\n{self.J}\nJSONEOF",  # délimiteur nu : expansion
+                        f"python3 scripts/arc_log.py << 'E'\n{self.J}\nE\nrm -rf x\nE",  # heredoc fermé tôt
+                        f"echo '{self.J}' | python3 scripts/arc_index.py",           # script sans stdin
+                        f"echo '{self.J}' | python3 scripts/arc_log.py; rm x",
+                        f"echo '{self.J}' | python3 scripts/arc_log.py --output /etc/x",
+                        "echo 'a' ; rm x ; echo 'b' | python3 scripts/arc_log.py",
+                        "cat planning/x | python3 scripts/arc_log.py",
+                        f"echo '{self.J}' | python3 -c 'import os'"):
             self.assertEqual(self.sh(command), "deny", command)

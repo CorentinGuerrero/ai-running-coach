@@ -30,7 +30,8 @@ from typing import Callable, Optional
 # Événements (SSE : `event: <type>\ndata: <json>\n\n`)
 # ---------------------------------------------------------------------------
 #
-#   text_delta         {"text": str}
+#   text_delta         {"text": str, "part": str (facultatif : id du bloc de texte — un nouvel id
+#                       ouvre un nouveau bloc côté page)}
 #   tool_start         {"id": str, "name": str (canonique), "summary": str}
 #   tool_end           {"id": str, "ok": bool, "summary": str}
 #   approval_request   {"approval_id": str, "tool": str, "summary": str,
@@ -41,10 +42,12 @@ from typing import Callable, Optional
 #                       "cache_read_tokens": int, "cost_eur": float}
 #   done               {"reason": "end_turn"|"interrupted"|"budget"|"max_turns"|"pending_approval"}
 #   error              {"message": str (français, lisible par l'athlète)}
+#   status             {"message": str} — état passager (fournisseur saturé, nouvelle tentative…),
+#                      affiché le temps d'attendre, jamais conservé dans l'historique
 
 EVENT_TYPES = (
     "text_delta", "tool_start", "tool_end", "approval_request", "approval_resolved",
-    "file_written", "usage", "done", "error",
+    "file_written", "usage", "done", "error", "status",
 )
 
 # ---------------------------------------------------------------------------
@@ -89,7 +92,28 @@ Tu réponds à l'athlète via l'interface web « Coach » du tableau de bord.
 - Ne recopie JAMAIS dans ta réponse le contenu d'un fichier que tu lis ou écris, ni ses
   blocs ```arc / JSON / YAML : l'interface affiche déjà un lien vers chaque fichier écrit.
   Résume en phrases ce qui compte pour l'athlète (chiffres clés, décision, prochaine étape).
+- N'affirme jamais avoir enregistré, écrit ou modifié quoi que ce soit sans que l'outil
+  d'écriture correspondant ait réussi dans CE tour : l'athlète le vérifie dans la trace.
+- Va au bout de la demande dans le même tour : n'annonce pas « je reviens avec… » pour
+  t'arrêter ensuite — fais les appels nécessaires, puis réponds.
 """
+
+
+LANGUAGE_NAMES = {"fr": "français", "en": "anglais", "it": "italien", "es": "espagnol",
+                  "de": "allemand", "nl": "néerlandais", "pt": "portugais"}
+
+
+def system_addendum(language: str = "fr") -> str:
+    """`SYSTEM_ADDENDUM` + la langue de réponse, explicite.
+
+    Une commande seule (« /today ») ne dit rien de la langue : sans cette ligne, un modèle
+    peut répondre en anglais, voire mélanger les deux (observé avec DeepSeek).
+    """
+    name = LANGUAGE_NAMES.get((language or "fr").lower(), language or "français")
+    return SYSTEM_ADDENDUM + (
+        f"- Langue : réponds dans la langue du message de l'athlète ; pour une commande seule "
+        f"(/today, /week, /why, /race, /log…) ou un message sans indice, en {name}. Une seule "
+        f"langue par réponse, titres et libellés compris.\n")
 
 
 class BackendError(RuntimeError):

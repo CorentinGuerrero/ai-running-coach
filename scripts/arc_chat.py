@@ -40,6 +40,7 @@ import os
 import queue
 import re
 import secrets
+import signal
 import sys
 import threading
 import time
@@ -729,7 +730,8 @@ class Turn:
             return
         data = data if isinstance(data, dict) else {}
         with self.lock:
-            self.service.sessions.append_event(self.session_id, etype, data)
+            if etype != "status":                   # passager : pas dans l'historique
+                self.service.sessions.append_event(self.session_id, etype, data)
             if etype in ("done", "error"):
                 self.terminal = True
             for q in list(self.subscribers):
@@ -1447,6 +1449,13 @@ def serve(workspace: Path, port: Optional[int] = None, listen: Optional[str] = N
     shown = "127.0.0.1" if cfg["listen"] in LOOPBACK_HOSTS else cfg["listen"]
     print(f"URL: http://{shown}:{httpd.server_address[1]}/", flush=True)
     log(f"backend {backend.name}, auth {cfg['auth']}, budget {float(cfg['daily_budget_eur']):.2f} €/jour")
+    def _terminate(signum, _frame):
+        # launchd / systemd / kill : même arrêt propre que Ctrl-C (le serveur OpenCode enfant
+        # est arrêté par `backend.shutdown()` au lieu de rester orphelin).
+        raise KeyboardInterrupt
+    for signame in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, signame):
+            signal.signal(getattr(signal, signame), _terminate)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -215,22 +215,78 @@ function startTurn() {
 
 function ensureTurn() { return state.turn || startTurn(); }
 
+// État passager (fournisseur saturé, nouvelle tentative…) : une ligne en bas du tour, remplacée
+// par la suivante, effacée dès que la réponse avance.
+function onStatus(d) {
+  const t = ensureTurn();
+  if (!t.status) {
+    t.status = el("p", "msg__status");
+    t.status.setAttribute("role", "status");
+  }
+  t.status.textContent = String(d.message || "");
+  t.body.appendChild(t.status);
+  scrollDown();
+}
+
+function clearStatus() {
+  const t = state.turn;
+  if (t && t.status) { t.status.remove(); t.status = null; }
+}
+
+// Fin de tour : parmi les blocs de texte écrits APRÈS le dernier outil, seul le dernier est la
+// réponse ; les précédents (« le fichier est validé, je résume… ») rejoignent la trace.
+function foldTrailingNarration(t) {
+  if (!t.trace) return;
+  const blocks = [];
+  for (let n = t.trace.details.nextElementSibling; n; n = n.nextElementSibling) {
+    if (n.classList.contains("msg__text")) blocks.push(n);
+  }
+  if (t.text) flushText(t);
+  for (const node of blocks.slice(0, -1)) {
+    if (!node.textContent.trim()) { node.remove(); continue; }
+    t.trace.list.appendChild(noteItem(node));
+  }
+}
+
 function endTurn() {
   const t = state.turn;
   if (!t) return;
+  foldTrailingNarration(t);
   t.art.classList.remove("is-streaming");
+  if (t.status) { t.status.remove(); t.status = null; }
   if (t.trace) t.trace.details.classList.remove("is-running");
   if (!t.body.children.length) t.art.remove();
   state.turn = null;
 }
 
 function traceLabel(trace) {
-  const n = trace.list.children.length;
+  const n = trace.list.querySelectorAll(":scope > li:not(.trace__note)").length;
   return `${n} étape${n > 1 ? "s" : ""}`;
 }
 
+// Texte écrit juste AVANT un appel d'outil = le coach qui commente son travail (« je lis le
+// plan… », voire tout son raisonnement chez certains modèles) : rangé dans la trace repliée.
+// La réponse — le texte après le dernier outil — reste seule visible.
+function noteItem(node) {
+  const li = el("li", "trace__note");
+  node.classList.add("trace__note-text");
+  li.appendChild(node);                 // retire le bloc du fil
+  return li;
+}
+
 function ensureTrace(t) {
-  if (t.trace && t.body.lastElementChild === t.trace.details) return t.trace;
+  // Tout chemin qui ouvre (ou reprend) une trace range d'abord le commentaire qui la précède.
+  let note = null;
+  if (t.text && t.body.lastElementChild === t.text) {
+    flushText(t);
+    const node = t.text;
+    t.text = null; t.raw = "";
+    if (node.textContent.trim()) note = noteItem(node); else node.remove();
+  }
+  if (t.trace && t.body.lastElementChild === t.trace.details) {
+    if (note) t.trace.list.appendChild(note);
+    return t.trace;
+  }
   const details = el("details", "trace is-running");
   const summary = el("summary");
   summary.append(el("span", "trace__dot"), el("span", "trace__label", "Le coach consulte le workspace…"));
@@ -239,6 +295,7 @@ function ensureTrace(t) {
   t.body.appendChild(details);
   t.text = null; t.raw = "";
   t.trace = { details, list, label: summary.lastChild };
+  if (note) list.appendChild(note);
   return t.trace;
 }
 
@@ -254,8 +311,10 @@ function onToolStart(d) {
 
 function onToolEnd(d) {
   const t = ensureTurn();
-  const trace = ensureTrace(t);
   let li = d.id != null ? t.tools.get(d.id) : null;
+  // Étape déjà rangée dans une trace (même plus haut) : on la met à jour sur place, sans ouvrir
+  // une trace vide sous le texte en cours.
+  const trace = li ? null : ensureTrace(t);
   if (!li) {
     li = el("li");
     li.append(el("code", null, d.name || "outil"), document.createTextNode(" "), el("span", "trace__sum", d.summary || ""));
@@ -266,7 +325,7 @@ function onToolEnd(d) {
     if (sum) sum.textContent = d.summary;
   }
   if (d.ok === false) li.appendChild(el("span", "trace__ko", "échec"));
-  trace.details.classList.remove("is-running");
+  (trace ? trace.details : li.closest("details"))?.classList.remove("is-running");
 }
 
 // Chaque bloc de texte garde son propre markdown brut : un bloc remplacé par un outil
@@ -284,12 +343,15 @@ function paint() {
 
 function onTextDelta(d) {
   const t = ensureTurn();
-  if (!t.text || t.body.lastElementChild !== t.text) {
+  const part = d.part || "";
+  if (!t.text || t.body.lastElementChild !== t.text || (part && t.textPart && part !== t.textPart)) {
+    if (t.text) flushText(t);
     if (t.trace) t.trace.details.classList.remove("is-running");
     t.text = el("div", "msg__text");
     t.raw = "";
     t.body.appendChild(t.text);
   }
+  t.textPart = part;
   t.raw += d.text || "";
   RAW.set(t.text, t.raw);
   dirty.add(t.text);
@@ -523,8 +585,9 @@ function handleEvent(type, d) {
   d = d && typeof d === "object" ? d : {};
   switch (type) {
     case "user_message": endTurn(); addUser(d.text || ""); break;
-    case "text_delta": onTextDelta(d); break;
-    case "tool_start": onToolStart(d); break;
+    case "status": if (!state.replaying) onStatus(d); break;
+    case "text_delta": clearStatus(); onTextDelta(d); break;
+    case "tool_start": clearStatus(); onToolStart(d); break;
     case "tool_end": onToolEnd(d); break;
     case "approval_request": onApprovalRequest(d); break;
     case "approval_resolved": onApprovalResolved(d); break;

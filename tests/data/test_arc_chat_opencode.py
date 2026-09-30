@@ -418,7 +418,8 @@ class TestTurns(OpenCodeCase):
         self.assertEqual(h.ctx.backend_state["opencode_session_id"], SID)
         prompt = next(b for m, p, b in self.fake.requests if p.endswith("/prompt_async"))
         self.assertEqual(prompt["model"], {"providerID": "openrouter", "modelID": "deepseek/deepseek-chat"})
-        self.assertEqual(prompt["system"], SYSTEM_ADDENDUM)
+        self.assertTrue(prompt["system"].startswith(SYSTEM_ADDENDUM))
+        self.assertIn("en français", prompt["system"])      # langue explicite (commande seule)
         self.assertEqual(prompt["parts"], [{"type": "text", "text": "salut"}])
 
     def test_text_not_duplicated_by_delta_then_update(self):

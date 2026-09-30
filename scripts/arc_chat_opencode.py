@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from arc_chat_backend import (SYSTEM_ADDENDUM, BackendError, ChatBackend, TurnContext,
+from arc_chat_backend import (SYSTEM_ADDENDUM, system_addendum, BackendError, ChatBackend, TurnContext,
                               resolve_workspace_path)
 from arc_chat_tools import (REFUSAL_DENY, display_input, fs_list_input, gate, map_leanproxy,
                             parse_unified_diff, short, summarize_tool, usd_to_eur)
@@ -213,6 +213,12 @@ class _Turn:
     def __init__(self, ctx: TurnContext):
         self.ctx = ctx
         self.lock = threading.Lock()
+        # Même verrou : `with turn.lock` et `with turn.cond` s'excluent mutuellement.
+        self.cond = threading.Condition(self.lock)
+        # Permissions posées et pas encore répondues, par session ; et celles qui attendent
+        # pour être REFUSÉES (voir `_send`).
+        self.outstanding: dict = {}
+        self.rejecting: dict = {}
         self.user_ids: set = set()
         self.text_seen: dict = {}          # partID -> nb de caractères déjà émis
         self.tools: dict = {}              # callID -> {"tool","input","name","started","ended"}
@@ -380,10 +386,15 @@ class OpenCodeBackend(ChatBackend):
             port = self._pick_port()
             self._base = f"http://127.0.0.1:{port}"
             cmd = [binary, "serve", "--pure", "--hostname", "127.0.0.1", "--port", str(port)]
+            self._reap_stale()
             try:
                 self._proc = self._spawn(cmd, env, str(self.workspace), str(self._state_dir / "server.log"))
             except OSError as exc:
                 raise BackendError(f"Impossible de démarrer OpenCode : {short(exc, 120)}") from exc
+            try:
+                (self._state_dir / "server.pid").write_text(str(self._proc.pid), encoding="utf-8")
+            except (OSError, AttributeError):
+                pass
             deadline = time.monotonic() + HEALTH_TIMEOUT_S
             while time.monotonic() < deadline:
                 if self._proc.poll() is not None:
@@ -396,9 +407,39 @@ class OpenCodeBackend(ChatBackend):
             self._stop_locked()
             raise BackendError("Le serveur OpenCode ne répond pas (délai de démarrage dépassé).")
 
+    def _reap_stale(self) -> None:
+        """Serveur laissé par un service tué sans nettoyage (SIGKILL, plantage) : on l'arrête.
+
+        Seulement si le PID noté appartient encore à un `opencode serve` — jamais un autre
+        processus qui aurait récupéré ce numéro.
+        """
+        pid_file = self._state_dir / "server.pid"
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return
+        try:
+            out = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                                 text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        if "opencode" in out and " serve" in out and "--hostname 127.0.0.1" in out:
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+
     def _stop_locked(self) -> None:
         proc, self._proc = self._proc, None
         self._base = ""
+        try:
+            (self._state_dir / "server.pid").unlink()
+        except (OSError, AttributeError):
+            pass
         if proc is None:
             return
         try:
@@ -463,10 +504,18 @@ class OpenCodeBackend(ChatBackend):
             except OSError:
                 pass
 
+        # Dépannage : `ARC_OPENCODE_TRACE=<fichier>` y recopie chaque évènement brut d'OpenCode
+        # (contenu des échanges compris : à réserver au diagnostic, fichier à supprimer ensuite).
+        trace_path = os.environ.get("ARC_OPENCODE_TRACE", "").strip()
+
         def reader() -> None:
+            trace = open(trace_path, "a", encoding="utf-8") if trace_path else None  # noqa: SIM115
             try:
                 for raw in resp:
                     line = raw.decode("utf-8", "replace").strip()
+                    if trace and line.startswith("data:"):
+                        trace.write(line[5:].strip() + "\n")
+                        trace.flush()
                     if line.startswith("data:"):
                         try:
                             q.put(json.loads(line[5:].strip()))
@@ -475,6 +524,8 @@ class OpenCodeBackend(ChatBackend):
             except Exception:  # noqa: BLE001 — flux coupé
                 pass
             finally:
+                if trace:
+                    trace.close()
                 q.put(None)
                 try:
                     conn.close()
@@ -517,7 +568,7 @@ class OpenCodeBackend(ChatBackend):
             self._wait_connected(events)
             self._request("POST", f"/session/{sid}/prompt_async", {
                 "parts": [{"type": "text", "text": user_message}],
-                "system": SYSTEM_ADDENDUM,
+                "system": system_addendum(ctx.language),
                 "model": {"providerID": provider_id, "modelID": model_id},
             })
             self._consume(sid, turn, events)
@@ -643,11 +694,24 @@ class OpenCodeBackend(ChatBackend):
             elif etype == "permission.asked":
                 with turn.lock:
                     turn.awaiting += 1
+                    turn.outstanding.setdefault(esid or sid, set()).add(props.get("id", ""))
                 worker = threading.Thread(target=self._answer_permission_guarded,
                                           args=(esid or sid, turn, props),
                                           name="opencode-permission", daemon=True)
                 turn.workers.append(worker)
                 worker.start()
+            elif etype == "session.status" and (props.get("status") or {}).get("type") == "retry":
+                # Fournisseur saturé ou injoignable : OpenCode réessaie seul, parfois pendant des
+                # minutes — on le dit à l'athlète au lieu de laisser une page muette.
+                info = props.get("status") or {}
+                reason = str(info.get("message") or "").strip()
+                short = "fournisseur saturé" if re.search(r"rate.?limit|429|overloaded", reason, re.I) \
+                    else "fournisseur injoignable" if re.search(r"connect|network|timeout", reason, re.I) \
+                    else "réponse du fournisseur en échec"
+                attempt = info.get("attempt")
+                turn.ctx.emit("status", {"message": f"{short.capitalize()} — nouvelle tentative"
+                                               + (f" n°{attempt}" if isinstance(attempt, int) and attempt else "")
+                                               + "…"})
             elif child:
                 continue
             elif etype == "session.status":
@@ -683,7 +747,7 @@ class OpenCodeBackend(ChatBackend):
             return
         pid = props.get("partID")
         turn.text_seen[pid] = turn.text_seen.get(pid, 0) + len(text)
-        turn.ctx.emit("text_delta", {"text": text})
+        turn.ctx.emit("text_delta", {"text": text, "part": pid or ""})
 
     @staticmethod
     def _key(turn: _Turn, sid: str, call_id: str) -> str:
@@ -701,7 +765,7 @@ class OpenCodeBackend(ChatBackend):
             seen = turn.text_seen.get(part.get("id"), 0)
             if len(text) > seen:
                 turn.text_seen[part["id"]] = len(text)
-                turn.ctx.emit("text_delta", {"text": text[seen:]})
+                turn.ctx.emit("text_delta", {"text": text[seen:], "part": part.get("id") or ""})
         elif ptype == "tool":
             self._on_tool(sid, turn, part, child)
         elif ptype == "step-finish":
@@ -798,6 +862,35 @@ class OpenCodeBackend(ChatBackend):
             legacy = {"response": "once" if allow else "reject"}
             self._request("POST", f"/session/{sid}/permissions/{request_id}", legacy, timeout=15)
 
+    def _send(self, turn: _Turn, sid: str, request_id: str, allow: bool, message: str) -> None:
+        """Répond à une permission ; un REFUS attend d'abord les autres réponses de la session.
+
+        OpenCode (`permission/index.ts`) : un « reject » refuse aussi TOUTES les autres
+        permissions en attente de la même session, et celles-là sans message — ce qui arrête
+        le tour (et annule la tâche d'un sous-agent). Quand le modèle lance plusieurs outils en
+        parallèle et qu'un seul est refusé par la politique, les autorisations partent donc en
+        premier, le refus ensuite. Limite connue : deux refus simultanés dans la même session
+        arrêtent quand même le tour (le second est emporté sans message).
+        """
+        if not allow:
+            hold = float(turn.ctx.config.get("approval_wait_s", 600) or 600) + 60.0
+            deadline = time.monotonic() + hold
+            with turn.cond:
+                turn.rejecting.setdefault(sid, set()).add(request_id)
+                while not (turn.abort_event.is_set() or turn.ctx.cancelled.is_set()):
+                    others = turn.outstanding.get(sid, set()) - turn.rejecting.get(sid, set())
+                    left = deadline - time.monotonic()
+                    if not others or left <= 0:
+                        break
+                    turn.cond.wait(min(left, 0.5))
+        try:
+            self._reply(sid, request_id, allow, message)
+        finally:
+            with turn.cond:
+                turn.outstanding.get(sid, set()).discard(request_id)
+                turn.rejecting.get(sid, set()).discard(request_id)
+                turn.cond.notify_all()
+
     def _answer_permission_guarded(self, sid: str, turn: _Turn, props: dict) -> None:
         try:
             self._answer_permission(sid, turn, props)
@@ -816,7 +909,7 @@ class OpenCodeBackend(ChatBackend):
         child = sid != turn.root
         try:
             if permission in ALWAYS_REJECT or ctx.cancelled.is_set() or turn.abort_event.is_set():
-                self._reply(sid, request_id, False, REFUSAL_DENY)
+                self._send(turn, sid, request_id, False, REFUSAL_DENY)
                 return
             with turn.lock:
                 rec = turn.tools.get(call_id) if call_id else None
@@ -839,7 +932,7 @@ class OpenCodeBackend(ChatBackend):
             if not known:
                 # Entrée introuvable : ne JAMAIS laisser passer un appel non résolu (une reprise
                 # d'approbation pré-approuverait sinon n'importe quoi avec `{}`).
-                self._reply(sid, request_id, False, REFUSAL_UNRESOLVED)
+                self._send(turn, sid, request_id, False, REFUSAL_UNRESOLVED)
                 return
             tool, cinput = canonical_tool(name, inp, self._mcp_names)
             if call_id:
@@ -850,13 +943,13 @@ class OpenCodeBackend(ChatBackend):
                 turn.verdicts[call_id] = decision
             if decision == "pending":
                 turn.pending = True
-            self._reply(sid, request_id, decision == "allow", message or REFUSAL_DENY)
+            self._send(turn, sid, request_id, decision == "allow", message or REFUSAL_DENY)
         except BackendError:
             # Réponse impossible : le tour ne peut plus avancer, on l'interrompt proprement.
             ctx.cancelled.set()
         except Exception:  # noqa: BLE001 — jamais laisser l'outil en attente
             try:
-                self._reply(sid, request_id, False, REFUSAL_DENY)
+                self._send(turn, sid, request_id, False, REFUSAL_DENY)
             except Exception:  # noqa: BLE001
                 ctx.cancelled.set()
 

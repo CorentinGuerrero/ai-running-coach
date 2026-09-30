@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from arc_chat_backend import payload_hash, resolve_workspace_path  # noqa: E402
+
+ENGINE_ROOT = Path(__file__).resolve().parent.parent
 from coach_config import read_toml  # noqa: E402
 
 POLICY_FILE = "config/chat-policy.toml"
@@ -32,6 +34,13 @@ POLICY_FILE = "config/chat-policy.toml"
 # substitutions, échappement (`\` ferait diverger shlex et le vrai shell), `~` (expansion
 # du répertoire personnel), jokers et accolades (un joker contournerait la liste des secrets).
 SHELL_META = set(";|&$`><()\n\r\\~*?[]{}!#")
+# Entrée standard des scripts qui lisent du JSON (`[shell].stdin_scripts`, ex. arc_log.py) : deux
+# formes seulement, sans aucune expansion possible par le shell — une chaîne entre apostrophes
+# (rien n'est interprété entre ' ') ou un heredoc à délimiteur entre apostrophes (`<< 'EOF'`).
+STDIN_ECHO_RE = re.compile(r"^echo[ \t]+'(?P<body>[^']*)'[ \t]*\|[ \t]*(?P<cmd>[^\n\r]+)$")
+STDIN_HEREDOC_RE = re.compile(
+    r"^(?P<cmd>[^\n\r<]+?)[ \t]*<<[ \t]*'(?P<tag>[A-Za-z_][A-Za-z0-9_]*)'[ \t]*\n(?P<body>.*?)\n(?P=tag)[ \t]*\n?$",
+    re.S)
 
 # Un argument qui se termine ainsi est traité comme un chemin même sans « / ».
 PATH_SUFFIXES = (".md", ".json", ".jsonl", ".toml", ".db", ".sqlite", ".gpx", ".fit", ".csv", ".txt",
@@ -54,12 +63,13 @@ BRACE_MAX_DEPTH = 3
 DEFAULTS = {
     "fs": {
         "write_dirs": ["activities", "medical", "nutrition", "planning", "rapports", "gear"],
-        "secret_patterns": ["workspace.user.toml", ".env", "*.env", "*.token", ".garminconnect",
+        "secret_patterns": [".env", "*.env", "*.token", ".garminconnect",
                             "llm.env", "*.pem", "*.key"],
         # Dossiers où une recherche de contenu (grep, `pattern`) est permise, en plus de write_dirs.
         "search_dirs": ["resources", "skills", "agents", "templates", "docs"],
     },
-    "shell": {"allowed_prefixes": ["python3 scripts/arc_index.py", "python3 scripts/arc_log.py"]},
+    "shell": {"allowed_prefixes": ["python3 scripts/arc_index.py", "python3 scripts/arc_log.py"],
+              "stdin_scripts": ["scripts/arc_log.py"]},
     "web": {"fetch_domains": ["wttr.in", "overpass-api.de", "nominatim.openstreetmap.org"]},
     "mcp": {
         "servers": ["garmin", "intervals"],
@@ -121,8 +131,11 @@ def _has_wildcard(text: str) -> bool:
 class Policy:
     """Règles chargées ; `decide` est pur (aucun effet de bord, thread-safe)."""
 
-    def __init__(self, workspace: Path, rules: Optional[dict] = None):
+    def __init__(self, workspace: Path, rules: Optional[dict] = None, engine: Optional[Path] = None):
         self.workspace = Path(workspace).resolve()
+        # Le moteur (ce dépôt) : `install.sh` relie AGENTS.md, config/workspace.toml, agents/,
+        # skills/ et scripts/ du workspace vers lui. Lecture seule, jamais d'écriture.
+        self.engine = Path(engine).resolve() if engine else ENGINE_ROOT
         merged = {section: dict(values) for section, values in DEFAULTS.items()}
         for section, values in (rules or {}).items():
             if isinstance(values, dict):
@@ -131,6 +144,7 @@ class Policy:
         self.secret_patterns = _as_list(merged["fs"].get("secret_patterns"))
         self.search_dirs = _as_list(merged["fs"].get("search_dirs")) + list(self.write_dirs)
         self.shell_prefixes = _as_list(merged["shell"].get("allowed_prefixes"))
+        self.stdin_scripts = _as_list(merged["shell"].get("stdin_scripts"))
         self.shell_scripts = _script_rules(rules or {}) or {k: dict(v) for k, v in DEFAULT_SCRIPTS.items()}
         self.fetch_domains = [d.lower() for d in _as_list(merged["web"].get("fetch_domains"))]
         self.mcp_servers = [s.lower() for s in _as_list(merged["mcp"].get("servers"))]
@@ -188,16 +202,53 @@ class Policy:
         low = rel.casefold()
         return low == ".arc" or low.startswith(".arc/")
 
+    def _locate(self, raw: str) -> Optional[str]:
+        """Chemin LISIBLE → son nom logique relatif au workspace, sinon None.
+
+        Le chemin est pris tel qu'écrit (relatif au workspace, ou absolu sous le workspace ou
+        sous le moteur) ; sa cible réelle doit rester dans le workspace ou dans le moteur — un
+        lien du workspace vers le moteur (installation normale) est donc suivi, un lien vers
+        ailleurs (~/.ssh…) jamais. Secrets et `.arc/` refusés sur le nom ET sur la cible.
+        """
+        raw = str(raw)
+        if "\x00" in raw or raw.startswith("~"):
+            return None
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self.workspace / path
+        logical = Path(os.path.normpath(str(path)))
+        try:
+            real = logical.resolve()
+        except (OSError, RuntimeError):
+            return None
+        names = []
+        for root in (self.workspace, self.engine):
+            try:
+                names.append(logical.relative_to(root).as_posix())
+                break
+            except ValueError:
+                continue
+        if not names:
+            return None                          # ni dans le workspace ni dans le moteur
+        target = None
+        for root in (self.workspace, self.engine):
+            try:
+                target = real.relative_to(root).as_posix()
+                break
+            except ValueError:
+                continue
+        if target is None:
+            return None                          # lien qui sort vers ailleurs
+        for name in (names[0], target):
+            if name not in ("", ".") and (self._secret(name) or self._in_arc(name)):
+                return None
+        return names[0] if names[0] != "." else ""
+
     def _fs_read(self, tool_input: dict) -> str:
         raw = tool_input.get("path")
         if raw in (None, "", "."):
             return "allow"                       # racine du workspace (ls, glob)
-        rel = resolve_workspace_path(self.workspace, str(raw))
-        if rel is None or self._secret(rel):
-            return "deny"
-        if self._in_arc(rel):
-            return "deny"                        # index, sessions, approbations : jamais via le modèle
-        return "allow"
+        return "deny" if self._locate(str(raw)) is None else "allow"
 
     def _fs_write(self, tool_input: dict) -> str:
         rel = resolve_workspace_path(self.workspace, str(tool_input.get("path") or ""))
@@ -255,7 +306,7 @@ class Policy:
         globs = tool_input.get("glob")
         globs = [globs] if isinstance(globs, str) else (list(globs) if isinstance(globs, (list, tuple)) else [])
         raw = tool_input.get("path")
-        base = "" if raw in (None, "", ".") else (resolve_workspace_path(self.workspace, str(raw)) or "")
+        base = "" if raw in (None, "", ".") else (self._locate(str(raw)) or "")
         if tool_input.get("pattern") and not self._search_dir_ok(base):
             return "deny"                                   # grep : le contenu des fichiers serait lu
         for glob in globs:
@@ -317,8 +368,35 @@ class Policy:
 
     # -- shell : liste blanche par script et par option -------------------------------
 
+    def _stdin_command(self, command: str) -> Optional[str]:
+        """`echo '<json>' | cmd` ou `cmd << 'EOF' … EOF` → `cmd` si la forme est sûre, sinon None."""
+        match = STDIN_ECHO_RE.match(command)
+        if not match:
+            match = STDIN_HEREDOC_RE.match(command)
+            if not match:
+                return None
+            tag = match.group("tag")
+            # Une ligne égale au délimiteur DANS le corps fermerait le heredoc plus tôt : la suite
+            # serait exécutée comme des commandes. Refus.
+            if any(line.strip() == tag for line in match.group("body").split("\n")):
+                return None
+        return match.group("cmd").strip()
+
     def _shell(self, command: str) -> str:
         command = command.strip()
+        inner = self._stdin_command(command)
+        if inner is not None:
+            if any(ch in SHELL_META for ch in inner):
+                return "deny"
+            try:
+                words = shlex.split(inner)
+            except ValueError:
+                return "deny"
+            script = next((p.split()[-1] for p in self.shell_prefixes
+                           if p.split() and words[:len(p.split())] == p.split()), None)
+            if script is None or script not in self.stdin_scripts:
+                return "deny"
+            return self._shell(inner)
         if not command or any(ch in SHELL_META for ch in command):
             return "deny"
         try:

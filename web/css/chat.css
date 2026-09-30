@@ -187,3 +187,13 @@ a.file-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px
 .msg__text .md-table table { border-collapse: collapse; font-size: 0.86rem; min-width: 60%; }
 .msg__text .md-table th, .msg__text .md-table td { padding: 0.35rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; font-variant-numeric: tabular-nums; }
 .msg__text .md-table th { font-weight: 600; color: var(--ink-soft); border-bottom-color: var(--line-strong); }
+
+.msg__status { margin: 0.2rem 0 0.6rem; font-size: 0.84rem; color: var(--warn); }
+.msg__status::before { content: ""; display: inline-block; width: 0.45rem; height: 0.45rem; margin-right: 0.45rem; border-radius: 50%; background: currentColor; vertical-align: 0.1em; animation: blink 900ms steps(2) infinite; }
+@media (prefers-reduced-motion: reduce) { .msg__status::before { animation: none; } }
+
+/* Commentaires du coach pendant son travail, rangés dans la trace (voir foldNarration). */
+.trace .trace__note { list-style: none; margin: 0.2rem 0 0.4rem -1.4rem; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink-soft); }
+.trace .trace__note-text { font-size: 0.8rem; line-height: 1.5; }
+.trace .trace__note-text p { margin: 0 0 0.3rem; }
+.trace .trace__note-text p:last-child { margin-bottom: 0; }

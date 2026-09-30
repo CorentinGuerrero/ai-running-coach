@@ -35,7 +35,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from arc_chat_backend import (SYSTEM_ADDENDUM, BackendError, ChatBackend, TurnContext,
+from arc_chat_backend import (SYSTEM_ADDENDUM, system_addendum, BackendError, ChatBackend, TurnContext,
                               resolve_workspace_path)
 from arc_chat_tools import (REFUSAL_DENY, display_input, fs_list_input, gate, map_leanproxy, short,
                             summarize_tool, usd_to_eur)
@@ -272,7 +272,7 @@ class ClaudeBackend(ChatBackend):
         kwargs: dict = dict(
             cwd=str(self.workspace),
             setting_sources=["project"],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_ADDENDUM},
+            system_prompt={"type": "preset", "preset": "claude_code", "append": system_addendum(turn.ctx.language)},
             can_use_tool=can_use_tool,
             hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[pre_tool_use],
                                                    timeout=self._hook_timeout())]},
@@ -381,11 +381,13 @@ class ClaudeBackend(ChatBackend):
         if getattr(message, "parent_tool_use_id", None):
             return  # texte interne d'un sous-agent : non affiché
         event = getattr(message, "event", None) or {}
+        if event.get("type") == "content_block_start" and (event.get("content_block") or {}).get("type") == "text":
+            turn.text_part = getattr(turn, "text_part", 0) + 1       # nouveau bloc de texte
         if event.get("type") == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
                 turn.streamed_text = True
-                turn.ctx.emit("text_delta", {"text": delta["text"]})
+                turn.ctx.emit("text_delta", {"text": delta["text"], "part": f"b{getattr(turn, 'text_part', 0)}"})
 
     def _on_assistant(self, turn: _Turn, message: Any) -> None:
         top_level = not getattr(message, "parent_tool_use_id", None)
