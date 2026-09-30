@@ -143,7 +143,8 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
   `depuis` ← date de début, `(retirée)` ← statut retiré). Jamais d'association devinée ; sans
   réponse, le matériel n'est simplement pas attribué. Le total Garmin d'une paire qui précède
   votre suivi peut alimenter son `départ` (départ = total Garmin − kilomètres déjà comptés par vos
-  séances, jamais négatif : aucun double comptage).
+  séances, jamais négatif : aucun double comptage). Pour l'historique déjà dans le workspace, voir
+  [Rattraper le matériel de l'historique](#rattraper-le-materiel-de-lhistorique).
 - **Priorité d'attribution.** Votre déclaration en chat > matériel attaché par la montre
   à la séance (un seul `get_activity_gear` par séance **nouvelle**) > `(par défaut)`. Si Garmin
   dit A et que vous dites B, vous gagnez et le coach le signale une fois. Un matériel Garmin sans
@@ -163,6 +164,58 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
   `get_gear,get_activity_gear,add_gear_to_activity`. `/coach-doctor` (`gear_sync`) signale une liste
   blanche trop ancienne et les paires du profil sans `garmin:` — sans jamais contacter Garmin.
 - **Source intervals.icu.** Voir [Configuration Intervals.icu](intervals-setup.md#materiel-et-attribution-par-seance).
+
+## Rattraper le matériel de l'historique
+
+Le matériel attaché par la montre n'est attribué qu'aux séances **nouvelles** (`get_activity_gear` à la
+synchronisation). Un historique déjà dans `activities/` reste sans `gear_id` : la carte « Matériel » est vide
+alors que Garmin Connect connaît la paire de chaque séance. Le script `scripts/garmin_gear_backfill.py` (#145)
+les rattrape avec **un appel Garmin par paire** de chaussures (`get_gear_activities`), jamais un par séance.
+
+```bash
+# 1. Simulation (par défaut) : rien n'est écrit
+python3 scripts/garmin_gear_backfill.py
+# 2. Après relecture du rapport : écriture
+python3 scripts/garmin_gear_backfill.py --apply
+```
+
+Options : `--since AAAA-MM-JJ` (séances du workspace à partir de cette date), `--gear <uuid>` (une seule paire),
+`--all-shoes` (propose aussi les paires sans séance dans la période du workspace — les anciennes paires
+retirées, en `(retirée)`), `--json`, `--workspace`, `--tokens-dir`. Le script est idempotent : une seconde
+exécution ne change rien.
+
+- **Dépendance.** Comme `download_fit.py`, il utilise `garminconnect` et les jetons locaux (`~/.garminconnect`,
+  ou `GARMINTOKENS` de `.mcp.json`) : c'est la seule exception à « bibliothèque standard seule » ; il se relance
+  seul avec le Python de `garmin-mcp` (`GARMIN_PYTHON` pour en imposer un autre). La connexion Garmin peut prendre
+  une à deux minutes.
+- **Rapport de simulation.** Par paire : la puce `### Chaussures` proposée, le nombre de séances rattachées, les
+  km du workspace comparés au total Garmin ; puis les **conflits**, les séances **ambiguës**, les séances Garmin
+  **absentes** du workspace et le nombre de fichiers **sans `garmin_activity_id`** (non rattachables : déclarez la
+  paire dans le chat).
+- **Priorité athlète.** Une séance qui porte déjà un `gear_id` (déclaré en chat, ou attribué par une
+  synchronisation antérieure) n'est **jamais** écrasée : la divergence est seulement listée. Seul un
+  `gear_source: "garmin_unmapped"` sans `gear_id` est remplacé. Une paire `(ignorée)` n'est jamais attribuée ;
+  une séance revendiquée par **deux** paires chez Garmin est ambiguë et n'est attribuée à aucune.
+- **Puces proposées.** `- <nom> — depuis <date> — alerte N km — départ N km — id: <slug> — garmin: <uuid>
+  (retirée)` : `alerte` vient de `maximumMeters` (si > 0), `(retirée)` du statut Garmin, le nom de
+  `displayName`, à défaut `customMakeModel`, à défaut « Chaussure Garmin <uuid[:8]> ». Une puce existante avec le
+  même `garmin:` est réutilisée (son `gear_id` sert) et **jamais modifiée**. `(par défaut)` n'est jamais posé : le
+  rapport liste seulement les paires par défaut de Garmin.
+- **`départ` sans double comptage.** Seule une puce **nouvelle** en reçoit un : la somme des km Garmin des séances
+  de la paire **absentes du workspace** (identifiées par leur `activityId`). Celles déjà dans le workspace sont
+  comptées par leurs fichiers, donc jamais deux fois : km du workspace + départ = total Garmin. Le départ n'est pas
+  proposé (raison donnée au rapport) avec `--since`, si la liste Garmin est tronquée ou en erreur, ou si des fichiers
+  sans `garmin_activity_id` tombent le même jour qu'une séance Garmin absente.
+- **`--apply`.** Ajoute les puces manquantes sous `### Chaussures` (sous-section créée dans `## Matériel & lieux`
+  si absente), écrit `gear_id` + `gear_source: "garmin"` dans le bloc `arc` des séances (le reste du fichier est
+  conservé tel quel), valide chaque fichier avec le contrat (un fichier refusé est restauré) puis réindexe.
+- **Codes de sortie.** 0 = succès ; 1 = succès partiel (paire injoignable, fichier refusé) ; 2 = usage,
+  `garminconnect` absent ou authentification impossible ; 3 = `--apply` sans profil athlète.
+
+Le coach vous propose ce rattrapage **une fois**, en conversation seulement (jamais dans la synchronisation
+automatique), toujours en simulation d'abord et n'écrit qu'après votre « oui » sur le rapport. `/coach-doctor`
+(`gear_history`) signale, sans contacter Garmin, un historique riche en `garmin_activity_id` mais sans aucun
+`gear_id`.
 
 ## Authentification
 

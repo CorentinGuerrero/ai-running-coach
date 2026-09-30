@@ -43,6 +43,7 @@ n'apparaît jamais littéralement en sortie.)
 | `daily_sync_scheduled` | Tâche cron (Linux) ou LaunchAgent (macOS) du daily-sync ; en mode `watch`, dernier passage de `scripts/garmin_watch.py` | ℹ️ si non installé (choix valide) ; ⚠️ si le watcher est installé mais muet depuis plus de 3 intervalles |
 | `ntfy_configured` | Notifications push configurées, si activées | ℹ️ si désactivées, ⚠️ si mal configurées |
 | `gear_sync` | Synchronisation du matériel Garmin (#133) : la liste blanche `GARMIN_ENABLED_TOOLS` de `.mcp.json` contient `get_gear` et `get_activity_gear`, et les paires actives du profil portent un segment `garmin: <uuid>`. **Statique — le doctor n'appelle jamais Garmin** ; lister le matériel Garmin sans puce est fait par le coach (`get_gear`) | ⚠️ si la liste blanche est antérieure à #133 (relancer `./install.sh`), ℹ️ si des paires actives ne sont pas associées (ou liste blanche illisible en mode passerelle), ℹ️ sous la source intervals.icu |
+| `gear_history` | (#145) Historique sans matériel : au moins 5 séances avec `garmin_activity_id` et aucune avec `gear_id` (ℹ️, jamais ⚠️) — propose `python3 scripts/garmin_gear_backfill.py` (simulation). **Statique : aucun appel Garmin.** |
 
 Un ❌ fait échouer la commande (code de sortie non nul). Un ⚠️ ou un ℹ️ jamais —
 ce sont des dégradations connues, pas des pannes.
