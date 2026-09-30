@@ -897,6 +897,61 @@ class TestGearSync(InstallAsserts):
             self.assertEqual(self._check(sb)["status"], "ok")
 
 
+class TestGearHistory(InstallAsserts):
+    """#145 — `gear_history` : information STATIQUE (blocs `arc` de `activities/`, aucun appel Garmin) quand
+    beaucoup de séances portent un `garmin_activity_id` et aucune de `gear_id`."""
+
+    def _activities(self, sb, n, gear_on=0):
+        folder = sb.repo / "activities"
+        folder.mkdir(exist_ok=True)
+        for i in range(n):
+            extra = {"gear_id": "pegasus", "gear_source": "chat"} if i < gear_on else {}
+            block = {"arc": 1, "kind": "activity", "date": f"2026-03-{i + 1:02d}", "sport": "trail",
+                     "duration_s": 3600, "garmin_activity_id": 1000 + i, **extra}
+            (folder / f"2026-03-{i + 1:02d}_trail.md").write_text(f"# S\n\n```arc\n{json.dumps(block)}\n```\n")
+
+    def _check(self, sb):
+        proc = sb.script("coach_doctor.py", "--json", "--check", "gear_history",
+                         "--tokens-dir", str(_fresh_tokens_dir(sb)))
+        self.assertSucceeded(proc)
+        return _find(json.loads(proc.stdout), "gear_history")
+
+    def test_many_ids_no_gear_is_info_pointing_to_backfill(self):
+        with Sandbox() as sb:
+            self._activities(sb, 8)
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIn("8 séance(s) sur 8", check["message"])
+            self.assertIn("garmin_gear_backfill.py", check["fix"])
+
+    def test_one_declared_gear_id_does_not_silence_the_signal(self):
+        with Sandbox() as sb:
+            self._activities(sb, 8, gear_on=1)
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIn("7 séance(s) sur 8", check["message"])
+
+    def test_mostly_attributed_or_few_activities_is_ok(self):
+        with Sandbox() as sb:
+            self._activities(sb, 8, gear_on=5)     # 3/8 sans gear_id : sous le seuil de 50 %
+            self.assertEqual(self._check(sb)["status"], "ok")
+        with Sandbox() as sb:
+            self._activities(sb, 8, gear_on=4)     # exactement 50 % : pas « plus de la moitié »
+            self.assertEqual(self._check(sb)["status"], "ok")
+        with Sandbox() as sb:
+            self._activities(sb, 3)
+            self.assertEqual(self._check(sb)["status"], "ok")
+
+    def test_intervals_source_is_info_without_backfill_hint(self):
+        with Sandbox() as sb:
+            (sb.repo / "config").mkdir(exist_ok=True)
+            (sb.repo / "config/workspace.user.toml").write_text('[data]\nsource = "intervals"\n')
+            self._activities(sb, 8)
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIsNone(check["fix"])
+
+
 class TestJsonSchema(InstallAsserts):
     def test_schema_shape(self):
         with Sandbox() as sb:
@@ -910,7 +965,7 @@ class TestJsonSchema(InstallAsserts):
             expected_ids = {
                 "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
                 "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
-                "gear_sync",
+                "gear_sync", "gear_history",
                 "fit_reader",
             }
             self.assertEqual({c["id"] for c in payload["checks"]}, expected_ids)

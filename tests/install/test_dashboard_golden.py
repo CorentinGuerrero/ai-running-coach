@@ -245,6 +245,11 @@ def _endpoint_urls(server: Server) -> dict:
     if decisions:
         urls["/api/decision/{first}"] = f"/api/decision/{decisions[0]['id']}"
 
+    # `/api/gear/<id>` (#147) : routée à part (regex dans `Handler._api`), hors de `ROUTES` — une
+    # chaussure à alerte du profil synthétique et un objet d'équipement (kit compris).
+    urls["/api/gear/{shoe}"] = "/api/gear/adizero-sl"
+    urls["/api/gear/{equipment}"] = "/api/gear/poche-eau"
+
     return urls
 
 

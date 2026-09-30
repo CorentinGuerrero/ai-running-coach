@@ -124,6 +124,41 @@ def _module_available(name: str) -> bool:
         return False
 
 
+def relaunch_candidates(garmin_python=None, garmin_mcp_exe=None, home=None, tool: str = "garmin-mcp") -> list[str]:
+    """Interpréteurs candidats (ordre de priorité) : la variable d'override (`GARMIN_PYTHON` /
+    `INTERVALS_PYTHON`), le venv du binaire `tool` du PATH, puis l'emplacement uv par défaut.
+    `python3` ET `python` à chaque fois (sur Linux l'un est un lien vers l'autre)."""
+    candidates: list[str] = []
+    if garmin_python:
+        candidates.append(os.path.expanduser(garmin_python))
+    if garmin_mcp_exe:
+        bindir = os.path.dirname(os.path.realpath(garmin_mcp_exe))
+        candidates += [os.path.join(bindir, n) for n in ("python3", "python")]
+    base = os.path.join(home or os.path.expanduser("~"), f".local/share/uv/tools/{tool}/bin")
+    candidates += [os.path.join(base, n) for n in ("python3", "python")]
+    return candidates
+
+
+def is_current_interpreter(candidate: str, prefix: str = None, executable: str = None) -> bool:
+    """Le candidat est-il l'interpréteur courant ? Un venv se reconnaît à son dossier (`pyvenv.cfg` à côté de
+    `bin/`), PAS au `realpath` de son python : sur Linux `bin/python` d'un venv uv est un lien vers
+    `/usr/bin/python3.x`, donc identique au python système une fois résolu — alors que les deux n'ont pas les
+    mêmes paquets. Sans `pyvenv.cfg`, repli sur la comparaison des chemins résolus."""
+    prefix = prefix or sys.prefix
+    executable = executable or sys.executable
+    venv_dir = os.path.dirname(os.path.dirname(os.path.abspath(candidate)))
+    if os.path.isfile(os.path.join(venv_dir, "pyvenv.cfg")):
+        return os.path.realpath(venv_dir) == os.path.realpath(prefix)
+    return os.path.realpath(candidate) == os.path.realpath(executable)
+
+
+def pick_relaunch_candidate(candidates, prefix: str = None, executable: str = None) -> str | None:
+    for py in candidates:
+        if os.path.exists(py) and not is_current_interpreter(py, prefix, executable):
+            return py
+    return None
+
+
 def _auto_relaunch(argv: list[str], source: str = "garmin") -> None:
     """Relance ce script avec le python de l'outil MCP de `source` si le module requis
     (`garminconnect` pour Garmin, `fitparse` pour Intervals.icu) est absent."""
@@ -133,23 +168,16 @@ def _auto_relaunch(argv: list[str], source: str = "garmin") -> None:
 
     # Ordre : --python (via la variable d'override), l'outil du PATH, puis l'emplacement
     # uv par défaut — ~/.local/bin est souvent absent du PATH d'une session SSH/cron.
-    candidates: list[str] = []
-    if os.environ.get(spec["env"]):
-        candidates.append(os.path.expanduser(os.environ[spec["env"]]))
-    exe = shutil.which(spec["tool"])
-    if exe:
-        real = os.path.realpath(exe)  # symlink uv -> bin/<outil>
-        candidates += [os.path.join(os.path.dirname(real), n) for n in ("python3", "python")]
-    candidates.append(os.path.expanduser(f"~/.local/share/uv/tools/{spec['tool']}/bin/python3"))
     # Une seule relance : un interpréteur candidat qui n'a pas non plus le module ne doit
     # jamais relancer à son tour l'interpréteur d'origine (boucle infinie).
-    if os.environ.get(_RELAUNCHED_ENV):
-        candidates = []
-    for py in candidates:
-        if os.path.exists(py) and os.path.realpath(py) != os.path.realpath(sys.executable):
-            r = subprocess.run([py, os.path.abspath(__file__)] + argv,
-                               env={**os.environ, _RELAUNCHED_ENV: "1"})
-            sys.exit(r.returncode)
+    py = None
+    if not os.environ.get(_RELAUNCHED_ENV):
+        py = pick_relaunch_candidate(relaunch_candidates(
+            os.environ.get(spec["env"]), shutil.which(spec["tool"]), tool=spec["tool"]))
+    if py:
+        r = subprocess.run([py, os.path.abspath(__file__)] + argv,
+                           env={**os.environ, _RELAUNCHED_ENV: "1"})
+        sys.exit(r.returncode)
 
     print(
         f"ERREUR : module '{spec['module']}' introuvable dans cet interpréteur.\n{spec['fix']}",

@@ -516,6 +516,9 @@ article.prose { background: var(--surface); border: 1px solid var(--line); borde
 .empty { padding: 2rem 1.5rem; text-align: center; background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius); }
 .empty h3 { font-family: var(--display); }
 .empty p { color: var(--ink-soft); max-width: 55ch; margin: 0 auto; }
+.empty p + p, .empty pre + p { margin-top: 0.8rem; }
+.empty__code { text-align: left; background: var(--surface-2); padding: 0.8rem 1rem; border-radius: var(--radius-sm); overflow-x: auto; max-width: 100%; font-size: 0.82rem; margin: 0.8rem auto; }
+.empty__code code { background: none; padding: 0; }
 
 /* ---------------------------------------------------------------- chargement */
 

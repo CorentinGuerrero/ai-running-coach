@@ -81,6 +81,7 @@ agents ou par les commandes courtes plutôt que par un skill dédié :
 | `arc_race_debrief.py` | `coach`, `course-strategist` | Débrief post-course plan vs réalisé, par segment (#61) |
 | `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60) |
 | `arc_trail_shape.py` | `coach`, `/race` | Score Trail Shape, préparation à l'objectif actif (#63) |
+| `garmin_gear_backfill.py` | `coach` (interactif, sur accord), à la main | Rattrape le matériel Garmin sur l'historique (#145) : simulation par défaut, `--apply` ; dépend de `garminconnect` (via l'environnement garmin-mcp), voir [Rattraper le matériel de l'historique](garmin-setup.md#rattraper-le-materiel-de-lhistorique) |
 
 ### Sous-commandes de `arc_index.py`
 

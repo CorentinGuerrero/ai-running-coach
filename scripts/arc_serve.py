@@ -315,6 +315,16 @@ class Store:
         with self.lock:
             return I.gear_inspections(self.conn, None, today)
 
+    def gear_detail(self, gear_id: str, today: date):
+        """Réutilise `arc_index.gear_detail` (#147) — fiche d'une paire/d'un objet, `None` si inconnu."""
+        with self.lock:
+            return I.gear_detail(self.conn, gear_id, today)
+
+    def gear_of_activity(self, activity_id: int, today: date) -> dict:
+        """Réutilise `arc_index.gear_of_activity` (#147) — chaussure attribuée + équipement de la séance."""
+        with self.lock:
+            return I.gear_of_activity(self.conn, activity_id, today)
+
     def performance_index(self, today: date) -> dict:
         """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
         `performance-index`. `today` : recalcule l'avertissement de date
@@ -416,6 +426,7 @@ def api_summary(store: Store, q: dict) -> dict:
         "gear": store.gear_mileage(today),
         "equipment": store.equipment_usage(today),
         "gear_inspections": store.gear_inspections(today),
+        "gear_ignored": store.rows("SELECT gear_id, name FROM gear WHERE ignored = 1 ORDER BY name, gear_id"),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,
@@ -649,6 +660,7 @@ def api_activity(store: Store, activity_id: int):
             "descent": api_activity_descent(store, activity_id),
             "durability": api_activity_durability(store, activity_id),
             "energy": api_activity_energy(store, activity_id),
+            "gear": store.gear_of_activity(activity_id, _today(store)),
             "body_html": render_markdown(I.C.body_after_block(body))}
 
 
@@ -1298,6 +1310,16 @@ def api_decisions(store: Store, q: dict) -> dict:
             "trigger": trigger, "outcome": outcome, "days": days, "active": active}
 
 
+def api_gear(store: Store, gear_id: str):
+    """Fiche d'une paire ou d'un objet d'équipement (#147) : `/api/gear/<id>`. `<id>` est un slug
+    (`arc_contract.GEAR_ID_RE`) — tout autre motif (dont `..`, `/`, majuscules) rend `None` (404),
+    sans distinction avec un identifiant inconnu. Bâtie sur `arc_index.gear_detail` (attribution
+    unique `arc_metrics.attribute_gear`), jamais sur une seconde règle."""
+    if not gear_id or not I.C.GEAR_ID_RE.match(gear_id):
+        return None
+    return store.gear_detail(gear_id, _today(store))
+
+
 def api_decision(store: Store, decision_id: str):
     """Détail d'une décision (#55) : `/api/decision/<id>` — `<id>` est le nom du
     fichier SANS extension (`DECISION_ID_RE`, jamais un chemin). Recherché par
@@ -1486,12 +1508,15 @@ class Handler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/activity/(\d+)", url.path)
             segment_match = re.fullmatch(r"/api/climb-segment/(\d+)", url.path)
             decision_match = re.fullmatch(r"/api/decision/([^/]+)", url.path)
+            gear_match = re.fullmatch(r"/api/gear/([^/]+)", url.path)
             if match:
                 payload = api_activity(self.store, int(match.group(1)))
             elif segment_match:
                 payload = api_climb_segment(self.store, int(segment_match.group(1)))
             elif decision_match:
                 payload = api_decision(self.store, decision_match.group(1))
+            elif gear_match:
+                payload = api_gear(self.store, gear_match.group(1))
             elif url.path in ROUTES:
                 payload = ROUTES[url.path](self.store, q)
             else:
