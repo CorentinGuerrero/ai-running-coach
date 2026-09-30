@@ -9,11 +9,14 @@ vit dans `skills/fit-download/scripts/download_fit.py`, qui l'importe aussi.
 
 ## Où vivent les données brutes
 
-Chemin canonique : `activities/fit/<garmin_activity_id>.json`, un objet JSON
-`{"activity_id": <int>, "records": [...]}` (le générateur synthétique,
-`tests/lib/synthetic.py::_write_samples`, y ajoute une clé `truth` ignorée ici).
-Ce dossier est une donnée **brute et jetable** — reconstruisible à tout moment
-depuis les fichiers FIT réels de Garmin — au même titre que `.arc/` : il n'est
+Chemin canonique : `activities/fit/<id>.json`, un objet JSON
+`{"activity_id": <id>, "records": [...]}` — `<id>` est le `garmin_activity_id`
+(entier) d'une séance Garmin, ou l'`intervals_activity_id` (chaîne `i<chiffres>`,
+#68) d'une séance synchronisée depuis Intervals.icu (voir `parse_activity_ref`).
+Le générateur synthétique (`tests/lib/synthetic.py::_write_samples`) y ajoute une
+clé `truth`, ignorée ici. Ce dossier est une donnée **brute et jetable** —
+reconstruisible à tout moment depuis les fichiers FIT réels (Garmin Connect ou
+Intervals.icu, `skills/fit-download`) — au même titre que `.arc/` : il n'est
 **jamais versionné**. Le dépôt moteur l'exclut déjà via le motif racine
 `/activities/` de `.gitignore` ; pour un workspace privé versionné séparément
 (`docs/workspace.md`), `activities/fit/` reçoit son propre marqueur
@@ -31,8 +34,9 @@ FIT ne sont qu'une donnée dérivée qui permet des KPI plus fins (zones #43, GA
 KPI. Symétriquement, un FIT ingéré avant que le Markdown de la séance n'existe
 encore (téléchargement puis synchronisation, ou ordre inverse d'un run
 `daily-sync`) n'est PAS perdu : voir `arc_index.py` — les échantillons sont
-stockés sous leur `garmin_activity_id`, indépendamment de l'existence d'une
-ligne `activity`, et se rattachent d'eux-mêmes dès qu'elle apparaît.
+stockés sous leur identifiant externe (`garmin_activity_id` ou
+`intervals_activity_id`), indépendamment de l'existence d'une ligne `activity`, et
+se rattachent d'eux-mêmes dès qu'elle apparaît.
 
 ## Deux formats d'entrée acceptés par `normalise_records`
 
@@ -172,10 +176,15 @@ l'affaire exclusive de `download_fit.py`, jamais une dépendance de l'index.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Union
 
 DEFAULT_RESOLUTION_S = 5
+
+# Identifiant Intervals.icu d'une activité importée depuis un fichier (#68) : « i » +
+# chiffres, ex. `i123456789` — voir `parse_activity_ref`.
+INTERVALS_ID_RE = re.compile(r"^i\d+$")
 
 # Saut minimal (m) entre une plage d'altitude à 0,0 m et la mesure valide voisine pour
 # la traiter en valeur sentinelle — voir ASSUMPTIONS["zero_altitude"].
@@ -213,7 +222,7 @@ _TIMESTAMP_FORMATS = (
 )
 
 ASSUMPTIONS = {
-    "canonical_path": "Échantillons bruts : activities/fit/<garmin_activity_id>.json, "
+    "canonical_path": "Échantillons bruts : activities/fit/<garmin_activity_id | intervals_activity_id>.json, "
                        "{'activity_id', 'records'} — jetable, jamais versionné (voir docstring du module).",
     "cadence_doubling": "Le champ FIT `cadence` d'une séance à pied (course, marche, randonnée — "
                          "CADENCE_DOUBLING_SPORTS) compte les foulées d'UN pied/min ; cadence_spm = "
@@ -525,10 +534,33 @@ def downsample(records: Sequence[dict], resolution_s: int = DEFAULT_RESOLUTION_S
     return out
 
 
-def sample_file_activity_id(path) -> Optional[int]:
-    """`garmin_activity_id` porté par un chemin canonique `<id>.json` (nom de fichier).
+def parse_activity_ref(value) -> Optional[Union[int, str]]:
+    """Identifiant externe d'une séance : un entier (`garmin_activity_id`) ou une
+    chaîne `i<chiffres>` (`intervals_activity_id`, #68). Accepte un entier, ou une
+    chaîne de chiffres (→ `int`) ou de la forme `i123` (→ `str`, inchangée). `None`
+    pour tout le reste (booléen, vide, forme inconnue) — jamais deviné.
 
-    `None` si le nom de fichier n'est pas un entier — appelant alors replié sur la
-    clé `activity_id` du contenu JSON (voir `arc_index.ingest_samples`)."""
+    Les deux espaces ne se chevauchent pas : le préfixe `i` distingue sans ambiguïté
+    un identifiant Intervals.icu d'un identifiant Garmin, dans un nom de fichier
+    (`activities/fit/i123456789.json`) comme en argument de CLI."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+    return value if INTERVALS_ID_RE.match(value) else None
+
+
+def sample_file_activity_id(path) -> Optional[Union[int, str]]:
+    """Identifiant de séance porté par un chemin canonique `<id>.json` (nom de fichier) :
+    entier Garmin (`24070286912.json`) ou chaîne Intervals.icu (`i123456789.json`),
+    voir `parse_activity_ref`.
+
+    `None` si le nom de fichier n'a aucune de ces deux formes — appelant alors replié
+    sur la clé `activity_id` du contenu JSON (voir `arc_index.ingest_samples`)."""
     stem = path.stem if hasattr(path, "stem") else path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    return int(stem) if stem.isdigit() else None
+    return parse_activity_ref(stem)

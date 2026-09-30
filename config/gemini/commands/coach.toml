@@ -298,9 +298,8 @@ one short alert line naming plausible causes WITHOUT asserting a single one
 as certain — optical wrist HR sensor, heat, cardiac drift, walking segments
 misclassified as running, or a stale/incorrect athlete weight
 (`weight_source`, check it). When `model_kcal` is `null` (no FIT ingested,
-sport outside the run family, no `garmin_activity_id` — notably every
-session at `[data].source = "intervals"`, #68: no FIT is ever available from
-that source), never invent a figure: at most a half-line with the `reason`,
+sport outside the run family, no external activity id, or an intervals.icu
+activity imported from Strava — no FIT exists for those), never invent a figure: at most a half-line with the `reason`,
 or nothing at `brief` — same discipline as the other FIT KPIs above.
 
 Persist only what a command actually returned into that day's

@@ -31,8 +31,10 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   pas un score calculé — voir AGENTS.md). Le serveur MCP interrogé est alors
   `intervals`, pas `garmin` ; l'activité persistée porte `intervals_activity_id`
   (chaîne) au lieu de `garmin_activity_id` (entier), et omet HRR/`splits`
-  (aucun équivalent). Aucun échantillon FIT téléchargé (étape 2 ci-dessous
-  sautée entièrement — Garmin uniquement). **Marqueur « pas encore
+  (aucun équivalent). L'étape 2 (échantillons FIT) s'applique aussi, avec
+  l'`intervals_activity_id` de la séance (`download_fit.py` lit la source dans
+  `[data].source`) ; une activité importée depuis Strava y sort `INDISPONIBLE` —
+  ni un échec ni une alerte, juste une séance sans KPI fins. **Marqueur « pas encore
   synchronisé » (`garmin-sync-efficiency`, règle 1a) : c'est l'absence de
   `intervals_activity_id`, pas de `garmin_activity_id`, qui compte ici** — un
   fichier `/log` déjà présent pour une date, sans cet identifiant, reste « pas
@@ -121,11 +123,11 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    > alert such as low HRV, poor sleep, HRR missing).
 2. **Échantillons FIT (#42, best-effort)** : pour chaque activité running/trail dont un
    fichier a été créé à l'étape 1, télécharger son FIT : `python3
-   skills/fit-download/scripts/download_fit.py <garmin_activity_id> --json` (sans
+   skills/fit-download/scripts/download_fit.py <garmin_activity_id | intervals_activity_id> --json` (sans
    `--output-dir` : la copie normalisée canonique doit atterrir dans `activities/fit/`
    du workspace pour être ingérée à l'étape suivante). **Best-effort et non bloquant** :
-   un échec (tokens `garminconnect` absents/expirés, `fitparse` non installé, FIT
-   indisponible côté Garmin) ne doit **jamais** faire échouer la synchronisation ni
+   un échec (tokens `garminconnect` absents/expirés, clé API intervals.icu refusée,
+   `fitparse` non installé, FIT indisponible côté source) ne doit **jamais** faire échouer la synchronisation ni
    apparaître comme `ERREUR :` — seulement contribuer au segment « FIT non téléchargé
    (n séance(s)) » de la ligne `Alerte :` unique (voir plus bas) si au moins un
    téléchargement a échoué. Ignorer silencieusement les sports sans profil FIT utile

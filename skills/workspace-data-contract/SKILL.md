@@ -532,7 +532,7 @@ de la clé du bloc :
 **Cette copie Markdown est un instantané narratif, jamais la source de
 vérité.** `scripts/arc_index.py` calcule sa PROPRE version de ces mêmes
 grandeurs à chaque passage (`index_workspace`), directement depuis les
-échantillons FIT ingérés (`activities/fit/<garmin_activity_id>.json`) — dans
+échantillons FIT ingérés (`activities/fit/<garmin_activity_id | intervals_activity_id>.json`) — dans
 les colonnes dérivées `activity.gap_pace_s_km`/`decoupling_pct`/`ef_whole`/
 `best_climb_vam_elapsed_m_h` et la table `hr_zone_time`. **La valeur de
 l'index fait TOUJOURS foi** pour le tableau de bord, `arc_index.py` et toute

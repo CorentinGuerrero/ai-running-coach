@@ -1498,12 +1498,12 @@ function energySection(energy, noFitSamples) {
 
 // Libellés français, indexés sur `reason_code` — jamais une raison technique
 // (nom de module, de table, de story) affichée telle quelle à l'athlète (revue
-// de code : `no_garmin_id`/`no_row` mentionnaient `garminconnect`/
+// de code : `no_activity_id`/`no_row` mentionnaient `garminconnect`/
 // `activity_energy` dans le texte serveur, du jargon interne). `reason` (texte
 // serveur, `arc_index._energy_reason_for_missing_row`) reste le repli si un
 // `reason_code` futur n'a pas encore son libellé ici.
 const ENERGY_REASON_LABEL = {
-  no_garmin_id: "séance sans donnée Garmin (par exemple synchronisée depuis une autre source) : le modèle a besoin "
+  no_activity_id: "séance sans identifiant de montre (saisie manuelle ?) : le modèle a besoin "
     + "des mesures fines de la montre, indisponibles ici.",
   no_samples: "aucun échantillon FIT ingéré pour cette séance.",
   no_row: "dépense énergétique modèle indisponible pour cette séance.",

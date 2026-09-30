@@ -1328,7 +1328,7 @@ class TestGearSweatFuelIndex(Workspace):
         self.assertIsNone(rate)   # 4.5 l/h > SWEAT_RATE_PLAUSIBLE_L_H[1] (4.0)
 
     def test_schema_version_bumped_forces_rebuild(self):
-        self.assertEqual(I.SCHEMA_VERSION, 30)
+        self.assertEqual(I.SCHEMA_VERSION, 31)
 
     def test_schema_version_28_adds_equipment_table_and_gear_ids_column(self):
         """#134 : table `equipment` + colonne `activity.gear_ids` — une base d'avant est reconstruite."""
@@ -1360,6 +1360,26 @@ class TestGearSweatFuelIndex(Workspace):
         conn = I.open_db(self.ws, str(db_path))
         columns = {row[1] for row in conn.execute("PRAGMA table_info(activity_sample)").fetchall()}
         self.assertIn("covered_s", columns)
+        conn.close()
+
+    def test_schema_version_31_adds_intervals_id_to_sample_tables(self):
+        """FIT Intervals.icu (#68) : `activity_sample` et `sample_file` gagnent
+        `intervals_activity_id` — une base de version 30 (#139, `covered_s` mais sans cette
+        colonne) doit être reconstruite avec, sinon l'ingestion d'un
+        `activities/fit/i<chiffres>.json` échouerait avec « no such column »."""
+        db_path = self.tmp / "legacy30.db"
+        legacy = sqlite3.connect(str(db_path))
+        legacy.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '30');"
+            "CREATE TABLE activity_sample (garmin_activity_id INTEGER, source_path TEXT, t_s REAL, covered_s REAL);"
+        )
+        legacy.commit()
+        legacy.close()
+        conn = I.open_db(self.ws, str(db_path))
+        for table in ("activity_sample", "sample_file"):
+            columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            self.assertIn("intervals_activity_id", columns, table)
         conn.close()
 
     def test_schema_version_25_adds_energy_table_and_bmr_column(self):

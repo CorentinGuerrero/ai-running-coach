@@ -67,7 +67,7 @@ Certains skills incluent des scripts Python, dans leur propre dossier :
 | `analyze_gpx.py` | gpx-analysis | stdlib uniquement |
 | `compare_course.py` | course-comparison | stdlib uniquement |
 | `analyze_session_parts.py` | session-parts-analyzer | stdlib uniquement |
-| `download_fit.py` | fit-download | `garminconnect` + `fitparse` (via l'environnement garmin-mcp) |
+| `download_fit.py` | fit-download | `garminconnect` + `fitparse` (environnement garmin-mcp) ; Intervals.icu : `fitparse` (environnement intervals-icu-mcp) |
 | `coach_setup.py` | coach-setup | stdlib uniquement |
 | `coach_doctor.py` | coach-doctor | stdlib uniquement |
 

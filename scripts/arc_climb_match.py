@@ -80,6 +80,7 @@ Stdlib uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import math
+import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # Tolérance de position (#49, critère d'acceptation : « robuste aux petites variations de
@@ -139,6 +140,44 @@ EARTH_RADIUS_M = 6371000.0
 # d'un compteur séquentiel (voir ASSUMPTIONS["segment_id"]). Marge large (une activité ne
 # détecte jamais des milliers de montées : gain minimal 50 m, `arc_climb.MIN_CLIMB_GAIN_M`).
 SEGMENT_ID_CLIMB_MULTIPLIER = 10_000
+
+# Graine d'une séance Intervals.icu (#68) : son identifiant `i<chiffres>` n'est pas un
+# entier — ses chiffres sont décalés dans un espace DISJOINT des identifiants Garmin
+# (~2·10¹⁰ aujourd'hui, loin des 5·10¹¹), toujours positif (la route
+# `/api/climb-segment/<id>` n'accepte que des chiffres) et, une fois multiplié par
+# `SEGMENT_ID_CLIMB_MULTIPLIER`, sous `Number.MAX_SAFE_INTEGER` (≈ 9·10¹⁵) pour que le
+# tableau de bord (JavaScript) le manipule sans perte de précision.
+# Alternative écartée pour garder ce changement local : un identifiant de segment
+# TEXTE (ex. `"i123456789-1"`), sans décalage ni borne — mais `climb_segment.id` est
+# un INTEGER dans la base, l'API (`/api/climb-segment/<chiffres>`), le tableau de bord,
+# le CLI (`--segment`) et les liens `#/montee/<id>` déjà mémorisés. À reconsidérer
+# dans une évolution dédiée si un troisième espace d'identifiants apparaît.
+INTERVALS_SEED_OFFSET = 500_000_000_000
+# Plus grande graine dont les identifiants de segment (`graine × SEGMENT_ID_CLIMB_MULTIPLIER
+# + indice`) restent sous `Number.MAX_SAFE_INTEGER` (2⁵³ − 1) — au-delà, le tableau de bord
+# arrondirait silencieusement l'identifiant. Chiffres Intervals.icu admis : < ~4·10¹¹.
+MAX_SEGMENT_SEED = (2 ** 53 - 1) // SEGMENT_ID_CLIMB_MULTIPLIER - 1
+_INTERVALS_ID_RE = re.compile(r"^i(\d+)$")   # même forme que `arc_samples.INTERVALS_ID_RE`
+
+
+def segment_seed(ref) -> int:
+    """Graine entière de `climb_segment.id` pour l'identifiant externe d'une séance :
+    le `garmin_activity_id` tel quel, ou `INTERVALS_SEED_OFFSET + chiffres` pour un
+    `intervals_activity_id` (`i123456789` → 500 123 456 789) — voir ASSUMPTIONS["segment_id"].
+    `ValueError` sur un identifiant mal formé ou une graine au-delà de `MAX_SEGMENT_SEED` :
+    jamais un identifiant faux produit en silence."""
+    if isinstance(ref, str):
+        match = _INTERVALS_ID_RE.match(ref)
+        if not match:
+            raise ValueError(f"identifiant Intervals.icu invalide : {ref!r} (attendu « i » + chiffres)")
+        seed = INTERVALS_SEED_OFFSET + int(match.group(1))
+    else:
+        seed = int(ref)
+    if not 0 <= seed <= MAX_SEGMENT_SEED:
+        raise ValueError(f"graine de segment hors bornes pour {ref!r} : {seed} (max {MAX_SEGMENT_SEED}, "
+                         "Number.MAX_SAFE_INTEGER côté tableau de bord)")
+    return seed
+
 
 ASSUMPTIONS = {
     "reuse": (
@@ -214,9 +253,11 @@ ASSUMPTIONS = {
     ),
     "segment_id": (
         "`climb_segment.id` (#49, revue de code, BLOQUANT) = "
-        "`garmin_activity_id_de_la_première_occurrence × SEGMENT_ID_CLIMB_MULTIPLIER + "
+        "`graine_de_la_première_occurrence × SEGMENT_ID_CLIMB_MULTIPLIER + "
         "index_de_la_montée_dans_cette_activité` (1-based, `arc_climb.detect_climbs` "
-        "l'attribue déjà) — JAMAIS un compteur séquentiel assigné dans l'ordre de "
+        "l'attribue déjà) — graine = `garmin_activity_id`, ou `INTERVALS_SEED_OFFSET + "
+        "chiffres de l'intervals_activity_id` pour une séance Intervals.icu (#68, "
+        "`segment_seed` : espace disjoint, jamais de collision avec un id Garmin) — JAMAIS un compteur séquentiel assigné dans l'ordre de "
         "traitement des activités (bug corrigé : avec un compteur, indexer une activité "
         "plus ANCIENNE que celles déjà connues décalait l'id de TOUS les segments créés "
         "après elle dans l'ordre chronologique, même sans aucun rapport avec la nouvelle "
@@ -607,11 +648,13 @@ class ClimbSegmentIndex:
     def add(self, candidate: dict) -> dict:
         """Enregistre `candidate` comme un NOUVEAU segment (aucun appariement trouvé) et le
         rend. `id` déterministe (voir ASSUMPTIONS["segment_id"]) : `candidate` DOIT porter
-        `garmin_activity_id` et `climb_idx` (index 1-based de cette montée dans son
+        `segment_seed` (`segment_seed(ref)`, #68) — ou, forme historique,
+        `garmin_activity_id` — et `climb_idx` (index 1-based de cette montée dans son
         activité, `arc_climb.detect_climbs` l'attribue déjà) — jamais un compteur
         séquentiel."""
+        seed = candidate["segment_seed"] if "segment_seed" in candidate else candidate["garmin_activity_id"]
         segment = {
-            "id": candidate["garmin_activity_id"] * SEGMENT_ID_CLIMB_MULTIPLIER + candidate["climb_idx"],
+            "id": seed * SEGMENT_ID_CLIMB_MULTIPLIER + candidate["climb_idx"],
             "start_lat": candidate.get("start_lat"), "start_lon": candidate.get("start_lon"),
             "summit_lat": candidate.get("end_lat"), "summit_lon": candidate.get("end_lon"),
             "mid_lat": candidate.get("mid_lat"), "mid_lon": candidate.get("mid_lon"),
