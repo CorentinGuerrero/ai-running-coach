@@ -1038,6 +1038,7 @@ la [machine coach](headless.md) ou [derrière votre reverse proxy](docker.md).
 ![Détail d'une séance sur téléphone](../assets/dashboard/mobile-seance.webp){ width="260" }
 ![Trail Shape sur téléphone](../assets/dashboard/mobile-trail-shape.webp){ width="260" }
 ![Matériel sur téléphone](../assets/dashboard/mobile-materiel.webp){ width="260" }
+![Carte Foulée sur téléphone](../assets/dashboard/mobile-foulee.webp){ width="260" }
 
 </div>
 
