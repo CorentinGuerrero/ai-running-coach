@@ -213,7 +213,7 @@ for name, spec in servers.items():
 
 permission.update({
     "edit": {"*": "deny", "activities/**": "allow", "medical/**": "allow",
-             "nutrition/**": "allow", "planning/**": "allow", "rapports/**": "allow"},
+             "nutrition/**": "allow", "planning/**": "allow", "rapports/**": "allow", "gear/**": "allow"},
     "bash": "deny", "webfetch": "deny", "websearch": "deny",
     "external_directory": "deny", "task": "allow", "skill": "allow",
 })
@@ -955,7 +955,7 @@ main() {
             python3 "$ARC_ENGINE_ROOT/scripts/arc_index.py" --validate "$f" >>"$LOG_FILE" 2>&1 \
                 || invalid="$invalid ${f#"$ARC_WORKSPACE"/}"
         done < <(find "$ARC_WORKSPACE/activities" "$ARC_WORKSPACE/medical" "$ARC_WORKSPACE/nutrition" \
-                      "$ARC_WORKSPACE/planning" "$ARC_WORKSPACE/rapports" -name '*.md' -newer "$run_marker" 2>/dev/null)
+                      "$ARC_WORKSPACE/planning" "$ARC_WORKSPACE/rapports" "$ARC_WORKSPACE/gear" -name '*.md' -newer "$run_marker" 2>/dev/null)
         if [[ -n "$invalid" ]]; then
             warn "Fichiers hors contrat après le run :$invalid"
             resume="$resume

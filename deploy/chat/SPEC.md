@@ -145,7 +145,7 @@ constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-
 `decide(tool, input) -> "allow" | "ask" | "deny"` on canonical names:
 - `fs.read`, `fs.list`: allow inside the workspace, deny outside and for secret-looking
   paths (`config/workspace.user.toml`, `.env`, `*.token`, `.garminconnect`).
-- `fs.write`: allow only under `activities/ medical/ nutrition/ planning/ rapports/`
+- `fs.write`: allow only under `activities/ medical/ nutrition/ planning/ rapports/ gear/`
   (+ `.arc/chat/` never through the model); deny elsewhere.
 - `shell`: allow only commands matching an allowlisted script prefix
   (`python3 scripts/arc_index.py`, `python3 scripts/arc_log.py`,

@@ -187,9 +187,9 @@ fournisseur :
 | Action | Règle |
 |---|---|
 | Lire le workspace, lire Garmin / Intervals.icu | autorisé (jamais les fichiers de secrets) |
-| Écrire dans `activities/ medical/ nutrition/ planning/ rapports/` | autorisé |
+| Écrire dans `activities/ medical/ nutrition/ planning/ rapports/ gear/` | autorisé |
 | Écrire vers Garmin / Intervals.icu (planifier, supprimer, téléverser…) | **votre accord à chaque fois** |
-| Scripts du projet (`arc_index.py`, `arc_log.py`…) | autorisé, liste fermée **et options fermées** : chaque script n'accepte que ses options déclarées dans `config/chat-policy.toml`, et tout chemin doit rester dans le workspace (jamais absolu, `~`, `..`, secret ni `.arc/`) ; les sorties ne s'écrivent que sous `activities/ medical/ nutrition/ planning/ rapports/` |
+| Scripts du projet (`arc_index.py`, `arc_log.py`…) | autorisé, liste fermée **et options fermées** : chaque script n'accepte que ses options déclarées dans `config/chat-policy.toml`, et tout chemin doit rester dans le workspace (jamais absolu, `~`, `..`, secret ni `.arc/`) ; les sorties ne s'écrivent que sous `activities/ medical/ nutrition/ planning/ rapports/ gear/` |
 | Shell libre, autre dossier, autre site | refusé |
 | Météo (`wttr.in`), points d'eau (OpenStreetMap) | autorisé |
 

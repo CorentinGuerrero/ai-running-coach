@@ -50,7 +50,7 @@ async function call(method, path, body) {
 }
 
 // ---------------------------------------------------------------------------
-// Rendu : markdown minimal (gras, italique, code, listes, paragraphes) sans innerHTML
+// Rendu : markdown réduit (gras, italique, code, listes, titres, tableaux, blocs ```) sans innerHTML
 // ---------------------------------------------------------------------------
 
 const INLINE_RE = /(\*\*[^*]+?\*\*|`[^`]+`|\*[^*\s][^*]*?\*)/g;
@@ -72,6 +72,47 @@ function inline(parent, text) {
   }
 }
 
+// Blocs de données (contrat ```arc, JSON, YAML) : repliés — l'athlète n'a pas à lire du JSON,
+// mais rien n'est caché au point d'être perdu. Tout autre bloc ``` est rendu en <pre>.
+const DATA_FENCES = new Set(["arc", "json", "yaml", "yml", "toml"]);
+
+function codeBlock(lang, lines) {
+  const pre = document.createElement("pre");
+  pre.className = "md-pre";
+  const code = document.createElement("code");
+  code.textContent = lines.join("\n");
+  pre.appendChild(code);
+  if (!DATA_FENCES.has(lang)) return pre;
+  const box = document.createElement("details");
+  box.className = "md-data";
+  const sum = document.createElement("summary");
+  sum.textContent = lang === "arc" ? "Données structurées du fichier" : `Données (${lang})`;
+  box.append(sum, pre);
+  return box;
+}
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+function table(rows) {
+  const wrap = document.createElement("div");
+  wrap.className = "md-table";
+  const t = document.createElement("table");
+  const head = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const c of cells(rows[0])) { const th = document.createElement("th"); inline(th, c); hr.appendChild(th); }
+  head.appendChild(hr);
+  const body = document.createElement("tbody");
+  for (const row of rows.slice(2)) {
+    const tr = document.createElement("tr");
+    for (const c of cells(row)) { const td = document.createElement("td"); inline(td, c); tr.appendChild(td); }
+    body.appendChild(tr);
+  }
+  t.append(head, body);
+  wrap.appendChild(t);
+  return wrap;
+}
+
 export function renderMarkdown(container, text) {
   container.replaceChildren();
   let list = null;
@@ -83,8 +124,39 @@ export function renderMarkdown(container, text) {
     container.appendChild(p);
     para = [];
   };
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\s+$/, "");
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+$/, "");
+    const fence = /^\s*```\s*([\w-]*)/.exec(line);
+    if (fence) {
+      // Bloc ``` : jusqu'à la clôture — ou jusqu'à la fin pendant le streaming.
+      flushPara(); list = null;
+      const body = [];
+      while (++i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i]);
+      container.appendChild(codeBlock(fence[1].toLowerCase(), body));
+      continue;
+    }
+    if (line.includes("|") && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+      flushPara(); list = null;
+      const rows = [line, lines[++i]];
+      while (i + 1 < lines.length && lines[i + 1].includes("|") && lines[i + 1].trim()) rows.push(lines[++i]);
+      container.appendChild(table(rows));
+      continue;
+    }
+    const heading = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      flushPara(); list = null;
+      const h = document.createElement(heading[1].length <= 2 ? "h3" : "h4");
+      h.className = "md-h";
+      inline(h, heading[2].replace(/\s*#+\s*$/, ""));
+      container.appendChild(h);
+      continue;
+    }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushPara(); list = null;
+      container.appendChild(document.createElement("hr"));
+      continue;
+    }
     const item = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(line);
     if (item) {
       flushPara();
@@ -136,7 +208,7 @@ function startTurn() {
   const body = el("div", "msg__body");
   art.append(avatar, body);
   els.thread.appendChild(art);
-  state.turn = { art, body, text: null, raw: "", trace: null, tools: new Map(), files: null, fileSet: new Set(), pending: false, scheduled: false };
+  state.turn = { art, body, text: null, raw: "", trace: null, tools: new Map(), files: null, fileSet: new Set(), pending: false };
   scrollDown();
   return state.turn;
 }
@@ -197,6 +269,19 @@ function onToolEnd(d) {
   trace.details.classList.remove("is-running");
 }
 
+// Chaque bloc de texte garde son propre markdown brut : un bloc remplacé par un outil
+// avant la prochaine image doit quand même être dessiné (sinon le texte est perdu).
+const RAW = new WeakMap();
+const dirty = new Set();
+let frameQueued = false;
+
+function paint() {
+  frameQueued = false;
+  for (const node of dirty) renderMarkdown(node, RAW.get(node) || "");
+  dirty.clear();
+  scrollDown();
+}
+
 function onTextDelta(d) {
   const t = ensureTurn();
   if (!t.text || t.body.lastElementChild !== t.text) {
@@ -206,18 +291,16 @@ function onTextDelta(d) {
     t.body.appendChild(t.text);
   }
   t.raw += d.text || "";
-  if (!t.scheduled) {
-    t.scheduled = true;
-    requestAnimationFrame(() => {
-      t.scheduled = false;
-      if (t.text) renderMarkdown(t.text, t.raw);
-      scrollDown();
-    });
+  RAW.set(t.text, t.raw);
+  dirty.add(t.text);
+  if (!frameQueued) {
+    frameQueued = true;
+    requestAnimationFrame(paint);
   }
 }
 
 function flushText(t) {
-  if (t && t.text) renderMarkdown(t.text, t.raw);
+  if (t && t.text) { RAW.set(t.text, t.raw); dirty.delete(t.text); renderMarkdown(t.text, t.raw); }
 }
 
 const ROUTES_BY_PREFIX = [

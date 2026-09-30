@@ -327,3 +327,34 @@ class Round2PolicyTest(PolicyBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GearPolicyTest(PolicyBase):
+    """Matériel (#132-#135, arrivé sur main après le chat) : dossier gear/ et options d'arc_index."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_gear_est_un_dossier_de_donnees(self):
+        self.assertEqual(self.d("fs.write", {"path": "gear/2026-09-30_abc_inspection.md"}), "allow")
+        self.assertEqual(self.sh("python3 scripts/arc_index.py --validate gear/2026-09-30_abc_inspection.md"), "allow")
+
+    def test_options_materiel_d_arc_index(self):
+        for command in ("python3 scripts/arc_index.py equipment --kit nuit --sport trail",
+                        "python3 scripts/arc_index.py inspections --gear abc",
+                        "python3 scripts/arc_index.py gear --activities 1,2 --today 2026-09-30",
+                        "python3 scripts/arc_index.py equipment --last-pass 2026-09-01",
+                        "python3 scripts/arc_index.py gear-attribution --garmin-gear u1 --chat-gear abc"):
+            self.assertEqual(self.sh(command), "allow", command)
+
+    def test_race_plan_valeur_facultative(self):
+        # nargs="?" : seule, suivie d'une autre option, ou avec un fichier du workspace.
+        for command in ("python3 scripts/arc_index.py equipment --race-plan",
+                        "python3 scripts/arc_index.py equipment --race-plan --today 2026-09-30",
+                        "python3 scripts/arc_index.py equipment --race-plan planning/plan_course.md"):
+            self.assertEqual(self.sh(command), "allow", command)
+        for command in ("python3 scripts/arc_index.py equipment --race-plan /etc/passwd",
+                        "python3 scripts/arc_index.py equipment --race-plan ~/x.md",
+                        "python3 scripts/arc_index.py equipment --race-plan config/workspace.user.toml",
+                        "python3 scripts/arc_index.py equipment --race-plan --output planning/x.md"):
+            self.assertEqual(self.sh(command), "deny", command)

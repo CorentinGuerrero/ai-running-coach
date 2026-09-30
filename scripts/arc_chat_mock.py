@@ -64,6 +64,17 @@ class MockBackend(ChatBackend):
         emit("text_delta", {"text": "Voici mon analyse. "})
         emit("file_written", {"path": DECISION_PATH})
 
+        if "bilan" in text:
+            # Réponse riche (titre, tableau, bloc ```arc recopié comme le ferait un modèle
+            # trop littéral) : sert à vérifier le rendu de la page sans modèle.
+            for chunk in ("\n\n## Bilan de la semaine\n\n", "| Jour | Séance | Durée |\n|---|---|---|\n",
+                          "| Lun | EF | 45 min |\n| Mer | Fractionné | 1 h 05 |\n\n",
+                          "```arc\n{\"type\": \"week\", \"load\": 412}\n```\n\n",
+                          "**Prochaine étape** : sortie longue samedi."):
+                emit("text_delta", {"text": chunk})
+            finish("end_turn")
+            return
+
         if "lent" in text:
             emit("text_delta", {"text": "Je réfléchis longuement… "})
             slow = float(self.config.get("mock_slow_s", 5))

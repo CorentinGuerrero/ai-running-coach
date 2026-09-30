@@ -53,7 +53,7 @@ BRACE_MAX_DEPTH = 3
 # `config/chat-policy.toml` (le refus reste le comportement par défaut).
 DEFAULTS = {
     "fs": {
-        "write_dirs": ["activities", "medical", "nutrition", "planning", "rapports"],
+        "write_dirs": ["activities", "medical", "nutrition", "planning", "rapports", "gear"],
         "secret_patterns": ["workspace.user.toml", ".env", "*.env", "*.token", ".garminconnect",
                             "llm.env", "*.pem", "*.key"],
         # Dossiers où une recherche de contenu (grep, `pattern`) est permise, en plus de write_dirs.
@@ -74,8 +74,10 @@ DEFAULT_SCRIPTS = {
     "scripts/arc_index.py": {
         "flags": ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active"],
         "value_options": ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since",
-                          "--limit", "--trigger", "--outcome", "--months", "--band"],
-        "read_options": ["--validate"],
+                          "--limit", "--trigger", "--outcome", "--months", "--band", "--last-pass",
+                          "--activities", "--garmin-gear", "--chat-gear", "--kit", "--sport", "--gear"],
+        "optional_value_options": ["--race-plan"],
+        "read_options": ["--validate", "--race-plan"],
         "multi_value_options": ["--validate"],
         "output_options": ["--db"],
     },
@@ -337,6 +339,7 @@ class Policy:
         reads = set(rules.get("read_options", []))
         valued = outputs | reads | set(rules.get("value_options", []))
         multi = set(rules.get("multi_value_options", []))   # nargs "*" / "+" : plusieurs valeurs à la suite
+        optional = set(rules.get("optional_value_options", []))  # nargs "?" : valeur facultative
         i = 0
         while i < len(args):
             token = args[i]
@@ -351,6 +354,8 @@ class Policy:
                 values: list = []
                 if eq:
                     values = [inline]
+                elif name in optional and (i >= len(args) or self._option_like(args[i])):
+                    continue                                # option seule : argparse prend sa constante
                 elif name in multi:
                     while i < len(args) and not self._option_like(args[i]):
                         values.append(args[i])
