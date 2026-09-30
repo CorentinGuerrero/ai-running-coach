@@ -660,14 +660,13 @@ départ »), un badge **« ≈ N sem. »** donne la prévision de retraite au ry
 jours (rien sans usage récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît
 dès 90 %, et le rôle `usage:` déclaré s'affiche à côté du nom.
 
-![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
+![Matériel : ce qui est à traiter, puis le kilométrage de chaque paire](../assets/dashboard/materiel.webp)
 
-*La carte Chaussures : la paire par défaut a dépassé son seuil, deux paires affichent
-leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
-visible en grisé ; la dernière inspection photo (#135) s'affiche à côté (« inspectée
-22 sept. », état « Usure visible ») et « Inspection conseillée » signale une paire à
-inspecter. Liste de chaussures d'illustration, kilométrages calculés sur les séances
-réelles du workspace des captures.*
+*La vue Matériel sur un vrai workspace, après le rattrapage Garmin (#145) : en tête « À
+traiter » — la paire principale a dépassé son seuil (920 km pour une alerte à 800 km), deux
+paires n'ont jamais été inspectées —, puis les six paires avec leur « départ » (kilométrage
+antérieur au workspace), la prévision de retraite de la paire en cours et les paires
+retirées en grisé.*
 
 **Équipement** (#134) — un tableau pour tout ce qui n'est pas chaussure (`### Matériel` du
 profil) : par objet, son **usage** (distance, heures, séances, jours depuis la date de
@@ -724,8 +723,9 @@ ouvre sa fiche, à l'adresse partageable `#/materiel/<gear_id>` :
 
 ![Fiche d'une paire : bilan de carrière, kilomètres par mois, séances et inspections](../assets/dashboard/materiel-fiche.webp)
 
-*La fiche d'une paire : bilan de carrière, kilomètres par mois, liste des séances (chacune
-renvoie vers son détail) et inspections de la paire.*
+*La fiche d'une paire (vrai workspace) : bilan de carrière — kilométrage, séances, course et
+sortie la plus longue, meilleurs efforts, seuil, lien Garmin —, kilomètres par mois, puis la
+liste des séances (chacune renvoie vers son détail) et les inspections de la paire.*
 
 La page d'une séance affiche de son côté « Chaussure » (paire attribuée, mention « paire par
 défaut » quand elle n'est pas déclarée sur la séance) et « Équipement porté » (`gear_ids`,
