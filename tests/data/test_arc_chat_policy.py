@@ -158,7 +158,6 @@ class ShellBypassTest(PolicyBase):
                 "python3 scripts/arc_race_pacing.py plan --gpx /etc/passwd",
                 "python3 scripts/arc_race_pacing.py plan --gpx planning/a.gpx --weather-file /etc/hosts",
                 "python3 scripts/coach_doctor.py --tokens-dir ~/.garminconnect",
-                "python3 scripts/coach_doctor.py",
                 "python3 scripts/arc_index.py --workspace /tmp"):
             self.assertEqual(self.sh(command), "deny", command)
 
@@ -428,4 +427,60 @@ class StdinScriptTest(PolicyBase):
                         "echo 'a' ; rm x ; echo 'b' | python3 scripts/arc_log.py",
                         "cat planning/x | python3 scripts/arc_log.py",
                         f"echo '{self.J}' | python3 -c 'import os'"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+
+class GearBackfillPolicyTest(PolicyBase):
+    """Rattrapage du matériel Garmin (#145) : simulation libre, `--apply` soumis à l'accord."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_simulation_autorisee(self):
+        for command in ("python3 scripts/garmin_gear_backfill.py",
+                        "python3 scripts/garmin_gear_backfill.py --json --since 2026-01-01 --all-shoes"):
+            self.assertEqual(self.sh(command), "allow", command)
+
+    def test_apply_demande_l_accord(self):
+        self.assertEqual(self.sh("python3 scripts/garmin_gear_backfill.py --apply"), "ask")
+        self.assertEqual(self.sh("python3 scripts/garmin_gear_backfill.py --gear u1 --apply"), "ask")
+        cmd = "python3 scripts/garmin_gear_backfill.py --apply"
+        from arc_chat_backend import payload_hash
+        self.assertEqual(self.d("shell", {"command": cmd},
+                                preapproved={payload_hash("shell", {"command": cmd})}), "allow")
+
+    def test_options_de_redirection_refusees(self):
+        for command in ("python3 scripts/garmin_gear_backfill.py --tokens-dir x",
+                        "python3 scripts/garmin_gear_backfill.py --workspace planning",
+                        "python3 scripts/garmin_gear_backfill.py --fake-client x.json",
+                        "python3 scripts/garmin_gear_backfill.py --apply=1"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+
+class SkillScriptsPolicyTest(PolicyBase):
+    """Scripts appelés par les skills (/week, cibles de séance, débrief, diagnostic, segments)."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_scripts_des_skills_autorises(self):
+        for command in ("python3 scripts/arc_guardrails.py check --week planning/Semaine.md --memory",
+                        "python3 scripts/arc_workout_targets.py targets --session planning/Semaine.md#mardi --memory",
+                        "python3 scripts/arc_race_debrief.py debrief --plan planning/plan.md --activity activities/a.md",
+                        "python3 scripts/coach_doctor.py --check garmin_token --json",
+                        "python3 skills/session-parts-analyzer/scripts/analyze_session_parts.py --activity-id 1 --part strides"):
+            self.assertEqual(self.sh(command), "allow", command)
+
+    def test_diese_refuse_seulement_en_debut_de_mot(self):
+        self.assertEqual(self.sh("python3 scripts/arc_index.py energy # ; rm -rf x"), "deny")
+        self.assertEqual(self.sh("python3 scripts/arc_index.py energy #x"), "deny")
+        self.assertEqual(self.sh("python3 scripts/arc_workout_targets.py targets --session planning/S.md#jeudi"), "allow")
+
+    def test_options_dangereuses_refusees(self):
+        for command in ("python3 scripts/coach_doctor.py --tokens-dir x",
+                        "python3 scripts/coach_doctor.py --workspace planning",
+                        "python3 scripts/coach_setup.py",
+                        "python3 skills/session-parts-analyzer/scripts/analyze_session_parts.py --garmin-host evil.com",
+                        "python3 skills/session-parts-analyzer/scripts/analyze_session_parts.py --output /tmp/x.json",
+                        "python3 scripts/arc_race_debrief.py debrief --plan /etc/passwd"):
             self.assertEqual(self.sh(command), "deny", command)

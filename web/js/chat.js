@@ -275,16 +275,22 @@ function noteItem(node) {
 }
 
 function ensureTrace(t) {
-  // Tout chemin qui ouvre (ou reprend) une trace range d'abord le commentaire qui la précède.
-  let note = null;
-  if (t.text && t.body.lastElementChild === t.text) {
-    flushText(t);
-    const node = t.text;
-    t.text = null; t.raw = "";
-    if (node.textContent.trim()) note = noteItem(node); else node.remove();
+  // Tout chemin qui ouvre (ou reprend) une trace range d'abord les commentaires qui la
+  // précèdent — tous les blocs de texte consécutifs en fin de tour (un modèle peut en écrire
+  // plusieurs d'affilée avant d'appeler un outil).
+  if (t.text) flushText(t);
+  const trailing = [];
+  for (let n = t.body.lastElementChild; n && n.classList.contains("msg__text"); n = n.previousElementSibling) {
+    trailing.unshift(n);
+  }
+  t.text = trailing.length ? null : t.text;
+  if (trailing.length) t.raw = "";
+  const notes = [];
+  for (const node of trailing) {
+    if (node.textContent.trim()) notes.push(noteItem(node)); else node.remove();
   }
   if (t.trace && t.body.lastElementChild === t.trace.details) {
-    if (note) t.trace.list.appendChild(note);
+    for (const note of notes) t.trace.list.appendChild(note);
     return t.trace;
   }
   const details = el("details", "trace is-running");
@@ -295,7 +301,7 @@ function ensureTrace(t) {
   t.body.appendChild(details);
   t.text = null; t.raw = "";
   t.trace = { details, list, label: summary.lastChild };
-  if (note) list.appendChild(note);
+  for (const note of notes) list.appendChild(note);
   return t.trace;
 }
 

@@ -197,3 +197,7 @@ a.file-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px
 .trace .trace__note-text { font-size: 0.8rem; line-height: 1.5; }
 .trace .trace__note-text p { margin: 0 0 0.3rem; }
 .trace .trace__note-text p:last-child { margin-bottom: 0; }
+/* Numérotation des seules étapes (les commentaires rangés dans la trace ne comptent pas). */
+.trace ol { list-style: none; counter-reset: etape; }
+.trace ol > li:not(.trace__note) { counter-increment: etape; }
+.trace ol > li:not(.trace__note)::before { content: counter(etape) ". "; margin-left: -1.3rem; display: inline-block; width: 1.3rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }

@@ -193,6 +193,7 @@ fournisseur :
 | Écrire dans `activities/ medical/ nutrition/ planning/ rapports/ gear/` | autorisé |
 | Écrire vers Garmin / Intervals.icu (planifier, supprimer, téléverser…) | **votre accord à chaque fois** |
 | Scripts du projet (`arc_index.py`, `arc_log.py`…) | autorisé, liste fermée **et options fermées** : chaque script n'accepte que ses options déclarées dans `config/chat-policy.toml`, et tout chemin doit rester dans le workspace (jamais absolu, `~`, `..`, secret ni `.arc/`) ; les sorties ne s'écrivent que sous `activities/ medical/ nutrition/ planning/ rapports/ gear/` |
+| Rattrapage du matériel Garmin (`garmin_gear_backfill.py`) | simulation autorisée ; `--apply` (qui écrit dans vos séances et votre profil) passe par la carte d'approbation |
 | Shell libre, autre dossier, autre site | refusé |
 | Météo (`wttr.in`), points d'eau (OpenStreetMap) | autorisé |
 

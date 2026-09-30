@@ -33,7 +33,9 @@ POLICY_FILE = "config/chat-policy.toml"
 # Métacaractères shell interdits dans une commande autorisée : redirections, chaînage,
 # substitutions, échappement (`\` ferait diverger shlex et le vrai shell), `~` (expansion
 # du répertoire personnel), jokers et accolades (un joker contournerait la liste des secrets).
-SHELL_META = set(";|&$`><()\n\r\\~*?[]{}!#")
+SHELL_META = set(";|&$`><()\n\r\\~*?[]{}!")
+# `#` ne commence un commentaire qu'en début de mot : refusé là seulement (`fichier.md#mardi` passe).
+COMMENT_RE = re.compile(r"(^|\s)#")
 # Entrée standard des scripts qui lisent du JSON (`[shell].stdin_scripts`, ex. arc_log.py) : deux
 # formes seulement, sans aucune expansion possible par le shell — une chaîne entre apostrophes
 # (rien n'est interprété entre ' ') ou un heredoc à délimiteur entre apostrophes (`<< 'EOF'`).
@@ -68,7 +70,11 @@ DEFAULTS = {
         # Dossiers où une recherche de contenu (grep, `pattern`) est permise, en plus de write_dirs.
         "search_dirs": ["resources", "skills", "agents", "templates", "docs"],
     },
-    "shell": {"allowed_prefixes": ["python3 scripts/arc_index.py", "python3 scripts/arc_log.py"],
+    "shell": {"allowed_prefixes": ["python3 scripts/arc_index.py", "python3 scripts/arc_log.py",
+                                   "python3 scripts/garmin_gear_backfill.py", "python3 scripts/arc_guardrails.py",
+                                   "python3 scripts/arc_workout_targets.py", "python3 scripts/arc_race_debrief.py",
+                                   "python3 scripts/coach_doctor.py",
+                                   "python3 skills/session-parts-analyzer/scripts/analyze_session_parts.py"],
               "stdin_scripts": ["scripts/arc_log.py"]},
     "web": {"fetch_domains": ["wttr.in", "overpass-api.de", "nominatim.openstreetmap.org"]},
     "mcp": {
@@ -94,6 +100,31 @@ DEFAULT_SCRIPTS = {
     "scripts/arc_log.py": {
         "read_options": ["--input"],
         "output_options": ["--output"],
+    },
+    "scripts/arc_guardrails.py": {
+        "flags": ["--memory"], "value_options": ["--week-start", "--today"],
+        "read_options": ["--week"], "output_options": ["--db"],
+    },
+    "scripts/arc_workout_targets.py": {
+        "flags": ["--memory"], "value_options": ["--structure-text", "--band", "--today"],
+        "read_options": ["--session"], "output_options": ["--db"],
+    },
+    "scripts/arc_race_debrief.py": {
+        "value_options": ["--scenario", "--carbs-target-g-h", "--carbs-actual-g-h", "--carbs-ceiling-g-h"],
+        "read_options": ["--plan", "--activity", "--planned-weather", "--actual-weather", "--fit"],
+    },
+    "scripts/coach_doctor.py": {
+        "flags": ["--json", "--probe-mcp"], "value_options": ["--check", "--now"],
+    },
+    "skills/session-parts-analyzer/scripts/analyze_session_parts.py": {
+        "flags": ["--quiet"],
+        "value_options": ["--activity-id", "--part", "--smooth-window", "--stride-threshold", "--recovery-threshold"],
+        "read_options": ["--fit", "--activity-json"], "output_options": ["--output", "--json"],
+    },
+    "scripts/garmin_gear_backfill.py": {
+        "flags": ["--all-shoes", "--json"],
+        "value_options": ["--since", "--gear"],
+        "ask_flags": ["--apply"],
     },
 }
 
@@ -386,7 +417,7 @@ class Policy:
         command = command.strip()
         inner = self._stdin_command(command)
         if inner is not None:
-            if any(ch in SHELL_META for ch in inner):
+            if any(ch in SHELL_META for ch in inner) or COMMENT_RE.search(inner):
                 return "deny"
             try:
                 words = shlex.split(inner)
@@ -397,7 +428,7 @@ class Policy:
             if script is None or script not in self.stdin_scripts:
                 return "deny"
             return self._shell(inner)
-        if not command or any(ch in SHELL_META for ch in command):
+        if not command or any(ch in SHELL_META for ch in command) or COMMENT_RE.search(command):
             return "deny"
         try:
             words = shlex.split(command)
@@ -418,12 +449,19 @@ class Policy:
         valued = outputs | reads | set(rules.get("value_options", []))
         multi = set(rules.get("multi_value_options", []))   # nargs "*" / "+" : plusieurs valeurs à la suite
         optional = set(rules.get("optional_value_options", []))  # nargs "?" : valeur facultative
+        # Options qui font ÉCRIRE le script hors du contrôle des chemins (ex. `--apply` du
+        # rattrapage matériel) : autorisées, mais seulement après accord de l'athlète.
+        ask_flags = set(rules.get("ask_flags", []))
+        verdict = "allow"
         i = 0
         while i < len(args):
             token = args[i]
             i += 1
             if self._option_like(token):
                 name, eq, inline = token.partition("=")
+                if name in ask_flags and not eq:
+                    verdict = "ask"
+                    continue
                 if name in flags and not eq:
                     continue
                 if name not in valued:
@@ -450,7 +488,7 @@ class Policy:
                 values, kind = [token], "plain"
             if not all(self._shell_value(v, kind) for v in values):
                 return "deny"
-        return "allow"
+        return verdict
 
     @staticmethod
     def _option_like(token: str) -> bool:
