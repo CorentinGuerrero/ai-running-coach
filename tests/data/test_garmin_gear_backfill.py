@@ -722,5 +722,56 @@ class TestReviewIO(unittest.TestCase):
         self.assertIn("même après relance", r.stderr)
 
 
+class TestRelaunchCandidates(unittest.TestCase):
+    """Linux : `bin/python` d'un venv uv est un LIEN vers le python système ; le venv se reconnaît à `pyvenv.cfg`."""
+
+    def setUp(self):
+        import os
+        sys.path.insert(0, str(REPO / "skills/fit-download/scripts"))
+        import download_fit as D
+        self.mods = (B, D)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.venv = Path(self.tmp.name) / "garmin-mcp"
+        (self.venv / "bin").mkdir(parents=True)
+        (self.venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        os.symlink(sys.executable, self.venv / "bin" / "python")          # python -> python système
+        os.symlink("python", self.venv / "bin" / "python3")               # python3 -> python
+
+    def test_symlinked_venv_python_is_not_the_current_interpreter(self):
+        for m in self.mods:
+            self.assertFalse(m.is_current_interpreter(str(self.venv / "bin/python3"), "/usr", sys.executable))
+            self.assertFalse(m.is_current_interpreter(str(self.venv / "bin/python"), sys.prefix, sys.executable) and
+                             str(self.venv) != sys.prefix)
+
+    def test_venv_is_recognised_as_current_when_prefix_is_that_venv(self):
+        for m in self.mods:
+            self.assertTrue(m.is_current_interpreter(str(self.venv / "bin/python3"), str(self.venv), sys.executable))
+
+    def test_without_pyvenv_cfg_falls_back_to_realpath(self):
+        import os
+        plain = Path(self.tmp.name) / "plain/bin"
+        plain.mkdir(parents=True)
+        os.symlink(sys.executable, plain / "python3")
+        for m in self.mods:
+            self.assertTrue(m.is_current_interpreter(str(plain / "python3"), "/nowhere", sys.executable))
+
+    def test_symlinked_venv_is_chosen_as_candidate(self):
+        for m in self.mods:
+            chosen = m.pick_relaunch_candidate(
+                [str(self.venv / "bin/python3"), str(self.venv / "bin/python")], prefix="/usr", executable=sys.executable)
+            self.assertEqual(chosen, str(self.venv / "bin/python3"))
+            self.assertIsNone(m.pick_relaunch_candidate([str(self.venv / "bin/python3")], prefix=str(self.venv),
+                                                        executable=sys.executable))
+
+    def test_candidate_order_includes_python_and_python3(self):
+        for m in self.mods:
+            cands = m.relaunch_candidates("~/mon-python", "/x/venv/bin/garmin-mcp", home="/h")
+            self.assertEqual(cands[0], str(Path("~/mon-python").expanduser()))
+            self.assertEqual([Path(c).name for c in cands[1:3]], ["python3", "python"])
+            self.assertEqual(cands[3:], ["/h/.local/share/uv/tools/garmin-mcp/bin/python3",
+                                         "/h/.local/share/uv/tools/garmin-mcp/bin/python"])
+
+
 if __name__ == "__main__":
     unittest.main()
