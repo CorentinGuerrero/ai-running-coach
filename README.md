@@ -13,9 +13,10 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | Composant | Description |
 |---|---|
 | 🧠 **4 agents spécialisés** | `coach`, `course-strategist`, `medical`, `nutritionist` — installez seulement ceux que vous voulez |
-| 🛠️ **19 skills** | commandes courtes `/today` `/why` `/week` `/race` `/log`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, inspection photo des chaussures, etc. |
+| 🛠️ **20 skills** | commandes courtes `/today` `/why` `/week` `/race` `/log` `/inspection`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, inspection photo des chaussures, etc. |
 | 📡 **Accès Garmin Connect** | via `garmin-mcp` (mode direct, liste blanche d'outils) — passerelle `leanproxy-mcp` optionnelle |
 | 🚀 **Installation automatisée** | un script pour installer et configurer tout (uv, Garmin, IDE) |
+| 👟 **Suivi du matériel** | kilométrage par paire depuis Garmin, prévision de retraite, équipement et kits, inspection photo (`/inspection`), contrôle du matériel de course |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
 | 📱 **Le coach dans la poche** | synchronisation Garmin automatique + notification push, et dialogue avec le coach depuis le téléphone (Claude Code Remote Control) — sans renoncer à votre abonnement |
 | 🎛️ **Coach configurable** | style de coaching, discipline (trail ou route), bilan santé matinal, profil d'athlète |
@@ -24,7 +25,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 ## 📊 Tableau de bord
 
 Tout ce que le coach stocke — verdict du jour, bilan du matin, courbe de forme,
-semaine planifiée, séances et splits, rapports — dans un tableau de bord local,
+semaine planifiée, séances et splits, matériel (kilométrage des paires, inspections), rapports — dans un tableau de bord local,
 en lecture seule :
 
 ```bash
@@ -111,8 +112,8 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 
 ### ⚡ Commandes courtes du quotidien
 
-Pour un usage rapide depuis le téléphone, cinq commandes courtes, format
-prévisible — natives sur **Claude Code** et **Gemini CLI** (commande dédiée),
+Pour un usage rapide depuis le téléphone, six commandes courtes (cinq réponses rapides, et `/inspection` pour une
+inspection guidée), format prévisible — natives sur **Claude Code** et **Gemini CLI** (commande dédiée),
 chargées comme n'importe quel skill sur **OpenCode** et **GitHub Copilot**,
 non disponibles sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces
 deux IDE, voir [IDE supportés](docs/ides.md)) :
@@ -124,11 +125,13 @@ deux IDE, voir [IDE supportés](docs/ides.md)) :
 | `/week` | Le statut compact de la semaine en cours : réalisé/prévu, garde-fous |
 | `/race` | Le compte à rebours de votre objectif, le score Trail Shape, votre plan de course s'il existe |
 | `/log` | Saisie libre en une phrase — ravitaillement, douleur, RPE — convertis en données du contrat sans jamais inventer une valeur |
+| `/inspection` | Lancer l'inspection photo d'une paire de chaussures : désigner la paire, protocole photo, où déposer les photos (`gear/photos/`) |
 
 `/today`, `/why`, `/week` et `/race` n'écrivent ni ne modifient jamais un
 plan, une semaine, une décision ou un plan de course, et ne poussent jamais
 rien vers Garmin. `/log`, lui, écrit dans `activities/`/`medical/` (jamais
-dans `planning/`).
+dans `planning/`) ; `/inspection` n'écrit, une fois la paire et les photos fournies,
+que dans `gear/`.
 
 ### 🎛️ Ce qui est configurable
 

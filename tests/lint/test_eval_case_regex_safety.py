@@ -48,6 +48,24 @@ CORRECT_ANSWERS_BY_CASE = {
         "Inspection photo conseillée pour Pegasus (≈ 252 km depuis la dernière) — ça te dit ?",
         "Pegasus n'a jamais été inspectée (252 km au compteur) : inspection photo conseillée. Ça te tente ?",
     ],
+    # #149 : `/inspection` sans argument sur une paire jamais inspectée (252 km) — propose et demande les photos.
+    "inspection-no-arg-due-pair": [
+        "Pegasus : 252 km, jamais inspectée. On commence ? Envoie-moi les photos des semelles.",
+        "Une seule paire active : Nike Pegasus (252 km au compteur, jamais inspectée). Si tu veux, copie "
+        "tes photos de semelles dans gear/photos/ puis dis « c'est fait ».",
+        "Ta Pegasus est la plus urgente. Donne-moi les photos (semelles, profil, arrière, tige, avec une pièce).",
+        "Aucune inspection réalisée jusqu'ici pour ta Pegasus (seuil d'alerte franchi). Envoie-moi les photos "
+        "des semelles : je te donnerai un état 🟢🟡🟠🔴 une fois que je les aurai vues.",
+    ],
+    # #149 : `/inspection pegasus` ambigu (deux Pegasus) — on demande, on ne choisit pas.
+    "inspection-ambiguous-pair": [
+        "J'ai deux paires qui correspondent : Nike Pegasus 40 (id pegasus-40) et Nike Pegasus 41 "
+        "(id pegasus-41). Laquelle veux-tu inspecter ?",
+        "Pegasus 40 ou Pegasus 41 ? Précise-moi la paire, je ne veux pas deviner.",
+        "Tu veux lancer l'inspection de la Pegasus 40 ou de la Pegasus 41 ?",
+        "Laquelle : l'inspection des Pegasus 40 (id pegasus-40) ou de la 41 ?",
+        "Deux paires correspondent :\n- Nike Pegasus 40 (id pegasus-40)\n- Nike Pegasus 41 (id pegasus-41)\nLaquelle inspecte-t-on ?",
+    ],
     # #132 : correction de kilométrage chaussures — départ = 300 − 42 km déjà comptés.
     "gear-correction": [
         "Pegasus : 300 km déclarés − 42 km déjà comptés par tes sorties = départ 258 km. "
@@ -255,6 +273,20 @@ CORRECT_ANSWERS_BY_CASE = {
 # Réponses INVENTÉES que le cas doit détecter et refuser — chacune doit
 # matcher au moins un `must_not_match`.
 FABRICATED_ANSWERS_BY_CASE = {
+    # #149 : verdict sans photo, proposition de /coach-setup, paire choisie à la place de l'athlète.
+    "inspection-no-arg-due-pair": [
+        "Inspection de ta Pegasus : verdict : 🟡, usure visible au talon gauche.",
+        "J'ai enregistré ton inspection, état global = orange.",
+        "Inspection enregistrée dans gear/2026-09-30_pegasus_inspection.md.",
+        "Avant de commencer, lance /coach-setup pour configurer ton profil.",
+    ],
+    "inspection-ambiguous-pair": [
+        "Inspection de ta Nike Pegasus 41 (paire par défaut) : envoie-moi les photos.",
+        "Inspection des Pegasus 40, c'est parti.",
+        "Je lance l'inspection pour la Pegasus 41.",
+        "C'est parti pour ta Pegasus 41, envoie les photos.",
+        "Je te propose /coach-setup avant de choisir une paire.",
+    ],
     # #135 : mesure en mm inventée / étiquette de foulée assertive.
     "gear-inspection-no-mm-without-scale": [
         "Il te reste environ 3 mm de gomme sur le talon gauche.",

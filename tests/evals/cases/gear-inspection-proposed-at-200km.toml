@@ -1,9 +1,9 @@
 # Inspection photo des chaussures (#135) : le coach PROPOSE, il n'impose pas.
 #
-# Fixture `gear-inspection/` : une paire (Nike Pegasus, `id: pegasus`, par défaut) à
-# 210 km de départ + 42 km de séances = 252 km, jamais inspectée — au-delà des ~200 km
-# depuis l'entrée en service, `arc_index.py inspections` rend `due: true`
-# (`never_inspected`). L'athlète demande seulement où en sont ses chaussures.
+# Fixture `gear-inspection/` : une paire (Nike Pegasus, `id: pegasus`, `alerte 240 km`, par défaut) à
+# 210 km de départ + 42 km de séances = 252 km, jamais inspectée — seuil d'alerte franchi,
+# `arc_index.py inspections` rend `due: true` (`threshold_alert`, vérifié sur la fixture matérialisée ;
+# sans seuil, une paire jamais inspectée compte depuis son kilométrage de départ, 42 km ne suffiraient pas). L'athlète demande seulement où en sont ses chaussures.
 #
 # Limite du harnais : le runner `claude -p` n'envoie aucune image. Le cas « photo de
 # référence » de l'issue (usure talon latérale, asymétrie, semelle neuve, photo sans échelle)

@@ -696,7 +696,8 @@ rappel d'hygiène (28 j / 30 j depuis le dernier entretien) ; les objets du kit
 l'inspection, zones d'usure par semelle (gauche/droite), asymétrie, indices de foulée et
 vignettes des photos. La ligne de la paire dans « Chaussures » porte la dernière inspection ;
 « Inspection conseillée » apparaît après ~200 km sans inspection, ou une fois le seuil d'alerte
-franchi (rappel, jamais une obligation). Une inspection plus dégradée que la précédente est
+franchi (rappel, jamais une obligation) : pour agir, tapez `/inspection <paire>` (ou `/inspection`
+pour laisser le coach proposer la plus urgente), voir [Faire inspecter une paire](../skills/inspection.md). Une inspection plus dégradée que la précédente est
 signalée. Les vignettes sont servies par une route dédiée en lecture seule, limitée aux images
 (`.jpg`, `.png`, `.webp`) de `gear/photos/` **citées par une inspection** ; rien d'autre du
 workspace n'est exposé. Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire

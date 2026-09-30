@@ -4003,8 +4003,66 @@ def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] 
     out = {"interval_m": M.GEAR_INSPECTION_INTERVAL_M, "gear": entries,
            "due": [e["gear_id"] for e in entries if e.get("due")]}
     if gear_id and not entries:
-        out["error"] = f"paire inconnue : {gear_id}"     # même contrat que `gear-career` (code retour 1)
+        row = conn.execute("SELECT gear_id, name, retired, ignored FROM gear WHERE gear_id = ?", (gear_id,)).fetchone()
+        if row is not None:     # déclarée mais sans inspection (retirée ou `(ignorée)`) : connue, pas une erreur (#149)
+            stub = {"gear_id": row["gear_id"], "name": row["name"] or row["gear_id"], "retired": bool(row["retired"]),
+                    "unknown": False, "inspections": [], "latest": None, "due": False, "due_reason": None}
+            if row["ignored"]:
+                stub["ignored"] = True
+            out["gear"] = [stub]
+        else:
+            out["error"] = f"paire inconnue : {gear_id}"     # même contrat que `gear-career` (code retour 1)
     return out
+
+
+_GEAR_PHOTO_CITATION = re.compile(r'"(gear/photos/[^"]+)"')
+
+
+def gear_photo_dropbox(conn, workspace: Path) -> dict:
+    """Boîte de dépôt `gear/photos/` (#149) — `{"unreferenced_photos": [...], "ignored_files": [...]}`.
+
+    `unreferenced_photos` : images (extensions raster du contrat, `arc_contract.GEAR_PHOTO_EXTENSIONS`,
+    celles de la route du tableau de bord) citées par AUCUNE inspection — ni indexée, ni non indexée
+    (les `gear/*.md` sont relus en brut : un fichier hors contrat qui cite encore la photo la garde
+    « référencée »). Comparaison insensible à la casse (APFS). `ignored_files` : les autres fichiers
+    (HEIC d'iPhone, TIFF…), jamais candidats, à expliquer à l'athlète. Chemins relatifs au workspace,
+    triés ; liens symboliques et tout chemin dont un composant commence par `.` sont ignorés.
+    Lecture seule : ne déplace, ne renomme ni ne supprime rien."""
+    ws = Path(workspace)
+    root = ws / "gear" / "photos"
+    out: Dict[str, List[str]] = {"unreferenced_photos": [], "ignored_files": []}
+    if not root.is_dir() or root.is_symlink():
+        return out
+    cited = {p.casefold() for row in _inspection_rows(conn) for p in row.get("photos", [])}
+    for md in (ws / "gear").glob("*.md"):
+        try:
+            cited.update(m.casefold() for m in _GEAR_PHOTO_CITATION.findall(md.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    for path in root.rglob("*"):
+        rel = path.relative_to(ws)
+        if path.is_symlink() or not path.is_file() or any(part.startswith(".") for part in rel.parts):
+            continue
+        if path.suffix.lower() in C.GEAR_PHOTO_EXTENSIONS:
+            if rel.as_posix().casefold() not in cited:
+                out["unreferenced_photos"].append(rel.as_posix())
+        else:
+            out["ignored_files"].append(rel.as_posix())
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def unreferenced_gear_photos(conn, workspace: Path) -> List[str]:
+    """Raccourci de `gear_photo_dropbox` : seulement les photos candidates."""
+    return gear_photo_dropbox(conn, workspace)["unreferenced_photos"]
+
+
+def declared_gear(conn) -> List[dict]:
+    """TOUTES les paires déclarées au profil (#149) — actives, retirées et `(ignorée)` — avec de quoi
+    résoudre un argument de `/inspection` : `gear_id`, `name`, `retired`, `ignored`, `garmin_uuid`."""
+    return [{"gear_id": r["gear_id"], "name": r["name"], "retired": bool(r["retired"]),
+             "ignored": bool(r["ignored"]), "garmin_uuid": r["garmin_uuid"]}
+            for r in conn.execute("SELECT gear_id, name, retired, ignored, garmin_uuid FROM gear "
+                                  "ORDER BY name COLLATE NOCASE, gear_id")]
 
 
 def _activities_of_gear(conn, gear_id: str, today: Optional[date]) -> List[dict]:
@@ -4205,6 +4263,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gear", metavar="GEAR_ID",
                         help="commande « inspections » (#135) : restreint à cette paire ; commande "
                              "« gear-career » : paire dont on veut le bilan de carrière (obligatoire)")
+    parser.add_argument("--unreferenced-photos", action="store_true",
+                        help="commande « inspections » (#149) : ajoute `unreferenced_photos` (images de `gear/photos/` "
+                             "citées par aucune inspection, boîte de dépôt) et `ignored_files` (fichiers d'un "
+                             "format non pris en charge, ex. HEIC) — lecture seule")
     parser.add_argument("--assumptions", action="store_true",
                         help="commande « energy » : rend arc_energy.ASSUMPTIONS en entier au lieu du "
                              "résumé court par défaut (assumptions_summary)")
@@ -4291,6 +4353,9 @@ def main(argv=None) -> int:
     if args.command == "inspections":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         report = gear_inspections(conn, args.gear, today_date)
+        report["declared"] = declared_gear(conn)       # (#149) toutes les paires du profil, retirées/ignorées comprises
+        if args.unreferenced_photos:
+            report.update(gear_photo_dropbox(conn, workspace))
         print(json.dumps(report, ensure_ascii=False))
         return 1 if "error" in report else 0
     if args.command == "gear-career":

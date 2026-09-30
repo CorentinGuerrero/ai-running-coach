@@ -328,6 +328,112 @@ class TestReminder(Workspace):
         self.assertIn("approximation du projet", M.ASSUMPTIONS["gear_inspection"])
 
 
+class TestDropBox(Workspace):
+    """#149 — `inspections --unreferenced-photos` : images de `gear/photos/` citées par aucune inspection."""
+
+    def touch(self, rel: str) -> None:
+        path = self.ws / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+
+    def test_absent_flag_keeps_the_payload_unchanged(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/IMG_0001.jpg")
+        _, out = self.cli("inspections")
+        self.assertNotIn("unreferenced_photos", out)
+
+    def test_lists_only_uncited_images_sorted(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch(PHOTO)
+        self.touch("gear/photos/IMG_0002.JPG")
+        self.touch("gear/photos/IMG_0001.heic.png")
+        self.touch("gear/photos/sub/vue.webp")
+        self.inspection("2026-09-20", photos=[PHOTO])
+        code, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(code, 0)
+        self.assertEqual(out["unreferenced_photos"],
+                         ["gear/photos/IMG_0001.heic.png", "gear/photos/IMG_0002.JPG", "gear/photos/sub/vue.webp"])
+
+    def test_ignores_non_images_hidden_files_and_symlinks(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/notes.txt")
+        self.touch("gear/photos/clip.svg")
+        self.touch("gear/photos/.hidden.jpg")
+        outside = self.tmp / "secret.jpg"
+        outside.write_bytes(b"x")
+        try:
+            (self.ws / "gear/photos/link.jpg").symlink_to(outside)
+        except OSError:
+            pass
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], [])
+
+    def test_missing_folder_is_an_empty_list_and_nothing_is_modified(self):
+        shutil.rmtree(self.ws / "gear" / "photos")
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], [])
+        self.touch("gear/photos/a.jpg")
+        self.cli("inspections", "--unreferenced-photos")
+        self.assertTrue((self.ws / "gear/photos/a.jpg").exists())
+
+    def test_unsupported_formats_are_reported_not_silently_dropped(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/IMG_0100.HEIC")
+        self.touch("gear/photos/scan.tiff")
+        self.touch("gear/photos/ok.jpg")
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], ["gear/photos/ok.jpg"])
+        self.assertEqual(out["ignored_files"], ["gear/photos/IMG_0100.HEIC", "gear/photos/scan.tiff"])
+
+    def test_hidden_components_are_skipped(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/.thumbs/a.jpg")
+        self.touch("gear/photos/.thumbs/b.heic")
+        self.touch("gear/photos/.DS_Store")
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual((out["unreferenced_photos"], out["ignored_files"]), ([], []))
+
+    def test_photo_cited_by_a_non_indexed_inspection_file_is_referenced(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/old.jpg")
+        self.touch("gear/photos/new.jpg")
+        # nom hors convention `AAAA-MM-JJ_<gear_id>_inspection.md` : non indexé, mais il cite encore old.jpg
+        self.write("gear/notes_inspection_manuelle.md",
+                   arc_md(block(photos=["gear/photos/old.jpg"])))
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], ["gear/photos/new.jpg"])
+
+    def test_comparison_is_case_insensitive(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/IMG_1.JPG")
+        self.inspection("2026-09-20", photos=["gear/photos/img_1.jpg"])
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], [])
+
+    def test_declared_lists_retired_and_ignored_pairs_with_uuid(self):
+        uuid = "a1b2c3d4-0000-4000-8000-000000000001"
+        self.profile(f"- Nike Pegasus — id: pegasus — garmin: {uuid} (par défaut)\n"
+                     "- Vieille paire — id: vieille (retirée)\n- Autre — id: autre (ignorée)")
+        _, out = self.cli("inspections")
+        by_id = {d["gear_id"]: d for d in out["declared"]}
+        self.assertEqual(set(by_id), {"pegasus", "vieille", "autre"})
+        self.assertEqual(by_id["pegasus"]["garmin_uuid"], uuid)
+        self.assertTrue(by_id["vieille"]["retired"])
+        self.assertTrue(by_id["autre"]["ignored"])
+
+    def test_gear_filter_on_declared_retired_pair_is_not_an_error(self):
+        self.profile("- Vieille paire — id: vieille (retirée)\n- Hoka — id: hoka")
+        code, out = self.cli("inspections", "--gear", "vieille")
+        self.assertEqual(code, 0)
+        self.assertEqual(out["gear"][0]["gear_id"], "vieille")
+        self.assertTrue(out["gear"][0]["retired"])
+        self.assertEqual(out["gear"][0]["inspections"], [])
+        code, out = self.cli("inspections", "--gear", "fantome")
+        self.assertEqual(code, 1)
+        self.assertIn("error", out)
+
+
 class TestCareer(Workspace):
     def setUp(self):
         super().setUp()
