@@ -345,6 +345,61 @@ class TestDownsample(unittest.TestCase):
         self.assertEqual(out[0]["altitude_m"], 3.0)
 
 
+class TestZeroAltitudeSentinel(unittest.TestCase):
+    """Altitude à EXACTEMENT 0,0 m écrite par certaines montres quand l'altimètre
+    ne mesure rien (observé : Apple Watch via Intervals.icu, plages de plusieurs
+    minutes au milieu d'une séance à ~600 m) — voir ASSUMPTIONS["zero_altitude"].
+    Non masquée, chaque bord de plage donnait des montées à plus de 100 000 m/h."""
+
+    @staticmethod
+    def _session(altitudes):
+        return [{"t_s": float(t), "distance_m": t * 2.5, "altitude_m": a, "hr_bpm": 140.0,
+                 "speed_ms": 2.5, "cadence_spm": 160.0} for t, a in enumerate(altitudes)]
+
+    def _alts(self, altitudes):
+        return [r["altitude_m"] for r in S.normalise_records(self._session(altitudes))]
+
+    def test_zero_run_mid_session_at_altitude_becomes_missing(self):
+        self.assertEqual(self._alts([576.4, 576.6, 0.0, 0.0, 0.0, 588.6, 589.0]),
+                         [576.4, 576.6, None, None, None, 588.6, 589.0])
+
+    def test_zero_run_at_session_start_uses_the_following_measure(self):
+        self.assertEqual(self._alts([0.0, 0.0, 512.0, 512.5]), [None, None, 512.0, 512.5])
+
+    def test_true_sea_level_zero_is_kept(self):
+        self.assertEqual(self._alts([1.2, 0.4, 0.0, 0.0, 0.6, 1.8]), [1.2, 0.4, 0.0, 0.0, 0.6, 1.8])
+
+    def test_all_zero_session_is_left_alone(self):
+        """Aucune mesure voisine : rien ne prouve une sentinelle (les consommateurs
+        traitent déjà une altitude constante comme « pas de pente exploitable »)."""
+        self.assertEqual(self._alts([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0])
+
+    def test_threshold_is_inclusive_and_applies_below_sea_level_too(self):
+        self.assertEqual(self._alts([S.ZERO_ALTITUDE_JUMP_M, 0.0]), [S.ZERO_ALTITUDE_JUMP_M, None])
+        self.assertEqual(self._alts([S.ZERO_ALTITUDE_JUMP_M - 0.1, 0.0]), [S.ZERO_ALTITUDE_JUMP_M - 0.1, 0.0])
+        self.assertEqual(self._alts([-30.0, 0.0, -30.0]), [-30.0, None, -30.0])
+
+    def test_masked_across_an_existing_gap(self):
+        """La voisine « valide » saute les altitudes déjà absentes (`None`)."""
+        self.assertEqual(self._alts([600.0, None, 0.0, 0.0]), [600.0, None, None, None])
+
+    def test_fitparse_path_is_masked_too(self):
+        raw = [{"timestamp": f"2026-09-24 17:10:{s:02d}", "distance": s * 2.5, "heart_rate": 150,
+                "enhanced_altitude": a, "altitude": a, "enhanced_speed": 2.5, "cadence": 80}
+               for s, a in enumerate([576.4, 0.0, 0.0, 588.6])]
+        self.assertEqual([r["altitude_m"] for r in S.normalise_records(raw, sport="running")],
+                         [576.4, None, None, 588.6])
+
+    def test_no_impossible_climb_is_detected_through_a_zero_run(self):
+        """Régression bout en bout : séance plate à 600 m avec 2 min de sentinelle —
+        aucune montée ne doit apparaître (avant correctif : ~600 m en quelques s)."""
+        import arc_climb as C
+
+        altitudes = [600.0] * 600 + [0.0] * 120 + [600.0] * 600
+        climbs = C.detect_climbs(S.downsample(S.normalise_records(self._session(altitudes))))
+        self.assertEqual(climbs, [])
+
+
 class TestBucketCoverage(unittest.TestCase):
     """`covered_s` : secondes que les mesures d'un bucket couvrent réellement
     (ASSUMPTIONS["covered_s"]) — borne des consommateurs qui pèsent un bucket

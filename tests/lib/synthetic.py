@@ -460,6 +460,23 @@ def _block(data: dict) -> str:
     return "```arc\n" + json.dumps(data, ensure_ascii=False, indent=1) + "\n```\n"
 
 
+# PNG 1x1 valide : photo factice des inspections synthétiques (#135).
+def _png_1x1() -> bytes:
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        body = kind + payload
+        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(b"\x00\x80\x80\x80\xff")) + chunk(b"IEND", b""))
+
+
+PNG_1X1 = _png_1x1()
+
+
 def _write(root: Path, rel: str, title: str, data: dict, prose: str) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -590,7 +607,7 @@ def build(root: Path, days: int = 120, today: date | None = None, sport: str = "
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "config/workspace.user.toml").write_text(
         f'[sport]\nprimary = "{sport}"\n\n[health]\nmorning_check = "full"\n', encoding="utf-8")
-    for folder in ("activities", "medical", "nutrition", "planning", "rapports", "resources"):
+    for folder in ("activities", "medical", "nutrition", "planning", "rapports", "resources", "gear"):
         (root / folder).mkdir(parents=True, exist_ok=True)
 
     # Adidas Adizero SL : seuil bas (50 km, pas les 500 km d'une vraie chaussure)
@@ -837,6 +854,32 @@ Semaine **conforme au plan** : charge en hausse contrôlée, HRV stable.
 
 - Garder la sortie longue en endurance stricte
 - Une seule séance de côtes""")
+
+    # --- inspections photo des chaussures (#135) -------------------------------
+    # Deux inspections chaînées de l'Adizero SL (dates relatives à `today`, kilométrages
+    # fixes : aucun tirage `rng`, le flux aléatoire partagé n'est jamais décalé). La 2e est
+    # plus dégradée que la 1re (`condition_change`) et la paire a franchi son seuil d'alerte
+    # (50 km) sans inspection faite au-delà : le rappel « inspection conseillée » est levé.
+    first, second = today - timedelta(days=40), today - timedelta(days=5)
+    photo = "gear/photos/{}_adizero-sl_semelles.png".format(second.isoformat())
+    _write(root, f"gear/{first.isoformat()}_adizero-sl_inspection.md", "Inspection Adizero SL", {
+        "arc": 1, "kind": "gear_inspection", "date": first.isoformat(), "gear_id": "adizero-sl",
+        "condition": "green", "distance_m": 12000,
+        "wear_zones": [{"side": "left", "zone": "heel_posterolateral", "severity": "light"},
+                       {"side": "right", "zone": "heel_posterolateral", "severity": "light"}],
+        "asymmetry": {"level": "none"}, "gait_hints": ["heel_strike"],
+    }, "Semelles quasi neuves : gomme intacte, mousse sans pli. Indice : attaque talon, symétrique.")
+    _write(root, f"gear/{second.isoformat()}_adizero-sl_inspection.md", "Inspection Adizero SL", {
+        "arc": 1, "kind": "gear_inspection", "date": second.isoformat(), "gear_id": "adizero-sl",
+        "condition": "yellow", "distance_m": 45000,
+        "wear_zones": [{"side": "left", "zone": "heel_posterolateral", "severity": "moderate"},
+                       {"side": "right", "zone": "heel_posterolateral", "severity": "light"}],
+        "asymmetry": {"level": "mild", "side": "left"}, "gait_hints": ["heel_strike"],
+        "photos": [photo], "previous": f"gear/{first.isoformat()}_adizero-sl_inspection.md",
+        "scale_reference": True,
+    }, "Plus usée que la précédente sur le talon gauche. Indice seulement, pas un diagnostic.")
+    (root / photo).parent.mkdir(parents=True, exist_ok=True)
+    (root / photo).write_bytes(PNG_1X1)
 
     # --- nutrition (quelques jours) --------------------------------------------
     # `weight_kg` est délibérément différent de `medical/<date>_health.md` le même jour

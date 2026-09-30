@@ -295,6 +295,14 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chip--outcome-proposed { color: var(--warn); background: var(--warn-bg); }
 .chip--outcome-rejected_by_athlete { color: var(--bad); background: var(--bad-bg); }
 .chip--outcome-superseded { color: var(--ink-faint); background: var(--surface-2); }
+/* Inspection photo des chaussures (#135) : mêmes teintes que la météo 🟢🟡🟠🔴 */
+.chip--gearcond-green { color: var(--ok); background: var(--ok-bg); }
+.chip--gearcond-yellow { color: var(--yellow); background: var(--warn-bg); }
+.chip--gearcond-orange { color: var(--orange); background: var(--warn-bg); }
+.chip--gearcond-red { color: var(--bad); background: var(--bad-bg); }
+.gear-inspections { list-style: none; margin: 0.4rem 0 1rem; padding: 0; display: grid; gap: 0.6rem; }
+.gear-photos { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.3rem; }
+.gear-photo { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-2); }
 .tag { font-size: 0.72rem; padding: 0.05rem 0.4rem; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-faint); }
 .tag--alert { color: var(--orange); border-color: var(--orange); }
 

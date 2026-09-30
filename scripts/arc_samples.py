@@ -104,6 +104,12 @@ d'étendre le générateur partagé. Un appelant qui fournit EXPLICITEMENT `lat_
 au format déjà normalisé les voit repassées telles quelles par `_clean_normalised`
 (passthrough générique, pas une fonctionnalité dédiée de `sample_session`).
 
+## Altitude à 0,0 m : valeur sentinelle, pas une mesure
+
+Une plage d'altitude à exactement 0,0 m bordée d'un saut d'au moins
+`ZERO_ALTITUDE_JUMP_M` vers la mesure voisine devient `None` (mesure absente) —
+voir `ASSUMPTIONS["zero_altitude"]` et `_mask_zero_altitude_sentinels`.
+
 ## Pauses et trous de signal : jamais interpolés
 
 Un `record` FIT est absent pendant une pause (montre en veille), une perte GPS,
@@ -171,6 +177,10 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 DEFAULT_RESOLUTION_S = 5
 
+# Saut minimal (m) entre une plage d'altitude à 0,0 m et la mesure valide voisine pour
+# la traiter en valeur sentinelle — voir ASSUMPTIONS["zero_altitude"].
+ZERO_ALTITUDE_JUMP_M = 20.0
+
 NORMALISED_KEYS = ("t_s", "distance_m", "altitude_m", "hr_bpm", "speed_ms", "cadence_spm")
 
 # GPS (#49) — clés OPTIONNELLES, jamais requises : un enregistrement/échantillon sans
@@ -231,6 +241,17 @@ ASSUMPTIONS = {
                           "(NaN/inf), est écarté silencieusement (jamais de t_s inventé qui décalerait les "
                           "échantillons suivants). t0 = le PLUS ANCIEN horodatage exploitable, pas le premier "
                           "enregistrement du fichier (un capteur peut livrer un premier point hors séquence).",
+    "zero_altitude": "Certaines montres/exports écrivent une altitude à EXACTEMENT 0,0 m quand l'altimètre "
+                     "ne mesure rien (observé : Apple Watch via Intervals.icu, plages de plusieurs minutes "
+                     "au milieu d'une séance à ~600 m). Une plage de 0,0 m dont la mesure valide voisine "
+                     "(avant OU après) est à au moins ZERO_ALTITUDE_JUMP_M (20 m) est une sentinelle : "
+                     "altitude_m = None sur toute la plage (mesure absente, jamais interpolée — même règle "
+                     "que les trous de signal). Un tel saut en un pas d'échantillonnage est impossible à pied ; "
+                     "au niveau de la mer, l'altitude voisine d'un vrai 0 reste à quelques mètres, la plage est "
+                     "conservée. Une séance entièrement à 0,0 m (aucune mesure voisine) reste telle quelle : "
+                     "les consommateurs la traitent déjà comme « altitude toujours identique ». Sans ce masque, "
+                     "chaque bord de plage produit un dénivelé de plusieurs centaines de mètres en quelques "
+                     "secondes (VAM > 100 000 m/h, GAP et découplage faussés).",
     "covered_s": "Chaque bucket sous-échantillonné porte `covered_s` : les secondes que ses mesures couvrent "
                   "réellement, ≤ resolution_s. Un bucket autour d'une pause (montre en veille), ou le dernier "
                   "de la séance, n'est que partiellement rempli : sans ce champ, tout consommateur qui pèse un "
@@ -413,8 +434,31 @@ def normalise_records(raw, sport: Optional[str] = None) -> List[dict]:
         cleaned = [_clean_normalised(r) for r in records]
         cleaned = [r for r in cleaned if r is not None]
         cleaned.sort(key=lambda r: r["t_s"])
-        return cleaned
-    return _normalise_fitparse(records, sport)
+        return _mask_zero_altitude_sentinels(cleaned)
+    return _mask_zero_altitude_sentinels(_normalise_fitparse(records, sport))
+
+
+def _mask_zero_altitude_sentinels(records: List[dict]) -> List[dict]:
+    """Remplace par `None` les plages d'altitude à EXACTEMENT 0,0 m qui sont une
+    valeur sentinelle « pas de mesure », pas une altitude — voir
+    ASSUMPTIONS["zero_altitude"]. `records` est déjà trié par `t_s` ; modifié en
+    place et rendu pour chaîner."""
+    n = len(records)
+    i = 0
+    while i < n:
+        if records[i]["altitude_m"] != 0.0:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and records[j + 1]["altitude_m"] == 0.0:
+            j += 1
+        before = next((r["altitude_m"] for r in reversed(records[:i]) if r["altitude_m"] is not None), None)
+        after = next((r["altitude_m"] for r in records[j + 1:] if r["altitude_m"] is not None), None)
+        if any(v is not None and abs(v) >= ZERO_ALTITUDE_JUMP_M for v in (before, after)):
+            for k in range(i, j + 1):
+                records[k]["altitude_m"] = None
+        i = j + 1
+    return records
 
 
 def _mean(values: Iterable) -> Optional[float]:

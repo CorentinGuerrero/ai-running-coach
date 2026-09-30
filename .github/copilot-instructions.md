@@ -49,7 +49,7 @@ L'environnement de l'agent cloud est préparé par
 L'agent cloud n'a **pas** accès à Garmin Connect (aucun token) : il est destiné
 aux contributions sur le dépôt (documentation, agents, skills, script
 d'installation), pas au coaching. Les dossiers de données personnelles
-(`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`,
+(`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`,
 `resources/`) sont gitignorés et absents de ses checkouts.
 
 ## Contribution

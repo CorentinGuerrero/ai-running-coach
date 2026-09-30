@@ -22,7 +22,7 @@ instructions: |
   - Ne jamais éditer le dossier `site/` : il est **généré** par `mkdocs build`.
   - Les pages de documentation vivent dans `docs/` (fichiers Markdown en français).
   - La navigation est définie dans `mkdocs.yml`.
-  - Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`
+  - Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`
     et `resources/` contiennent des données personnelles de l'utilisateur :
     ne pas les modifier, ne pas les versionner.
   - Après une modification de `docs/` ou `mkdocs.yml`, valider avec

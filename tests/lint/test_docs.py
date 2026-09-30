@@ -215,7 +215,7 @@ class TestFixturesAreTracked(unittest.TestCase):
         for line in (REPO / ".gitignore").read_text(encoding="utf-8").splitlines():
             entry = line.strip()
             if entry.rstrip("/") in ("activities", "medical", "nutrition", "planning",
-                                     "rapports", "resources") and not entry.startswith("/"):
+                                     "rapports", "resources", "gear") and not entry.startswith("/"):
                 unanchored.append(entry)
         self.assertFalse(
             unanchored,

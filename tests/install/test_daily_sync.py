@@ -55,12 +55,36 @@ class TestDataSourceAwareTools(InstallAsserts):
             self.assertOutputContains(proc, "mcp__garmin__add_gear_to_activity")
             self.assertOutputContains(proc, "mcp__garmin__remove_gear_from_activity")
 
-    def test_intervals_source_has_no_disallowed_tools(self):
+    def test_garmin_source_forbids_workout_writes_in_headless_runs(self):
+        """Le run non surveillé ne pousse ni ne supprime jamais de séance/parcours chez Garmin."""
+        with Sandbox() as sb:
+            ws = self._workspace(sb, None)
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            for tool in ("schedule_workouts", "schedule_week", "upload_workout", "create_strength_workout",
+                         "delete_workout", "unschedule_workout", "unschedule_workouts", "upload_course"):
+                self.assertOutputContains(proc, f"mcp__garmin__{tool}")
+
+    def test_headless_run_cannot_run_arbitrary_python_nor_edit_its_scripts(self):
+        """Une consigne injectée ne doit pouvoir ni lancer `python3 -c`, ni réécrire ce que cron exécute."""
+        for source in (None, "intervals"):
+            with self.subTest(source=source), Sandbox() as sb:
+                ws = self._workspace(sb, source)
+                proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+                self.assertSucceeded(proc)
+                self.assertOutputLacks(proc, "Bash(python3:*)")
+                self.assertOutputContains(proc, "Bash(python3 scripts/*)")
+                self.assertOutputContains(proc, "Bash(python3 skills/*)")
+                self.assertOutputContains(proc, "--disallowedTools")
+                for rule in ("Edit(scripts/**)", "Edit(skills/**)", "Edit(.claude/**)", "Edit(.mcp.json)"):
+                    self.assertOutputContains(proc, rule)
+
+    def test_intervals_source_disallows_no_garmin_tool(self):
         with Sandbox() as sb:
             ws = self._workspace(sb, "intervals")
             proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
             self.assertSucceeded(proc)
-            self.assertOutputLacks(proc, "--disallowedTools")
+            self.assertOutputLacks(proc, "mcp__garmin__")
 
     def test_explicit_garmin_source_matches_default(self):
         with Sandbox() as sb:

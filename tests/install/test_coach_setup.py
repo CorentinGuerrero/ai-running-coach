@@ -130,7 +130,7 @@ class TestApply(SetupCase):
     def test_creates_the_work_directories(self):
         with Sandbox() as sb:
             self.setup(sb, "--scaffold")
-            for name in ("activities", "medical", "nutrition", "planning", "rapports", "resources"):
+            for name in ("activities", "medical", "nutrition", "planning", "rapports", "resources", "gear"):
                 self.assertTrue((sb.repo / name).is_dir(), f"{name}/ manquant")
 
 

@@ -1807,6 +1807,37 @@ def resolve_gear_attribution(gear_defs: List[dict], garmin_uuids: List[str],
     return out
 
 
+def attribute_gear(activities: List[dict], gear_defs: List[dict], today: Optional[date] = None):
+    """Générateur `(activité, gear_id)` : l'UNIQUE règle d'attribution d'une séance à une paire
+    (#40/#132/#133), partagée par `gear_mileage` (kilométrage) et par le bilan de carrière
+    (`arc_index.gear_career`, #135) pour qu'ils ne divergent jamais. Ne rend que les séances
+    comptées : sport d'usure (`GEAR_WEAR_SPORTS`), avec distance, pas postérieures à `today` ;
+    `gear_id` explicite prioritaire ; sinon paire par défaut non retirée (filtrée par `depuis`),
+    jamais pour un matériel Garmin non associé (`gear_source == "garmin_unmapped"`)."""
+    by_id = {g["gear_id"]: g for g in gear_defs if g.get("gear_id")}
+    default_entry = next((g for g in by_id.values() if g.get("default") and not g.get("retired")), None)
+    default_id = default_entry["gear_id"] if default_entry else None
+    default_start = default_entry.get("start_date") if default_entry else None
+    today_iso = today.isoformat() if today else None
+    for act in activities:
+        if act.get("sport") not in GEAR_WEAR_SPORTS:
+            continue
+        if not act.get("distance_m"):
+            continue
+        if today_iso and act.get("date") and act["date"] > today_iso:
+            continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
+        gear_id = act.get("gear_id")
+        if not gear_id:
+            if act.get("gear_source") == "garmin_unmapped":
+                continue    # #133 : matériel Garmin non associé — jamais crédité en silence à la paire par défaut
+            if not default_id:
+                continue
+            if default_start and (not act.get("date") or act["date"] < default_start):
+                continue    # séance antérieure à l'entrée en service de la chaussure par défaut
+            gear_id = default_id
+        yield act, gear_id
+
+
 def gear_mileage(activities: List[dict], gear_defs: List[dict],
                  today: Optional[date] = None, run_refs: Optional[Iterable[str]] = None) -> dict:
     """Kilométrage cumulé par chaussure (#40). Voir `ASSUMPTIONS["gear_mileage"]`
@@ -1833,16 +1864,8 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
     afficher de plus) ; `warnings` signale toute collision de `gear_id` dérivé
     détectée par `arc_legacy.parse_gear` (revue #85 blocker 2)."""
     by_id = {g["gear_id"]: dict(g) for g in gear_defs if g.get("gear_id")}
-    default_entry = next((g for g in by_id.values() if g.get("default") and not g.get("retired")), None)
-    default_id = default_entry["gear_id"] if default_entry else None
-    # Revue #85 blocker 1 : une chaussure par défaut déclarée avec `depuis` ne doit
-    # RÉCUPÉRER que les séances postérieures (ou égales) à cette date — sans ce
-    # filtre, TOUT l'historique sans `gear_id` (y compris des années d'activités
-    # d'avant #39, où `gear_id` n'existait même pas encore dans le contrat) se
-    # retrouve attribué à une paire achetée hier. Seule l'attribution PAR DÉFAUT
-    # est filtrée : un `gear_id` EXPLICITE sur l'activité n'est jamais remis en
-    # cause par la date (voir ASSUMPTIONS["gear_mileage"]).
-    default_start = default_entry.get("start_date") if default_entry else None
+    # Attribution (défaut filtré par `depuis`, `gear_id` explicite jamais remis en cause,
+    # matériel Garmin non associé jamais crédité) : voir `attribute_gear`, règle partagée.
     window_start = (today - timedelta(days=GEAR_FORECAST_WINDOW_DAYS - 1)).isoformat() if today else None
     today_iso = today.isoformat() if today else None
 
@@ -1850,23 +1873,8 @@ def gear_mileage(activities: List[dict], gear_defs: List[dict],
     recent: Dict[str, float] = {}     # 28 derniers jours (prévision)
     run_set = {str(r) for r in run_refs} if run_refs else set()
     run_m: Dict[str, float] = {}      # séances de CE run (alerte à franchissement)
-    for act in activities:
-        if act.get("sport") not in GEAR_WEAR_SPORTS:
-            continue
-        distance = act.get("distance_m")
-        if not distance:
-            continue
-        if today_iso and act.get("date") and act["date"] > today_iso:
-            continue    # `--today` dans le passé : rien de postérieur (cumul cohérent avec la fenêtre)
-        gear_id = act.get("gear_id")
-        if not gear_id:
-            if act.get("gear_source") == "garmin_unmapped":
-                continue    # #133 : matériel Garmin non associé — jamais crédité en silence à la paire par défaut
-            if not default_id:
-                continue
-            if default_start and (not act.get("date") or act["date"] < default_start):
-                continue    # séance antérieure à l'entrée en service de la chaussure par défaut
-            gear_id = default_id
+    for act, gear_id in attribute_gear(activities, gear_defs, today):
+        distance = act["distance_m"]
         totals[gear_id] = totals.get(gear_id, 0.0) + distance
         day = act.get("date")
         if window_start and day and window_start <= day <= today_iso:
@@ -2647,3 +2655,145 @@ def heat_acclimation(activities: List[dict], weather_rows: List[dict], end,
         "sessions_considered": sessions_considered,
         "sessions_without_weather": sessions_without_weather,
     }
+
+
+# ---------------------------------------------------------------------------
+# Inspection photo du matériel (#135) : rappel « inspection conseillée » et bilan de carrière
+# ---------------------------------------------------------------------------
+
+# Cadence d'inspection proposée (jamais imposée) : ~200 km depuis la dernière inspection de la
+# paire, ou depuis son entrée en service quand aucune n'existe.
+GEAR_INSPECTION_INTERVAL_M = 200_000
+GEAR_CONDITION_RANK = {"green": 0, "yellow": 1, "orange": 2, "red": 3}
+
+ASSUMPTIONS["gear_inspection"] = (
+    "Inspection photo des chaussures (#135) : l'état (🟢🟡🟠🔴), les zones d'usure et les indices de foulée "
+    "sont posés par le coach à partir de photos (skill `gear-inspection`) et lus tels quels dans "
+    "`gear/AAAA-MM-JJ_<gear_id>_inspection.md` — aucun calcul d'image ici. Le script ne calcule que le "
+    "RAPPEL : « inspection conseillée » quand la paire (non retirée) a parcouru >= 200 km depuis sa "
+    "dernière inspection (`distance_m` de l'inspection ; sans inspection, le kilométrage de DÉPART "
+    "`départ N km` de la paire — une paire d'occasion à 250 km de départ n'est pas due le premier jour), "
+    "ou a franchi son seuil d'alerte sans inspection faite au-delà de ce seuil (test prioritaire, jamais "
+    "masqué par une inspection sans kilométrage). Si la dernière inspection n'a pas de "
+    "`distance_m`, le rappel est indéterminé (`due: null`) — jamais deviné. `km_since_inspection_m` "
+    "est plafonné à 0 ; un kilométrage d'inspection supérieur au kilométrage actuel produit un "
+    "avertissement (`warnings`). L'intervalle de 200 km est "
+    "une approximation du projet (aucune norme : l'usure dépend du modèle, du terrain et du poids "
+    "du coureur). `condition_change` compare les DEUX dernières inspections d'une même paire "
+    "(pire/identique/meilleur) : c'est le signal le plus fiable, plus qu'un verdict isolé. "
+    "L'usure d'une semelle est un signal faible — les chaussures modernes (pile haute, rocker, mousses) "
+    "la déforment — et un indice de foulée n'est jamais un diagnostic."
+)
+
+
+def gear_inspection_status(shoes: List[dict], inspections: List[dict],
+                           interval_m: float = GEAR_INSPECTION_INTERVAL_M,
+                           ignored: Optional[Dict[str, str]] = None) -> List[dict]:
+    """Historique d'inspections par paire + rappel (voir `ASSUMPTIONS["gear_inspection"]`).
+
+    `shoes` : `gear_mileage()["shoes"]` (kilométrage courant, seuil, retraite). `inspections` :
+    dicts portant au moins `gear_id`, `date`, `condition` (+ `distance_m`, `path`…), dans n'importe
+    quel ordre. Rend une entrée par paire non retirée, par paire retirée ayant des inspections, et
+    par `gear_id` inspecté mais absent du profil (`unknown: true`), triées par nom. `ignored` :
+    `{gear_id: nom}` des paires `(ignorée)` (#133) — leurs inspections restent visibles, marquées
+    `ignored: true` (jamais « inconnue », jamais de rappel)."""
+    ignored = ignored or {}
+    by_gear: Dict[str, List[dict]] = {}
+    for insp in inspections:
+        by_gear.setdefault(insp["gear_id"], []).append(insp)
+    for rows in by_gear.values():
+        rows.sort(key=lambda r: (r.get("date") or "", r.get("path") or ""), reverse=True)
+
+    def entry(gear_id: str, shoe: Optional[dict]) -> dict:
+        rows = by_gear.get(gear_id, [])
+        latest = rows[0] if rows else None
+        out: Dict[str, Any] = {
+            "gear_id": gear_id, "name": (shoe or {}).get("name") or gear_id,
+            "retired": bool((shoe or {}).get("retired")),
+            "unknown": shoe is None and gear_id not in ignored,
+            "inspections": rows, "latest": latest,
+        }
+        if gear_id in ignored and shoe is None:
+            out["ignored"] = True
+            out["name"] = ignored[gear_id] or gear_id
+        distance = (shoe or {}).get("distance_m")
+        if distance is not None:
+            out["distance_m"] = distance
+        if len(rows) >= 2:
+            a, b = GEAR_CONDITION_RANK.get(rows[0]["condition"]), GEAR_CONDITION_RANK.get(rows[1]["condition"])
+            if a is not None and b is not None:
+                out["condition_change"] = "worse" if a > b else "better" if a < b else "same"
+        due, reason = False, None
+        if shoe is not None and not out["retired"]:
+            threshold = shoe.get("threshold_m")
+            # Le seuil d'alerte est testé EN PREMIER : une dernière inspection sans `distance_m`
+            # ne doit pas le masquer (seule une inspection AVEC kilométrage >= seuil le lève).
+            alert_open = bool(shoe.get("alert")) and threshold is not None and not any(
+                (r.get("distance_m") or 0) >= threshold for r in rows)
+            # Sans inspection, la base est le kilométrage de DÉPART de la paire (`départ N km`) :
+            # une paire d'occasion à 250 km de départ n'est pas « à inspecter » le jour même.
+            baseline = (shoe.get("start_m") or 0) if latest is None else latest.get("distance_m")
+            if baseline is not None:
+                raw = distance - baseline
+                if raw < 0:
+                    out.setdefault("warnings", []).append(
+                        "kilométrage à l'inspection supérieur au kilométrage actuel de la paire — "
+                        "`distance_m` de l'inspection ou `départ` du profil à vérifier")
+                since = max(0.0, raw)
+                out["km_since_inspection_m"] = round(since)
+            if alert_open:
+                due, reason = True, "threshold_alert"
+            elif baseline is None:
+                due, reason = None, "baseline_unknown"
+            elif since >= interval_m:
+                due, reason = True, "never_inspected" if latest is None else "interval"
+        out["due"], out["due_reason"] = due, reason
+        return out
+
+    known = {s["gear_id"] for s in shoes}
+    result = [entry(s["gear_id"], s) for s in shoes if not s.get("retired") or s["gear_id"] in by_gear]
+    result += [entry(gid, None) for gid in by_gear if gid not in known]
+    result.sort(key=lambda e: (e["name"].casefold(), e["gear_id"]))
+    return result
+
+
+def gear_career(shoe: dict, activities: List[dict], inspections: List[dict]) -> dict:
+    """Bilan de carrière d'une paire (#135, item 7 — au passage `(retirée)`).
+
+    `shoe` : entrée de `gear_mileage()["shoes"]`. `activities` : séances DÉJÀ attribuées à cette paire
+    (`date`, `sport`, `distance_m`, `duration_s`, `name`, `is_race`, `splits` facultatifs), avec
+    distance. `inspections` : celles de la paire (n'importe quel ordre).
+
+    Rend km (départ compris, comme `gear`), séances, période, courses (`is_race` : séances dont
+    l'intensité PLANIFIÉE le même jour est `race`), meilleurs efforts (records 1/5/10/21 km sur
+    les seules séances de la paire AYANT des splits — clé omise sinon, jamais devinée), plus
+    longue sortie, dernière inspection et historique des états."""
+    acts = sorted(activities, key=lambda a: a.get("date") or "")
+    dated = [a["date"] for a in acts if a.get("date")]
+    races = [{"date": a.get("date"), "name": a.get("name"), "sport": a.get("sport"),
+              "distance_m": a.get("distance_m"), "duration_s": a.get("duration_s")}
+             for a in acts if a.get("is_race")]
+    out: Dict[str, Any] = {
+        "gear_id": shoe["gear_id"], "name": shoe.get("name") or shoe["gear_id"],
+        "retired": bool(shoe.get("retired")), "distance_m": shoe.get("distance_m"),
+        "sessions": len(acts),
+        "counted_distance_m": round(sum(a.get("distance_m") or 0 for a in acts)),
+        "first_date": dated[0] if dated else None, "last_date": dated[-1] if dated else None,
+        "races": races,
+    }
+    if shoe.get("start_m"):
+        out["start_m"] = shoe["start_m"]
+    if acts:
+        longest = max(acts, key=lambda a: a.get("distance_m") or 0)
+        out["longest"] = {"date": longest.get("date"), "name": longest.get("name"),
+                          "distance_m": longest.get("distance_m")}
+    efforts = best_efforts([a for a in acts if a.get("splits")])
+    if efforts:
+        out["best_efforts"] = [{"km": km, **v} for km, v in sorted(efforts.items())]
+    rows = sorted(inspections, key=lambda r: (r.get("date") or "", r.get("path") or ""), reverse=True)
+    out["inspections_count"] = len(rows)
+    if rows:
+        out["last_inspection"] = rows[0]
+        out["condition_history"] = [{"date": r.get("date"), "condition": r.get("condition"),
+                                     "distance_m": r.get("distance_m")} for r in reversed(rows)]
+    return out

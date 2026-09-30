@@ -12,11 +12,14 @@ on:
 
 jobs:
   claude:
+    # Only collaborators can trigger Claude: the action rejects anyone without
+    # write access (401), which showed up as a failed run.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association) &&
+      ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,6 +27,13 @@ jobs:
       issues: read
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
+    env:
+      # `@claude` can be tagged on a fork PR, whose body and files are untrusted
+      # and end up in the prompt. Strip Anthropic/GitHub credentials from the
+      # environment of every subprocess Claude spawns, so an injected instruction
+      # has a harder time reading CLAUDE_CODE_OAUTH_TOKEN. Reduces the risk, does
+      # not remove it: read the raw PR before tagging Claude on outside work.
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

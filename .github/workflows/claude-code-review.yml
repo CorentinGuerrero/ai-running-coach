@@ -18,6 +18,11 @@ jobs:
     #   github.event.pull_request.user.login == 'new-developer' ||
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
+    # Fork PRs get a read-only token, no secrets and no OIDC token on the
+    # `pull_request` event, so the action cannot authenticate: skip them
+    # instead of failing (maintainers can review them by hand).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
