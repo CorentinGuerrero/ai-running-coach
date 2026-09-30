@@ -373,6 +373,12 @@ le coach n'a pas tranché : rien n'est inventé.
 
 ![Santé, carte Foulée : tendances mesurées par la montre, indices des inspections photo, confiance et désaccords](../assets/dashboard/sante-foulee.webp)
 
+*La carte Foulée (workspace de démonstration) : 98 séances de course avec dynamique, dont 71 avec
+balance ; chaque grandeur avec sa moyenne et son sens de variation sur les 4 dernières semaines ;
+la balance reste dans la bande grisée de ±1 point autour de 50 % ; en bas, les indices tirés des
+inspections photo et les deux désaccords relevés — indices d'attaque différents selon la paire, et
+usure asymétrique alors que la balance mesurée est symétrique (« la mesure prime »).*
+
 Une carte en bas de la vue Santé (#151), montrée **même quand le bilan matinal est désactivé**
 (elle ne dépend pas de `[health].morning_check` : aucune donnée de santé du matin). Elle sépare
 ce qui est **mesuré** de ce qui est **deviné** :
