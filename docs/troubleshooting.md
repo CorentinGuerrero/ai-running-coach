@@ -28,7 +28,7 @@ Rechargez votre shell (`source ~/.zshrc` ou `source ~/.bashrc`) puis relancez le
 ### `garmin-mcp` introuvable
 
 ```bash
-uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp
+uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7
 ```
 
 ### `leanproxy-mcp` introuvable (mode passerelle uniquement)
@@ -157,7 +157,7 @@ la demande de confiance, puis vérifiez avec `/mcp`.
 
 ### Les dossiers de travail sont vides
 
-Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/` sont créés par le script d'installation. Ils sont **exclus du dépôt** (voir `.gitignore`).
+Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/` sont créés par le script d'installation. Ils sont **exclus du dépôt** (voir `.gitignore`).
 
 ### Les données Garmin ne se synchronisent pas
 

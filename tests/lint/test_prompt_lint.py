@@ -21,7 +21,7 @@ ENGINE_PREFIXES = ("agents/", "skills/", "config/", "scripts/", "templates/", "d
 # Préfixes qui désignent le WORKSPACE de l'athlète : créés à l'usage, jamais
 # versionnés (cf. .gitignore).
 WORKSPACE_PREFIXES = (
-    "activities/", "medical/", "nutrition/", "planning/", "rapports/", "resources/", "logs/",
+    "activities/", "medical/", "nutrition/", "planning/", "rapports/", "resources/", "gear/", "logs/",
 )
 
 # Chemins cités qui ne sont ni l'un ni l'autre (exemples, dossiers générés par
@@ -479,3 +479,82 @@ class TestEquipmentWiring(unittest.TestCase):
         text = self.read(self.CONTRACT)
         for needle in ("`gear_ids`", "alerte N km", "N séances", "N jours", "entretien", "kit:", "catégorie:"):
             self.assertIn(needle, text)
+class TestGearInspectionWiring(unittest.TestCase):
+    """#135 — le skill `gear-inspection` n'existe que par son prompt : verrouille ses
+    garde-fous (signal faible, jamais un diagnostic, aucune mesure sans échelle, pas de
+    changement de foulée recommandé sur une photo, relais médical conditionné, proposition
+    jamais imposée), l'absence de vocabulaire de diagnostic, et le câblage du coach et de
+    la documentation mobile (envoi de photos non validé)."""
+
+    SKILL = REPO / "skills/gear-inspection/SKILL.md"
+    COACH = REPO / "agents/coach.md"
+    MOBILE = REPO / "docs/mobile.md"
+    DOC = REPO / "docs/skills/gear-inspection.md"
+
+    # Formulations qui affirment un diagnostic ou étiquettent l'athlète.
+    DIAGNOSIS_VOCABULARY = re.compile(
+        r"diagnostic\s+(de|d['’])|vous\s+souffrez|tu\s+souffres|pronateur|supinateur|"
+        r"sur-?pronat|sous-?pronat|syndrome\b|pathologi", re.IGNORECASE)
+
+    def text(self, path) -> str:
+        return path.read_text(encoding="utf-8")
+
+    def test_skill_has_frontmatter_within_limit(self):
+        fields = read_frontmatter(self.SKILL)
+        self.assertEqual(fields.get("name"), "gear-inspection")
+        self.assertTrue(0 < len(fields.get("description", "")) <= 1024)
+
+    def test_guardrail_phrases_are_present(self):
+        text = self.text(self.SKILL)
+        for phrase in (
+            "signal faible",
+            "jamais un diagnostic",
+            "Aucune mesure en mm sans référence d'échelle",
+            "Ne jamais recommander de changer de technique de foulée",
+            "proposée, jamais imposée",
+            "approximation du projet",
+            "redemander l'angle manquant",
+            "comparaison explicite",
+            "asymétrie",
+            "indisponible",
+        ):
+            self.assertIn(phrase, text, f"garde-fou absent du skill : {phrase}")
+
+    def test_medical_handoff_is_gated_on_enabled_agents(self):
+        text = self.text(self.SKILL)
+        self.assertIn("[agents].enabled", text)
+        self.assertIn("kiné", text)
+        self.assertIn("analyse de foulée", text)
+
+    def test_no_diagnosis_vocabulary(self):
+        for path in (self.SKILL, self.DOC):
+            hits = self.DIAGNOSIS_VOCABULARY.findall(self.text(path))
+            self.assertFalse(hits, f"vocabulaire de diagnostic dans {path.relative_to(REPO)} : {hits}")
+
+    def test_only_the_two_verified_sources_are_cited(self):
+        urls = set(re.findall(r"https?://[^\s)]+", self.text(self.SKILL)))
+        self.assertEqual(urls, {
+            "https://www.doctorsofrunning.com/footwear-science-outsole-wear-patterns/",
+            "https://marathonhandbook.com/wear-on-running-shoes/",
+        })
+
+    def test_no_ground_contact_claim(self):
+        """Le temps de contact au sol n'est extrait nulle part : le skill doit le dire, pas l'utiliser."""
+        text = self.text(self.SKILL)
+        self.assertIn("temps de contact au sol", text)
+        self.assertIn("ne jamais l'inventer", text)
+
+    def test_coach_wires_the_skill_command_and_guardrails(self):
+        text = self.text(self.COACH)
+        for needle in ("GEAR INSPECTION MANDATE", "scripts/arc_index.py inspections",
+                       "scripts/arc_index.py gear-career", "a proposal, never an imposition",
+                       "NEVER recommend changing foot strike", "ONLY IF `medical` is in `[agents].enabled`",
+                       "Never in headless mode", "not extracted anywhere",
+                       "worded by `due_reason`", "`threshold_alert` →", "`never_inspected` →",
+                       "belongs to the chat reply ONLY"):
+            self.assertIn(needle, text, f"coach.md : {needle}")
+
+    def test_mobile_doc_flags_photo_upload_as_unvalidated(self):
+        text = self.text(self.MOBILE)
+        self.assertIn("à valider", text)
+        self.assertIn("pas validé", text)

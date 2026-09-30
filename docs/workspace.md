@@ -11,7 +11,7 @@ jour du moteur sans rien copier**, séparez-les avec `--workspace`.
 ```
 ~/ai-running-coach/          moteur (ce dépôt, public)        → git pull pour les nouveautés
 ~/mon-workspace/             workspace (VOTRE dépôt privé)
-├── activities/ medical/ nutrition/ planning/ rapports/ resources/   ← versionnés
+├── activities/ medical/ nutrition/ planning/ rapports/ gear/ resources/   ← versionnés
 ├── local/agents/  local/skills/    ← vos agents/skills privés, versionnés
 ├── config/workspace.user.toml      ← vos réglages (langue, notifications, sync), versionné
 │
@@ -267,6 +267,31 @@ batterie ; poche et flasques : hygiène). Ligne de commande :
 **Avant la course.** Le `course-strategist` croise le matériel obligatoire de son plan avec
 cet inventaire : **manquant** (non retrouvé), **à vérifier** (seule la catégorie correspond : à confirmer sur la spécification du règlement), **jamais utilisé à l'entraînement** (« rien de
 nouveau le jour J ») ou **sous alerte** — jamais inventé.
+### Le dossier `gear/` : inspections photo (#135)
+
+`gear/` reçoit les inspections photo de vos chaussures (skill
+[`gear-inspection`](skills/gear-inspection.md)) : un fichier
+`gear/AAAA-MM-JJ_<gear_id>_inspection.md` par inspection (bloc `arc` de type
+`gear_inspection`), et les photos dans `gear/photos/`. Comme les autres dossiers de
+données, il est **exclu du dépôt public** (`/gear/` dans `.gitignore`), créé par
+`install.sh` et `/coach-setup`, et versionné dans **votre** dépôt privé quand vous
+séparez le workspace. Attention : avec `git_autocommit`, les photos partent alors dans
+ce dépôt privé — des images redimensionnées (~1 Mo) suffisent.
+
+```
+gear/
+├── 2026-09-24_pegasus-41_inspection.md
+├── 2026-08-02_pegasus-41_inspection.md
+└── photos/2026-09-24_pegasus-41_semelles.jpg
+```
+
+Le coach propose une inspection environ tous les 200 km d'une paire (approximation du
+projet), à l'alerte de seuil, ou sur demande — jamais imposée. Ce que vous retrouvez :
+`python3 scripts/arc_index.py inspections [--gear ID]` (rappel `due`, historique, comparaison
+des deux dernières), le tableau de bord (carte « Inspections photo », vignettes comprises), et,
+quand une paire passe en `(retirée)`, `python3 scripts/arc_index.py gear-career --gear ID`
+(km, séances, courses, meilleurs efforts quand des splits existent, dernière inspection). L'usure
+d'une semelle est un signal faible : les indices de foulée qu'on en tire ne sont jamais un diagnostic.
 
 ## Les décisions tracées
 

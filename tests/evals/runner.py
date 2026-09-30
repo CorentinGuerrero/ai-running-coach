@@ -282,7 +282,7 @@ def build_workspace(root: Path, case: dict) -> Path:
     else:
         workspace.mkdir(parents=True)
     _materialize_relative_dates(workspace)
-    for name in ("activities", "medical", "nutrition", "planning", "rapports", "resources"):
+    for name in ("activities", "medical", "nutrition", "planning", "rapports", "resources", "gear"):
         (workspace / name).mkdir(parents=True, exist_ok=True)
     _write_fixture_snapshot(root, workspace)
 

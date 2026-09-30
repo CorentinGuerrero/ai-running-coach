@@ -30,7 +30,7 @@ flowchart LR
 | Composant | Rôle | Installation |
 |---|---|---|
 | `uv` | Gestionnaire Python | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| `garmin-mcp` | Serveur MCP Garmin | `uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp` |
+| `garmin-mcp` | Serveur MCP Garmin | `uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7` |
 | `garmin-mcp-auth` | Authentification OAuth | via `uv run garmin-mcp-auth` |
 | `leanproxy-mcp` | Passerelle MCP (optionnel) | `brew tap mmornati/leanproxy-mcp && brew install leanproxy-mcp` |
 
@@ -151,8 +151,9 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
   garmin_unmapped`) ; une puce `- <nom Garmin> — garmin: <uuid> (ignorée)` fait taire propositions
   et alertes. La provenance est tracée dans `gear_source` (`garmin`/`chat`/`garmin_unmapped`) ; règle exécutée par `python3 scripts/arc_index.py gear-attribution`.
 - **Synchronisation automatique.** `scripts/daily-sync.sh` passe `--disallowedTools` pour
-  `add_gear_to_activity` et `remove_gear_from_activity` : le run non surveillé ne peut pas écrire
-  chez Garmin. **Limite** : en mode passerelle l'appel passe par l'outil unique
+  `add_gear_to_activity` et `remove_gear_from_activity`, ainsi que pour les outils d'écriture de
+  séances et de parcours (`schedule_workouts`, `upload_workout`, `delete_workout`…) : le run non
+  surveillé ne peut pas écrire chez Garmin. **Limite** : en mode passerelle l'appel passe par l'outil unique
   `mcp__leanproxy__invoke_tool`, qui ne peut pas être filtré par sous-outil — seule la consigne du skill
   protège alors ; préférez le mode direct pour un run non surveillé.
 - **Retour vers Garmin (facultatif).** Une attribution faite en chat peut être poussée vers Garmin
@@ -193,7 +194,7 @@ Les agents accèdent aux outils Garmin directement (mode direct) ou via `leanpro
 
 | Problème | Solution |
 |---|---|
-| `garmin-mcp` introuvable | `uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp` |
+| `garmin-mcp` introuvable | `uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7` |
 | Tokens expirés | `uv run garmin-mcp-auth` |
 | `leanproxy-mcp` introuvable (mode passerelle) | `brew tap mmornati/leanproxy-mcp && brew install leanproxy-mcp` |
 | Erreur de connexion | Vérifiez que `garmin-mcp` fonctionne : `garmin-mcp stdio` |

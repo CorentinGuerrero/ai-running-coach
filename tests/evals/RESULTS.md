@@ -31,6 +31,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `feedback-with-fit` | — | — |
 | `feedback-without-fit` | — | — |
 | `gear-correction` | — | — |
+| `gear-inspection-no-mm-without-scale` | — | — |
+| `gear-inspection-proposed-at-200km` | — | — |
 | `gear-suggestion-three-pairs` | — | — |
 | `gear-sync-conflict-athlete-wins` | — | — |
 | `gear-sync-garmin-attached` | — | — |

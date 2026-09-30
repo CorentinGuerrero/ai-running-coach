@@ -156,7 +156,7 @@ MCP_PROBE_TIMEOUT_S = float(os.environ.get("ARC_MCP_PROBE_TIMEOUT_S", "10"))
 CRON_MARKER = "# ai-running-coach daily-sync"
 LAUNCHD_PLIST_REL = "Library/LaunchAgents/com.ai-running-coach.daily-sync.plist"
 
-GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp"
+GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7"
 
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",

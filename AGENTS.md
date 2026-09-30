@@ -14,7 +14,7 @@ héritage.
 
 | Clé | Effet sur les agents |
 |---|---|
-| `[language].documents` | Langue des MD persistés (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`). Défaut `fr`. |
+| `[language].documents` | Langue des MD persistés (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`). Défaut `fr`. |
 | `[language].responses` | Langue des réponses. Défaut `auto` = celle de la requête. |
 | `[coaching].style` | Voix de l'agent → `config/coaching-styles.md`. |
 | `[coaching].intensity` | Fermeté d'application du style. |
@@ -77,6 +77,7 @@ ci-dessous.
 | `nutrition/` | Journaux nutrition & plans de ravitaillement | `YYYY-MM-DD_nutrition.md` |
 | `planning/` | Plans d'entraînement, objectifs, stratégies de course, **décisions tracées** | `active_objective.md` est la **source de vérité** de l'objectif courant ; `Runner_Profile.md` est le profil de l'athlète. Les deux sont installés depuis `templates/` par `/coach-setup`. Une décision (garde-fou, bilan matinal, blessure…) = un fichier `YYYY-MM-DD_decision_<slug>.md`. |
 | `rapports/` | Rapports de synthèse périodiques (propriété du **coach**) | `YYYY-MM-DD_rapport.md` |
+| `gear/` | Inspections photo du matériel (propriété du **coach**, skill `gear-inspection`, #135) ; photos dans `gear/photos/` (jamais dans le dépôt public) | `YYYY-MM-DD_<gear_id>_inspection.md` |
 | `resources/` | Base de connaissances (langue des documents) : running, nutrition, santé, récupération | Matériel de référence, citer lors des conseils. **Catalogues produits** (optionnels) : `resources/nutrition/catalogue-produits-*.md` = valeurs nutritionnelles par produit de l'athlète |
 
 > **Note** : ces dossiers sont créés par l'utilisateur dans son espace de travail
@@ -85,7 +86,7 @@ ci-dessous.
 ### Contrat de données
 
 Tout fichier écrit par un agent dans `activities/`, `medical/`, `nutrition/`,
-`planning/` (semaines, évaluations, plans de course, décisions) ou `rapports/` s'ouvre, sous
+`planning/` (semaines, évaluations, plans de course, décisions), `rapports/` ou `gear/` s'ouvre, sous
 son titre, par **un bloc ```` ```arc ```` de JSON** conforme au skill
 `workspace-data-contract` : clés en anglais, unités SI, mesure absente = clé omise.
 Le texte libre reste en dessous. Valider après écriture avec
@@ -224,5 +225,6 @@ jamais devinés ou simulés :**
 - `session-parts-analyzer` — analyse au niveau segment des drills (strides, montées, intervalles, sprints) depuis FIT/MCP. L'analyse détaillée délègue le téléchargement FIT à `fit-download`.
 - `fit-download` — **téléchargement des fichiers FIT + records GPS en bypassant le MCP** (qui timeoute sur les FIT) : `scripts/download_fit.py`, source suivant `[data].source` — Garmin via `garminconnect` + tokens locaux `~/.garminconnect`, ou intervals.icu via son API REST + la clé API du serveur MCP (activités importées depuis Strava exclues, voir « Backends MCP »). Charger dès qu'une séance doit être analysée à précision sub-km (profil de parcours, montées, dérive FC×élévation, analyse stride/sprint/intervalle, comparaison de parcours). Toujours persister l'analyse dans le MD de l'activité dans la langue des documents (`config/workspace.toml`), ne jamais dumper le JSON brut.
 - `gpx-analysis` — **analyse générique de parcours GPX** (fichiers Strava/Garmin/course) via `scripts/analyze_gpx.py` (stdlib) : distance réelle, D+/D- (lissage anti-bruit), profil par km, montées significatives, boucle vs point-to-point, verdict de compatibilité vs une cible (distance/D+). Charger dès que l'utilisateur fournit un GPX et veut l'analyser ou l'évaluer contre une séance planifiée. Persister la fiche d'évaluation dans `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` (langue des documents). Utilisé par `course-strategist` pour l'entrée GPX.
+- `gear-inspection` — **inspection photo des chaussures** (#135) : le coach la **propose** (jamais imposée) environ tous les 200 km d'une paire, à l'alerte de seuil ou sur demande (`python3 scripts/arc_index.py inspections`, jamais en headless) ; protocole photo (semelles, profil, arrière, tige, échelle), grille de lecture 🟢🟡🟠🔴, comparaison avec l'inspection précédente de la même paire, **indices** de foulée depuis la zone d'usure (signal faible, jamais un diagnostic ; aucune mesure en mm sans échelle ; jamais de changement de foulée recommandé sur une photo), relais à `medical` seulement s'il est dans `[agents].enabled`. Persiste `gear/YYYY-MM-DD_<gear_id>_inspection.md` (type `gear_inspection`) et produit, à la retraite d'une paire, son bilan de carrière (`arc_index.py gear-career --gear ID`). Temps de contact au sol (FIT) : indisponible dans ce dépôt.
 - `course-comparison` — **analyse comparative de séances sur le même parcours/lieu** via `scripts/compare_course.py` : découverte de toutes les activités d'un lieu (fichiers MD Garmin), alignement des boucles/segments, comparaison des montées, tableau global (date, distance, D+, durée, allure, FC moy/max, premier tour, montées) et dump JSON. Charger quand l'utilisateur demande de comparer des séances d'un même lieu ou d'évaluer la progression sur un parcours connu. Prérequis : chaque MD d'activité porte son bloc ```` ```arc ```` avec `location` et `splits` (fichiers anciens : bloc YAML `## Données brutes Garmin (référence)` + `## Analyse par splits (km)`). Persister les rapports dans `rapports/YYYY-MM-DD_comparaison_<lieu>.md`.
 - `log` — **saisie libre en une phrase** (`/log`, #67) : « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Le modèle extrait les entités, `scripts/arc_log.py` (stdlib, JSON-in/JSON-out) fait l'arithmétique et la correspondance catalogue (`resources/nutrition/catalogue-produits-*.md`) — jamais l'inverse. Produit inconnu/ambigu → toujours demander, jamais inventer. Écrit `carbs_g`/`fluid_intake_ml`/`rpe` dans l'activité du jour (`activities/`, agent coach) et `pain` dans `medical/YYYY-MM-DD_health.md` (agent medical si activé, sinon coach) ; une douleur ≥ 7/10 déclenche une recommandation de consultation.

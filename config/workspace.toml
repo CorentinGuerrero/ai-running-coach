@@ -6,7 +6,7 @@
 
 [language]
 # Langue des fichiers Markdown persistés par les agents/skills
-# (activities/, medical/, nutrition/, planning/, rapports/).
+# (activities/, medical/, nutrition/, planning/, rapports/, gear/).
 # Valeurs : code ISO 639-1 (ex. "fr", "en", "nl").
 documents = "fr"
 
