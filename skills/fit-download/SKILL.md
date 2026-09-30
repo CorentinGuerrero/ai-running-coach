@@ -1,16 +1,21 @@
 ---
 name: fit-download
-description: Use to download Garmin FIT files and their GPS records (JSON) by bypassing the MCP channel, which times out on FIT payloads. Load whenever a session must be analyzed at sub-kilometer precision — course profile, climbs, HR×elevation drift, stride/sprint/interval analysis, course comparison. Runs scripts/download_fit.py with the garminconnect library and the local ~/.garminconnect tokens.
+description: Use to download FIT files and their GPS records (JSON) by bypassing the MCP channel, which times out on FIT payloads — from Garmin Connect or from Intervals.icu, following [data].source. Load whenever a session must be analyzed at sub-kilometer precision — course profile, climbs, HR×elevation drift, stride/sprint/interval analysis, course comparison, or the FIT-derived KPIs (zones, GAP, decoupling, VAM, descent, durability, energy model). Runs scripts/download_fit.py — garminconnect + local ~/.garminconnect tokens for Garmin, the Intervals.icu REST API + the MCP server's API key for Intervals.icu.
 ---
 
 # Skill: fit-download
 
-Télécharge les fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassant le canal MCP**.
+Télécharge les fichiers FIT (et leurs records GPS en JSON) en **bypassant le canal MCP**, depuis la source de `[data].source` :
+
+| Source | Identifiant | Accès |
+|---|---|---|
+| `garmin` (défaut) | `garmin_activity_id` (entier) | lib `garminconnect` de l'environnement `garmin-mcp` + **tokens locaux** `~/.garminconnect` — aucun mot de passe |
+| `intervals` | `intervals_activity_id` (`i<chiffres>`) | API REST Intervals.icu (stdlib) + la **clé API du serveur MCP** (`~/.config/ai-running-coach/intervals-icu-mcp/.env`) — aucune nouvelle configuration ; `fitparse` de l'environnement `intervals-icu-mcp` pour `--json` |
 
 ## Pourquoi ce skill
 
-- Le MCP Garmin (`get_activity_fit_data`) **timeoute** sur les downloads FIT (payload de plusieurs Mo) — ne pas insister dessus pour un download.
-- Le script `download_fit.py` utilise la lib `garminconnect` installée dans l'environnement `garmin-mcp` + les **tokens locaux** `~/.garminconnect` → **aucun mot de passe** nécessaire.
+- Le MCP Garmin (`get_activity_fit_data`) **timeoute** sur les downloads FIT (payload de plusieurs Mo) — ne pas insister dessus pour un download. Côté Intervals.icu, le FIT passerait en base64 dans le contexte : même raison de passer par le script.
+- **Intervals.icu — activités importées depuis Strava** : l'API Strava interdit leur redistribution, aucun FIT n'existe. Le script les signale `INDISPONIBLE` (avec la raison) et continue : la séance reste valide, simplement sans KPI fins — ne jamais inventer de valeur FIT pour elle.
 
 ## Quand l'utiliser
 
@@ -19,10 +24,12 @@ Télécharge les fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassa
 
 ## Workflow
 
-1. **Trouver les activity_id** : dans les fichiers MD d'activités (`activity_id: \d+`), ou via `get_activities_by_date` (MCP).
+1. **Trouver les identifiants** : dans le bloc ```` ```arc ```` des fichiers MD d'activités (`garmin_activity_id` ou `intervals_activity_id`), ou via le MCP (`get_activities_by_date` / `get_recent_activities`).
 2. **Télécharger** :
    ```bash
    python3 skills/fit-download/scripts/download_fit.py 24070286912 --json --output-dir /tmp/fits/
+   python3 skills/fit-download/scripts/download_fit.py i123456789 --json   # Intervals.icu
+   # --source garmin|intervals → force la source (défaut : [data].source)
    # --json   → écrit aussi <id>.records.json (records GPS/HR/power/cadence, brut)
    #            + <output-dir>/fit/<id>.json (copie normalisée #42, voir scripts/arc_samples.py)
    # --from-dir activities/ → scanne tous les activity_id des MD
@@ -32,7 +39,7 @@ Télécharge les fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassa
    quand le FIT n'a pas vocation à rester. **Pour que `scripts/arc_index.py` ingère les
    échantillons** (table `activity_sample`), le téléchargement doit se faire SANS
    `--output-dir` (ou avec `--output-dir <workspace>/activities`) : la copie normalisée
-   canonique est `activities/fit/<garmin_activity_id>.json`, jetable et jamais versionnée
+   canonique est `activities/fit/<garmin_activity_id | intervals_activity_id>.json`, jetable et jamais versionnée
    (son propre `.gitignore` est créé automatiquement à la première écriture).
 3. **Analyser** le FIT avec `session-parts-analyzer` (`analyze_session_parts.py --fit ... --part climb|stride|...`) ou `course-comparison` (`compare_course.py --fit-dir`).
 4. **Persister** l'analyse (dérive, profil) dans le MD de l'activité dans la langue des documents (`config/workspace.toml` → `[language].documents`, défaut FRANÇAIS) — ne jamais dump le JSON brut en chat.
@@ -41,7 +48,7 @@ Télécharge les fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassa
 
 Le [modèle de dépense énergétique](../../docs/energie.md) (`scripts/arc_energy.py`,
 table dérivée `activity_energy`) se calcule automatiquement pour toute séance
-dont le FIT est déjà ingéré (`activities/fit/<garmin_activity_id>.json`) — il
+dont le FIT est déjà ingéré (`activities/fit/<id>.json`) — il
 ne manque donc **que** pour les séances plus anciennes dont le FIT n'a jamais
 été téléchargé. Procédure détaillée : [docs/skills/fit-download.md — Rattraper
 l'historique](../../docs/skills/fit-download.md#rattraper-lhistorique-pour-la-depense-energetique-modele).
@@ -66,7 +73,8 @@ manque encore, jamais tout l'historique à chaque fois.
 - `_write_records_json` extrait les messages `record` → champs `distance`, `enhanced_altitude`/`altitude`, `heart_rate`, `speed`, `cadence`, `power`, **`position_lat`/`position_long`** (position GPS, quand le FIT en porte une — entiers en semi-cercles, pas encore des degrés à ce stade).
 - **Champ altitude** : préférer `enhanced_altitude` quand présent (plus précis que `altitude`).
 - `_write_canonical_samples` (#42) normalise ensuite ces mêmes records (sans reparser le FIT) via `normalise_records` de `scripts/arc_samples.py` : mapping `heart_rate → hr_bpm`, `distance → distance_m`, `enhanced_altitude/altitude → altitude_m`, `enhanced_speed/speed → speed_ms` (déjà en m/s), `timestamp → t_s` relatif au départ, **`position_lat`/`position_long` → `lat_deg`/`lon_deg`** (degrés décimaux, semi-cercles convertis — #49, identité de montée entre séances, `scripts/arc_climb_match.py` ; `None` si absents ou si le FIT ne porte aucun GPS), et **doublement de la cadence** (`cadence` FIT course à pied compte un seul pied/min, `cadence_spm` en sortie compte les deux) — voir la docstring du module pour le détail et les sources.
-- Auto-relance avec le python de `garmin-mcp` si `garminconnect` absent de l'interpréteur courant.
+- Auto-relance avec le python de `garmin-mcp` si `garminconnect` absent de l'interpréteur courant (Garmin), ou avec celui de `intervals-icu-mcp` si `fitparse` est absent (Intervals.icu, `--json` seulement — le téléchargement lui-même est stdlib). Une seule relance, jamais en boucle.
+- Intervals.icu : `GET /api/v1/activity/<id>` (détection d'un import Strava) puis `GET /api/v1/activity/<id>/fit-file` (gzip décompressé à la volée), authentification Basic `API_KEY:<clé>` comme `intervals-icu-mcp`. `$INTERVALS_ICU_API_KEY` prime sur le `.env`. Codes de sortie : `INDISPONIBLE` (import Strava, 404 = saisie manuelle sans fichier) n'est jamais une panne ; 401/403 = clé API refusée.
 
 ## Files
 

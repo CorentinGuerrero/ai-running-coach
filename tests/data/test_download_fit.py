@@ -13,6 +13,7 @@ qui exigerait le vrai paquet installé pour résoudre l'attribut à patcher.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -298,6 +299,246 @@ class TestShouldSkipDownload(unittest.TestCase):
             (fit_dir / "42.json").write_text("{}", encoding="utf-8")
             self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=True, want_json=True))
             self.assertFalse(D._should_skip_download(dst, out_dir, 42, overwrite=True, want_json=False))
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _fake_opener(routes: dict, calls: list):
+    """`urlopen` factice : `routes` = {suffixe de chemin: bytes | HTTPError}."""
+    def opener(req, timeout=None):
+        calls.append(req)
+        path = req.full_url[len(D.INTERVALS_API):]
+        body = routes[path]
+        if isinstance(body, Exception):
+            raise body
+        return _FakeResponse(body)
+
+    return opener
+
+
+def _http_error(code: int):
+    import urllib.error
+
+    return urllib.error.HTTPError("https://intervals.icu/x", code, "err", {}, None)
+
+
+class TestIntervalsCredentials(unittest.TestCase):
+    """Source Intervals.icu (#68) : la clé API est celle du serveur MCP — une seule
+    clé à configurer. Jamais d'appel réseau dans ces tests."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("INTERVALS_ICU_API_KEY", None)
+
+    def tearDown(self):
+        os.environ.pop("INTERVALS_ICU_API_KEY", None)
+        if self._saved is not None:
+            os.environ["INTERVALS_ICU_API_KEY"] = self._saved
+
+    def test_reads_the_mcp_env_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / ".env"
+            env.write_text("# commentaire\nINTERVALS_ICU_API_KEY='abc123'\nINTERVALS_ICU_ATHLETE_ID=i1\n",
+                           encoding="utf-8")
+            self.assertEqual(D._intervals_api_key(env), "abc123")
+
+    def test_environment_variable_wins_over_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / ".env"
+            env.write_text("INTERVALS_ICU_API_KEY=fichier\n", encoding="utf-8")
+            os.environ["INTERVALS_ICU_API_KEY"] = "variable"
+            self.assertEqual(D._intervals_api_key(env), "variable")
+
+    def test_missing_or_placeholder_key_is_an_explicit_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / ".env"
+            with self.assertRaises(D.IntervalsError):
+                D._intervals_api_key(env)
+            env.write_text("INTERVALS_ICU_API_KEY=your_api_key_here\n", encoding="utf-8")
+            with self.assertRaises(D.IntervalsError):
+                D._intervals_api_key(env)
+
+
+class TestIntervalsDownload(unittest.TestCase):
+    FIT = b"\x0e\x10FAKE.FIT"
+    META = json.dumps({"id": "i123456789", "source": "OAUTH_CLIENT", "type": "Run"}).encode()
+
+    def _download(self, routes, aid="i123456789", want_json=False):
+        calls: list = []
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            result = D._download_one_intervals(aid, out_dir, want_json, "k3y", opener=_fake_opener(routes, calls))
+            written = result.read_bytes()
+            gitignore = (out_dir / ".gitignore").read_text(encoding="utf-8")
+        return result.name, written, gitignore, calls
+
+    def test_writes_the_fit_under_its_intervals_id(self):
+        name, written, gitignore, calls = self._download({
+            "/activity/i123456789": self.META, "/activity/i123456789/fit-file": self.FIT})
+        self.assertEqual(name, "i123456789.fit")
+        self.assertEqual(written, self.FIT)
+        self.assertIn("*.fit", gitignore)
+        auth = calls[0].get_header("Authorization")
+        self.assertTrue(auth.startswith("Basic "))
+        import base64
+        self.assertEqual(base64.b64decode(auth.split()[1]).decode(), "API_KEY:k3y")
+
+    def test_gzipped_fit_is_decompressed(self):
+        import gzip
+        _, written, _, _ = self._download({
+            "/activity/i123456789": self.META, "/activity/i123456789/fit-file": gzip.compress(self.FIT)})
+        self.assertEqual(written, self.FIT)
+
+    def test_json_flag_writes_the_canonical_copy_under_the_intervals_id(self):
+        fake = types.ModuleType("fitparse")
+
+        class _Msg:
+            def __init__(self, fields):
+                self.fields = [types.SimpleNamespace(name=k, value=v) for k, v in fields.items()]
+                self._fields = fields
+
+            def get_value(self, name):
+                return self._fields.get(name)
+
+        class _Fit:
+            def __init__(self, _stream):
+                pass
+
+            def get_messages(self, name):
+                if name == "record":
+                    return [_Msg({"timestamp": "2026-09-29 16:56:53", "distance": 0.0, "heart_rate": 120,
+                                  "cadence": 80}),
+                            _Msg({"timestamp": "2026-09-29 16:56:54", "distance": 2.5, "heart_rate": 121,
+                                  "cadence": 81})]
+                return [_Msg({"sport": "running"})]
+
+        fake.FitFile = _Fit
+        calls: list = []
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"fitparse": fake}):
+            out_dir = Path(tmp)
+            D._download_one_intervals("i123456789", out_dir, True, "k3y", opener=_fake_opener({
+                "/activity/i123456789": self.META, "/activity/i123456789/fit-file": self.FIT}, calls))
+            canonical = json.loads((out_dir / "fit/i123456789.json").read_text(encoding="utf-8"))
+        self.assertEqual(canonical["activity_id"], "i123456789")
+        self.assertEqual([r["cadence_spm"] for r in canonical["records"]], [160.0, 162.0])
+
+    def test_strava_import_is_unavailable_and_never_downloads_the_fit(self):
+        meta = json.dumps({"id": "i1", "source": "STRAVA",
+                           "_note": "STRAVA activities are not available via the API"}).encode()
+        calls: list = []
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(D.IntervalsUnavailable) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener(
+                    {"/activity/i1": meta}, calls))
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+        self.assertIn("Strava", str(cm.exception))
+        self.assertEqual(len(calls), 1, "le FIT ne doit même pas être demandé")
+
+    def test_unprefixed_id_is_unavailable_without_any_request(self):
+        calls: list = []
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(D.IntervalsUnavailable):
+            D._download_one_intervals("123456789", Path(tmp), False, "k", opener=_fake_opener({}, calls))
+        self.assertEqual(calls, [])
+
+    def test_http_errors_map_to_explicit_reasons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(D.IntervalsUnavailable):   # manuelle : pas de fichier
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": self.META, "/activity/i1/fit-file": _http_error(404)}, []))
+            with self.assertRaises(D.IntervalsError) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": _http_error(401)}, []))
+            self.assertNotIsInstance(cm.exception, D.IntervalsUnavailable)
+            self.assertIn("clé API", str(cm.exception))
+
+    def test_403_and_429_have_dedicated_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(D.IntervalsError) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": _http_error(403)}, []))
+            self.assertIn("autre athlète", str(cm.exception))
+            with self.assertRaises(D.IntervalsError) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": _http_error(429)}, []))
+            self.assertNotIsInstance(cm.exception, D.IntervalsUnavailable)
+            self.assertIn("réessayer plus tard", str(cm.exception))
+
+
+class TestBatchExitCode(unittest.TestCase):
+    """Revue #142 : seul un FAIL réel fait sortir en 1 — une activité INDISPONIBLE
+    (import Strava, saisie manuelle) ou déjà présente n'est pas une panne, sinon
+    `daily-sync.sh` signalerait un échec un jour avec une seule séance Strava."""
+
+    @staticmethod
+    def _run(outcomes, skipped=()):
+        def fetch(aid):
+            if outcomes[aid] == "unavailable":
+                raise D.IntervalsUnavailable("import Strava")
+            if outcomes[aid] == "fail":
+                raise D.IntervalsError("HTTP 500")
+
+        with patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()):
+            return D._download_all(list(outcomes), fetch, lambda aid: aid in skipped)
+
+    def test_only_unavailable_is_not_a_failure(self):
+        counts = self._run({"i1": "unavailable", "i2": "unavailable"})
+        self.assertEqual(counts, {"ok": 0, "unavailable": 2, "skipped": 0, "failed": 0})
+
+    def test_all_skipped_is_not_a_failure(self):
+        counts = self._run({"i1": "ok", "i2": "ok"}, skipped={"i1", "i2"})
+        self.assertEqual(counts, {"ok": 0, "unavailable": 0, "skipped": 2, "failed": 0})
+
+    def test_a_real_failure_is_counted_even_among_successes(self):
+        counts = self._run({"i1": "ok", "i2": "fail", "i3": "unavailable"})
+        self.assertEqual(counts, {"ok": 1, "unavailable": 1, "skipped": 0, "failed": 1})
+
+    def test_main_exit_code_follows_real_failures_only(self):
+        for outcome, expected in (("unavailable", 0), ("fail", 1)):
+            with tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(D, "_intervals_api_key", return_value="k"), \
+                    patch.object(D, "_download_one_intervals", side_effect=(
+                        D.IntervalsUnavailable("Strava") if outcome == "unavailable" else D.IntervalsError("x"))), \
+                    patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()):
+                rc = D.main(["--source", "intervals", "--output-dir", tmp, "i1"])
+            self.assertEqual(rc, expected, outcome)
+
+
+class TestIntervalsIdsFromMarkdown(unittest.TestCase):
+    def _md(self, data: dict) -> str:
+        return f"# Séance\n\n```arc\n{json.dumps(data)}\n```\n"
+
+    def test_reads_the_id_of_the_requested_source_only(self):
+        text = self._md({"arc": 1, "kind": "activity", "intervals_activity_id": "i42"})
+        self.assertEqual(D._activity_id_from_arc(text, "intervals"), "i42")
+        self.assertIsNone(D._activity_id_from_arc(text, "garmin"))
+        garmin = self._md({"arc": 1, "kind": "activity", "garmin_activity_id": 42})
+        self.assertEqual(D._activity_id_from_arc(garmin), 42)
+        self.assertIsNone(D._activity_id_from_arc(garmin, "intervals"))
+
+    def test_malformed_intervals_id_is_ignored(self):
+        text = self._md({"arc": 1, "kind": "activity", "intervals_activity_id": "42"})
+        self.assertIsNone(D._activity_id_from_arc(text, "intervals"))
+
+    def test_from_dir_collects_intervals_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.md").write_text(self._md({"intervals_activity_id": "i1"}), encoding="utf-8")
+            (root / "b.md").write_text(self._md({"garmin_activity_id": 2}), encoding="utf-8")
+            self.assertEqual(D._ids_from_dir(root, "intervals"), ["i1"])
+            self.assertEqual(D._ids_from_dir(root, "garmin"), [2])
+
+    def test_garmin_source_rejects_an_intervals_id_with_a_hint(self):
+        import argparse
+        ap = argparse.ArgumentParser()
+        with patch.object(ap, "error", side_effect=SystemExit) as err, self.assertRaises(SystemExit):
+            D._parse_ids(["i42"], "garmin", ap)
+        self.assertIn("--source intervals", err.call_args[0][0])
+        self.assertEqual(D._parse_ids(["i42"], "intervals", ap), ["i42"])
 
 
 if __name__ == "__main__":

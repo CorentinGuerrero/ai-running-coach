@@ -988,10 +988,28 @@ EOF
 
 install_intervals_mcp() {
     log "Installation de intervals-icu-mcp (accès Intervals.icu, --source intervals)"
+    # `--with fitparse` : `skills/fit-download/scripts/download_fit.py --source
+    # intervals` se relance dans CET environnement pour lire les FIT téléchargés
+    # (même mécanique que garmin-mcp, qui embarque déjà fitparse). Une installation
+    # antérieure sans fitparse est complétée par `uv pip install` DANS son
+    # environnement — jamais `uv tool install --reinstall`, qui écraserait les
+    # fichiers du serveur (et tout correctif local que l'athlète y aurait appliqué).
     if have intervals-icu-mcp; then
         ok "intervals-icu-mcp déjà installé : $(command -v intervals-icu-mcp)"
+        local tool_py
+        # realpath via python3 : `readlink -f` n'existe pas sur les macOS anciens.
+        tool_py="$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' \
+            "$(command -v intervals-icu-mcp)")")/python3"
+        if [[ -x "$tool_py" ]] && ! "$tool_py" -c 'import fitparse' 2>/dev/null; then
+            log "Ajout de fitparse à l'environnement intervals-icu-mcp (lecture des FIT)"
+            # Facultatif (seul `--json` lit les FIT) : un échec (réseau, environnement en
+            # lecture seule) n'interrompt jamais l'installation — `coach_doctor` (`fit_reader`)
+            # le signale ensuite.
+            run uv pip install --python "$tool_py" fitparse \
+                || warn "fitparse non installé dans l'environnement intervals-icu-mcp — download_fit.py --json indisponible (voir /coach-doctor)"
+        fi
     else
-        run uv tool install --python 3.12 "$INTERVALS_MCP_REF"
+        run uv tool install --python 3.12 --with fitparse "$INTERVALS_MCP_REF"
         export PATH="$HOME/.local/bin:$PATH"
         if ! have intervals-icu-mcp; then
             [[ "$DRY_RUN" -eq 1 ]] && warn "intervals-icu-mcp absent (dry-run) — serait installé." || die "intervals-icu-mcp introuvable après installation."

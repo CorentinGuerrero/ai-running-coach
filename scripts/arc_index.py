@@ -55,8 +55,9 @@ progression), médiane du taux de sudation, effectifs. N'est PAS soumis à
 `[health].morning_check` (voir `arc_metrics.ASSUMPTIONS["fueling"]`). Utilisée par
 `course-strategist` pour plafonner l'objectif glucides/h d'un plan de course.
 
-`samples` rend, pour une séance donnée (identifiée par son `garmin_activity_id`,
-pas l'id interne de la table `activity`), les échantillons FIT déjà ingérés
+`samples` rend, pour une séance donnée (identifiée par son `garmin_activity_id`, ou
+son `intervals_activity_id` `i<chiffres>` pour une séance synchronisée depuis
+Intervals.icu — #68 —, jamais l'id interne de la table `activity`), les échantillons FIT déjà ingérés
 (sous-échantillonnés, triés par `t_s`) ou `{"samples": [], "reason": ...}` si la
 séance n'a pas de FIT associé — jamais une erreur (voir `arc_samples.py` et
 `ingest_samples` ci-dessous pour le format et l'ingestion elle-même).
@@ -64,7 +65,8 @@ séance n'a pas de FIT associé — jamais une erreur (voir `arc_samples.py` et
 `zones` (#43) rend les bornes de zones FC effectives (méthode par précédence, voir
 `arc_metrics.hr_zone_resolution` — toujours une `reason` explicite quand aucune
 zone n'est calculable, jamais un échec muet) et, selon les options :
-`--activity GARMIN_ID` le temps en zone d'une séance précise ; `--weeks N` (défaut 8)
+`--activity ID` (entier Garmin ou `i<chiffres>` Intervals.icu, comme pour toutes les
+sous-commandes par séance) le temps en zone d'une séance précise ; `--weeks N` (défaut 8)
 la polarisation 80/20 hebdomadaire des N dernières semaines. Restreint aux sports de
 la famille course à pied (`arc_metrics.sport_family` = « run » : course, trail,
 randonnée, marche — pas le renforcement ni le vélo). Tables dérivées `hr_zone_time`
@@ -172,9 +174,9 @@ dernières séances éligibles, rendues en ORDRE CHRONOLOGIQUE (la plus ancienne
 `--activity`/`--date`/`--since` (ne s'applique qu'à la liste par défaut), et l'argument
 positionnel est INCOMPATIBLE avec `--activity` (un seul moyen de désigner la séance) —
 rejetés avec un message explicite, jamais une précédence silencieuse. Une séance sans
-ligne dans `activity_energy` (hors famille course à pied, sans identifiant Garmin —
-`reason_code: "no_garmin_id"`, typiquement `[data].source = "intervals"` — ou sans
-échantillons FIT ingérés) obtient une `reason`/`reason_code` explicite à la lecture
+ligne dans `activity_energy` (hors famille course à pied, sans aucun identifiant
+externe — `reason_code: "no_activity_id"`, saisie manuelle — ou sans échantillons FIT
+ingérés, `"no_samples"`) obtient une `reason`/`reason_code` explicite à la lecture
 (jamais une absence silencieuse) ; une séance AVEC ligne mais `model_kcal: None` (poids
 introuvable ou implausible, `reason_code: "no_weight"`, ou erreur interne,
 `"internal_error"`) la porte directement depuis la table. `--activity`/`--date`/
@@ -228,7 +230,7 @@ import statistics
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_climb as VC  # noqa: E402
@@ -293,14 +295,19 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # `gear/` ajouté à `DATA_DIRS`) — sans ce bump, une base déjà construite n'a pas la table (« no such table »).
 # Temps en zone surestimé (buckets partiels) : `activity_sample` gagne `covered_s` (REAL,
 # secondes réellement couvertes par les mesures du bucket, `arc_samples.ASSUMPTIONS
-# ["covered_s"]`). Version 30 et non 29 : #135 a déjà publié la 29 sans cette colonne — une
-# base construite en 29 doit être reconstruite, sinon l'ingestion échouerait avec « no such column ».
+# ["covered_s"]`) — version 30 (#139).
+# FIT Intervals.icu (#68, suite) : `activity_sample` et `sample_file` gagnent la colonne
+# `intervals_activity_id` (TEXT) — les échantillons d'une séance synchronisée depuis
+# Intervals.icu (`activities/fit/i<chiffres>.json`, `skills/fit-download --source
+# intervals`) s'y rattachent comme ceux d'une séance Garmin à `garmin_activity_id`.
+# Version 31 et non 30 : #139 a déjà publié la 30 sans cette colonne — une base construite
+# en 30 doit être reconstruite, sinon l'ingestion échouerait avec « no such column ».
 # #151 : `activity_sample` gagne la dynamique de course Garmin (`ground_contact_s`,
 # `stance_balance_pct`, `vertical_oscillation_m`, `vertical_ratio_pct`, `step_length_m`, NULL quand le
 # capteur ne les fournit pas — `arc_samples.ASSUMPTIONS["running_dynamics"]`) — sans ce bump, une base déjà
-# construite n'a pas les colonnes (« no such column »). Les `activities/fit/*.json` existants n'en portent
-# pas : les re-extraire avec `download_fit.py --refresh-dynamics`.
-SCHEMA_VERSION = 31
+# construite n'a pas les colonnes (« no such column »). Version 32 (31 = #68 FIT Intervals.icu). Les
+# `activities/fit/*.json` existants n'en portent pas : les re-extraire avec `download_fit.py --refresh-dynamics`.
+SCHEMA_VERSION = 32
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports", "gear")
 
@@ -669,13 +676,18 @@ CREATE TABLE metric_day (
 -- NULL sinon (indoor, capteur coupé) — usage INTERNE uniquement (appariement de montée,
 -- `arc_climb_match.py`) : jamais exposées par l'API ni le CLI (voir
 -- `arc_climb_match.ASSUMPTIONS["privacy"]`).
+-- `intervals_activity_id` (#68) : même rôle que `garmin_activity_id` pour une séance
+-- synchronisée depuis Intervals.icu — exactement UNE des deux colonnes est renseignée
+-- par ligne, selon la forme de l'identifiant du fichier (`arc_samples.parse_activity_ref`).
 CREATE TABLE activity_sample (
     garmin_activity_id INTEGER, source_path TEXT, t_s REAL, distance_m REAL, altitude_m REAL,
     hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, covered_s REAL,
+    intervals_activity_id TEXT,
     ground_contact_s REAL, stance_balance_pct REAL, vertical_oscillation_m REAL, vertical_ratio_pct REAL,
     step_length_m REAL
 );
 CREATE INDEX activity_sample_garmin ON activity_sample(garmin_activity_id);
+CREATE INDEX activity_sample_intervals ON activity_sample(intervals_activity_id);
 CREATE INDEX activity_sample_source ON activity_sample(source_path);
 -- Suivi des fichiers `activities/fit/*.json` — table DÉDIÉE, jamais `source_file` :
 -- `source_file` est lu par `backfill_items` et `scripts/coach_doctor.py` en supposant
@@ -684,7 +696,7 @@ CREATE INDEX activity_sample_source ON activity_sample(source_path);
 -- fantôme après --rebuild.
 CREATE TABLE sample_file (
     path TEXT PRIMARY KEY, sha256 TEXT, mtime REAL, garmin_activity_id INTEGER,
-    status TEXT, issues TEXT
+    status TEXT, issues TEXT, intervals_activity_id TEXT
 );
 -- Temps en zone FC (#43), par activité (id INTERNE, comme `activity_split` — jamais
 -- `garmin_activity_id` : la ligne est recréée à chaque `compute_metrics`, sans purge
@@ -1429,14 +1441,17 @@ def _sample_stats(conn) -> Dict[int, list]:
     lui-même (pas sur le sha de `sample_file`) : une réingestion qui normaliserait
     autrement le même fichier (sport connu entre-temps) change donc la clé."""
     stats = {}
-    for row in conn.execute(
-        "SELECT garmin_activity_id, COUNT(*), TOTAL(t_s), MIN(t_s), MAX(t_s), "
-        "COUNT(distance_m), TOTAL(distance_m), COUNT(altitude_m), TOTAL(altitude_m), "
-        "COUNT(hr_bpm), TOTAL(hr_bpm), COUNT(speed_ms), TOTAL(speed_ms), "
-        "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon), TOTAL(covered_s) "
-        "FROM activity_sample GROUP BY garmin_activity_id"
-    ).fetchall():
-        stats[row[0]] = [repr(v) for v in tuple(row)[1:]]
+    # Clé = identifiant externe (entier Garmin ou chaîne Intervals.icu, #68 — jamais en
+    # collision, voir `arc_samples.parse_activity_ref`), comme `activity_ref(act)`.
+    for col in ("garmin_activity_id", "intervals_activity_id"):
+        for row in conn.execute(
+            f"SELECT {col}, COUNT(*), TOTAL(t_s), MIN(t_s), MAX(t_s), "
+            "COUNT(distance_m), TOTAL(distance_m), COUNT(altitude_m), TOTAL(altitude_m), "
+            "COUNT(hr_bpm), TOTAL(hr_bpm), COUNT(speed_ms), TOTAL(speed_ms), "
+            "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon), TOTAL(covered_s) "
+            f"FROM activity_sample WHERE {col} IS NOT NULL GROUP BY {col}"
+        ).fetchall():
+            stats[row[0]] = [repr(v) for v in tuple(row)[1:]]
     return stats
 
 
@@ -1601,12 +1616,13 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None,
         # le renforcement (effort anaérobie/technique) et le vélo (LTHR différente,
         # non renseignée séparément au profil) fausseraient temps en zone et
         # polarisation — voir ASSUMPTIONS["hr_zones"], revue de code #43 point 5.
-        if act.get("garmin_activity_id") and M.sport_family(act.get("sport")) == "run":
+        sample_ref = activity_ref(act)
+        if sample_ref is not None and M.sport_family(act.get("sport")) == "run":
             # Cache par activité (tableau de bord, `metrics_cache`) : les échantillons ne
             # sont chargés que si l'un des deux calculs ci-dessous n'est pas déjà en cache
             # pour EXACTEMENT les mêmes entrées. Sans cache (CLI, tests), chargement
             # immédiat, comme avant.
-            sample_stat = sample_stats.get(act["garmin_activity_id"]) if metrics_cache is not None else None
+            sample_stat = sample_stats.get(sample_ref) if metrics_cache is not None else None
             act_samples = samples(conn, act["id"]) if metrics_cache is None else None
             if metrics_cache is None:
                 has_samples = bool(act_samples)
@@ -1718,7 +1734,7 @@ def compute_metrics(conn, conf: dict, today: Optional[str] = None,
                                 "location": act.get("location"),
                                 # Identifiant déterministe (#49, ASSUMPTIONS["segment_id"]) :
                                 # requis par `ClimbSegmentIndex.add` si aucun appariement.
-                                "garmin_activity_id": act["garmin_activity_id"], "climb_idx": c["index"],
+                                "segment_seed": VM.segment_seed(sample_ref), "climb_idx": c["index"],
                             }
                             segment = climb_registry.match(candidate)
                             if segment is None:
@@ -2003,19 +2019,65 @@ def discover_sample_files(workspace: Path) -> List[Path]:
     return sorted(p for p in root.glob("*.json") if p.is_file()) if root.is_dir() else []
 
 
-def _sample_file_activity_id(path: Path, raw) -> Optional[int]:
-    """`garmin_activity_id` d'un fichier `activities/fit/*.json` : le nom du fichier
-    (chemin canonique) prime, avec repli sur la clé `activity_id` du JSON pour un
-    fichier renommé ou déposé à la main."""
+def _sample_file_activity_id(path: Path, raw) -> Optional[Union[int, str]]:
+    """Identifiant externe d'un fichier `activities/fit/*.json` — entier Garmin ou
+    chaîne Intervals.icu `i<chiffres>` (`arc_samples.parse_activity_ref`) : le nom du
+    fichier (chemin canonique) prime, avec repli sur la clé `activity_id` du JSON pour
+    un fichier renommé ou déposé à la main."""
     from_name = S.sample_file_activity_id(path)
     if from_name is not None:
         return from_name
-    if isinstance(raw, dict) and raw.get("activity_id") is not None:
-        try:
-            return int(raw["activity_id"])
-        except (TypeError, ValueError):
-            return None
+    if isinstance(raw, dict):
+        return S.parse_activity_ref(raw.get("activity_id"))
     return None
+
+
+def ref_column(ref: Union[int, str]) -> str:
+    """Colonne qui porte l'identifiant externe `ref` — dans `activity`, `activity_sample`
+    ET `sample_file`, qui la nomment toutes trois pareil : `intervals_activity_id` pour
+    une chaîne (`i<chiffres>`, #68), `garmin_activity_id` pour un entier. Nom de colonne
+    tiré d'une liste FERMÉE, jamais d'une valeur utilisateur : sûr à interpoler en SQL."""
+    return "intervals_activity_id" if isinstance(ref, str) else "garmin_activity_id"
+
+
+def activity_ref(act) -> Optional[Union[int, str]]:
+    """Identifiant externe auquel les échantillons d'une activité sont rattachés :
+    `garmin_activity_id` s'il existe, sinon `intervals_activity_id` (#68) — le contrat
+    n'en renseigne qu'un par séance (`workspace-data-contract`), Garmin prime si un
+    fichier ancien porte les deux. `None` : séance sans identifiant externe (saisie
+    manuelle), donc sans échantillons possibles."""
+    if act is None:
+        return None
+    keys = act.keys() if hasattr(act, "keys") else ()
+    garmin = act["garmin_activity_id"] if "garmin_activity_id" in keys else None
+    if garmin is not None:
+        return garmin
+    intervals = act["intervals_activity_id"] if "intervals_activity_id" in keys else None
+    return S.parse_activity_ref(intervals) if intervals else None
+
+
+def ref_label(ref: Union[int, str]) -> dict:
+    """`{"garmin_activity_id": ref}` ou `{"intervals_activity_id": ref}` — la clé
+    d'identification des rapports par séance (`zones`/`gap`/`decoupling`/…) suit la
+    source de l'identifiant demandé, inchangée pour un identifiant Garmin."""
+    return {ref_column(ref): ref}
+
+
+def unknown_activity_reason(ref: Union[int, str]) -> str:
+    return f"aucune activité indexée pour ce {ref_column(ref)}"
+
+
+def parse_activity_selector(value, command: str) -> Optional[Union[int, str]]:
+    """`--activity`/argument positionnel des sous-commandes par séance : entier Garmin
+    ou `i<chiffres>` Intervals.icu. `None` si absent ; `ConfigError` explicite pour
+    toute autre forme — jamais un `int()` qui planterait sur `i123456789`."""
+    if value is None or value == "":
+        return None
+    ref = S.parse_activity_ref(value)
+    if ref is None:
+        raise ConfigError(f"commande « {command} » : identifiant de séance attendu — entier "
+                          f"(garmin_activity_id) ou i<chiffres> (intervals_activity_id) — « {value} » reçu.")
+    return ref
 
 
 def ingest_samples(conn, workspace: Path, resolution_s: int = S.DEFAULT_RESOLUTION_S) -> dict:
@@ -2080,37 +2142,39 @@ def ingest_samples(conn, workspace: Path, resolution_s: int = S.DEFAULT_RESOLUTI
             raw = json.loads(raw_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             conn.execute(
-                "INSERT OR REPLACE INTO sample_file VALUES (?, ?, ?, ?, ?, ?)",
-                (rel, digest, path.stat().st_mtime, None, "invalid", _j(["JSON illisible"])),
+                "INSERT OR REPLACE INTO sample_file (path, sha256, mtime, status, issues) VALUES (?, ?, ?, ?, ?)",
+                (rel, digest, path.stat().st_mtime, "invalid", _j(["JSON illisible"])),
             )
             counts["invalid"] += 1
             continue
-        garmin_id = _sample_file_activity_id(path, raw)
-        if garmin_id is None:
+        ref = _sample_file_activity_id(path, raw)
+        if ref is None:
             conn.execute(
-                "INSERT OR REPLACE INTO sample_file VALUES (?, ?, ?, ?, ?, ?)",
-                (rel, digest, path.stat().st_mtime, None, "invalid",
-                 _j(["garmin_activity_id introuvable (nom de fichier non numérique et clé activity_id absente)"])),
+                "INSERT OR REPLACE INTO sample_file (path, sha256, mtime, status, issues) VALUES (?, ?, ?, ?, ?)",
+                (rel, digest, path.stat().st_mtime, "invalid",
+                 _j(["identifiant de séance introuvable (nom de fichier ni entier Garmin ni i<chiffres> "
+                     "Intervals.icu, et clé activity_id absente ou invalide)"])),
             )
             counts["invalid"] += 1
             continue
-        sport = conn.execute(
-            "SELECT sport FROM activity WHERE garmin_activity_id = ?", (garmin_id,)).fetchone()
+        col = ref_column(ref)
+        sport = conn.execute(f"SELECT sport FROM activity WHERE {col} = ?", (ref,)).fetchone()
         records = S.downsample(
             S.normalise_records(raw, sport=sport["sport"] if sport else None), resolution_s)
         conn.executemany(
             "INSERT INTO activity_sample "
-            "(garmin_activity_id, source_path, t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, "
+            f"({col}, source_path, t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, "
             "lat, lon, covered_s, ground_contact_s, stance_balance_pct, vertical_oscillation_m, "
             "vertical_ratio_pct, step_length_m) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(garmin_id, rel, rec["t_s"], rec["distance_m"], rec["altitude_m"],
+            [(ref, rel, rec["t_s"], rec["distance_m"], rec["altitude_m"],
               rec["hr_bpm"], rec["speed_ms"], rec["cadence_spm"],
               rec.get("lat_deg"), rec.get("lon_deg"), rec.get("covered_s"),
               *(rec.get(key) for key in S.DYNAMICS_KEYS)) for rec in records],
         )
         conn.execute(
-            "INSERT OR REPLACE INTO sample_file VALUES (?, ?, ?, ?, ?, ?)",
-            (rel, digest, path.stat().st_mtime, garmin_id, "ok", "[]"),
+            f"INSERT OR REPLACE INTO sample_file (path, sha256, mtime, {col}, status, issues) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (rel, digest, path.stat().st_mtime, ref, "ok", "[]"),
         )
         counts["ingested"] += 1
     for (rel,) in conn.execute("SELECT path FROM sample_file").fetchall():
@@ -2131,14 +2195,19 @@ def sample_coverage(conn) -> dict:
     (FIT téléchargé avant le Markdown, ou séance depuis retirée du workspace) — jamais
     une erreur, juste une information de latence entre les deux sources."""
     rows = conn.execute("SELECT COUNT(*) FROM activity_sample").fetchone()[0]
-    linked = conn.execute(
-        "SELECT COUNT(DISTINCT garmin_activity_id) FROM activity_sample "
-        "WHERE garmin_activity_id IN (SELECT garmin_activity_id FROM activity WHERE garmin_activity_id IS NOT NULL)"
-    ).fetchone()[0]
-    unlinked = conn.execute(
-        "SELECT COUNT(DISTINCT garmin_activity_id) FROM activity_sample "
-        "WHERE garmin_activity_id NOT IN (SELECT garmin_activity_id FROM activity WHERE garmin_activity_id IS NOT NULL)"
-    ).fetchone()[0]
+    linked = unlinked = 0
+    # Les deux espaces d'identifiants (#68) comptés séparément puis additionnés : une
+    # ligne n'en porte jamais qu'un, voir la DDL de `activity_sample`. `unlinked_garmin_ids`
+    # garde son nom historique (consommé par `status`) mais couvre les deux sources.
+    for col in ("garmin_activity_id", "intervals_activity_id"):
+        linked += conn.execute(
+            f"SELECT COUNT(DISTINCT {col}) FROM activity_sample "
+            f"WHERE {col} IN (SELECT {col} FROM activity WHERE {col} IS NOT NULL)"
+        ).fetchone()[0]
+        unlinked += conn.execute(
+            f"SELECT COUNT(DISTINCT {col}) FROM activity_sample "
+            f"WHERE {col} IS NOT NULL AND {col} NOT IN (SELECT {col} FROM activity WHERE {col} IS NOT NULL)"
+        ).fetchone()[0]
     return {"rows": rows, "activities_with_samples": linked, "unlinked_garmin_ids": unlinked}
 
 
@@ -2154,17 +2223,25 @@ def samples(conn, activity_id: int) -> List[dict]:
     — jamais mis en cache sur un rowid : voir `ingest_samples` pour le bug que cette
     résolution tardive corrige (rowid réutilisé/instable).
     """
-    row = conn.execute("SELECT garmin_activity_id FROM activity WHERE id = ?", (activity_id,)).fetchone()
-    if row is None or row["garmin_activity_id"] is None:
+    row = conn.execute("SELECT garmin_activity_id, intervals_activity_id FROM activity WHERE id = ?",
+                       (activity_id,)).fetchone()
+    ref = activity_ref(row)
+    if ref is None:
         return []
-    return samples_by_garmin_id(conn, row["garmin_activity_id"])["samples"]
+    return samples_by_ref(conn, ref)["samples"]
 
 
 def samples_by_garmin_id(conn, garmin_activity_id: int) -> dict:
-    """Enveloppe JSON-amie, par `garmin_activity_id` (identifiant externe, celui du nom
-    de fichier `activities/fit/<id>.json` et du CLI `arc_index.py samples`) — fonctionne
-    même SANS activité indexée correspondante (FIT ingéré avant le Markdown) : c'est le
-    but de stocker `activity_sample` par `garmin_activity_id` plutôt que par rowid."""
+    """Alias historique de `samples_by_ref` pour un identifiant Garmin."""
+    return samples_by_ref(conn, garmin_activity_id)
+
+
+def samples_by_ref(conn, ref: Union[int, str]) -> dict:
+    """Enveloppe JSON-amie, par identifiant externe — `garmin_activity_id` (entier) ou
+    `intervals_activity_id` (`i<chiffres>`, #68), celui du nom de fichier
+    `activities/fit/<id>.json` et du CLI `arc_index.py samples` — fonctionne même SANS
+    activité indexée correspondante (FIT ingéré avant le Markdown) : c'est le but de
+    stocker `activity_sample` par identifiant externe plutôt que par rowid."""
     # `lat`/`lon` INCLUS ici (#49) : cette fonction sert à la fois de lecture INTERNE
     # (`samples()`, réutilisée par `compute_metrics` pour l'appariement de montée,
     # `arc_climb_match.py` — a besoin des positions) et de sortie du CLI `samples`
@@ -2172,15 +2249,23 @@ def samples_by_garmin_id(conn, garmin_activity_id: int) -> dict:
     # le disque de l'athlète — pas une fuite nouvelle). Ce n'est PAS l'API du tableau de
     # bord (`arc_serve.py`), qui n'appelle jamais cette fonction et ne renvoie jamais de
     # coordonnée (voir `arc_climb_match.ASSUMPTIONS["privacy"]`).
+    col = ref_column(ref)
     rows = conn.execute(
         "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg, "
         "covered_s "
-        "FROM activity_sample WHERE garmin_activity_id = ? ORDER BY t_s", (garmin_activity_id,),
+        f"FROM activity_sample WHERE {col} = ? ORDER BY t_s", (ref,),
     ).fetchall()
-    result = {"garmin_activity_id": garmin_activity_id, "samples": [dict(r) for r in rows]}
+    result = {col: ref, "samples": [dict(r) for r in rows]}
     if not rows:
-        result["reason"] = "aucun échantillon ingéré pour ce garmin_activity_id"
+        result["reason"] = f"aucun échantillon ingéré pour ce {col}"
     return result
+
+
+def count_samples(conn, ref: Optional[Union[int, str]]) -> int:
+    """Nombre d'échantillons ingérés pour un identifiant externe (0 si `None`)."""
+    if ref is None:
+        return 0
+    return conn.execute(f"SELECT COUNT(*) FROM activity_sample WHERE {ref_column(ref)} = ?", (ref,)).fetchone()[0]
 
 
 # ---------------------------------------------------------------------------
@@ -2210,7 +2295,7 @@ def athlete_hr_zone_bounds(conn, conf: dict) -> Optional[Tuple[Tuple[float, ...]
     return M.hr_zone_bounds(dict(athlete) if athlete else {}, conf.get("hr_zones"))
 
 
-def activity_zone_report(conn, conf: dict, garmin_activity_id: int) -> dict:
+def activity_zone_report(conn, conf: dict, ref: Union[int, str]) -> dict:
     """Temps en zone d'une séance (#43), par `garmin_activity_id` — pour la CLI
     (`arc_index.py zones --activity`) et pour les agents en headless. Rend
     `{"garmin_activity_id", "bounds_bpm", "method", "reason", "zone_seconds",
@@ -2224,24 +2309,24 @@ def activity_zone_report(conn, conf: dict, garmin_activity_id: int) -> dict:
     dessous, pour que l'agent distingue les deux causes sans parser le texte."""
     resolution = athlete_hr_zone_resolution(conn, conf)
     if resolution["bounds_bpm"] is None:
-        return {"garmin_activity_id": garmin_activity_id, **resolution, "zone_seconds": None, "polarisation": None}
-    act = conn.execute("SELECT id FROM activity WHERE garmin_activity_id = ?", (garmin_activity_id,)).fetchone()
+        return {**ref_label(ref), **resolution, "zone_seconds": None, "polarisation": None}
+    act = conn.execute(f"SELECT id FROM activity WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
     if act is None:
-        return {"garmin_activity_id": garmin_activity_id, **resolution, "reason": "aucune activité indexée pour ce garmin_activity_id",
+        return {**ref_label(ref), **resolution, "reason": unknown_activity_reason(ref),
                 "reason_code": "unknown_activity", "zone_seconds": None, "polarisation": None}
     rows = conn.execute(
         "SELECT zone, seconds FROM hr_zone_time WHERE activity_id = ?", (act["id"],)).fetchall()
     pol_rows = conn.execute(
         "SELECT bucket, seconds FROM hr_polarisation_time WHERE activity_id = ?", (act["id"],)).fetchall()
     if not rows and not pol_rows:
-        return {"garmin_activity_id": garmin_activity_id, **resolution,
+        return {**ref_label(ref), **resolution,
                 "reason": "aucun échantillon FIT ingéré pour cette séance (ou sport hors de la famille "
                           "course à pied, voir ASSUMPTIONS[\"hr_zones\"])",
                 "zone_seconds": None, "polarisation": None}
     zone_seconds = {row["zone"]: row["seconds"] for row in rows} if rows else None
     pol_seconds = {row["bucket"]: row["seconds"] for row in pol_rows} if pol_rows else None
     return {
-        "garmin_activity_id": garmin_activity_id, **resolution,
+        **ref_label(ref), **resolution,
         "zone_seconds": zone_seconds, "polarisation": M.polarisation_shares(pol_seconds) if pol_seconds else None,
     }
 
@@ -2251,7 +2336,7 @@ def activity_zone_report(conn, conf: dict, garmin_activity_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def activity_gap_report(conn, garmin_activity_id: int) -> dict:
+def activity_gap_report(conn, ref: Union[int, str]) -> dict:
     """Rapport GAP (#44) d'une séance : allure GAP globale (s/km) + par split, par
     `garmin_activity_id` — pour la CLI (`arc_index.py gap --activity`) et pour
     les agents en headless. Rend TOUJOURS `{"garmin_activity_id", "gap_pace_s_km",
@@ -2265,30 +2350,28 @@ def activity_gap_report(conn, garmin_activity_id: int) -> dict:
     barométrique absent, séance toujours à l'arrêt) sont QUATRE raisons
     distinctes — les deux dernières se ressemblent côté athlète (aucun chiffre
     affiché) mais pointent vers des causes très différentes à corriger."""
-    act = conn.execute("SELECT id, sport, gap_pace_s_km FROM activity WHERE garmin_activity_id = ?",
-                        (garmin_activity_id,)).fetchone()
+    act = conn.execute(f"SELECT id, sport, gap_pace_s_km FROM activity WHERE {ref_column(ref)} = ?",
+                        (ref,)).fetchone()
     if act is None:
-        return {"garmin_activity_id": garmin_activity_id, "gap_pace_s_km": None, "splits": None,
-                "reason": "aucune activité indexée pour ce garmin_activity_id", "reason_code": "unknown_activity"}
+        return {**ref_label(ref), "gap_pace_s_km": None, "splits": None,
+                "reason": unknown_activity_reason(ref), "reason_code": "unknown_activity"}
     if M.sport_family(act["sport"]) != "run":
-        return {"garmin_activity_id": garmin_activity_id, "gap_pace_s_km": None, "splits": None,
+        return {**ref_label(ref), "gap_pace_s_km": None, "splits": None,
                 "reason": "hors de la famille course à pied (arc_metrics.sport_family), voir "
                           "arc_gap.ASSUMPTIONS[\"restricted_to_run_family\"]"}
     splits = conn.execute(
         "SELECT km, gap_pace_s_km FROM activity_split WHERE activity_id = ? ORDER BY km", (act["id"],)).fetchall()
     if act["gap_pace_s_km"] is None and not any(s["gap_pace_s_km"] is not None for s in splits):
-        sample_count = conn.execute(
-            "SELECT COUNT(*) FROM activity_sample WHERE garmin_activity_id = ?", (garmin_activity_id,)
-        ).fetchone()[0]
+        sample_count = count_samples(conn, ref)
         if sample_count == 0:
             reason = "aucun échantillon FIT ingéré pour cette séance"
         else:
             reason = ("échantillons FIT ingérés, mais aucune pente exploitable (tapis de course, "
                       "capteur barométrique absent, altitude toujours identique, ou vitesse "
                       "toujours sous le seuil de mouvement) — voir arc_gap.ASSUMPTIONS")
-        return {"garmin_activity_id": garmin_activity_id, "gap_pace_s_km": None, "splits": None,
+        return {**ref_label(ref), "gap_pace_s_km": None, "splits": None,
                 "reason": reason}
-    return {"garmin_activity_id": garmin_activity_id, "gap_pace_s_km": act["gap_pace_s_km"],
+    return {**ref_label(ref), "gap_pace_s_km": act["gap_pace_s_km"],
             "splits": [dict(s) for s in splits], "reason": None}
 
 
@@ -2372,29 +2455,25 @@ def _energy_session_dict(act: dict, energy_row: Optional[dict]) -> dict:
 
 def _energy_reason_for_missing_row(conn, act: dict) -> Tuple[str, str]:
     """`reason`/`reason_code` d'une séance SANS ligne `activity_energy` — hors
-    famille course à pied, sans identifiant Garmin (séance synchronisée depuis
-    Intervals.icu, `[data].source = "intervals"`, #68 — voir AGENTS.md, table de
-    correspondance des outils : aucun FIT possible sans passer par
-    `garminconnect`), ou sans échantillon FIT ingéré (les seules raisons pour
-    lesquelles `compute_metrics` n'insère aucune ligne, voir la DDL de
-    `activity_energy`). Jamais appelée pour une séance qui A une ligne (poids
-    introuvable y est déjà `reason_code: "no_weight"`, porté par la ligne
-    elle-même)."""
+    famille course à pied, sans aucun identifiant externe (ni `garmin_activity_id`
+    ni `intervals_activity_id` : saisie manuelle, aucun FIT rattachable), ou sans
+    échantillon FIT ingéré (les seules raisons pour lesquelles `compute_metrics`
+    n'insère aucune ligne, voir la DDL de `activity_energy`). Jamais appelée pour
+    une séance qui A une ligne (poids introuvable y est déjà `reason_code:
+    "no_weight"`, porté par la ligne elle-même)."""
     if M.sport_family(act.get("sport")) != "run":
         return ("hors de la famille course à pied (arc_metrics.sport_family) — le moteur "
                 "ne couvre que running/trail/hiking/walking", "not_run_family")
-    if act.get("garmin_activity_id") is None:
+    ref = activity_ref(act)
+    if ref is None:
         # Revue de code : distinct de « no_samples » — une séance sans identifiant
-        # Garmin (typiquement `[data].source = "intervals"`, #68) n'a jamais pu
-        # avoir de FIT ingéré, ce n'est pas un simple oubli de synchronisation.
-        return ("aucun identifiant Garmin pour cette séance (probablement synchronisée depuis "
-                "Intervals.icu, #68) — le moteur dépend des échantillons FIT, disponibles "
-                "uniquement via garminconnect", "no_garmin_id")
-    sample_count = conn.execute(
-        "SELECT COUNT(*) FROM activity_sample WHERE garmin_activity_id = ?",
-        (act.get("garmin_activity_id"),)).fetchone()[0]
-    if sample_count == 0:
-        return "aucun échantillon FIT ingéré pour cette séance", "no_samples"
+        # externe n'a jamais pu avoir de FIT ingéré, ce n'est pas un simple oubli de
+        # synchronisation.
+        return ("aucun identifiant Garmin ni Intervals.icu pour cette séance — le moteur "
+                "dépend des échantillons FIT, qui se rattachent par cet identifiant", "no_activity_id")
+    if count_samples(conn, ref) == 0:
+        return ("aucun échantillon FIT ingéré pour cette séance (skills/fit-download : "
+                "download_fit.py --from-dir activities/ --json)", "no_samples")
     # Ne devrait pas arriver (une activité de la famille course à pied avec des
     # échantillons FIT obtient toujours une ligne, voir compute_metrics) — filet de
     # sécurité honnête plutôt qu'une exception si l'invariant est un jour rompu.
@@ -2410,7 +2489,7 @@ def _energy_session_for_activity_row(conn, act: dict) -> dict:
     return session
 
 
-def activity_energy_report(conn, garmin_activity_id: int) -> dict:
+def activity_energy_report(conn, ref: Union[int, str]) -> dict:
     """Détail de dépense énergétique modèle vs Garmin d'UNE séance, par
     `garmin_activity_id` — pour la CLI (`arc_index.py energy --activity`) et les
     agents en headless. Rend TOUJOURS le même jeu de clés (voir
@@ -2418,17 +2497,17 @@ def activity_energy_report(conn, garmin_activity_id: int) -> dict:
     est `None` — jamais une exception ni un échec muet, même discipline que
     `activity_gap_report`/`activity_descent_report`."""
     act = conn.execute(
-        "SELECT id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
-        "WHERE garmin_activity_id = ?", (garmin_activity_id,)).fetchone()
+        "SELECT id, garmin_activity_id, intervals_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
+        f"WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
     if act is None:
-        empty = _energy_session_dict({"garmin_activity_id": garmin_activity_id}, None)
-        empty["reason"] = "aucune activité indexée pour ce garmin_activity_id"
+        empty = _energy_session_dict({**ref_label(ref)}, None)
+        empty["reason"] = unknown_activity_reason(ref)
         empty["reason_code"] = "unknown_activity"
         return empty
     return _energy_session_for_activity_row(conn, dict(act))
 
 
-def energy_report(conn, *, activity: Optional[int] = None, day: Optional[str] = None,
+def energy_report(conn, *, activity: Optional[Union[int, str]] = None, day: Optional[str] = None,
                    since: Optional[str] = None, limit: int = ENERGY_DEFAULT_LIMIT,
                    assumptions: bool = False) -> dict:
     """Dépense énergétique modèle vs Garmin d'un ensemble de séances — pour
@@ -2457,7 +2536,7 @@ def energy_report(conn, *, activity: Optional[int] = None, day: Optional[str] = 
     if activity is not None:
         sessions = [activity_energy_report(conn, activity)]
     else:
-        cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+        cols = "id, garmin_activity_id, intervals_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
         placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
         if day:
             rows = conn.execute(
@@ -2493,7 +2572,7 @@ def activity_energy_report_by_id(conn, activity_id: int) -> dict:
     `energy_report`/`activity_energy_report`) : aucun second calcul du
     delta/flag ici, seule la clause `WHERE` change."""
     act = conn.execute(
-        "SELECT id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
+        "SELECT id, garmin_activity_id, intervals_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal FROM activity "
         "WHERE id = ?", (activity_id,)).fetchone()
     if act is None:
         empty = _energy_session_dict({}, None)
@@ -2545,7 +2624,7 @@ def energy_trend(conn, today: date, weeks: int = ENERGY_TREND_WEEKS) -> dict:
     de ce panier dans la fenêtre, jamais 0 (qui laisserait croire à un accord
     parfait mesuré)."""
     start = today - timedelta(days=weeks * 7 - 1)
-    cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+    cols = "id, garmin_activity_id, intervals_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
     placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
     rows = conn.execute(
         f"SELECT {cols} FROM activity WHERE date >= ? AND date <= ? AND sport IN ({placeholders}) "
@@ -2617,7 +2696,7 @@ def energy_calibration(conn, today: date, weeks: int = EN.CALIBRATION_WINDOW_WEE
     — chaque panier via `arc_energy.calibration_band_report` (`n`,
     `ratio_median`, `ratio_iqr`, `status`, `factor`)."""
     start = today - timedelta(days=weeks * 7 - 1)
-    cols = "id, garmin_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
+    cols = "id, garmin_activity_id, intervals_activity_id, date, name, sport, calories_kcal, calories_bmr_kcal"
     placeholders = ", ".join("?" for _ in ENERGY_ELIGIBLE_SPORTS)
     rows = conn.execute(
         f"SELECT {cols} FROM activity WHERE date >= ? AND date <= ? AND sport IN ({placeholders}) "
@@ -2811,7 +2890,8 @@ def metrics_fingerprint(conn, conf: dict, today: str) -> str:
     h.update(today.encode())
     for row in conn.execute("SELECT path, kind, sha256, parsed_ok, issues FROM source_file ORDER BY path"):
         h.update(repr(tuple(row)).encode("utf-8"))
-    for row in conn.execute("SELECT path, sha256, garmin_activity_id, status FROM sample_file ORDER BY path"):
+    for row in conn.execute(
+            "SELECT path, sha256, garmin_activity_id, intervals_activity_id, status FROM sample_file ORDER BY path"):
         h.update(repr(tuple(row)).encode("utf-8"))
     return h.hexdigest()
 
@@ -2841,13 +2921,18 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None,
         _purge(conn, rel)
         kind, data, arc_version, parsed_ok, issues = read_file(path, rel, conf)
         twin = None
-        if kind == "activity" and data.get("garmin_activity_id"):
-            twin = conn.execute("SELECT source_path FROM activity WHERE garmin_activity_id = ? AND source_path != ?",
-                                (data["garmin_activity_id"], rel)).fetchone()
+        twin_key = None
+        if kind == "activity":
+            # Même règle pour les deux espaces d'identifiants (#68) : une séance
+            # Intervals.icu décrite dans deux fichiers compterait sinon deux fois.
+            twin_key = next((k for k in ("garmin_activity_id", "intervals_activity_id") if data.get(k)), None)
+        if twin_key:
+            twin = conn.execute(f"SELECT source_path FROM activity WHERE {twin_key} = ? AND source_path != ?",
+                                (data[twin_key], rel)).fetchone()
         if twin:
-            # Même séance Garmin décrite dans deux fichiers : une seule charge. Le fichier
+            # Même séance décrite dans deux fichiers : une seule charge. Le fichier
             # écarté est relu à chaque passe (sha vide) pour reprendre la main si l'autre disparaît.
-            issues.append(f"doublon de {twin[0]} (même garmin_activity_id) : non compté")
+            issues.append(f"doublon de {twin[0]} (même {twin_key}) : non compté")
             digest = ""
         elif kind is not None and parsed_ok != "no" and (kind not in ("decision", "gear_inspection") or parsed_ok == "ok"):
             # `decision` (#100, revue de code) : PAS de repli légitime — il n'existe
@@ -3545,7 +3630,7 @@ def classify_source_path(path: Optional[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def activity_decoupling_report(conn, garmin_activity_id: int) -> dict:
+def activity_decoupling_report(conn, ref: Union[int, str]) -> dict:
     """Rapport de découplage aérobie (#45) d'une séance, par `garmin_activity_id` —
     pour la CLI (`arc_index.py decoupling --activity`) et pour les agents en
     headless (`coach`, #51). Lit les colonnes déjà calculées à l'indexation
@@ -3555,19 +3640,19 @@ def activity_decoupling_report(conn, garmin_activity_id: int) -> dict:
     "unknown_activity"` spécifiquement quand la séance n'est pas (encore)
     indexée, jamais une exception."""
     act = conn.execute(
-        "SELECT sport, decoupling_pct, ef_whole, decoupling_reason FROM activity WHERE garmin_activity_id = ?",
-        (garmin_activity_id,)).fetchone()
+        f"SELECT sport, decoupling_pct, ef_whole, decoupling_reason FROM activity WHERE {ref_column(ref)} = ?",
+        (ref,)).fetchone()
     if act is None:
-        return {"garmin_activity_id": garmin_activity_id, "decoupling_pct": None, "ef_whole": None,
-                "reason": "aucune activité indexée pour ce garmin_activity_id", "reason_code": "unknown_activity"}
+        return {**ref_label(ref), "decoupling_pct": None, "ef_whole": None,
+                "reason": unknown_activity_reason(ref), "reason_code": "unknown_activity"}
     if M.sport_family(act["sport"]) != "run":
-        return {"garmin_activity_id": garmin_activity_id, "decoupling_pct": None, "ef_whole": None,
+        return {**ref_label(ref), "decoupling_pct": None, "ef_whole": None,
                 "reason": "hors de la famille course à pied (arc_metrics.sport_family), voir "
                           "arc_decoupling.ASSUMPTIONS[\"restricted_to_run_family\"]"}
     if act["decoupling_pct"] is None and act["decoupling_reason"] is None:
-        return {"garmin_activity_id": garmin_activity_id, "decoupling_pct": None, "ef_whole": None,
+        return {**ref_label(ref), "decoupling_pct": None, "ef_whole": None,
                 "reason": "aucun échantillon FIT ingéré pour cette séance"}
-    return {"garmin_activity_id": garmin_activity_id, "decoupling_pct": act["decoupling_pct"],
+    return {**ref_label(ref), "decoupling_pct": act["decoupling_pct"],
             "ef_whole": act["ef_whole"], "reason": act["decoupling_reason"]}
 
 
@@ -3602,7 +3687,7 @@ def decoupling_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def activity_climb_report(conn, garmin_activity_id: int) -> dict:
+def activity_climb_report(conn, ref: Union[int, str]) -> dict:
     """Rapport VAM (#46) d'une séance, par `garmin_activity_id` — pour la CLI
     (`arc_index.py vam --activity`) et pour les agents en headless. Lit les
     lignes/colonnes déjà calculées à l'indexation (`compute_metrics`), jamais un
@@ -3613,21 +3698,19 @@ def activity_climb_report(conn, garmin_activity_id: int) -> dict:
     jamais une exception — voir `arc_climb.climb_report` pour la sémantique de
     `reason_code`/`applicable` (#47, revue de code, nit : contrepartie stable,
     non localisée, de `reason`)."""
-    empty = {"garmin_activity_id": garmin_activity_id, "climbs": [], "vam_best_10min_m_h": None,
+    empty = {**ref_label(ref), "climbs": [], "vam_best_10min_m_h": None,
              "vam_best_20min_m_h": None, "vam_by_grade_class": {}, "best_climb_vam_elapsed_m_h": None}
     act = conn.execute(
         "SELECT id, sport, best_vam_10min_m_h, best_vam_20min_m_h, best_climb_vam_elapsed_m_h "
-        "FROM activity WHERE garmin_activity_id = ?", (garmin_activity_id,)).fetchone()
+        f"FROM activity WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
     if act is None:
-        return {**empty, "reason": "aucune activité indexée pour ce garmin_activity_id",
+        return {**empty, "reason": unknown_activity_reason(ref),
                 "reason_code": "unknown_activity", "applicable": True}
     if M.sport_family(act["sport"]) != "run":
         return {**empty, "reason": "hors de la famille course à pied (arc_metrics.sport_family), voir "
                                     "arc_climb.ASSUMPTIONS[\"restricted_to_run_family\"]",
                 "reason_code": "not_run_family", "applicable": False}
-    sample_count = conn.execute(
-        "SELECT COUNT(*) FROM activity_sample WHERE garmin_activity_id = ?", (garmin_activity_id,)
-    ).fetchone()[0]
+    sample_count = count_samples(conn, ref)
     if sample_count == 0:
         return {**empty, "reason": "aucun échantillon FIT ingéré pour cette séance",
                 "reason_code": "no_samples", "applicable": True}
@@ -3637,7 +3720,7 @@ def activity_climb_report(conn, garmin_activity_id: int) -> dict:
         "hr_first_third_bpm, hr_last_third_bpm, hr_drift_bpm_per_100m, vs_previous_pct, vs_best_pct "
         "FROM activity_climb WHERE activity_id = ? ORDER BY idx", (act["id"],)).fetchall()]
     return {
-        "garmin_activity_id": garmin_activity_id,
+        **ref_label(ref),
         "climbs": climbs,
         "vam_best_10min_m_h": act["best_vam_10min_m_h"],
         "vam_best_20min_m_h": act["best_vam_20min_m_h"],
@@ -3760,7 +3843,8 @@ def recompute_slope_model(conn, conf: dict, band: str, months: int, today: Optio
     if band == "endurance" and seiler_thresholds:
         easy_hr_bpm, moderate_hr_bpm = seiler_thresholds
     rows = conn.execute(
-        "SELECT id, date, garmin_activity_id, sport FROM activity WHERE garmin_activity_id IS NOT NULL "
+        "SELECT id, date, garmin_activity_id, intervals_activity_id, sport FROM activity "
+        "WHERE garmin_activity_id IS NOT NULL OR intervals_activity_id IS NOT NULL "
         "ORDER BY date").fetchall()
     activities = []
     for row in rows:
@@ -3809,7 +3893,7 @@ def vam_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def activity_descent_report(conn, garmin_activity_id: int) -> dict:
+def activity_descent_report(conn, ref: Union[int, str]) -> dict:
     """Rapport d'efficacité en descente (#47) d'une séance, par
     `garmin_activity_id` — pour la CLI (`arc_index.py descent --activity`) et
     pour les agents en headless. Lit les lignes/colonnes déjà calculées à
@@ -3820,20 +3904,18 @@ def activity_descent_report(conn, garmin_activity_id: int) -> dict:
     exception — voir `arc_descent.descent_report` pour la sémantique de
     `reason_code`/`applicable` (contrepartie stable, non localisée, de
     `reason`)."""
-    empty = {"garmin_activity_id": garmin_activity_id, "classes": {}, "reference_gap_pace_s_km": None,
+    empty = {**ref_label(ref), "classes": {}, "reference_gap_pace_s_km": None,
               "reference_source": None}
     act = conn.execute(
         "SELECT id, sport, descent_reference_gap_pace_s_km, descent_reference_source FROM activity "
-        "WHERE garmin_activity_id = ?", (garmin_activity_id,)).fetchone()
+        f"WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
     if act is None:
-        return {**empty, "reason": DS.REASON_UNKNOWN_ACTIVITY, "reason_code": "unknown_activity",
+        return {**empty, "reason": unknown_activity_reason(ref), "reason_code": "unknown_activity",
                 "applicable": True}
     if M.sport_family(act["sport"]) != "run":
         return {**empty, "reason": DS.REASON_NOT_RUN_FAMILY, "reason_code": "not_run_family",
                 "applicable": False}
-    sample_count = conn.execute(
-        "SELECT COUNT(*) FROM activity_sample WHERE garmin_activity_id = ?", (garmin_activity_id,)
-    ).fetchone()[0]
+    sample_count = count_samples(conn, ref)
     if sample_count == 0:
         return {**empty, "reason": DS.REASON_NO_SAMPLES, "reason_code": "no_samples", "applicable": True}
     rows = {r["grade_class"]: dict(r) for r in conn.execute(
@@ -3852,7 +3934,7 @@ def activity_descent_report(conn, garmin_activity_id: int) -> dict:
         else:
             reason, reason_code = DS.REASON_NO_QUALIFYING_CLASS, "no_qualifying_class"
     return {
-        "garmin_activity_id": garmin_activity_id,
+        **ref_label(ref),
         "classes": classes,
         "reference_gap_pace_s_km": act["descent_reference_gap_pace_s_km"],
         "reference_source": act["descent_reference_source"],
@@ -3894,7 +3976,7 @@ def descent_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def activity_durability_report(conn, garmin_activity_id: int) -> dict:
+def activity_durability_report(conn, ref: Union[int, str]) -> dict:
     """Rapport de durabilité (#48) d'une séance, par `garmin_activity_id` — pour
     la CLI (`arc_index.py durability --activity`) et pour les agents en
     headless. Lit les colonnes déjà calculées à l'indexation
@@ -3906,15 +3988,15 @@ def activity_durability_report(conn, garmin_activity_id: int) -> dict:
     `arc_durability.durability_report` pour la sémantique de
     `reason_code`/`applicable` (contrepartie stable, non localisée, de
     `reason`)."""
-    empty = {"garmin_activity_id": garmin_activity_id, "gap_fade_pct": None, "ef_fade_pct": None,
+    empty = {**ref_label(ref), "gap_fade_pct": None, "ef_fade_pct": None,
               "hr_first_third_bpm": None, "hr_middle_third_bpm": None, "hr_last_third_bpm": None}
     act = conn.execute(
         "SELECT sport, durability_gap_fade_pct, durability_ef_fade_pct, durability_hr_first_third_bpm, "
         "durability_hr_middle_third_bpm, durability_hr_last_third_bpm, durability_reason, "
-        "durability_reason_code FROM activity WHERE garmin_activity_id = ?",
-        (garmin_activity_id,)).fetchone()
+        f"durability_reason_code FROM activity WHERE {ref_column(ref)} = ?",
+        (ref,)).fetchone()
     if act is None:
-        return {**empty, "reason": DU.REASON_UNKNOWN_ACTIVITY, "reason_code": "unknown_activity",
+        return {**empty, "reason": unknown_activity_reason(ref), "reason_code": "unknown_activity",
                 "applicable": True}
     if M.sport_family(act["sport"]) != "run":
         return {**empty, "reason": DU.REASON_NOT_RUN_FAMILY, "reason_code": "not_run_family",
@@ -3922,7 +4004,7 @@ def activity_durability_report(conn, garmin_activity_id: int) -> dict:
     if act["durability_gap_fade_pct"] is None and act["durability_reason"] is None:
         return {**empty, "reason": DU.REASON_NO_SAMPLES, "reason_code": "no_samples", "applicable": True}
     return {
-        "garmin_activity_id": garmin_activity_id,
+        **ref_label(ref),
         "gap_fade_pct": act["durability_gap_fade_pct"],
         "ef_fade_pct": act["durability_ef_fade_pct"],
         "hr_first_third_bpm": act["durability_hr_first_third_bpm"],
@@ -4217,17 +4299,19 @@ GAIT_DEFAULT_WEEKS = 26
 def _gait_session_rows(conn, since: date, until: date) -> List[dict]:
     """Séances de COURSE (route + trail) de la fenêtre, avec la moyenne PONDÉRÉE (par `covered_s`, 1 s si
     absent) de chaque grandeur de foulée sur leurs échantillons FIT — `NULL` quand aucun échantillon ne la
-    porte (jamais 0). Une seule requête, jointe par `garmin_activity_id` (comme `samples()`)."""
+    porte (jamais 0). Une seule requête, jointe par identifiant externe : `garmin_activity_id` s'il existe, sinon
+    `intervals_activity_id` (#68, même règle que `_sample_ref_of`) — séances Garmin ET Intervals.icu."""
     weight = "CASE WHEN covered_s IS NULL OR covered_s <= 0 THEN 1.0 ELSE covered_s END"
     cols = []
     for metric in GT.METRICS:
         cols.append(f"SUM(CASE WHEN {metric_col(metric)} IS NOT NULL THEN {metric_col(metric)} * {weight} END) / "
                     f"NULLIF(SUM(CASE WHEN {metric_col(metric)} IS NOT NULL THEN {weight} END), 0) AS {metric}")
     marks = ",".join("?" for _ in M.RUNNING_SPORTS)
-    sql = (f"SELECT a.id AS activity_id, a.date, a.name, a.sport, a.garmin_activity_id, a.data_json, "
+    ref = "CAST(COALESCE(garmin_activity_id, intervals_activity_id) AS TEXT)"
+    sql = (f"SELECT a.id AS activity_id, a.date, a.name, a.sport, a.data_json, "
            f"{', '.join('s.' + m for m in GT.METRICS)} FROM activity a LEFT JOIN ("
-           f"SELECT garmin_activity_id, {', '.join(cols)} FROM activity_sample GROUP BY garmin_activity_id) s "
-           f"ON s.garmin_activity_id = a.garmin_activity_id "
+           f"SELECT {ref} AS ref, {', '.join(cols)} FROM activity_sample GROUP BY {ref}) s "
+           f"ON s.ref = CAST(COALESCE(a.garmin_activity_id, a.intervals_activity_id) AS TEXT) "
            f"WHERE a.sport IN ({marks}) AND a.date >= ? AND a.date <= ? ORDER BY a.date, a.id")
     return [dict(r) for r in conn.execute(sql, (*M.RUNNING_SPORTS, since.isoformat(), until.isoformat()))]
 
@@ -4267,17 +4351,19 @@ def build_parser() -> argparse.ArgumentParser:
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary"))
     parser.add_argument("selector", nargs="?", default=None,
-                        help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
+                        help="argument de la sous-commande (ex. garmin_activity_id ou intervals_activity_id "
+                             "pour « samples »)")
     parser.add_argument("--workspace")
     parser.add_argument("--db")
     parser.add_argument("--memory", action="store_true")
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--today", help="date de fin des séries (AAAA-MM-JJ)")
     parser.add_argument("--validate", nargs="+", metavar="FICHIER")
-    parser.add_argument("--activity", type=int, metavar="GARMIN_ID",
+    parser.add_argument("--activity", metavar="ID",
                         help="commande « zones »/« gap »/« decoupling »/« vam »/« descent »/« durability »/"
                              "« energy » : temps en zone, GAP, découplage, montées/VAM, efficacité en "
-                             "descente, durabilité ou dépense énergétique d'une séance (garmin_activity_id)")
+                             "descente, durabilité ou dépense énergétique d'une séance (garmin_activity_id "
+                             "entier, ou intervals_activity_id i<chiffres>)")
     parser.add_argument("--weeks", type=int, metavar="N",
                         help="commande « zones »/« decoupling »/« vam »/« descent »/« durability »/"
                              "« energy --calibration »/« gait-summary » : polarisation ou tendance sur les N "
@@ -4447,13 +4533,9 @@ def main(argv=None) -> int:
         return 0
     if args.command == "samples":
         if not args.selector:
-            raise ConfigError("commande « samples » : garmin_activity_id attendu "
-                               "(ex. arc_index.py samples 19287537093).")
-        try:
-            garmin_id = int(args.selector)
-        except ValueError:
-            raise ConfigError(f"commande « samples » : entier attendu, « {args.selector} » reçu.")
-        result = samples_by_garmin_id(conn, garmin_id)
+            raise ConfigError("commande « samples » : identifiant de séance attendu "
+                               "(ex. arc_index.py samples 19287537093, ou samples i123456789).")
+        result = samples_by_ref(conn, parse_activity_selector(args.selector, "samples"))
         # `--with-gps` (#49, revue de code, nit) : lat_deg/lon_deg RETIRÉS par défaut de la
         # sortie CLI — même si la position n'est pas une fuite nouvelle en soi (déjà lisible
         # dans le fichier `activities/fit/<id>.json` source, voir `samples_by_garmin_id`),
@@ -4469,7 +4551,8 @@ def main(argv=None) -> int:
         conf = settings(load_config(workspace))
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         if args.activity is not None:
-            print(json.dumps(activity_zone_report(conn, conf, args.activity), ensure_ascii=False))
+            print(json.dumps(activity_zone_report(conn, conf, parse_activity_selector(args.activity, "zones")),
+                             ensure_ascii=False))
             return 0
         weeks = args.weeks if args.weeks and args.weeks > 0 else 8
         result = {
@@ -4479,41 +4562,41 @@ def main(argv=None) -> int:
         print(json.dumps(result, ensure_ascii=False))
         return 0
     if args.command == "gap":
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is None:
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is None:
             raise ConfigError("commande « gap » : garmin_activity_id attendu "
                                "(--activity ou argument positionnel, ex. arc_index.py gap 19287537093).")
-        print(json.dumps(activity_gap_report(conn, garmin_id), ensure_ascii=False))
+        print(json.dumps(activity_gap_report(conn, ref), ensure_ascii=False))
         return 0
     if args.command == "decoupling":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is not None:
-            print(json.dumps(activity_decoupling_report(conn, garmin_id), ensure_ascii=False))
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is not None:
+            print(json.dumps(activity_decoupling_report(conn, ref), ensure_ascii=False))
             return 0
         print(json.dumps(decoupling_trend(conn, today_date, args.weeks), ensure_ascii=False))
         return 0
     if args.command == "vam":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is not None:
-            print(json.dumps(activity_climb_report(conn, garmin_id), ensure_ascii=False))
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is not None:
+            print(json.dumps(activity_climb_report(conn, ref), ensure_ascii=False))
             return 0
         print(json.dumps(vam_trend(conn, today_date, args.weeks), ensure_ascii=False))
         return 0
     if args.command == "descent":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is not None:
-            print(json.dumps(activity_descent_report(conn, garmin_id), ensure_ascii=False))
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is not None:
+            print(json.dumps(activity_descent_report(conn, ref), ensure_ascii=False))
             return 0
         print(json.dumps(descent_trend(conn, today_date, args.weeks), ensure_ascii=False))
         return 0
     if args.command == "durability":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is not None:
-            print(json.dumps(activity_durability_report(conn, garmin_id), ensure_ascii=False))
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is not None:
+            print(json.dumps(activity_durability_report(conn, ref), ensure_ascii=False))
             return 0
         print(json.dumps(durability_trend(conn, today_date, args.weeks), ensure_ascii=False))
         return 0
@@ -4539,12 +4622,12 @@ def main(argv=None) -> int:
         # le positionnel n'est qu'un ALIAS de --activity et les deux ne sont
         # jamais fournis ensemble par erreur en pratique) — rejeté explicitement.
         if args.activity is not None and args.selector:
-            raise ConfigError("commande « energy » : passez garmin_activity_id soit en argument "
+            raise ConfigError("commande « energy » : passez l'identifiant de séance soit en argument "
                                "positionnel, soit via --activity, jamais les deux à la fois.")
         # Un SEUL sélecteur à la fois — même discipline que `--date`/`--days` pour
         # `decisions` : jamais une précédence silencieuse entre --activity/--date/--since.
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        selectors_used = sum(1 for v in (garmin_id, args.date, args.since) if v is not None)
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        selectors_used = sum(1 for v in (ref, args.date, args.since) if v is not None)
         if selectors_used > 1:
             raise ConfigError("commande « energy » : --activity/--date/--since sont incompatibles "
                                "entre eux, choisissez un seul sélecteur.")
@@ -4568,7 +4651,7 @@ def main(argv=None) -> int:
         if args.limit is not None and selectors_used >= 1:
             raise ConfigError("commande « energy » : --limit ne s'applique qu'à la liste par défaut "
                                "(sans --activity/--date/--since), où il n'aurait aucun effet.")
-        print(json.dumps(energy_report(conn, activity=garmin_id, day=args.date, since=args.since,
+        print(json.dumps(energy_report(conn, activity=ref, day=args.date, since=args.since,
                                         limit=args.limit or ENERGY_DEFAULT_LIMIT,
                                         assumptions=args.assumptions), ensure_ascii=False))
         return 0
@@ -4581,13 +4664,13 @@ def main(argv=None) -> int:
         if args.segment is not None:
             print(json.dumps(climb_segment_history(conn, args.segment), ensure_ascii=False))
             return 0
-        garmin_id = args.activity if args.activity is not None else (int(args.selector) if args.selector else None)
-        if garmin_id is not None:
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is not None:
             act_row = conn.execute(
-                "SELECT id FROM activity WHERE garmin_activity_id = ?", (garmin_id,)).fetchone()
+                f"SELECT id FROM activity WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
             if act_row is None:
                 print(json.dumps({"activity_id": None, "segments": [],
-                                   "reason": "aucune activité indexée pour ce garmin_activity_id",
+                                   "reason": unknown_activity_reason(ref),
                                    "reason_code": "unknown_activity"}, ensure_ascii=False))
                 return 0
             seg_ids = [r[0] for r in conn.execute(

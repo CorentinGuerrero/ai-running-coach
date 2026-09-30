@@ -40,7 +40,7 @@ des précédentes sur le même parcours, la charge de la semaine face au plan.
 En plus des fichiers Markdown, la synchronisation tente — en best-effort, sans jamais
 faire échouer le reste — de télécharger le fichier FIT de chaque nouvelle séance
 running/trail (`skills/fit-download`) et écrit sa copie normalisée dans
-`activities/fit/<garmin_activity_id>.json` : une donnée **brute et jetable**
+`activities/fit/<garmin_activity_id | intervals_activity_id>.json` : une donnée **brute et jetable**
 (reconstruite depuis Garmin à tout moment), jamais versionnée, même dans un
 [workspace privé](../workspace.md) — son propre `.gitignore` est créé automatiquement.
 La réindexation (`scripts/arc_index.py`) l'ingère alors dans la table dérivée

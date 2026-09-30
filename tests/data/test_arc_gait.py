@@ -402,7 +402,7 @@ class Workspace(unittest.TestCase):
 
 class TestIndexAndSummary(Workspace):
     def test_schema_has_dynamics_columns_and_version_bumped(self):
-        self.assertGreaterEqual(I.SCHEMA_VERSION, 31)
+        self.assertGreaterEqual(I.SCHEMA_VERSION, 32)
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(activity_sample)")}
         self.assertTrue(set(S.DYNAMICS_KEYS) <= cols, cols)
 
@@ -474,6 +474,16 @@ class TestIndexAndSummary(Workspace):
         self.write("activities/fit/1.json", json.dumps({"activity_id": 1, "records": [
             {"t_s": t, "speed_ms": 3.0, "ground_contact_s": 0.25} for t in range(0, 100, 5)]}))
         self.assertEqual(self.summary()["dynamics"]["ground_contact_s"]["mean"], 0.25)
+
+    def test_intervals_sourced_session_gets_its_dynamics(self):
+        data = {"arc": 1, "kind": "activity", "date": "2026-09-05", "sport": "running", "duration_s": 3600,
+                "intervals_activity_id": "i555"}
+        self.write("activities/2026-09-05_running.md", f"# S\n\n```arc\n{json.dumps(data)}\n```\n")
+        self.write("activities/fit/i555.json", json.dumps({"activity_id": "i555", "records": [
+            {"t_s": t, "speed_ms": 3.0, "ground_contact_s": 0.27} for t in range(0, 100, 5)]}))
+        out = self.summary()
+        self.assertEqual(out["dynamics"]["ground_contact_s"]["mean"], 0.27)
+        self.assertEqual(out["confidence"]["sessions_with_dynamics"], 1)
 
     def test_cli_gait_summary(self):
         self.activity("2026-09-01", 1, dynamics={"ground_contact_s": 0.25})
@@ -557,6 +567,18 @@ class TestRefreshDynamics(unittest.TestCase):
         self.assertEqual(json.loads((self.tmp / "fit/111.json").read_text())["truth"], {"x": 1})
         self.assertEqual((self.tmp / "2026-09-01_running.md").read_text(encoding="utf-8"), "# S\n")
 
+    def test_intervals_icu_fit_files_are_refreshed_too(self):
+        """#68 : `i<chiffres>.fit` (source Intervals.icu) — même emplacement, JSON `fit/i<chiffres>.json`."""
+        self.fits["irun"] = self.fits["run"]
+        (self.tmp / "i987654.fit").write_bytes(b"irun")
+        (self.tmp / "iabc.fit").write_bytes(b"irun")             # forme invalide : ignoré
+        result = self.refresh()
+        self.assertIn(("i987654", "created"), result["files"])
+        payload = json.loads((self.tmp / "fit/i987654.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["activity_id"], "i987654")
+        self.assertAlmostEqual(payload["records"][0]["ground_contact_s"], 0.25, places=3)
+        self.assertFalse((self.tmp / "fit/iabc.json").exists())
+
     def test_unreadable_fit_is_counted_not_fatal(self):
         self.fits.pop("ride")
         result = self.refresh()
@@ -564,12 +586,12 @@ class TestRefreshDynamics(unittest.TestCase):
 
     def test_main_refresh_needs_no_ids_and_reports(self):
         buf = io.StringIO()
-        with patch.object(D, "_read_fit", FakeFit(self.fits)), patch.object(D, "_auto_relaunch") as relaunch, \
-                contextlib.redirect_stdout(buf):
+        with patch.object(D, "_read_fit", FakeFit(self.fits)), patch.object(D, "_relaunch_for_fitparse") as relaunch, \
+                patch.object(D, "_auto_relaunch") as auto, contextlib.redirect_stdout(buf):
             code = D.main(["--refresh-dynamics", "--output-dir", str(self.tmp)])
         self.assertEqual(code, 0)
-        relaunch.assert_called_once()
-        self.assertEqual(relaunch.call_args[0][1], "fitparse")      # jamais `garminconnect` : aucune connexion Garmin
+        relaunch.assert_called_once()                               # fitparse seul
+        auto.assert_not_called()                                    # jamais `garminconnect` : aucune connexion Garmin
         out = buf.getvalue()
         self.assertIn("2 JSON créés, 0 réécrits", out)
         self.assertIn("111 : créé", out)                       # id par id

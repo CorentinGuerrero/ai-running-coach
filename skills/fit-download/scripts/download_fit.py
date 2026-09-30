@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-"""Téléchargeur de fichiers FIT Garmin — bypass du canal MCP.
+"""Téléchargeur de fichiers FIT — Garmin Connect ou Intervals.icu, sans passer par le MCP.
 
-Résout le timeout MCP de `get_activity_fit_data` (records GPS = payload
-de plusieurs Mo qui dépasse le timeout côté client). Ce script utilise la
-librairie `garminconnect` déjà installée dans l'environnement `garmin-mcp` et
-les tokens locaux `~/.garminconnect` — aucun mot de passe nécessaire.
+Deux sources, choisies par `--source` (défaut : `[data].source` du workspace, #68) :
+
+- **`garmin`** — résout le timeout MCP de `get_activity_fit_data` (records GPS =
+  payload de plusieurs Mo qui dépasse le timeout côté client). Utilise la librairie
+  `garminconnect` déjà installée dans l'environnement `garmin-mcp` et les tokens
+  locaux `~/.garminconnect` — aucun mot de passe nécessaire.
+- **`intervals`** — `GET /api/v1/activity/<id>/fit-file` de l'API Intervals.icu
+  (bibliothèque standard, `urllib`), authentifié par la clé API déjà configurée pour
+  le serveur MCP `intervals-icu-mcp` (`~/.config/ai-running-coach/intervals-icu-mcp/.env`,
+  écrit par `./install.sh --source intervals`). Intervals.icu garde le FIT de toute
+  activité importée depuis une montre (Garmin, COROS, Suunto, Polar, Apple Watch via
+  HealthFit/RunGap…) — SAUF celles importées depuis Strava, que l'API Strava interdit
+  de redistribuer : elles sont détectées (`source = "STRAVA"`) et sautées avec une
+  raison explicite, jamais un FIT vide ni une valeur inventée.
 
 Usage:
   download_fit.py 12345678901                          # -> activities/12345678901.fit
   download_fit.py 12345678901 --json                   # + JSON des records GPS
   download_fit.py 12345678901 12345678902 12345678903  # plusieurs
-  download_fit.py --from-dir activities/               # lit activity_id dans les MD
+  download_fit.py --from-dir activities/               # lit l'identifiant dans les MD
   download_fit.py 12345678901 --output-dir /tmp/fits/
+  download_fit.py i123456789 --json --source intervals # -> activities/i123456789.fit (+ fit/i123456789.json)
 
 Options:
+  --source       garmin | intervals (défaut: [data].source du workspace, sinon garmin)
   --output-dir   Répertoire de sortie (défaut: activities/)
   --json         Écrit aussi <id>.records.json (bruts fitparse) ET la copie normalisée
                  activities/fit/<id>.json (#42 — ingérée par `scripts/arc_index.py`)
@@ -29,7 +41,12 @@ Options:
   --dry-run      Avec `--refresh-dynamics` : liste (id par id) ce qui serait créé / réécrit, sans rien écrire
   -v, --verbose  Avec `--refresh-dynamics` : liste aussi les id déjà à jour
                  Un `.fit` téléchargé sans `--json` n'a pas de JSON normalisé : `--refresh-dynamics` le CRÉE.
-  --python PATH  Interpréteur contenant garminconnect (auto-détecté sinon)
+  --python PATH  Interpréteur contenant garminconnect/fitparse (auto-détecté sinon)
+
+Identifiants : un entier pour Garmin (`garmin_activity_id` du bloc ```arc), une
+chaîne `i<chiffres>` pour Intervals.icu (`intervals_activity_id`). La copie
+normalisée porte ce même identifiant dans son nom (`fit/i123456789.json`) : c'est
+lui qu'`arc_index.py` utilise pour la rattacher à la séance.
 
 Sans `--overwrite`, une séance déjà téléchargée est sautée — avec `--json`, ce
 saut porte sur la copie NORMALISÉE canonique (`<out_dir>/fit/<id>.json`), pas
@@ -89,16 +106,66 @@ def _activity_dir_out() -> Path:
     return workspace_root() / "activities"
 
 
-def relaunch_candidates(garmin_python=None, garmin_mcp_exe=None, home=None) -> list[str]:
-    """Interpréteurs candidats (ordre de priorité) : `GARMIN_PYTHON`, le venv du binaire `garmin-mcp` du PATH, puis
-    l'emplacement uv par défaut. `python3` ET `python` à chaque fois (sur Linux l'un est un lien vers l'autre)."""
+# Par source : module requis, variable d'override de l'interpréteur (`--python`), outil
+# `uv` qui l'embarque, et commande de réparation affichée si rien n'est trouvé. Côté
+# Intervals.icu, le téléchargement lui-même est stdlib (`urllib`) : seul `fitparse`
+# (lecture des records, `--json`) manque — `./install.sh --source intervals` l'installe
+# dans l'environnement `intervals-icu-mcp` (`uv tool install --with fitparse`).
+_RELAUNCH = {
+    "garmin": {
+        "module": "garminconnect", "env": "GARMIN_PYTHON", "tool": "garmin-mcp",
+        "fix": "→ utilisez le python de garmin-mcp : --python ~/.local/share/uv/tools/garmin-mcp/bin/python3",
+    },
+    "intervals": {
+        "module": "fitparse", "env": "INTERVALS_PYTHON", "tool": "intervals-icu-mcp",
+        "fix": "→ relancez ./install.sh --source intervals (installe fitparse dans l'environnement "
+               "intervals-icu-mcp), ou passez --python vers un interpréteur qui a fitparse",
+    },
+}
+
+
+_RELAUNCHED_ENV = "ARC_FIT_DOWNLOAD_RELAUNCHED"
+
+
+def _relaunch_for_fitparse(argv: list[str]) -> None:
+    """`--refresh-dynamics` (#151) : seul `fitparse` est requis, quelle que soit la source des `.fit`. Présent
+    dans l'environnement de `garmin-mcp` ET (`./install.sh --source intervals`) dans celui d'`intervals-icu-mcp` :
+    on essaie l'un puis l'autre, une seule relance (jamais de boucle)."""
+    if _module_available("fitparse"):
+        return
+    if not os.environ.get(_RELAUNCHED_ENV):
+        for source in ("garmin", "intervals"):
+            spec = _RELAUNCH[source]
+            py = pick_relaunch_candidate(relaunch_candidates(
+                os.environ.get(spec["env"]), shutil.which(spec["tool"]), tool=spec["tool"]))
+            if py:
+                r = subprocess.run([py, os.path.abspath(__file__)] + argv,
+                                   env={**os.environ, _RELAUNCHED_ENV: "1"})
+                sys.exit(r.returncode)
+    print("ERREUR : module 'fitparse' introuvable dans cet interpréteur.\n"
+          f"{_RELAUNCH['garmin']['fix']}\n{_RELAUNCH['intervals']['fix']}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _module_available(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except ImportError:
+        return False
+
+
+def relaunch_candidates(garmin_python=None, garmin_mcp_exe=None, home=None, tool: str = "garmin-mcp") -> list[str]:
+    """Interpréteurs candidats (ordre de priorité) : la variable d'override (`GARMIN_PYTHON` /
+    `INTERVALS_PYTHON`), le venv du binaire `tool` du PATH, puis l'emplacement uv par défaut.
+    `python3` ET `python` à chaque fois (sur Linux l'un est un lien vers l'autre)."""
     candidates: list[str] = []
     if garmin_python:
         candidates.append(os.path.expanduser(garmin_python))
     if garmin_mcp_exe:
         bindir = os.path.dirname(os.path.realpath(garmin_mcp_exe))
         candidates += [os.path.join(bindir, n) for n in ("python3", "python")]
-    base = os.path.join(home or os.path.expanduser("~"), ".local/share/uv/tools/garmin-mcp/bin")
+    base = os.path.join(home or os.path.expanduser("~"), f".local/share/uv/tools/{tool}/bin")
     candidates += [os.path.join(base, n) for n in ("python3", "python")]
     return candidates
 
@@ -123,25 +190,28 @@ def pick_relaunch_candidate(candidates, prefix: str = None, executable: str = No
     return None
 
 
-def _auto_relaunch(argv: list[str], module: str = "garminconnect") -> None:
-    """Relance ce script avec le python de garmin-mcp si `module` est absent (`garminconnect` pour
-    un téléchargement ; `fitparse` suffit pour `--refresh-dynamics`, sans connexion Garmin)."""
-    try:
-        __import__(module)
+def _auto_relaunch(argv: list[str], source: str = "garmin") -> None:
+    """Relance ce script avec le python de l'outil MCP de `source` si le module requis
+    (`garminconnect` pour Garmin, `fitparse` pour Intervals.icu) est absent."""
+    spec = _RELAUNCH[source]
+    if _module_available(spec["module"]):
         return
-    except ImportError:
-        pass
 
-    # Ordre : --python (via GARMIN_PYTHON), garmin-mcp du PATH, puis l'emplacement uv
-    # par défaut — ~/.local/bin est souvent absent du PATH d'une session SSH/cron.
-    py = pick_relaunch_candidate(relaunch_candidates(os.environ.get("GARMIN_PYTHON"), shutil.which("garmin-mcp")))
+    # Ordre : --python (via la variable d'override), l'outil du PATH, puis l'emplacement
+    # uv par défaut — ~/.local/bin est souvent absent du PATH d'une session SSH/cron.
+    # Une seule relance : un interpréteur candidat qui n'a pas non plus le module ne doit
+    # jamais relancer à son tour l'interpréteur d'origine (boucle infinie).
+    py = None
+    if not os.environ.get(_RELAUNCHED_ENV):
+        py = pick_relaunch_candidate(relaunch_candidates(
+            os.environ.get(spec["env"]), shutil.which(spec["tool"]), tool=spec["tool"]))
     if py:
-        r = subprocess.run([py, os.path.abspath(__file__)] + argv)
+        r = subprocess.run([py, os.path.abspath(__file__)] + argv,
+                           env={**os.environ, _RELAUNCHED_ENV: "1"})
         sys.exit(r.returncode)
 
     print(
-        f"ERREUR : module '{module}' introuvable dans cet interpréteur.\n"
-        "→ utilisez le python de garmin-mcp : --python ~/.local/share/uv/tools/garmin-mcp/bin/python3",
+        f"ERREUR : module '{spec['module']}' introuvable dans cet interpréteur.\n{spec['fix']}",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -200,8 +270,13 @@ def _download_one(client, activity_id: int, out_dir: Path, want_json: bool) -> P
     from garminconnect import Garmin
 
     fit = client.download_activity(activity_id, dl_fmt=Garmin.ActivityDownloadFormat.ORIGINAL)
-    fit = _unwrap_fit(fit)
+    return _persist_fit(_unwrap_fit(fit), activity_id, out_dir, want_json)
 
+
+def _persist_fit(fit: bytes, activity_id, out_dir: Path, want_json: bool) -> Path:
+    """Écrit le FIT brut `<out_dir>/<id>.fit` et, avec `want_json`, ses records
+    `fitparse` + la copie normalisée canonique — commun aux deux sources, qui ne
+    diffèrent que par la façon d'obtenir les octets du FIT."""
     # FIT brut + records.json (pistes GPS complètes) : lourds, jetables, jamais
     # versionnés — même dans un workspace privé qui versionne `activities/`
     # (docs/workspace.md). `daily-sync` avec `git_autocommit = true` fait un
@@ -221,6 +296,137 @@ def _download_one(client, activity_id: int, out_dir: Path, want_json: bool) -> P
         records, sport = _write_records_json(fit, out.with_suffix(".records.json"))
         _write_canonical_samples(activity_id, records, out_dir, sport)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Source Intervals.icu (#68) — API REST, bibliothèque standard uniquement
+# ---------------------------------------------------------------------------
+
+INTERVALS_API = "https://intervals.icu/api/v1"
+# Identifiant d'une activité importée dans Intervals.icu (fichier FIT/TCX/GPX) :
+# « i » + chiffres, ex. `i123456789` — la forme que `get_recent_activities` rend et
+# que le contrat stocke dans `intervals_activity_id`. Une activité importée depuis
+# Strava porte, elle, un identifiant sans préfixe — et n'est de toute façon pas
+# redistribuable (voir `IntervalsUnavailable`).
+INTERVALS_ID_RE = re.compile(r"^i\d+$")
+# Même fichier que celui du serveur MCP (`install.sh`, INTERVALS_ENV_DIR) : une seule
+# clé API à configurer pour le MCP ET pour ce script.
+INTERVALS_ENV_FILE = Path("~/.config/ai-running-coach/intervals-icu-mcp/.env")
+_HTTP_TIMEOUT_S = 60
+
+
+class IntervalsError(RuntimeError):
+    """Échec d'un appel à l'API Intervals.icu (réseau, authentification, statut HTTP)."""
+
+
+class IntervalsUnavailable(IntervalsError):
+    """Activité sans FIT récupérable — importée depuis Strava (API Strava : données non
+    redistribuables par un tiers), ou saisie manuelle sans fichier. Jamais une panne :
+    une raison à dire à l'athlète, la séance reste valide sans échantillons."""
+
+
+def _read_env_file(path: Path) -> dict:
+    """`KEY=VALUE` d'un fichier `.env` (commentaires `#`, guillemets simples ou doubles
+    retirés) — le format qu'écrit `intervals-icu-mcp-auth` (python-dotenv `set_key`)."""
+    values: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _intervals_api_key(env_file: Path | None = None) -> str:
+    """Clé API Intervals.icu : `$INTERVALS_ICU_API_KEY` si défini (même précédence que
+    `intervals-icu-mcp`, pydantic-settings), sinon le `.env` du serveur MCP."""
+    key = os.environ.get("INTERVALS_ICU_API_KEY", "").strip()
+    if not key:
+        key = _read_env_file((env_file or INTERVALS_ENV_FILE).expanduser()).get("INTERVALS_ICU_API_KEY", "").strip()
+    if not key or key == "your_api_key_here":
+        raise IntervalsError(
+            f"clé API Intervals.icu introuvable ($INTERVALS_ICU_API_KEY ou {INTERVALS_ENV_FILE}) — "
+            "lancez `./install.sh --source intervals` (ou `intervals-icu-mcp-auth`), voir docs/intervals-setup.md")
+    return key
+
+
+def _intervals_get(path: str, api_key: str, opener=None) -> bytes:
+    """GET authentifié (Basic `API_KEY:<clé>`, comme `intervals-icu-mcp`). `opener`
+    injectable pour les tests (aucun appel réseau dans la suite de tests)."""
+    import base64
+    import urllib.error
+    import urllib.request
+
+    token = base64.b64encode(f"API_KEY:{api_key}".encode()).decode()
+    req = urllib.request.Request(f"{INTERVALS_API}{path}", headers={
+        "Authorization": f"Basic {token}", "User-Agent": "ai-running-coach/download_fit"})
+    try:
+        with (opener or urllib.request.urlopen)(req, timeout=_HTTP_TIMEOUT_S) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise IntervalsError(f"HTTP 401 sur {path} : clé API Intervals.icu refusée "
+                                 "(régénérer la clé : https://intervals.icu/settings, section Developer)") from exc
+        if exc.code == 403:
+            raise IntervalsError(f"HTTP 403 sur {path} : accès refusé — clé API Intervals.icu refusée, ou "
+                                 "activité d'un autre athlète (régénérer la clé : https://intervals.icu/settings, "
+                                 "section Developer)") from exc
+        if exc.code == 429:
+            raise IntervalsError(f"HTTP 429 sur {path} : limite de requêtes Intervals.icu atteinte — "
+                                 "réessayer plus tard") from exc
+        if exc.code == 404:
+            raise IntervalsUnavailable(f"HTTP 404 sur {path} : activité introuvable, ou sans fichier FIT "
+                                       "(saisie manuelle)") from exc
+        raise IntervalsError(f"HTTP {exc.code} sur {path}") from exc
+    except urllib.error.URLError as exc:
+        raise IntervalsError(f"Intervals.icu injoignable ({exc.reason})") from exc
+
+
+def _intervals_check_available(meta: dict) -> None:
+    """Lève `IntervalsUnavailable` si l'activité est importée depuis Strava
+    (`source = "STRAVA"` — l'API renvoie alors une coquille presque vide avec une
+    `_note`). Une activité sans fichier d'origine (saisie manuelle) n'est PAS devinée
+    ici : c'est le 404 de `/fit-file` qui la signale (`_intervals_get`)."""
+    if str(meta.get("source") or "").upper() == "STRAVA":
+        raise IntervalsUnavailable(
+            "activité importée dans Intervals.icu depuis Strava — l'API Strava interdit sa "
+            "redistribution, aucun FIT disponible. Connecter la montre (ou l'app qui l'exporte) "
+            "directement à Intervals.icu pour les séances suivantes.")
+
+
+def _unwrap_gzip(data: bytes) -> bytes:
+    """Intervals.icu peut servir le fichier d'origine compressé (gzip)."""
+    if data[:2] == b"\x1f\x8b":
+        import gzip
+
+        return gzip.decompress(data)
+    return data
+
+
+def _download_one_intervals(activity_id: str, out_dir: Path, want_json: bool, api_key: str,
+                             opener=None) -> Path:
+    if not INTERVALS_ID_RE.match(activity_id):
+        raise IntervalsUnavailable(
+            f"identifiant « {activity_id} » : forme i<chiffres> attendue (intervals_activity_id) — "
+            "un identifiant sans préfixe est en général une activité importée depuis Strava, "
+            "non redistribuable")
+    meta = json.loads(_intervals_get(f"/activity/{activity_id}", api_key, opener).decode("utf-8"))
+    _intervals_check_available(meta)
+    fit = _unwrap_fit(_unwrap_gzip(_intervals_get(f"/activity/{activity_id}/fit-file", api_key, opener)))
+    if not fit:
+        raise IntervalsUnavailable("fichier FIT vide renvoyé par Intervals.icu")
+    return _persist_fit(fit, activity_id, out_dir, want_json)
 
 
 def _read_fit(fit: bytes) -> tuple[list[dict], str | None]:
@@ -261,9 +467,14 @@ def refresh_dynamics(out_dir: Path, dry_run: bool = False) -> dict:
     fit_dir = out_dir / "fit"
     result: dict = {"created": 0, "rewritten": 0, "unchanged": 0, "failed": 0, "with_dynamics": 0, "files": []}
     for fit_path in sorted(out_dir.glob("*.fit")):
-        if not fit_path.stem.isdigit():
+        # `<entier>.fit` (Garmin) ET `i<chiffres>.fit` (Intervals.icu, #68) : même emplacement, même nom de
+        # copie normalisée (`fit/<id>.json`), identifiant conservé tel quel (entier ou chaîne).
+        if fit_path.stem.isdigit():
+            activity_id = int(fit_path.stem)
+        elif INTERVALS_ID_RE.match(fit_path.stem):
+            activity_id = fit_path.stem
+        else:
             continue
-        activity_id = int(fit_path.stem)
         try:
             records, sport = _read_fit(fit_path.read_bytes())
             normalised = S.normalise_records(records, sport=sport)
@@ -345,19 +556,24 @@ def _write_canonical_samples(activity_id: int, raw_records: list[dict], activiti
     print(f"OK {len(records)} échantillons normalisés -> {out}")
 
 
-def _activity_id_from_arc(text: str):
-    """`garmin_activity_id` du bloc ```arc (contrat workspace-data-contract), ou None."""
+def _activity_id_from_arc(text: str, source: str = "garmin"):
+    """Identifiant de la séance dans le bloc ```arc (contrat workspace-data-contract),
+    ou None : `garmin_activity_id` (entier) pour `source="garmin"`,
+    `intervals_activity_id` (chaîne `i<chiffres>`) pour `source="intervals"`."""
     m = re.search(r"^```arc[ \t]*\n(.*?)\n```", text, re.M | re.S)
     if not m:
         return None
+    key = "intervals_activity_id" if source == "intervals" else "garmin_activity_id"
     try:
-        value = json.loads(m.group(1)).get("garmin_activity_id")
+        value = json.loads(m.group(1)).get(key)
     except (ValueError, AttributeError):
         return None
-    return value if isinstance(value, int) else None
+    if source == "intervals":
+        return value if isinstance(value, str) and INTERVALS_ID_RE.match(value) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _should_skip_download(dst: Path, out_dir: Path, activity_id: int, *,
+def _should_skip_download(dst: Path, out_dir: Path, activity_id, *,
                            overwrite: bool, want_json: bool) -> bool:
     """`True` si `activity_id` peut être sauté (déjà téléchargé) — jamais un simple
     `dst.exists()` (le `.fit` brut) quand `--json` est demandé : une version
@@ -378,27 +594,74 @@ def _should_skip_download(dst: Path, out_dir: Path, activity_id: int, *,
     return dst.exists()
 
 
+def _configured_source() -> str:
+    """`[data].source` du workspace (#68), `garmin` par défaut ou si illisible — la
+    même résolution que `garmin_watch.load_settings`."""
+    try:
+        from arc_index import load_config  # noqa: E402 (sys.path déjà préparé en tête de module)
+        from coach_setup import workspace_root  # noqa: E402
+
+        source = (load_config(workspace_root()).get("data") or {}).get("source", "garmin")
+    except Exception:  # noqa: BLE001 — TOML invalide : signalé par coach_doctor, pas ici
+        return "garmin"
+    return source if source in _RELAUNCH else "garmin"
+
+
+def _parse_ids(raw: list[str], source: str, ap: argparse.ArgumentParser) -> list:
+    """Entiers pour Garmin ; chaînes pour Intervals.icu (validées au téléchargement,
+    pour qu'un identifiant Strava sans préfixe reçoive une raison explicite)."""
+    if source == "intervals":
+        return list(raw)
+    ids = []
+    for value in raw:
+        if not value.isdigit():
+            hint = " (identifiant Intervals.icu ? ajoutez --source intervals)" if INTERVALS_ID_RE.match(value) else ""
+            ap.error(f"identifiant Garmin entier attendu, « {value} » reçu{hint}")
+        ids.append(int(value))
+    return ids
+
+
+def _ids_from_dir(directory: Path, source: str) -> list:
+    ids = []
+    for md in directory.glob("*.md"):
+        txt = md.read_text(encoding="utf-8", errors="ignore")
+        found = _activity_id_from_arc(txt, source)
+        if found is None and source == "garmin":
+            # Fichiers antérieurs au contrat : la clé en début de ligne du bloc YAML
+            # uniquement — un « activity_id: 123 » cité dans la prose n'est pas une séance.
+            m = re.search(r"^activity_id:\s*(\d+)", txt, re.M)
+            found = int(m.group(1)) if m else None
+        if found is not None:
+            ids.append(found)
+    return ids
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Télécharge des fichiers FIT Garmin (bypass MCP) via garminconnect + tokens locaux."
+        description="Télécharge des fichiers FIT (Garmin Connect ou Intervals.icu) sans passer par le MCP."
     )
-    ap.add_argument("activity_ids", nargs="*", type=int, help="IDs Garmin à télécharger")
+    ap.add_argument("activity_ids", nargs="*",
+                    help="identifiants à télécharger (entier Garmin, ou i<chiffres> Intervals.icu)")
+    ap.add_argument("--source", choices=sorted(_RELAUNCH), default=None,
+                    help="garmin | intervals (défaut : [data].source du workspace, sinon garmin)")
     ap.add_argument("--output-dir", type=Path, default=None, help="Répertoire de sortie (défaut: activities/)")
     ap.add_argument("--json", action="store_true", help="Écrit aussi <id>.records.json")
     ap.add_argument("--overwrite", action="store_true", help="Réécrire même si présent")
-    ap.add_argument("--from-dir", type=Path, default=None, help="Scan de fichiers MD pour activity_id")
-    ap.add_argument("--python", type=Path, default=None, help="Interpréteur garminconnect (override)")
+    ap.add_argument("--from-dir", type=Path, default=None, help="Scan de fichiers MD pour l'identifiant")
+    ap.add_argument("--python", type=Path, default=None, help="Interpréteur garminconnect/fitparse (override)")
     ap.add_argument("--refresh-dynamics", action="store_true",
                     help="Ré-extrait la dynamique de course des .fit déjà présents (aucun téléchargement)")
     ap.add_argument("--dry-run", action="store_true", help="Avec --refresh-dynamics : n'écrit rien")
     ap.add_argument("-v", "--verbose", action="store_true", help="Avec --refresh-dynamics : liste aussi les id à jour")
     args = ap.parse_args(argv)
 
+    source = args.source or _configured_source()
     if args.python:
-        os.environ["GARMIN_PYTHON"] = str(args.python)
+        os.environ[_RELAUNCH[source]["env"]] = str(args.python)
     if args.refresh_dynamics:
-        # Hors ligne : ni `garminconnect` ni tokens — seul `fitparse` est requis.
-        _auto_relaunch(sys.argv[1:], "fitparse")
+        # Hors ligne, quelle que soit la source : ni `garminconnect` ni tokens ni clé API — seul
+        # `fitparse` est requis. Fichiers Garmin (`<entier>.fit`) ET Intervals.icu (`i<chiffres>.fit`).
+        _relaunch_for_fitparse(sys.argv[1:] if argv is None else list(argv))
         out_dir = args.output_dir or _activity_dir_out()
         result = refresh_dynamics(out_dir, dry_run=args.dry_run)
         labels = {"create": "à créer", "rewrite": "à réécrire", "created": "créé", "rewritten": "réécrit",
@@ -413,47 +676,71 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result['unchanged']} déjà à jour, {result['failed']} échec(s) ; "
               f"{result['with_dynamics']} séance(s) avec dynamique de course — {out_dir / 'fit'}")
         return 1 if result["failed"] else 0
-    _auto_relaunch(sys.argv[1:])
+    # Intervals.icu : le téléchargement est stdlib, seul `--json` (lecture fitparse) a
+    # besoin d'un autre interpréteur. Garmin : garminconnect est requis dans tous les cas.
+    if source == "garmin" or args.json:
+        _auto_relaunch(sys.argv[1:] if argv is None else list(argv), source)
 
-    ids: list[int] = list(args.activity_ids)
+    ids = _parse_ids(args.activity_ids, source, ap)
     if args.from_dir:
-        for md in args.from_dir.glob("*.md"):
-            txt = md.read_text(encoding="utf-8", errors="ignore")
-            found = _activity_id_from_arc(txt)
-            if found is None:
-                # Fichiers antérieurs au contrat : la clé en début de ligne du bloc YAML
-                # uniquement — un « activity_id: 123 » cité dans la prose n'est pas une séance.
-                m = re.search(r"^activity_id:\s*(\d+)", txt, re.M)
-                found = int(m.group(1)) if m else None
-            if found is not None:
-                ids.append(found)
-        ids = sorted(set(ids))
+        # Entiers Garmin en ordre numérique (9 avant 10), puis identifiants Intervals.icu.
+        ids = sorted(set(ids + _ids_from_dir(args.from_dir, source)), key=lambda x: (isinstance(x, str), x))
     if not ids:
-        ap.error("aucun activity_id fourni (args ou --from-dir)")
+        ap.error("aucun identifiant fourni (args ou --from-dir)")
 
     out_dir = args.output_dir or _activity_dir_out()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    token_dir = str(Path("~/.garminconnect").expanduser())
-    from garminconnect import Garmin
+    if source == "intervals":
+        try:
+            api_key = _intervals_api_key()
+        except IntervalsError as exc:
+            print(f"ERREUR : {exc}", file=sys.stderr)
+            return 2
 
-    client = Garmin()
-    _login(client, token_dir)
+        def fetch(aid):
+            return _download_one_intervals(aid, out_dir, args.json, api_key)
+    else:
+        token_dir = str(Path("~/.garminconnect").expanduser())
+        from garminconnect import Garmin
 
-    ok = 0
+        client = Garmin()
+        _login(client, token_dir)
+
+        def fetch(aid):
+            return _download_one(client, aid, out_dir, args.json)
+
+    counts = _download_all(ids, fetch, lambda aid: _should_skip_download(
+        out_dir / f"{aid}.fit", out_dir, aid, overwrite=args.overwrite, want_json=args.json))
+    suffix = f", {counts['unavailable']} sans FIT disponible" if counts["unavailable"] else ""
+    if counts["skipped"]:
+        suffix += f", {counts['skipped']} déjà présents"
+    print(f"{counts['ok']}/{len(ids)} téléchargements OK dans {out_dir}{suffix}")
+    return 1 if counts["failed"] else 0
+
+
+def _download_all(ids, fetch, should_skip) -> dict:
+    """Télécharge chaque identifiant et compte les issues. Seul un `FAIL` (erreur réelle :
+    réseau, clé refusée, FIT illisible…) est une panne : une activité INDISPONIBLE
+    (import Strava, saisie manuelle) ou déjà présente n'en est pas une — sinon un jour
+    avec une seule séance Strava ferait échouer `daily-sync.sh` en headless."""
+    counts = {"ok": 0, "unavailable": 0, "skipped": 0, "failed": 0}
     for aid in ids:
-        dst = out_dir / f"{aid}.fit"
-        if _should_skip_download(dst, out_dir, aid, overwrite=args.overwrite, want_json=args.json):
+        if should_skip(aid):
             print(f"skip {aid} (existe) — --overwrite pour forcer")
+            counts["skipped"] += 1
             continue
         try:
-            _download_one(client, aid, out_dir, args.json)
-            ok += 1
+            fetch(aid)
+            counts["ok"] += 1
+        except IntervalsUnavailable as e:
+            # Pas une panne : la séance reste valide sans échantillons — raison dite, puis on continue.
+            counts["unavailable"] += 1
+            print(f"INDISPONIBLE {aid}: {e}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
+            counts["failed"] += 1
             print(f"FAIL {aid}: {e}", file=sys.stderr)
-    print(f"{ok}/{len(ids)} téléchargements OK dans {out_dir}")
-    return 0 if ok else 1
-
+    return counts
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -703,7 +703,8 @@ def api_activity_climbs(store: Store, activity_id: int) -> dict:
     (`climbs: [], reason: None`), au lieu d'afficher partout le même message
     « aucune montée détectée » qui laisserait croire à tort qu'une séance de
     renforcement ou de vélo aurait pu en avoir une."""
-    act = store.one("SELECT sport, garmin_activity_id FROM activity WHERE id = ?", (activity_id,))
+    act = store.one("SELECT sport, garmin_activity_id, intervals_activity_id FROM activity WHERE id = ?",
+                    (activity_id,))
     empty = {"climbs": [], "vam_by_grade_class": {}}
     if act is None:
         return {**empty, "reason": "activité introuvable", "reason_code": "unknown_activity", "applicable": True}
@@ -712,9 +713,9 @@ def api_activity_climbs(store: Store, activity_id: int) -> dict:
                                     "arc_climb.ASSUMPTIONS[\"restricted_to_run_family\"]",
                 "reason_code": "not_run_family", "applicable": False}
     sample_count = 0
-    if act.get("garmin_activity_id") is not None:
-        row = store.one("SELECT COUNT(*) AS n FROM activity_sample WHERE garmin_activity_id = ?",
-                         (act["garmin_activity_id"],))
+    ref = I.activity_ref(act)
+    if ref is not None:
+        row = store.one(f"SELECT COUNT(*) AS n FROM activity_sample WHERE {I.ref_column(ref)} = ?", (ref,))
         sample_count = row["n"] if row else 0
     if not sample_count:
         return {**empty, "reason": "aucun échantillon FIT ingéré pour cette séance",
@@ -760,7 +761,7 @@ def api_activity_descent(store: Store, activity_id: int) -> dict:
     TOUS les cas vides (contrairement aux montées, l'absence de classe
     qualifiante est toujours documentée ici — critère d'acceptation de #47 :
     « classes sans assez de données -> absentes », jamais silencieusement)."""
-    act = store.one("SELECT sport, garmin_activity_id, descent_reference_gap_pace_s_km, "
+    act = store.one("SELECT sport, garmin_activity_id, intervals_activity_id, descent_reference_gap_pace_s_km, "
                      "descent_reference_source FROM activity WHERE id = ?", (activity_id,))
     empty = {"classes": {}, "reference_gap_pace_s_km": None, "reference_source": None}
     if act is None:
@@ -770,9 +771,9 @@ def api_activity_descent(store: Store, activity_id: int) -> dict:
                                     "arc_descent.ASSUMPTIONS[\"restricted_to_run_family\"]",
                 "reason_code": "not_run_family", "applicable": False}
     sample_count = 0
-    if act.get("garmin_activity_id") is not None:
-        row = store.one("SELECT COUNT(*) AS n FROM activity_sample WHERE garmin_activity_id = ?",
-                         (act["garmin_activity_id"],))
+    ref = I.activity_ref(act)
+    if ref is not None:
+        row = store.one(f"SELECT COUNT(*) AS n FROM activity_sample WHERE {I.ref_column(ref)} = ?", (ref,))
         sample_count = row["n"] if row else 0
     if not sample_count:
         return {**empty, "reason": "aucun échantillon FIT ingéré pour cette séance",

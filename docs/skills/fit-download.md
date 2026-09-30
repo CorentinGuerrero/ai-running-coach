@@ -1,31 +1,32 @@
 # Skill : Téléchargement FIT
 
-> **Description** : Téléchargement de fichiers FIT Garmin (et leurs records GPS en JSON) en **bypassant le canal MCP**.
+> **Description** : Téléchargement de fichiers FIT (et leurs records GPS en JSON) en **bypassant le canal MCP** — depuis Garmin Connect ou Intervals.icu, selon `[data].source`.
 
 ## Pourquoi ce skill existe
 
 - Le MCP Garmin (`get_activity_fit_data`) **timeoute** sur les téléchargements FIT (payloads de plusieurs Mo)
-- Le script `download_fit.py` utilise la lib `garminconnect` installée dans l'environnement `garmin-mcp` + les **tokens locaux** `~/.garminconnect` → **aucun mot de passe** nécessaire
+- **Garmin** : le script `download_fit.py` utilise la lib `garminconnect` installée dans l'environnement `garmin-mcp` + les **tokens locaux** `~/.garminconnect` → **aucun mot de passe** nécessaire
+- **Intervals.icu** : le script appelle l'API REST avec la **clé API déjà configurée pour le serveur MCP** → aucune nouvelle configuration. Fonctionne pour toutes les montres qu'Intervals.icu synchronise (Garmin, COROS, Suunto, Polar, Apple Watch via HealthFit…), **sauf les activités importées depuis Strava**, que l'API Strava interdit de redistribuer (signalées `INDISPONIBLE`, jamais inventées). Voir [Intervals.icu — Fichiers FIT](../intervals-setup.md#fichiers-fit)
 
 ## Quand l'utiliser
 
-- Télécharger un **fichier FIT** d'une activité Garmin
+- Télécharger un **fichier FIT** d'une activité Garmin ou Intervals.icu
 - Récupérer les **records GPS** en JSON
 - Analyser une activité en détail hors du canal MCP
 
 ## Fonctionnalités
 
-- Téléchargement de fichiers FIT via la lib `garminconnect`
+- Téléchargement de fichiers FIT via la lib `garminconnect` (Garmin) ou l'API REST (Intervals.icu, bibliothèque standard)
 - Récupération des records GPS en JSON
 - Utilisation des tokens locaux (pas de mot de passe)
-- **Auto-relaunch** : le script se relance dans l'environnement garmin-mcp si les dépendances manquent
+- **Auto-relaunch** : le script se relance dans l'environnement `garmin-mcp` (ou `intervals-icu-mcp`) si les dépendances manquent
 
 ## Script
 
-`skills/fit-download/scripts/download_fit.py` — nécessite `garminconnect` + `fitparse` (disponibles dans l'environnement garmin-mcp).
+`skills/fit-download/scripts/download_fit.py` — nécessite `garminconnect` + `fitparse` pour Garmin (environnement `garmin-mcp`), `fitparse` seul pour Intervals.icu avec `--json` (environnement `intervals-icu-mcp`, installé par `./install.sh --source intervals`).
 
 Avec `--json`, écrit aussi une copie **normalisée** au chemin canonique
-`activities/fit/<garmin_activity_id>.json` (unités SI, mapping documenté dans
+`activities/fit/<id>.json` — `<id>` = `garmin_activity_id` ou `intervals_activity_id` (unités SI, mapping documenté dans
 `scripts/arc_samples.py`) — c'est ce fichier que `scripts/arc_index.py` ingère dans la
 table dérivée `activity_sample` (voir [Mode headless](../dashboard/headless.md)).
 Donnée brute et jetable, jamais versionnée.
@@ -52,8 +53,15 @@ Le compte rendu distingue les JSON **à créer** (un `.fit` téléchargé sans `
 normalisée : elle est créée) de ceux **à réécrire** (copie existante sans dynamique), liste les id concernés
 (`-v` ajoute ceux déjà à jour) et compte les échecs.
 
-`--refresh-dynamics` ne nécessite que `fitparse` (le script se relance dans l'environnement
-`garmin-mcp`) : **aucune connexion Garmin, aucun token**. Il n'écrit que les copies normalisées
+Il traite aussi bien les `.fit` Garmin (`<entier>.fit`) que ceux de la source Intervals.icu
+(`i<chiffres>.fit`, même dossier `activities/`, copie `fit/i<chiffres>.json`) : la synthèse Foulée
+rattache les échantillons à la séance par `garmin_activity_id`, sinon `intervals_activity_id`. Attention : un
+FIT Intervals.icu n'embarque la dynamique que si la montre l'enregistre et que l'activité n'a pas été
+importée depuis Strava (alors aucun FIT n'est disponible).
+
+`--refresh-dynamics` ne nécessite que `fitparse` (présent dans l'environnement `garmin-mcp` comme dans
+celui d'`intervals-icu-mcp` — le script essaie de se relancer dans l'un puis l'autre :
+`garmin-mcp` ou `intervals-icu-mcp`) — **aucune connexion Garmin, aucun token**. Il n'écrit que les copies normalisées
 `activities/fit/<id>.json` (jetables, jamais versionnées) — jamais un Markdown de séance, jamais un
 `.fit`. Il est **idempotent** : un JSON déjà à jour est laissé tel quel. Seuls les `.fit`
 présents sont traités ; pour ceux que vous avez supprimés, relancez un téléchargement
@@ -77,7 +85,7 @@ anciennes dont le FIT n'a jamais été téléchargé. Pour le rattraper :
    ```
 
    Une séance déjà rattrapée (sa copie normalisée
-   `activities/fit/<garmin_activity_id>.json` existe déjà) est sautée
+   `activities/fit/<id>.json` existe déjà) est sautée
    automatiquement, même avec `--json` — relancer cette commande sur un
    historique déjà (partiellement) rattrapé ne re-télécharge donc que ce qui
    manque encore, jamais tout l'historique à chaque fois. `--overwrite` force
