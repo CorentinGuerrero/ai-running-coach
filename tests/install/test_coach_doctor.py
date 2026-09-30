@@ -871,12 +871,22 @@ class TestGearHistory(InstallAsserts):
             self._activities(sb, 8)
             check = self._check(sb)
             self.assertEqual(check["status"], "info")
-            self.assertIn("8 séance(s)", check["message"])
+            self.assertIn("8 séance(s) sur 8", check["message"])
             self.assertIn("garmin_gear_backfill.py", check["fix"])
 
-    def test_any_gear_id_or_few_activities_is_ok(self):
+    def test_one_declared_gear_id_does_not_silence_the_signal(self):
         with Sandbox() as sb:
             self._activities(sb, 8, gear_on=1)
+            check = self._check(sb)
+            self.assertEqual(check["status"], "info")
+            self.assertIn("7 séance(s) sur 8", check["message"])
+
+    def test_mostly_attributed_or_few_activities_is_ok(self):
+        with Sandbox() as sb:
+            self._activities(sb, 8, gear_on=5)     # 3/8 sans gear_id : sous le seuil de 50 %
+            self.assertEqual(self._check(sb)["status"], "ok")
+        with Sandbox() as sb:
+            self._activities(sb, 8, gear_on=4)     # exactement 50 % : pas « plus de la moitié »
             self.assertEqual(self._check(sb)["status"], "ok")
         with Sandbox() as sb:
             self._activities(sb, 3)

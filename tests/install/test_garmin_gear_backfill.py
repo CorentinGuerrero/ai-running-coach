@@ -155,3 +155,35 @@ class TestGearBackfillCli(InstallAsserts):
             proc = self._run(sb, fake2)
             self.assertEqual(proc.returncode, 1)
             self.assertIn("erreur Garmin", proc.stdout)
+
+    # -- revue #145 ----------------------------------------------------------------------------------
+    def test_gear_filter_keeps_ambiguity_detection(self):
+        with Sandbox() as sb:
+            spec = json.loads(json.dumps(FIXTURE))
+            spec["gear_activities"][U2].append(
+                {"activityId": 1001, "startTimeLocal": "2026-03-01 07:00:00", "distance": 10000})
+            fake = _setup(sb, spec)
+            payload = json.loads(self._run(sb, fake, "--json", "--gear", U1, "--apply").stdout)
+            self.assertEqual([a["id"] for a in payload["ambiguous"]], [1001])
+            self.assertEqual(payload["applied"]["written"], ["activities/2026-03-09_trail.md"])
+            self.assertNotIn('"gear_id"', (sb.repo / "activities/2026-03-01_trail.md").read_text(encoding="utf-8"))
+
+    def test_apply_refused_and_nothing_written_when_a_pair_errors(self):
+        with Sandbox() as sb:
+            broken = dict(FIXTURE, gear_activities={**FIXTURE["gear_activities"], U2: "HTTP 500"})
+            fake = _setup(sb, broken)
+            before = self._tree(sb)
+            proc = self._run(sb, fake, "--apply", "--gear", U1)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("--apply REFUSÉ", proc.stdout)
+            self.assertEqual(before, self._tree(sb))
+            self.assertFalse((sb.repo / ".arc").exists())
+
+    def test_duplicate_files_reported_and_not_written(self):
+        with Sandbox() as sb:
+            fake = _setup(sb)
+            _activity(sb, "2026-03-01_trail_2.md", garmin_activity_id=1001, distance_m=10000)
+            payload = json.loads(self._run(sb, fake, "--json", "--apply").stdout)
+            self.assertEqual(payload["duplicate_ids"][0]["id"], 1001)
+            self.assertNotIn("activities/2026-03-01_trail.md", payload["applied"]["written"])
+            self.assertNotIn('"gear_id"', (sb.repo / "activities/2026-03-01_trail_2.md").read_text(encoding="utf-8"))

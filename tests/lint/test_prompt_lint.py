@@ -345,6 +345,12 @@ class TestGearBackfillWiring(unittest.TestCase):
         self.assertRegex(text, r"(?s)History backfill.*?`--apply`.*?ONLY after an explicit yes")
         self.assertRegex(text, r"(?s)History backfill.*?NEVER in a headless run")
 
+    def test_coach_trigger_is_a_ratio_and_mentions_long_timeout(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?s)History backfill.*?MORE THAN HALF")
+        self.assertRegex(text, r"(?s)History backfill.*?long timeout")
+        self.assertRegex(text, r"(?s)History backfill.*?APPLY REFUS|History backfill.*?--apply REFUS")
+
     def test_coach_never_sets_default_pair_automatically(self):
         text = self.COACH.read_text(encoding="utf-8")
         self.assertRegex(text, r"(?s)History backfill.*?never sets `\(par défaut\)`")

@@ -916,17 +916,19 @@ def check_gear_sync(workspace: Path, config: dict) -> dict:
 
 
 GEAR_HISTORY_MIN_ACTIVITIES = 5
+GEAR_HISTORY_MIN_RATIO = 0.5
 
 
 def check_gear_history(workspace: Path, config: dict) -> dict:
     """#145 — historique sans matériel : information quand au moins `GEAR_HISTORY_MIN_ACTIVITIES`
-    séances portent un `garmin_activity_id` et qu'AUCUNE n'a de `gear_id`. STATIQUE (lit les blocs
-    `arc` de `activities/`, jamais l'index ni Garmin) ; jamais un avertissement."""
+    séances portent un `garmin_activity_id` ET que plus de la moitié (`GEAR_HISTORY_MIN_RATIO`) n'a pas de
+    `gear_id` — un seul `gear_id` déclaré ne fait donc pas taire le signal. STATIQUE (lit les blocs `arc` de
+    `activities/`, jamais l'index ni Garmin) ; jamais un avertissement."""
     check_id = "gear_history"
     if (config.get("data") or {}).get("source", "garmin") == "intervals":
         return build_check(check_id, "info",
                            "[data].source = \"intervals\" — pas de matériel Garmin à rattraper.", fix=None)
-    with_id = with_gear = 0
+    with_id = without_gear = 0
     folder = workspace / "activities"
     for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
         try:
@@ -937,12 +939,12 @@ def check_gear_history(workspace: Path, config: dict) -> dict:
             continue
         if block.get("garmin_activity_id") is not None:
             with_id += 1
-        if block.get("gear_id"):
-            with_gear += 1
-    if with_gear == 0 and with_id >= GEAR_HISTORY_MIN_ACTIVITIES:
+            if not block.get("gear_id"):
+                without_gear += 1
+    if with_id >= GEAR_HISTORY_MIN_ACTIVITIES and without_gear / with_id > GEAR_HISTORY_MIN_RATIO:
         return build_check(
             check_id, "info",
-            f"{with_id} séance(s) avec garmin_activity_id et aucune avec gear_id — historique sans matériel : "
+            f"{without_gear} séance(s) sur {with_id} avec garmin_activity_id n'ont pas de gear_id — historique sans matériel : "
             "la carte Matériel reste vide. Lancer le rattrapage (simulation d'abord, aucun écrit sans --apply).",
             fix="python3 scripts/garmin_gear_backfill.py   # simulation ; ajouter --apply après relecture",
         )

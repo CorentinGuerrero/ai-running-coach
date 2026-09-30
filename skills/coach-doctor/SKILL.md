@@ -29,7 +29,7 @@ commande de correction sous chaque ligne non ✅ :
 | `daily_sync_scheduled` | Tâche cron ou LaunchAgent du daily-sync installée ; en mode `[sync].mode = "watch"`, passage récent de `garmin_watch.py` (⚠ après 3 intervalles de silence) |
 | `ntfy_configured` | Notifications push configurées (si activées) |
 | `gear_sync` | (#133) Liste blanche `GARMIN_ENABLED_TOOLS` de `.mcp.json` avec `get_gear`/`get_activity_gear` ; paires actives du profil sans segment `garmin: <uuid>` (ℹ️). **Statique : aucun appel Garmin** — lister le matériel Garmin sans puce est le rôle du coach (`get_gear`) |
-| `gear_history` | (#145) ≥ 5 séances avec `garmin_activity_id` et aucune avec `gear_id` : historique sans matériel (ℹ️ seulement). Propose le rattrapage `python3 scripts/garmin_gear_backfill.py` (simulation d'abord ; `--apply` seulement sur accord de l'athlète). **Statique : aucun appel Garmin.** |
+| `gear_history` | (#145) ≥ 5 séances avec `garmin_activity_id`, dont plus de la moitié sans `gear_id` : historique sans matériel (ℹ️ seulement). Propose le rattrapage `python3 scripts/garmin_gear_backfill.py` (simulation d'abord ; `--apply` seulement sur accord de l'athlète). **Statique : aucun appel Garmin.** |
 
 Un ❌ fait échouer la commande (code de sortie non nul) ; un ⚠️ ou un ℹ️ jamais
 — ce sont des dégradations connues, pas des pannes.

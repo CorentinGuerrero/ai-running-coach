@@ -130,7 +130,8 @@ class TestPlanMatching(unittest.TestCase):
 
     def test_same_gear_already_attributed_is_not_a_conflict(self):
         files = [ws(1, "2026-03-01", gear_id="hoka-speedgoat-5", source="garmin")]
-        p = make_plan([shoe()], {U1: [gact(1, "2026-03-01")]}, files)
+        profile = f"### Chaussures\n- Hoka Speedgoat 5 — id: hoka-speedgoat-5 — garmin: {U1}\n"
+        p = make_plan([shoe()], {U1: [gact(1, "2026-03-01")]}, files, profile)
         self.assertEqual((p["shoes"][0]["already"], p["conflicts"], p["assignments"]), (1, [], []))
 
     def test_unmapped_is_replaced(self):
@@ -166,7 +167,7 @@ class TestPlanMatching(unittest.TestCase):
         self.assertEqual(p["shoes"][0]["status"], "duplicate_in_profile")
 
     def test_new_id_avoids_profile_and_equipment_collisions(self):
-        profile = "### Chaussures\n- Hoka Speedgoat 5 — id: hoka-speedgoat-5\n"
+        profile = f"### Chaussures\n- Hoka Speedgoat 5 — id: hoka-speedgoat-5 — garmin: {U3}\n"
         p = make_plan([shoe(U1)], {U1: [gact(1, "2026-03-01")]}, [ws(1, "2026-03-01")], profile,
                       extra_used_ids={"hoka-speedgoat-5-2"})
         self.assertEqual(p["shoes"][0]["gear_id"], "hoka-speedgoat-5-3")
@@ -222,15 +223,11 @@ class TestPeriodAndDepart(unittest.TestCase):
         self.assertIn("--since", s["depart_note"])
         self.assertNotIn("départ", s["bullet"])
 
-    def test_depart_skipped_when_truncated_or_id_less_file_same_day(self):
+    def test_depart_skipped_when_truncated(self):
         per = {U1: {**acts(gact(1, "2026-03-01"), gact(7, "2025-11-01", 40)), "truncated": True}}
         s = make_plan([shoe()], per, [ws(1, "2026-03-01")])["shoes"][0]
         self.assertIsNone(s["depart_km"])
         self.assertIn("tronquée", s["depart_note"])
-        files = [ws(1, "2026-03-05"), ws(None, "2026-03-06")]
-        s = make_plan([shoe()], {U1: [gact(1, "2026-03-05"), gact(7, "2026-03-06", 40)]}, files)["shoes"][0]
-        self.assertIsNone(s["depart_km"])
-        self.assertIn("double comptage", s["depart_note"])
 
     def test_existing_bullet_never_gets_depart(self):
         profile = f"### Chaussures\n- Ma Hoka — id: mes-hoka — garmin: {U1}\n"
@@ -390,7 +387,12 @@ class TestApply(unittest.TestCase):
         p = self.run_plan()
         target = self.ws / "activities/2026-03-01_trail.md"
         original = target.read_text()
-        out = B.apply_plan(self.ws, self.profile, p, validate=lambda _p: (False, ["refus simulé"], []))
+        calls = []
+
+        def validate(_p):     # valide AVANT l'écriture, refuse APRÈS
+            calls.append(1)
+            return (len(calls) == 1, ["refus simulé"], [])
+        out = B.apply_plan(self.ws, self.profile, p, validate=validate)
         self.assertEqual(target.read_text(), original)
         self.assertEqual(out["failed"][0]["error"], "refus simulé")
 
@@ -416,6 +418,308 @@ class TestReport(unittest.TestCase):
                        "SÉANCES GARMIN ABSENTES"):
             self.assertIn(needle, text)
         json.dumps(p)
+
+
+# ---------------------------------------------------------------------------
+# Revue Opus (#145) : tests par constat
+# ---------------------------------------------------------------------------
+
+class TestReviewMajor(unittest.TestCase):
+    def test_1_gear_filter_still_detects_ambiguity_across_all_shoes(self):
+        files = [ws(1, "2026-03-01"), ws(2, "2026-03-02")]
+        per = {U1: [gact(1, "2026-03-01"), gact(2, "2026-03-02")], U2: [gact(1, "2026-03-01")]}
+        p = make_plan([shoe(U1), shoe(U2, "Nike")], per, files, only_gear=U1)
+        self.assertEqual([a["path"] for a in p["assignments"]], [files[1]["path"]])
+        self.assertEqual([a["id"] for a in p["ambiguous"]], [1])
+        self.assertEqual([s["uuid"] for s in p["shoes"]], [U1])
+
+    def test_1_errored_or_truncated_pair_is_incomplete(self):
+        per = {U1: [gact(1, "2026-03-01")], U2: {"activities": [], "error": "boom", "truncated": False}}
+        p = make_plan([shoe(U1), shoe(U2, "Nike")], per, [ws(1, "2026-03-01")], only_gear=U1)
+        self.assertEqual([i["uuid"] for i in p["incomplete"]], [U2])
+        per = {U1: [gact(1, "2026-03-01")], U2: {**acts(gact(5, "2026-03-02")), "truncated": True}}
+        p = make_plan([shoe(U1), shoe(U2, "Nike")], per, [ws(1, "2026-03-01")])
+        self.assertEqual(p["incomplete"][0]["reason"], "liste tronquée")
+
+    def test_1_run_refuses_apply_when_incomplete_and_writes_nothing(self):
+        import argparse
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "planning").mkdir()
+            prof = root / "planning" / "Runner_Profile.md"
+            prof.write_text("# P\n", encoding="utf-8")
+            write_activity(root, "2026-03-01_trail.md", garmin_activity_id=1, distance_m=1000)
+            spec = {"gear": [shoe(U1), shoe(U2, "Nike")],
+                    "gear_activities": {U1: [gact(1, "2026-03-01")], U2: "HTTP 500"}}
+            args = argparse.Namespace(workspace=str(root), apply=True, since=None, gear=U1, all_shoes=False,
+                                      json=False, tokens_dir=None, fake_client=None)
+            before = (prof.read_text(), (root / "activities/2026-03-01_trail.md").read_text())
+            code, payload, text = B.run(args, B.GarminSource(B.FakeClient(spec)))
+            self.assertEqual(code, B.EXIT_PARTIAL)
+            self.assertTrue(payload["apply_refused"])
+            self.assertIn("--apply REFUSÉ", text)
+            self.assertEqual(before, (prof.read_text(), (root / "activities/2026-03-01_trail.md").read_text()))
+            self.assertFalse((root / ".arc").exists())
+
+    def test_2_depart_ignores_sessions_after_and_inside_the_workspace_period(self):
+        files = [ws(1, "2026-03-01"), ws(2, "2026-03-20")]
+        per = {U1: [gact(1, "2026-03-01"), gact(2, "2026-03-20"), gact(7, "2025-11-01", 40),
+                    gact(8, "2026-03-10", 15),       # trou dans la période
+                    gact(9, "2026-04-05", 25)]}      # postérieure : la synchronisation l'importera
+        s = make_plan([shoe()], per, files)["shoes"][0]
+        self.assertEqual(s["depart_km"], 40)
+        self.assertEqual((s["missing_before"], s["missing_in_period"], s["missing_after"]), (1, 1, 1))
+        self.assertIn("postérieure", s["depart_note"])
+        self.assertIn("trous", s["depart_note"])
+
+    def test_2_after_period_only_gives_no_depart(self):
+        s = make_plan([shoe()], {U1: [gact(1, "2026-03-01"), gact(9, "2026-04-05", 25)]},
+                      [ws(1, "2026-03-01")])["shoes"][0]
+        self.assertIsNone(s["depart_km"])
+        p = make_plan([shoe()], {U1: [gact(1, "2026-03-01"), gact(9, "2026-04-05", 25)]}, [ws(1, "2026-03-01")])
+        self.assertEqual(p["missing_from_workspace"][0]["bucket"], "after")
+        self.assertIn("postérieures", B.render_report(p))
+
+    def test_3_duplicate_files_for_same_activity_are_reported_not_written(self):
+        files = [ws(1, "2026-03-01", name="running"), ws(1, "2026-03-01", name="running_2"), ws(2, "2026-03-02")]
+        p = make_plan([shoe()], {U1: [gact(1, "2026-03-01"), gact(2, "2026-03-02")]}, files)
+        self.assertEqual([a["path"] for a in p["assignments"]], [files[2]["path"]])
+        self.assertEqual(p["duplicate_ids"][0]["id"], 1)
+        self.assertEqual(len(p["duplicate_ids"][0]["paths"]), 2)
+        s = p["shoes"][0]
+        self.assertEqual((s["matched"], s["duplicates"]), (1, 1))
+        self.assertEqual(p["workspace_with_id"], 3)
+        self.assertIn("DOUBLONS", B.render_report(p))
+
+    def test_4_new_slug_never_reuses_gear_id_declared_in_activities(self):
+        files = [ws(1, "2026-03-01"), ws(5, "2026-03-02", gear_id="hoka", source="chat")]
+        p = make_plan([shoe(name="Hoka")], {U1: [gact(1, "2026-03-01")]}, files)
+        s = p["shoes"][0]
+        self.assertEqual(s["gear_id"], "hoka-2")
+        self.assertEqual(s["name_matches"], ["hoka"])
+        self.assertEqual(p["assignments"][0]["gear_id"], "hoka-2")
+        self.assertIn("déclarent déjà", B.render_report(p))
+
+    def test_4_prefix_name_match_is_reported(self):
+        files = [ws(1, "2026-03-01"), ws(5, "2026-03-02", gear_id="hoka", source="chat")]
+        s = make_plan([shoe()], {U1: [gact(1, "2026-03-01")]}, files)["shoes"][0]
+        self.assertEqual(s["name_matches"], ["hoka"])
+
+
+class TestReviewMinor(unittest.TestCase):
+    def test_5_uuidless_bullet_of_same_shoe_is_linked_not_duplicated(self):
+        profile = "### Chaussures\n- Nike Pegasus 41 — id: pegasus\n- Autre — id: autre\n"
+        p = make_plan([shoe(U1, "Nike Pegasus 41")], {U1: [gact(1, "2026-03-01")]}, [ws(1, "2026-03-01")], profile)
+        s = p["shoes"][0]
+        self.assertEqual((s["status"], s["gear_id"], p["new_bullets"]), ("link_existing", "pegasus", []))
+        self.assertEqual(p["links"], [{"uuid": U1, "gear_id": "pegasus", "name": "Nike Pegasus 41"}])
+        self.assertEqual(p["assignments"][0]["gear_id"], "pegasus")
+        self.assertIsNone(s["depart_km"])
+        self.assertIn("garmin:", B.render_report(p))
+
+    def test_5_slug_match_via_gear_id_and_ambiguity(self):
+        profile = "### Chaussures\n- Pegasus — id: nike-pegasus-41\n"
+        p = make_plan([shoe(U1, "Nike Pegasus 41")], {U1: [gact(1, "2026-03-01")]}, [ws(1, "2026-03-01")], profile)
+        self.assertEqual(p["shoes"][0]["status"], "link_existing")
+        profile = "### Chaussures\n- Nike Pegasus 41 — id: a\n- Nike Pegasus 41 — id: b\n"
+        p = make_plan([shoe(U1, "Nike Pegasus 41")], {U1: [gact(1, "2026-03-01")]}, [ws(1, "2026-03-01")], profile)
+        self.assertEqual(p["shoes"][0]["status"], "name_ambiguous")
+        self.assertEqual((p["assignments"], p["new_bullets"], p["links"]), ([], [], []))
+
+    def test_5_append_segment_only_touches_that_bullet(self):
+        text = ("## Matériel & lieux\n\n### Chaussures\n\n- Nike Pegasus 41 — id: pegasus (par défaut)\n"
+                "  - alerte 500 km\n- Autre — id: autre\n\n### Matériel\n")
+        out = B.append_garmin_segment(text, "pegasus", U1)
+        self.assertEqual(out, text.replace("id: pegasus (par défaut)", f"id: pegasus (par défaut) — garmin: {U1}", 1))
+        parsed = {g["gear_id"]: g for g in L.parse_gear(out)}
+        self.assertEqual(parsed["pegasus"]["garmin_uuid"], U1)
+        self.assertTrue(parsed["pegasus"]["default"])
+        self.assertIsNone(B.append_garmin_segment(text, "absent", U1))
+        self.assertIsNone(B.append_garmin_segment(text.replace("id: autre", "id: pegasus"), "pegasus", U1))
+
+    def test_5_apply_links_existing_bullet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "planning").mkdir()
+            prof = root / "planning" / "Runner_Profile.md"
+            prof.write_text("# P\n\n## Matériel & lieux\n\n### Chaussures\n\n- Nike Pegasus 41 — id: pegasus\n",
+                            encoding="utf-8")
+            write_activity(root, "2026-03-01_trail.md", garmin_activity_id=1, distance_m=1000)
+            p = B.plan(B.normalize_shoes([shoe(U1, "Nike Pegasus 41")]), {U1: acts(gact(1, "2026-03-01"))},
+                       B.scan_workspace(root), L.parse_gear(prof.read_text()))
+            out = B.apply_plan(root, prof, p)
+            self.assertEqual((out["profile_written"], out["linked"], out["failed"]), (True, ["pegasus"], []))
+            self.assertIn(f"id: pegasus — garmin: {U1}\n", prof.read_text())
+            self.assertEqual(prof.read_text().count("Nike Pegasus 41"), 1)
+            self.assertEqual(C.extract_block((root / "activities/2026-03-01_trail.md").read_text())["gear_id"], "pegasus")
+
+    def test_9_pagination_stops_when_start_is_ignored(self):
+        class Stub:
+            garmin_connect_activities_baseurl = "u/"
+            calls = 0
+
+            def get_gear_activities(self, uuid, limit=1000):
+                return [{"activityId": i} for i in range(1000)]
+
+            def connectapi(self, url):
+                Stub.calls += 1
+                return [{"activityId": i} for i in range(1000)]   # ignore `start`
+
+        out = B.GarminSource(Stub()).gear_activities(U1)
+        self.assertTrue(out["truncated"])
+        self.assertEqual((len(out["activities"]), Stub.calls), (1000, 1))
+
+    def test_9_pagination_follows_real_pages_and_caps(self):
+        class Paged:
+            garmin_connect_activities_baseurl = "u/"
+
+            def get_gear_activities(self, uuid, limit=1000):
+                return [{"activityId": i} for i in range(1000)]
+
+            def connectapi(self, url):
+                start = int(url.split("start=")[1].split("&")[0])
+                return [{"activityId": i} for i in range(start, min(start + 1000, 2300))]
+
+        out = B.GarminSource(Paged()).gear_activities(U1)
+        self.assertEqual((len(out["activities"]), out["truncated"]), (2300, False))
+
+        class Endless(Paged):
+            def connectapi(self, url):
+                start = int(url.split("start=")[1].split("&")[0])
+                return [{"activityId": i} for i in range(start, start + 1000)]
+
+        out = B.GarminSource(Endless()).gear_activities(U1)
+        self.assertTrue(out["truncated"])
+        self.assertLessEqual(len(out["activities"]), 1000 * (B.GEAR_ACTIVITIES_MAX_PAGES + 1))
+
+    def test_nit_profile_id_called_once_and_error_payload_is_error(self):
+        calls = []
+
+        class C1:
+            def get_device_last_used(self):
+                calls.append(1)
+                return {"userProfileNumber": 7}
+
+            def get_gear(self, pid):
+                return {"error": "unauthorized"}
+
+            def get_gear_defaults(self, pid):
+                return []
+        src = B.GarminSource(C1())
+        with self.assertRaises(RuntimeError):
+            src.gear()
+        src.defaults()
+        self.assertEqual(len(calls), 1)
+
+    def test_nit_inconsistent_source_without_gear_id_left_untouched(self):
+        files = [ws(1, "2026-03-01", source="chat")]
+        p = make_plan([shoe()], {U1: [gact(1, "2026-03-01")]}, files)
+        self.assertEqual(p["assignments"], [])
+        self.assertEqual(p["inconsistent"][0]["gear_source"], "chat")
+        self.assertIn("INCOHÉRENTS", B.render_report(p))
+
+
+class TestReviewIO(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        (self.ws / "planning").mkdir()
+        self.profile = self.ws / "planning" / "Runner_Profile.md"
+        self.profile.write_text("# P\n\n## Matériel & lieux\n", encoding="utf-8")
+        self.addCleanup(self.tmp.cleanup)
+
+    def plan_for(self, per=None):
+        per = per or {U1: [gact(1, "2026-03-01")]}
+        return B.plan(B.normalize_shoes([shoe()]), {u: acts(*v) for u, v in per.items()},
+                      B.scan_workspace(self.ws), L.parse_gear(self.profile.read_text()))
+
+    def test_6_crlf_profile_and_mode_preserved(self):
+        import os
+        raw = ("# P\r\n\r\n## Matériel & lieux\r\n\r\n### Chaussures\r\n\r\n- Vieille — id: vieille\r\n\r\n"
+               "### Matériel\r\n- x\r\n").encode("utf-8")
+        self.profile.write_bytes(raw)
+        os.chmod(self.profile, 0o600)
+        write_activity(self.ws, "2026-03-01_trail.md", garmin_activity_id=1, distance_m=1000)
+        act = self.ws / "activities/2026-03-01_trail.md"
+        os.chmod(act, 0o640)
+        out = B.apply_plan(self.ws, self.profile, self.plan_for())
+        self.assertEqual(out["failed"], [])
+        new = self.profile.read_bytes()
+        self.assertTrue(new.startswith(raw[:raw.index(b"\r\n\r\n### Mat")]))
+        self.assertNotIn(b"\n", new.replace(b"\r\n", b""))            # aucun LF nu introduit
+        self.assertIn(b"- Vieille \xe2\x80\x94 id: vieille\r\n- Hoka", new)
+        self.assertEqual([g["gear_id"] for g in L.parse_gear(new.decode())], ["vieille", "hoka-speedgoat-5"])
+        self.assertEqual(oct(os.stat(self.profile).st_mode & 0o777), "0o600")
+        self.assertEqual(oct(os.stat(act).st_mode & 0o777), "0o640")
+        self.assertFalse(list(self.ws.rglob("*.tmp-gearbackfill")))
+
+    def test_6_crlf_profile_creating_subsection_stays_crlf(self):
+        self.profile.write_bytes(b"# P\r\n\r\n## Mat\xc3\xa9riel & lieux\r\n\r\n- Lieu : T\r\n")
+        out = B.insert_gear_bullets(self.profile.read_bytes().decode(), [f"- Hoka — id: hoka — garmin: {U1}"])
+        self.assertNotIn("\n", out.replace("\r\n", ""))
+        self.assertEqual([g["gear_id"] for g in L.parse_gear(out)], ["hoka"])
+
+    def test_12_headings_match_arc_legacy_on_crlf(self):
+        text = "## Matériel & lieux\r\n### Chaussures\r\n- A — id: a\r\n"
+        self.assertEqual(len(L.parse_gear(text)), 1)
+        out = B.insert_gear_bullets(text, [f"- B — id: b — garmin: {U1}"])
+        self.assertEqual([g["gear_id"] for g in L.parse_gear(out)], ["a", "b"])
+        self.assertEqual(out.count("### Chaussures"), 1)
+
+    def test_6_rollback_is_byte_identical_only_when_written(self):
+        write_activity(self.ws, "2026-03-01_trail.md", garmin_activity_id=1, distance_m=1000)
+        act = self.ws / "activities/2026-03-01_trail.md"
+        import os
+        os.chmod(act, 0o600)
+        original = act.read_bytes()
+        calls = []
+
+        def validate(_p):
+            calls.append(1)
+            return (len(calls) == 1, ["non"], [])
+        out = B.apply_plan(self.ws, self.profile, self.plan_for(), validate=validate)
+        self.assertEqual(act.read_bytes(), original)
+        self.assertEqual(oct(os.stat(act).st_mode & 0o777), "0o600")
+        self.assertEqual(len(out["failed"]), 1)
+
+    def test_8_already_invalid_file_is_reported_apart_and_untouched(self):
+        write_activity(self.ws, "2026-03-01_trail.md", garmin_activity_id=1, distance_m=1000)
+        act = self.ws / "activities/2026-03-01_trail.md"
+        original = act.read_bytes()
+        out = B.apply_plan(self.ws, self.profile, self.plan_for(), validate=lambda _p: (False, ["hors contrat"], []))
+        self.assertEqual((out["failed"], out["written"]), ([], []))
+        self.assertEqual(out["out_of_contract"][0]["path"], "activities/2026-03-01_trail.md")
+        self.assertIn("/arc-backfill", out["out_of_contract"][0]["reason"])
+        self.assertEqual(act.read_bytes(), original)
+
+    def test_7_unmapped_replacement_is_byte_minimal(self):
+        text = ('# T\n\n```arc\n{\n  "arc": 1, "kind": "activity", "date": "2026-03-01",\n'
+                '  "gear_source": "garmin_unmapped", "sport": "trail",   "duration_s": 60, "name": "é"\n}\n```\n\nTexte\n')
+        out = B.set_block_keys(text, {"gear_id": "x", "gear_source": "garmin"})
+        self.assertEqual(out, text.replace('"garmin_unmapped"', '"garmin"').replace(
+            '"name": "é"\n}', '"name": "é",\n  "gear_id": "x"\n}'))
+        single = ('```arc\n{"arc": 1, "kind": "activity", "date": "2026-03-01", "sport": "trail", "duration_s": 60, '
+                  '"gear_source": "garmin_unmapped"}\n```\n')
+        out = B.set_block_keys(single, {"gear_id": "x", "gear_source": "garmin"})
+        self.assertEqual(out, single.replace("garmin_unmapped", "garmin").replace(
+            '"garmin"}', '"garmin", "gear_id": "x"}'))
+
+    def test_nit_insertion_cosmetics(self):
+        text = "## Matériel & lieux\n- Lieu : T\n### Matériel\n- x\n"
+        out = B.insert_gear_bullets(text, [f"- Hoka — id: hoka — garmin: {U1}"])
+        self.assertIn("- Lieu : T\n\n### Chaussures\n", out)
+        self.assertNotIn("\n\n\n", out)
+        self.assertEqual(text.replace("- Lieu : T\n", "- Lieu : T\n", 1).count("###"), 1)
+
+    def test_nit_relaunch_guard_prevents_ping_pong(self):
+        import os
+        import subprocess
+        code = ("import sys,os; sys.path.insert(0,%r); sys.modules['garminconnect']=None; import garmin_gear_backfill as B; "
+                "B._auto_relaunch([])" % str(REPO / "scripts"))
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                           env=dict(os.environ, ARC_GEAR_BACKFILL_RELAUNCHED="1"))
+        self.assertEqual(r.returncode, B.EXIT_USAGE)
+        self.assertIn("même après relance", r.stderr)
 
 
 if __name__ == "__main__":

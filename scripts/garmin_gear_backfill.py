@@ -22,7 +22,7 @@ machine), `--workspace`, `--tokens-dir`.
 
 CODES DE SORTIE : 0 = succès (simulation ou application complète) ; 1 = succès partiel
 (paire injoignable côté Garmin, fichier rejeté par la validation et restauré) ; 2 = usage,
-dépendance `garminconnect` absente ou authentification Garmin impossible ; 3 = `--apply`
+dépendance `garminconnect` absente, authentification Garmin impossible ou `get_gear` illisible ; 3 = `--apply`
 impossible faute de profil athlète (`planning/Runner_Profile.md`).
 
 EXCEPTION À « stdlib seule » (documentée, comme `skills/fit-download/scripts/download_fit.py`) :
@@ -44,8 +44,15 @@ RÈGLES (voir docs/garmin-setup.md) :
   - `départ N km` d'une puce NOUVELLE = km Garmin de la paire pour les séances Garmin ABSENTES du
     workspace (identifiées par `activityId`, jamais par un total soustrait) : celles du workspace
     sont déjà comptées par leurs fichiers, elles ne peuvent donc pas l'être deux fois. Non calculé
-    (avec la raison au rapport) avec `--since`, si la liste Garmin est tronquée ou en erreur, ou si
-    des fichiers sans `garmin_activity_id` tombent le même jour qu'une séance Garmin absente.
+    (avec la raison au rapport) avec `--since` ou si la liste Garmin est tronquée ou en erreur. Seules
+    comptent les séances Garmin datées STRICTEMENT AVANT le premier fichier du workspace : les absentes
+    dans la période (trous) ou postérieures (la synchronisation les importera) sont listées à part.
+  - TOUTES les paires sont lues, même avec `--gear` (ambiguïté). Paire en erreur ou tronquée : `--apply`
+    refusé (code 1, rien d'écrit). Fichiers en double pour un même `garmin_activity_id`, `gear_source` sans
+    `gear_id` : signalés, jamais écrits. Fichier déjà hors contrat : signalé à part, jamais réécrit.
+  - Puce existante sans `garmin:` de même nom/id : pas de doublon, `--apply` n'y ajoute QUE ` — garmin: <uuid>`.
+  - Écritures en octets (CRLF et permissions conservés) ; `ARC_GEAR_BACKFILL_RELAUNCHED` évite toute
+    boucle de relance entre interpréteurs.
 """
 
 from __future__ import annotations
@@ -55,6 +62,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from datetime import date
@@ -66,6 +74,7 @@ import arc_contract as C  # noqa: E402
 import arc_legacy as L  # noqa: E402
 
 GEAR_ACTIVITIES_PAGE = 1000            # plafond `MAX_ACTIVITY_LIMIT` de garminconnect
+GEAR_ACTIVITIES_MAX_PAGES = 50         # garde-fou contre une pagination sans fin
 EXIT_OK, EXIT_PARTIAL, EXIT_USAGE, EXIT_NO_PROFILE = 0, 1, 2, 3
 DEFAULT_PROFILE_REL = "planning/Runner_Profile.md"
 _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
@@ -198,20 +207,38 @@ def _km(meters: float) -> float:
     return round(meters / 1000.0, 1)
 
 
+def _bucket(day: Optional[str], ws_min: Optional[str], ws_max: Optional[str]) -> str:
+    """Position d'une séance Garmin ABSENTE du workspace par rapport à sa période : `before` (strictement
+    avant le premier fichier), `in_period` (trou du workspace), `after` (postérieure au dernier fichier —
+    la synchronisation l'importera), `undated`."""
+    if not day:
+        return "undated"
+    if ws_min is None or day < ws_min:
+        return "before"
+    return "in_period" if day <= ws_max else "after"
+
+
 def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], profile_gear: List[dict],
          *, since: Optional[str] = None, only_gear: Optional[str] = None, all_shoes: bool = False,
          extra_used_ids=(), garmin_defaults=()) -> dict:
     """Plan de rattrapage — entrées :
 
-    - `shoes` : `normalize_shoes` ; `gear_acts` : `{uuid: {"activities": normalize_gear_activities,
-      "error": str|None, "truncated": bool}}` ;
+    - `shoes` : `normalize_shoes` (TOUTES les paires : l'ambiguïté se détecte sur l'ensemble, `only_gear`
+      ne restreint que ce qui est proposé/écrit) ; `gear_acts` : `{uuid: {"activities":
+      normalize_gear_activities, "error": str|None, "truncated": bool}}` ;
     - `ws_files` : une entrée par `activities/*.md` : `{path, date, garmin_activity_id, distance_m,
       gear_id, gear_source, has_block}` ;
     - `profile_gear` : `arc_legacy.parse_gear` (puces existantes, `(ignorée)` comprises).
+
+    `incomplete` liste les paires dont la liste Garmin est en erreur ou tronquée : l'ambiguïté n'est alors pas
+    garantie et `--apply` est refusé par l'appelant.
     """
     only = (only_gear or "").strip().lower() or None
     selected = [s for s in shoes if only is None or s["uuid"] == only]
-    by_ws_id = {f["garmin_activity_id"]: f for f in ws_files if f.get("garmin_activity_id") is not None}
+    by_ws_id: Dict[int, List[dict]] = {}
+    for f in ws_files:
+        if f.get("garmin_activity_id") is not None:
+            by_ws_id.setdefault(f["garmin_activity_id"], []).append(f)
     no_id_files = [f for f in ws_files if f.get("garmin_activity_id") is None]
     dated = [f["date"] for f in ws_files if f.get("date")]
     ws_min, ws_max = (min(dated), max(dated)) if dated else (None, None)
@@ -221,24 +248,37 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
     for g in profile_gear:
         if g.get("garmin_uuid"):
             profile_by_uuid.setdefault(g["garmin_uuid"], []).append(g)
-    used_ids = {g["gear_id"] for g in profile_gear} | set(extra_used_ids)
-    profile_id_by_uuid = {u: gs[0]["gear_id"] for u, gs in profile_by_uuid.items()}
+    ws_gear_ids = {f["gear_id"] for f in ws_files if f.get("gear_id")}
+    profile_ids = {g["gear_id"] for g in profile_gear}
+    used_ids = profile_ids | set(extra_used_ids) | ws_gear_ids
+    unlinked_bullets = [g for g in profile_gear if not g.get("garmin_uuid") and not g.get("garmin_uuid_invalid")
+                        and not g.get("ignored")]
+    claimed_bullets: set = set()
 
-    # activité Garmin → paires qui la revendiquent (uniquement parmi les paires interrogées)
+    # activité Garmin → paires qui la revendiquent (TOUTES les paires interrogées)
     claimed: Dict[int, List[str]] = {}
-    for s in selected:
-        for a in gear_acts.get(s["uuid"], {}).get("activities", []):
+    incomplete = []
+    for s in shoes:
+        info = gear_acts.get(s["uuid"], {})
+        if info.get("error"):
+            incomplete.append({"uuid": s["uuid"], "name": s["name"], "reason": "erreur : " + str(info["error"])})
+        elif info.get("truncated"):
+            incomplete.append({"uuid": s["uuid"], "name": s["name"], "reason": "liste tronquée"})
+        for a in info.get("activities", []):
             claimed.setdefault(a["id"], []).append(s["uuid"])
     ambiguous_ids = {aid for aid, us in claimed.items() if len(us) > 1}
+    selected_uuids = {s["uuid"] for s in selected}
 
     result: Dict[str, Any] = {
         "since": since, "gear_filter": only, "all_shoes": all_shoes,
         "workspace_period": [ws_min, ws_max],
-        "shoes": [], "assignments": [], "new_bullets": [], "conflicts": [], "ambiguous": [],
+        "shoes": [], "assignments": [], "new_bullets": [], "links": [], "conflicts": [], "ambiguous": [],
+        "duplicate_ids": [], "inconsistent": [], "incomplete": incomplete,
         "missing_from_workspace": [], "workspace_without_id": [f["path"] for f in no_id_files],
-        "workspace_files": len(ws_files), "workspace_with_id": len(by_ws_id),
+        "workspace_files": len(ws_files), "workspace_with_id": sum(len(v) for v in by_ws_id.values()),
         "garmin_defaults": list(garmin_defaults), "skipped_out_of_period": [],
     }
+    dup_seen: Dict[int, dict] = {}
     ordered = sorted(selected, key=lambda s: (s["date_begin"] or "9999", s["name"].lower(), s["uuid"]))
     for shoe in ordered:
         info = gear_acts.get(shoe["uuid"], {})
@@ -248,7 +288,9 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
             "garmin_sessions": len(acts), "garmin_km": _km(sum(a["distance_m"] for a in acts)),
             "error": info.get("error"), "truncated": bool(info.get("truncated")),
             "matched": 0, "workspace_km": 0.0, "to_write": 0, "already": 0, "conflicts": 0,
-            "ambiguous": 0, "before_since": 0, "missing_from_workspace": 0,
+            "ambiguous": 0, "before_since": 0, "duplicates": 0, "inconsistent": 0,
+            "missing_from_workspace": 0, "missing_before": 0, "missing_in_period": 0, "missing_after": 0,
+            "missing_undated": 0, "name_matches": [],
             "status": None, "gear_id": None, "bullet": None, "depart_km": None, "depart_note": None,
         }
         result["shoes"].append(entry)
@@ -262,6 +304,7 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
             if not all_shoes:
                 continue
         existing = profile_by_uuid.get(shoe["uuid"], [])
+        base_slug = C.gear_slug(shoe["name"])
         if len(existing) > 1:
             entry["status"] = "duplicate_in_profile"
             entry["depart_note"] = "uuid présent sur plusieurs puces du profil : rien n'est attribué"
@@ -270,24 +313,49 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
             entry["status"] = "ignored"
             entry["gear_id"] = existing[0]["gear_id"]
             continue
+        linking = None
         if existing:
             entry["status"] = "existing"
             entry["gear_id"] = existing[0]["gear_id"]
         else:
-            if entry["status"] != "out_of_period":
-                entry["status"] = "new"
-            entry["gear_id"] = unique_gear_id(shoe["name"], shoe["uuid"], used_ids)
+            cands = [g for g in unlinked_bullets if base_slug and (C.gear_slug(g.get("name") or "") == base_slug
+                                                                    or g["gear_id"] == base_slug)]
+            if cands:
+                if len(cands) > 1 or cands[0]["gear_id"] in claimed_bullets:
+                    entry["status"] = "name_ambiguous"
+                    entry["depart_note"] = ("plusieurs puces du profil sans garmin: portent ce nom : rien n'est "
+                                            "attribué, ajoutez le segment garmin: à la bonne puce")
+                    continue
+                linking = cands[0]
+                claimed_bullets.add(linking["gear_id"])
+                entry["status"] = "link_existing"
+                entry["gear_id"] = linking["gear_id"]
+                result["links"].append({"uuid": shoe["uuid"], "gear_id": linking["gear_id"],
+                                        "name": linking.get("name") or linking["gear_id"]})
+            else:
+                if entry["status"] != "out_of_period":
+                    entry["status"] = "new"
+                entry["name_matches"] = sorted(
+                    i for i in ws_gear_ids - profile_ids
+                    if base_slug and (i == base_slug or base_slug.startswith(i + "-")))
+                entry["gear_id"] = unique_gear_id(shoe["name"], shoe["uuid"], used_ids)
         gear_id = entry["gear_id"]
 
         # --- séances du workspace ---
         missing = []
         for a in acts:
-            f = by_ws_id.get(a["id"])
-            if f is None:
+            fs = by_ws_id.get(a["id"])
+            if fs is None:
                 if a["id"] in ambiguous_ids:
                     continue   # signalée plus bas, jamais comptée dans `départ` (deux paires la revendiquent)
                 missing.append(a)
                 continue
+            if len(fs) > 1:    # plusieurs fichiers pour la même séance : jamais écrits, à trier à la main
+                entry["duplicates"] += 1
+                rec = dup_seen.setdefault(a["id"], {"id": a["id"], "paths": [f["path"] for f in fs], "shoes": []})
+                rec["shoes"].append(shoe["uuid"])
+                continue
+            f = fs[0]
             entry["matched"] += 1
             entry["workspace_km"] += (f.get("distance_m") or 0.0)
             if a["id"] in ambiguous_ids:
@@ -298,6 +366,10 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
                 continue
             current, source = f.get("gear_id"), f.get("gear_source")
             if not current:
+                if source in ("garmin", "chat"):
+                    entry["inconsistent"] += 1     # source sans gear_id : fichier incohérent, jamais réécrit
+                    result["inconsistent"].append({"path": f["path"], "gear_source": source})
+                    continue
                 entry["to_write"] += 1
                 result["assignments"].append({
                     "path": f["path"], "date": f.get("date"), "gear_id": gear_id, "gear_uuid": shoe["uuid"],
@@ -311,26 +383,36 @@ def plan(shoes: List[dict], gear_acts: Dict[str, dict], ws_files: List[dict], pr
                     "garmin": gear_id, "garmin_name": shoe["name"]})
         entry["workspace_km"] = _km(entry["workspace_km"])
         entry["missing_from_workspace"] = len(missing)
+        buckets: Dict[str, List[dict]] = {"before": [], "in_period": [], "after": [], "undated": []}
         for a in missing:
+            b = _bucket(a["date"], ws_min, ws_max)
+            buckets[b].append(a)
             result["missing_from_workspace"].append({"id": a["id"], "date": a["date"], "uuid": shoe["uuid"],
-                                                     "distance_km": _km(a["distance_m"])})
+                                                     "distance_km": _km(a["distance_m"]), "bucket": b})
+        for b, items in buckets.items():
+            entry[f"missing_{b}"] = len(items)
 
         # --- départ (puce nouvelle seulement) ---
-        if entry["status"] in ("new", "out_of_period") and not existing:
-            entry["depart_km"], entry["depart_note"] = _depart(
-                shoe, acts, missing, entry["matched"], no_id_files, since, info)
+        if entry["status"] in ("new", "out_of_period") and not existing and linking is None:
+            entry["depart_km"], entry["depart_note"] = _depart(shoe, acts, buckets, entry, ws_min, since, info)
             entry["bullet"] = build_bullet(shoe, gear_id, entry["depart_km"])
             result["new_bullets"].append({"uuid": shoe["uuid"], "gear_id": gear_id, "bullet": entry["bullet"],
                                           "date_begin": shoe["date_begin"]})
+    result["duplicate_ids"] = sorted(dup_seen.values(), key=lambda r: r["id"])
     for aid in sorted(ambiguous_ids):
-        f = by_ws_id.get(aid)
-        result["ambiguous"].append({"id": aid, "date": (f or {}).get("date"), "path": (f or {}).get("path"),
-                                    "in_workspace": f is not None, "shoes": sorted(claimed[aid])})
+        if not (set(claimed[aid]) & selected_uuids):
+            continue
+        fs = by_ws_id.get(aid) or []
+        result["ambiguous"].append({"id": aid, "date": fs[0].get("date") if fs else None,
+                                    "path": fs[0]["path"] if fs else None,
+                                    "in_workspace": bool(fs), "shoes": sorted(claimed[aid])})
     return result
 
 
-def _depart(shoe, acts, missing, matched, no_id_files, since, info) -> Tuple[Optional[int], str]:
-    """`(km | None, explication)` : km Garmin des séances ABSENTES du workspace (voir docstring du module)."""
+def _depart(shoe, acts, buckets, entry, ws_min, since, info) -> Tuple[Optional[int], str]:
+    """`(km | None, explication)` : km Garmin des séances de la paire datées STRICTEMENT AVANT le premier fichier
+    du workspace. Les séances absentes mais dans la période (trous) ou postérieures (la synchronisation les
+    importera : les compter ici les doublerait) ne sont jamais comptées ; elles sont listées au rapport."""
     if since:
         return None, ("non calculé avec --since : des séances du workspace antérieures à la date seraient "
                       "comptées deux fois (relancer sans --since pour proposer un départ)")
@@ -338,19 +420,21 @@ def _depart(shoe, acts, missing, matched, no_id_files, since, info) -> Tuple[Opt
         return None, "non calculé : liste Garmin tronquée (plafond de l'API), total incertain"
     if not acts:
         return None, "aucune séance côté Garmin"
-    no_id_days = {f["date"] for f in no_id_files if f.get("date")}
-    clash = sorted({a["date"] for a in missing if a["date"] in no_id_days})
-    if clash:
-        return None, ("non calculé : des fichiers sans garmin_activity_id tombent le même jour qu'une séance "
-                      f"Garmin absente ({', '.join(clash[:3])}{'…' if len(clash) > 3 else ''}) — risque de "
-                      "double comptage")
-    meters = sum(a["distance_m"] for a in missing)
-    km = round(meters / 1000.0)
+    before = buckets["before"]
+    km = round(sum(a["distance_m"] for a in before) / 1000.0)
     total = round(sum(a["distance_m"] for a in acts) / 1000.0)
+    excluded = []
+    for key, label in (("in_period", "dans la période du workspace (trous, à importer par la synchronisation)"),
+                       ("after", "postérieure(s) au dernier fichier (la synchronisation les importera)"),
+                       ("undated", "sans date")):
+        if buckets[key]:
+            excluded.append(f"{len(buckets[key])} {label}")
+    tail = f" ; non comptée(s) : {' ; '.join(excluded)}" if excluded else ""
     if km < 1:
-        return None, "aucun kilométrage hors workspace"
-    return km, (f"{km} km = {len(missing)} séance(s) Garmin de la paire absentes du workspace ; les séances déjà "
-                f"dans le workspace ({matched}) ne sont pas recomptées (total Garmin {total} km)")
+        return None, "aucun kilométrage antérieur au premier fichier du workspace" + tail
+    return km, (f"{km} km = {len(before)} séance(s) Garmin de la paire antérieures au premier fichier du workspace "
+                f"({ws_min or '?'}) ; les séances déjà dans le workspace ({entry['matched']}) ne sont pas recomptées "
+                f"(total Garmin {total} km){tail}")
 
 
 # ---------------------------------------------------------------------------
@@ -362,17 +446,32 @@ def _mask_comments(text: str) -> str:
     return re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
 
 
-_H_CHAUSSURES = re.compile(r"^\s{0,3}#{2,4}[ \t]*chaussures[ \t]*$", re.I | re.M)
-_H_MATERIEL_SECTION = re.compile(r"^\s{0,3}##[ \t]+mat[ée]riel\b[^\n]*$", re.I | re.M)
-_H_ANY = re.compile(r"^\s{0,3}#{1,6}[ \t]", re.M)
-_H_LEVEL1_2 = re.compile(r"^\s{0,3}#{1,2}[ \t]", re.M)
-_H_EQUIPMENT_SUB = re.compile(r"^\s{0,3}#{3,4}[ \t]*mat[ée]riel[ \t]*$", re.I | re.M)
+# Mêmes titres que `arc_legacy` (`_GEAR_HEADING_RE`, `\s*$`) : le `\r` d'un fichier CRLF est toléré en fin de
+# ligne (`[ \t\r]*$` plutôt que `\s*$`, qui avalerait aussi les lignes vides suivantes et décalerait les offsets).
+_H_CHAUSSURES = re.compile(r"^[ ]{0,3}#{2,4}[ \t]*chaussures[ \t\r]*$", re.I | re.M)
+_H_MATERIEL_SECTION = re.compile(r"^[ ]{0,3}##[ \t]+mat[ée]riel\b[^\n]*$", re.I | re.M)
+_H_ANY = re.compile(r"^[ ]{0,3}#{1,6}[ \t]", re.M)
+_H_LEVEL1_2 = re.compile(r"^[ ]{0,3}#{1,2}[ \t]", re.M)
+_H_EQUIPMENT_SUB = re.compile(r"^[ ]{0,3}#{3,4}[ \t]*mat[ée]riel[ \t\r]*$", re.I | re.M)
 
 
+def _with_lf(fn):
+    """Applique `fn(text, …)` sur une vue LF d'un fichier CRLF UNIFORME, puis rétablit les CRLF : le fichier
+    garde ses fins de ligne. Un fichier mixte est traité tel quel (lignes ajoutées en LF)."""
+    def wrapper(text, *args, **kwargs):
+        uniform = "\r\n" in text and "\n" not in text.replace("\r\n", "")
+        if not uniform:
+            return fn(text, *args, **kwargs)
+        out = fn(text.replace("\r\n", "\n"), *args, **kwargs)
+        return out if out is None else out.replace("\n", "\r\n")
+    return wrapper
+
+
+@_with_lf
 def insert_gear_bullets(text: str, bullets: List[str]) -> str:
     """Ajoute `bullets` sous `### Chaussures` sans toucher aux lignes existantes. Sous-section absente :
     créée dans `## Matériel & lieux` (avant `### Matériel` s'il existe, sinon en fin de section) ; section
-    `## Matériel & lieux` absente : créée en fin de fichier."""
+    `## Matériel & lieux` absente : créée en fin de fichier. Fins de ligne CRLF conservées."""
     if not bullets:
         return text
     if not text.endswith("\n"):
@@ -395,7 +494,7 @@ def insert_gear_bullets(text: str, bullets: List[str]) -> str:
             return text[:last_bullet_end] + block + text[last_bullet_end:]
         # aucune puce : juste sous le titre (sous d'éventuelles consignes commentées)
         return _splice_after_heading(text, after, end, block)
-    sub = "### Chaussures\n\n" + block + "\n"
+    sub = "### Chaussures\n\n" + block
     sec = _H_MATERIEL_SECTION.search(masked)
     if sec:
         start = sec.end() + 1
@@ -403,12 +502,17 @@ def insert_gear_bullets(text: str, bullets: List[str]) -> str:
         end = nxt.start() if nxt else len(text)
         eq = _H_EQUIPMENT_SUB.search(masked, start, end)
         if eq:
-            return text[:eq.start()] + sub + text[eq.start():]
+            pre = text[:eq.start()]
+            if pre and not pre.endswith("\n\n"):
+                pre += "\n"
+            return pre + sub + "\n" + text[eq.start():]
         body = text[start:end].rstrip("\n")
         insert_at = start + len(body) + (1 if body else 0)
-        return text[:insert_at] + "\n" + sub.rstrip("\n") + "\n" + text[insert_at:]
+        lead = "\n" if body else ""
+        rest = text[insert_at:]
+        return text[:insert_at] + lead + sub + ("\n" if rest and not rest.startswith("\n") else "") + rest
     sep = "" if text.endswith("\n\n") else "\n"
-    return text + sep + "## Matériel & lieux\n\n" + sub.rstrip("\n") + "\n"
+    return text + sep + "## Matériel & lieux\n\n" + sub
 
 
 def _splice_after_heading(text: str, after: int, end: int, block: str) -> str:
@@ -420,15 +524,41 @@ def _splice_after_heading(text: str, after: int, end: int, block: str) -> str:
     return text[:after] + joined + (tail if tail else ("\n" if end < len(text) else "")) + text[end:]
 
 
+@_with_lf
+def append_garmin_segment(text: str, gear_id: str, uuid: str) -> Optional[str]:
+    """Ajoute le SEUL segment ` — garmin: <uuid>` à la puce `### Chaussures` qui porte `gear_id` et n'a pas encore
+    de segment `garmin:` (jamais rien d'autre sur une puce existante). `None` si la puce n'est pas trouvée
+    exactement une fois (lue seule, sans suffixe de collision) — l'appelant le signale sans rien écrire."""
+    masked = _mask_comments(text)
+    m = _H_CHAUSSURES.search(masked)
+    if not m:
+        return None
+    after = m.end() + 1
+    nxt = _H_ANY.search(masked, after)
+    end = nxt.start() if nxt else len(text)
+    hits, cursor = [], after
+    for ln in text[after:end].splitlines(keepends=True):
+        line_start, cursor = cursor, cursor + len(ln)
+        top = L._GEAR_TOP_BULLET_RE.match(masked[line_start:cursor].rstrip("\r\n"))
+        if not top:
+            continue
+        parsed = _try_parse("- " + top.group(1))
+        if parsed and parsed.get("gear_id") == gear_id and not parsed.get("garmin_uuid") \
+                and not parsed.get("garmin_uuid_invalid"):
+            hits.append(cursor - len(ln) + len(ln.rstrip("\r\n")))
+    if len(hits) != 1:
+        return None
+    return text[:hits[0]] + f" — garmin: {uuid}" + text[hits[0]:]
+
+
 # ---------------------------------------------------------------------------
 # Bloc `arc` d'une activité : écriture textuelle minimale (pur)
 # ---------------------------------------------------------------------------
 
 def set_block_keys(text: str, updates: Dict[str, Any]) -> str:
-    """Ajoute/remplace des clés de premier niveau du bloc ```arc SANS reformater le reste : insertion
-    textuelle avant l'accolade finale (ordre et mise en forme conservés, ligne unique ou multi-lignes).
-    Une clé déjà présente (ex. `gear_source: "garmin_unmapped"`) réécrit le bloc en JSON, indentation
-    d'origine conservée."""
+    """Ajoute/remplace des clés de premier niveau du bloc ```arc SANS reformater le reste : une clé déjà présente
+    (ex. `gear_source: "garmin_unmapped"`) voit SEULE sa valeur remplacée sur place ; les clés absentes sont
+    insérées avant l'accolade finale (ordre et mise en forme conservés, ligne unique ou multi-lignes)."""
     m = C.BLOCK_RE.search(text)
     if not m:
         raise C.ContractError("bloc ```arc absent")
@@ -436,22 +566,23 @@ def set_block_keys(text: str, updates: Dict[str, Any]) -> str:
     data = json.loads(body)
     expected = dict(data)
     expected.update(updates)
-    multiline = "\n" in body
-    if any(k in data for k in updates):
-        data.update(updates)
-        if multiline:
-            indent_m = re.search(r"\n([ \t]+)\S", body)
-            new_body = json.dumps(data, ensure_ascii=False, indent=len(indent_m.group(1)) if indent_m else 2)
-        else:
-            new_body = json.dumps(data, ensure_ascii=False, separators=(", ", ": "))
-    else:
-        close = body.rstrip().rfind("}")
-        before = body[:close].rstrip()
-        items = [f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in updates.items()]
-        if multiline:
+    new_body = body
+    for key, value in updates.items():
+        if key not in data:
+            continue
+        pattern = re.compile(r'("%s"\s*:\s*)%s' % (re.escape(key), re.escape(json.dumps(data[key], ensure_ascii=False))))
+        new_body, n = pattern.subn(lambda mm, v=value: mm.group(1) + json.dumps(v, ensure_ascii=False), new_body, count=1)
+        if n == 0:
+            raise C.ContractError(f"valeur de « {key} » introuvable telle quelle dans le bloc ```arc")
+    added = {k: v for k, v in updates.items() if k not in data}
+    if added:
+        close = new_body.rstrip().rfind("}")
+        before = new_body[:close].rstrip()
+        items = [f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in added.items()]
+        if "\n" in body:
             last_line = before.rsplit("\n", 1)[-1]
             indent = re.match(r"[ \t]*", last_line).group(0) or "  "
-            new_body = before + ",\n" + ",\n".join(indent + it for it in items) + "\n" + body[close:].rstrip()
+            new_body = before + ",\n" + ",\n".join(indent + it for it in items) + "\n" + new_body[close:].rstrip()
         else:
             new_body = before + ", " + ", ".join(items) + "}"
     if json.loads(new_body) != expected:
@@ -464,7 +595,9 @@ def set_block_keys(text: str, updates: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def scan_workspace(workspace: Path) -> List[dict]:
-    """Une entrée par `activities/*.md` (niveau supérieur seulement) portant un bloc `activity`."""
+    """Une entrée par `activities/*.md` (niveau supérieur seulement) portant un bloc `activity`. Lecture en
+    octets : un fichier CRLF n'a pas de bloc lisible par le contrat (comme pour l'index), il est compté « sans
+    identifiant »."""
     out = []
     folder = workspace / "activities"
     for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
@@ -472,8 +605,8 @@ def scan_workspace(workspace: Path) -> List[dict]:
         entry = {"path": rel, "date": L.filename_date(path.name), "garmin_activity_id": None,
                  "distance_m": 0.0, "gear_id": None, "gear_source": None, "has_block": False}
         try:
-            block = C.extract_block(path.read_text(encoding="utf-8", errors="replace"))
-        except C.ContractError:
+            block = C.extract_block(path.read_bytes().decode("utf-8", errors="replace"))
+        except (C.ContractError, OSError):
             block = None
         if block and block.get("kind") == "activity":
             entry["has_block"] = True
@@ -489,45 +622,74 @@ def scan_workspace(workspace: Path) -> List[dict]:
     return out
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Écriture atomique EN OCTETS (fins de ligne intactes), permissions du fichier d'origine conservées."""
     tmp = path.with_name(path.name + ".tmp-gearbackfill")
-    tmp.write_text(text, encoding="utf-8")
+    tmp.write_bytes(data)
+    try:
+        os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+    except OSError:
+        pass
     os.replace(tmp, path)
 
 
 def apply_plan(workspace: Path, profile: Path, result: dict, *, validate=None) -> dict:
-    """Écrit puces puis `gear_id` ; chaque fichier est validé, restauré tel quel en cas d'échec."""
+    """Écrit puces puis `gear_id` ; chaque fichier est validé AVANT (déjà hors contrat : signalé à part, jamais
+    réécrit) et APRÈS écriture (refus : octets d'origine restaurés, seulement si on avait écrit)."""
     if validate is None:
         import arc_index
         validate = arc_index.validate_file
-    out: Dict[str, Any] = {"profile_written": False, "written": [], "failed": [], "skipped": []}
-    if result["new_bullets"]:
-        original = profile.read_text(encoding="utf-8")
-        updated = insert_gear_bullets(original, [b["bullet"] for b in result["new_bullets"]])
-        _atomic_write(profile, updated)
-        parsed = {g.get("garmin_uuid"): g["gear_id"] for g in L.parse_gear(updated)}
-        bad = [b["uuid"] for b in result["new_bullets"] if parsed.get(b["uuid"]) != b["gear_id"]]
-        if bad:
+    out: Dict[str, Any] = {"profile_written": False, "linked": [], "written": [], "failed": [], "skipped": [],
+                           "out_of_contract": []}
+    rel_profile = str(profile.relative_to(workspace)) if profile.is_relative_to(workspace) else str(profile)
+    if result["new_bullets"] or result["links"]:
+        original = profile.read_bytes()
+        text = original.decode("utf-8")
+        failed_link = None
+        for link in result["links"]:
+            updated = append_garmin_segment(text, link["gear_id"], link["uuid"])
+            if updated is None:
+                failed_link = link
+                break
+            text = updated
+        if failed_link is not None:
+            out["failed"].append({"path": rel_profile, "error": f"puce « {failed_link['name']} » introuvable "
+                                  "exactement une fois pour y ajouter garmin: — profil inchangé"})
+            return out
+        text = insert_gear_bullets(text, [b["bullet"] for b in result["new_bullets"]])
+        _atomic_write(profile, text.encode("utf-8"))
+        parsed = {g.get("garmin_uuid"): g["gear_id"] for g in L.parse_gear(text)}
+        expected = [(b["uuid"], b["gear_id"]) for b in result["new_bullets"]] + \
+                   [(k["uuid"], k["gear_id"]) for k in result["links"]]
+        if any(parsed.get(u) != gid for u, gid in expected):
             _atomic_write(profile, original)
-            out["failed"].append({"path": str(profile.relative_to(workspace)) if profile.is_relative_to(workspace)
-                                  else str(profile), "error": "puces non relues après écriture — profil restauré"})
+            out["failed"].append({"path": rel_profile, "error": "puces non relues après écriture — profil restauré"})
             return out
         out["profile_written"] = True
+        out["linked"] = [k["gear_id"] for k in result["links"]]
     for a in result["assignments"]:
         path = workspace / a["path"]
-        original = path.read_text(encoding="utf-8")
+        original = path.read_bytes()
+        ok, errors, _warnings = validate(path)
+        if not ok:
+            out["out_of_contract"].append({"path": a["path"], "errors": errors,
+                                           "reason": "fichier déjà hors contrat (voir /arc-backfill)"})
+            continue
+        written = False
         try:
-            block = C.extract_block(original) or {}
-            if block.get("gear_id"):
+            text = original.decode("utf-8")
+            if (C.extract_block(text) or {}).get("gear_id"):
                 out["skipped"].append({"path": a["path"], "reason": "gear_id apparu depuis la simulation"})
                 continue
-            updated = set_block_keys(original, {"gear_id": a["gear_id"], "gear_source": "garmin"})
-            _atomic_write(path, updated)
+            updated = set_block_keys(text, {"gear_id": a["gear_id"], "gear_source": "garmin"})
+            _atomic_write(path, updated.encode("utf-8"))
+            written = True
             ok, errors, _warnings = validate(path)
             if not ok:
                 raise C.ContractError("; ".join(errors) or "validation refusée")
         except (C.ContractError, OSError, ValueError) as exc:
-            _atomic_write(path, original)
+            if written:
+                _atomic_write(path, original)
             out["failed"].append({"path": a["path"], "error": str(exc)})
             continue
         out["written"].append(a["path"])
@@ -554,12 +716,18 @@ class GarminSource:
 
     def __init__(self, client):
         self.client = client
+        self._profile_id = None
 
     def profile_id(self):
-        return self.client.get_device_last_used().get("userProfileNumber")
+        if self._profile_id is None:   # un seul appel `get_device_last_used` par exécution
+            self._profile_id = self.client.get_device_last_used().get("userProfileNumber")
+        return self._profile_id
 
     def gear(self) -> List[dict]:
-        return self.client.get_gear(self.profile_id()) or []
+        raw = self.client.get_gear(self.profile_id())
+        if not isinstance(raw, list):   # charge d'erreur (dict) : jamais lue comme « aucune chaussure »
+            raise RuntimeError(f"réponse get_gear inattendue ({type(raw).__name__}) : {str(raw)[:120]}")
+        return raw
 
     def defaults(self) -> List[dict]:
         try:
@@ -580,14 +748,23 @@ class GarminSource:
             base = getattr(self.client, "garmin_connect_activities_baseurl", None)
             fetch = getattr(self.client, "connectapi", None)
             if base and fetch:
-                start = len(raw)
+                seen = {a.get("activityId") for a in raw if isinstance(a, dict)}
+                offset = len(raw)
                 try:
-                    while True:
-                        page = fetch(f"{base}{uuid}/gear?start={start}&limit={GEAR_ACTIVITIES_PAGE}") or []
-                        raw.extend(page)
+                    for _page in range(GEAR_ACTIVITIES_MAX_PAGES):
+                        page = fetch(f"{base}{uuid}/gear?start={offset}&limit={GEAR_ACTIVITIES_PAGE}") or []
+                        fresh = [a for a in page if isinstance(a, dict) and a.get("activityId") not in seen]
+                        if not fresh:
+                            # page vide, ou `start` ignoré (mêmes séances) : fin non garantie
+                            truncated = bool(page)
+                            break
+                        raw.extend(fresh)
+                        seen.update(a.get("activityId") for a in fresh)
                         if len(page) < GEAR_ACTIVITIES_PAGE:
                             break
-                        start += len(page)
+                        offset += len(page)
+                    else:
+                        truncated = True    # plafond de pages atteint
                 except Exception:   # noqa: BLE001
                     truncated = True
             else:
@@ -624,6 +801,9 @@ def _auto_relaunch(argv: List[str]) -> None:
         return
     except ImportError:
         pass
+    if os.environ.get("ARC_GEAR_BACKFILL_RELAUNCHED"):   # déjà relancé une fois : pas de ping-pong
+        print("ERREUR : 'garminconnect' introuvable même après relance avec le python de garmin-mcp.", file=sys.stderr)
+        sys.exit(EXIT_USAGE)
     candidates: List[str] = []
     if os.environ.get("GARMIN_PYTHON"):
         candidates.append(os.path.expanduser(os.environ["GARMIN_PYTHON"]))
@@ -634,7 +814,8 @@ def _auto_relaunch(argv: List[str]) -> None:
     candidates.append(os.path.expanduser("~/.local/share/uv/tools/garmin-mcp/bin/python3"))
     for py in candidates:
         if os.path.exists(py) and os.path.realpath(py) != os.path.realpath(sys.executable):
-            sys.exit(subprocess.run([py, os.path.abspath(__file__)] + argv).returncode)
+            env = dict(os.environ, ARC_GEAR_BACKFILL_RELAUNCHED="1")
+            sys.exit(subprocess.run([py, os.path.abspath(__file__)] + argv, env=env).returncode)
     print("ERREUR : module 'garminconnect' introuvable dans cet interpréteur.\n"
           "→ utilisez le python de garmin-mcp : GARMIN_PYTHON=~/.local/share/uv/tools/garmin-mcp/bin/python3",
           file=sys.stderr)
@@ -660,6 +841,8 @@ _STATUS_LABEL = {
     "new": "puce à ajouter", "existing": "puce existante (id réutilisé)", "ignored": "(ignorée) — jamais attribuée",
     "out_of_period": "hors période du workspace", "error": "erreur Garmin",
     "duplicate_in_profile": "uuid dupliqué dans le profil",
+    "link_existing": "puce existante sans garmin: — segment à ajouter",
+    "name_ambiguous": "nom ambigu dans le profil — rien n'est attribué",
 }
 
 
@@ -678,25 +861,43 @@ def render_report(result: dict, applied: Optional[dict] = None, reindexed: Optio
         if s["status"] == "error":
             lines.append(f"    erreur : {s['error']}")
             continue
-        if s["bullet"]:
+        if s["status"] == "link_existing":
+            lines.append(f"    → ajouter « — garmin: {s['uuid']} » à la puce existante « {s['gear_id']} » "
+                         "(seul ajout sur une puce existante)")
+        elif s["bullet"]:
             lines.append(f"    puce proposée : {s['bullet']}")
         elif s["gear_id"]:
             lines.append(f"    gear_id : {s['gear_id']}")
+        if s.get("name_matches"):
+            lines.append("    attention : des séances déclarent déjà « " + "», « ".join(s["name_matches"]) +
+                         " » sans puce au profil — à vous de décider si c'est cette paire ; l'id proposé est "
+                         f"« {s['gear_id']} » pour ne pas leur attribuer ce matériel en silence")
         lines.append(f"    séances rattachées : {s['matched']} (à écrire {s['to_write']}, déjà attribuées "
                      f"{s['already']}, conflits {s['conflicts']}, ambiguës {s['ambiguous']}"
+                     + (f", doublons de fichier {s['duplicates']}" if s['duplicates'] else "")
+                     + (f", incohérentes {s['inconsistent']}" if s['inconsistent'] else "")
                      + (f", avant --since {s['before_since']}" if s['before_since'] else "") + ")")
         lines.append(f"    km : {s['workspace_km']:g} dans le workspace · {s['garmin_km']:g} au total chez Garmin "
                      f"({s['garmin_sessions']} séance(s))" + (" — LISTE TRONQUÉE" if s["truncated"] else ""))
+        if not s["garmin_sessions"]:
+            lines.append("    note : aucune séance renvoyée (paire sans séance, ou 404 Garmin — la bibliothèque "
+                         "le masque en liste vide, indiscernable ici)")
         if s["depart_note"]:
             lines.append(f"    départ : {s['depart_note']}")
     if result["garmin_defaults"]:
         lines += ["", "PAIRES PAR DÉFAUT CHEZ GARMIN (non reprises : `(par défaut)` n'est jamais posé automatiquement) : "
                   + ", ".join(result["garmin_defaults"])]
     for title, items, fmt in (
+        ("INCOMPLET — liste Garmin en erreur ou tronquée : l'ambiguïté n'est pas garantie, --apply refusé",
+         result["incomplete"], lambda i: f"- {i['name']} : {i['reason']}"),
         ("CONFLITS — déclaration déjà présente conservée (priorité athlète/chat)", result["conflicts"],
          lambda c: f"- {c['path']} : garde « {c['kept']} » ({c['kept_source']}), Garmin indique « {c['garmin']} » ({c['garmin_name']})"),
         ("AMBIGUËS — revendiquées par deux paires chez Garmin, jamais attribuées", result["ambiguous"],
          lambda a: f"- activité {a['id']} ({a['date'] or '?'}){'' if a['in_workspace'] else ' hors workspace'} : {len(a['shoes'])} paires"),
+        ("DOUBLONS — plusieurs fichiers pour la même séance Garmin, jamais écrits (à trier à la main)",
+         result["duplicate_ids"], lambda d: f"- activité {d['id']} : {', '.join(d['paths'])}"),
+        ("INCOHÉRENTS — gear_source sans gear_id (contrat invalide), laissés tels quels", result["inconsistent"],
+         lambda i: f"- {i['path']} (gear_source: {i['gear_source']})"),
     ):
         if items:
             lines += ["", f"{title} ({len(items)})"] + [fmt(i) for i in items[:20]]
@@ -704,22 +905,32 @@ def render_report(result: dict, applied: Optional[dict] = None, reindexed: Optio
                 lines.append(f"  … et {len(items) - 20} autre(s) (voir --json)")
     miss = result["missing_from_workspace"]
     if miss:
-        lines += ["", f"SÉANCES GARMIN ABSENTES DU WORKSPACE ({len(miss)}, {sum(m['distance_km'] for m in miss):.0f} km) — "
-                  "comptées dans « départ » des puces nouvelles, jamais réimportées ici"]
+        labels = (("before", "antérieures au premier fichier du workspace — comptées dans « départ » des puces nouvelles"),
+                  ("in_period", "dans la période du workspace (trous) — non comptées, jamais réimportées ici"),
+                  ("after", "postérieures au dernier fichier — non comptées (la synchronisation les importera)"),
+                  ("undated", "sans date — non comptées"))
+        lines += ["", f"SÉANCES GARMIN ABSENTES DU WORKSPACE ({len(miss)}, {sum(m['distance_km'] for m in miss):.0f} km)"]
+        for key, label in labels:
+            part = [m for m in miss if m["bucket"] == key]
+            if part:
+                lines.append(f"  - {len(part)} ({sum(m['distance_km'] for m in part):.0f} km) {label}")
     if result["workspace_without_id"]:
         lines += ["", f"FICHIERS SANS garmin_activity_id : {len(result['workspace_without_id'])} — non rattachables "
                   "automatiquement (déclarer la paire dans le chat)"]
     total_write = len(result["assignments"])
-    lines += ["", f"BILAN : {len(result['new_bullets'])} puce(s) à ajouter, {total_write} séance(s) à renseigner, "
-              f"{len(result['conflicts'])} conflit(s), {len(result['ambiguous'])} ambiguë(s)."]
+    lines += ["", f"BILAN : {len(result['new_bullets'])} puce(s) à ajouter, {len(result['links'])} segment(s) garmin: à "
+              f"ajouter à une puce existante, {total_write} séance(s) à renseigner, {len(result['conflicts'])} "
+              f"conflit(s), {len(result['ambiguous'])} ambiguë(s)."]
     if applied is None:
         lines.append("Simulation seulement. Pour écrire : relancer avec --apply.")
     else:
         lines.append(f"Appliqué : profil {'mis à jour' if applied['profile_written'] else 'inchangé'}, "
                      f"{len(applied['written'])} séance(s) écrite(s), {len(applied['failed'])} échec(s), "
-                     f"{len(applied['skipped'])} ignorée(s).")
+                     f"{len(applied['out_of_contract'])} déjà hors contrat, {len(applied['skipped'])} ignorée(s).")
         for f in applied["failed"]:
             lines.append(f"  échec : {f['path']} — {f['error']}")
+        for f in applied["out_of_contract"]:
+            lines.append(f"  {f['path']} — {f['reason']}")
         if reindexed:
             lines.append(f"Index reconstruit : {reindexed['index']}.")
     return "\n".join(lines)
@@ -735,7 +946,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", help="racine du workspace (sinon ARC_WORKSPACE / défaut du moteur)")
     p.add_argument("--apply", action="store_true", help="écrit (sinon simulation)")
     p.add_argument("--since", metavar="AAAA-MM-JJ", help="ne renseigne que les séances du workspace à partir de cette date")
-    p.add_argument("--gear", metavar="UUID", help="une seule paire Garmin")
+    p.add_argument("--gear", metavar="UUID", help="une seule paire Garmin (toutes sont tout de même lues, pour l'ambiguïté)")
     p.add_argument("--all-shoes", action="store_true",
                    help="propose aussi les paires sans séance dans la période du workspace (puces `(retirée)`)")
     p.add_argument("--json", action="store_true", help="sortie machine")
@@ -773,10 +984,11 @@ def run(args, source=None) -> Tuple[int, dict, str]:
         shoes = normalize_shoes(source.gear())
     except Exception as exc:   # noqa: BLE001
         return EXIT_USAGE, {"error": "garmin"}, f"Garmin injoignable : {type(exc).__name__}: {exc}"
-    wanted = [s for s in shoes if not args.gear or s["uuid"] == args.gear.strip().lower()]
-    if args.gear and not wanted:
+    if args.gear and not any(s["uuid"] == args.gear.strip().lower() for s in shoes):
         return EXIT_USAGE, {"error": "gear_not_found"}, f"--gear : aucune chaussure Garmin d'uuid {args.gear}."
-    gear_acts = {s["uuid"]: source.gear_activities(s["uuid"]) for s in wanted}
+    # TOUTES les paires sont lues : `--gear` ne restreint que ce qui est proposé/écrit, jamais la détection
+    # d'ambiguïté (une séance commune à la paire choisie et à une autre n'est attribuée à aucune des deux).
+    gear_acts = {s["uuid"]: source.gear_activities(s["uuid"]) for s in shoes}
     ws_files = scan_workspace(workspace)
     equipment_ids = {e["gear_id"] for e in L.parse_equipment(profile_text)} if profile_text else set()
     shoe_names = {s["uuid"]: s["name"] for s in shoes}
@@ -785,8 +997,14 @@ def run(args, source=None) -> Tuple[int, dict, str]:
                   since=args.since, only_gear=args.gear, all_shoes=args.all_shoes,
                   extra_used_ids=equipment_ids, garmin_defaults=default_names)
     code, applied, reindexed = EXIT_OK, None, None
-    if any(s["status"] == "error" for s in result["shoes"]):
+    if result["incomplete"]:
         code = EXIT_PARTIAL
+    if args.apply and result["incomplete"]:
+        # Une paire illisible ou tronquée peut cacher une ambiguïté : aucune écriture, nulle part.
+        payload = {"dry_run": True, "apply_refused": True, "workspace": str(workspace), **result}
+        return EXIT_PARTIAL, payload, render_report(result) + (
+            "\n\n--apply REFUSÉ : au moins une paire est en erreur ou tronquée (section INCOMPLET) ; rien n'a été écrit. "
+            "Relancez quand Garmin répond, ou après avoir réglé le problème.")
     if args.apply:
         applied = apply_plan(workspace, profile, result)
         if applied["failed"]:
