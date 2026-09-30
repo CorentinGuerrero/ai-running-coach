@@ -15,6 +15,10 @@
 .garminconnect/
 .env
 .env.local
+# Sauvegardes et temporaires de scripts/coach_config.py : `workspace.user.toml.bak` contient
+# le sujet ntfy (seul secret sur ntfy.sh), `.mcp.json.bak` la configuration MCP.
+*.bak
+.arc-*.tmp
 
 # Python
 __pycache__/
