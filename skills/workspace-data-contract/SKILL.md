@@ -131,6 +131,8 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `ef_whole` | nombre | facteur d'efficacité séance entière — voir « Champs KPI FIT » |
 | `time_in_zone_s` | objet | temps en zone FC, secondes, clés `z1`…`z5` — voir « Champs KPI FIT » |
 | `best_climb_vam_m_h` | nombre | meilleure VAM observée sur une montée de la séance, m/h — voir « Champs KPI FIT » |
+| `avg_ground_contact_s`, `avg_vertical_oscillation_m`, `avg_step_length_m` | nombre | dynamique de course Garmin (#151), moyennes de séance en secondes / mètres — voir « Dynamique de course » |
+| `avg_stance_balance_pct`, `avg_vertical_ratio_pct` | nombre (0-100 exclus) | balance du temps de contact et ratio vertical, % — voir « Dynamique de course » |
 
 **Matériel, sudation, glucides.** `gear_id` référence la section « Matériel &
 lieux » du profil athlète (`planning/Runner_Profile.md`) : un identifiant
@@ -559,6 +561,29 @@ possibles.
   "best_climb_vam_m_h": 620
 }
 ```
+
+#### Dynamique de course : `avg_ground_contact_s`, `avg_stance_balance_pct`, `avg_vertical_oscillation_m`, `avg_vertical_ratio_pct`, `avg_step_length_m` (#151)
+
+Moyennes de séance de la **dynamique de course** mesurée par la montre Garmin
+(champs FIT `avg_stance_time` ms, `avg_stance_time_balance` %, `avg_vertical_oscillation` mm,
+`avg_vertical_ratio` %, `avg_step_length` mm), **en unités SI** : secondes et mètres (ms ÷ 1000,
+mm ÷ 1000), pourcentages inchangés. Toutes optionnelles :
+
+- **Clé absente = grandeur non mesurée.** Jamais `0`, et surtout jamais `50` pour une balance
+  absente : un capteur qui ne fournit pas la balance (15 séances de course sur 80 sur l'installation
+  observée) laisse la clé omise.
+- **Aucun writer automatique** : ni le coach ni un script n'écrivent ces clés d'office ; elles servent de
+  repli pour des valeurs saisies à la main ou héritées de fichiers anciens. `avg_stance_balance_pct` hors
+  de 30-70 % → avertissement du validateur (et valeur ignorée par `gait-summary`).
+- **Repli seulement.** Quand les échantillons FIT de la séance sont ingérés
+  (`activities/fit/<id>.json`, colonnes `activity_sample.ground_contact_s`… — extraites par
+  `download_fit.py`, re-extractibles avec `--refresh-dynamics`), `scripts/arc_index.py gait-summary`
+  calcule sa PROPRE moyenne et c'est elle qui fait foi ; ces clés ne servent que sans échantillons.
+  N'écrivez rien qui ne vienne pas du FIT/du MCP (jamais une valeur estimée).
+- **La balance est un écart à 50 %.** Le côté que porte le pourcentage (gauche ou droite) n'est pas
+  établi par le profil FIT : ne l'écrivez jamais dans la prose comme « pied gauche/droit ».
+- Validation : `avg_stance_balance_pct` et `avg_vertical_ratio_pct` strictement entre 0 et 100 ; les
+  autres sont des nombres positifs.
 
 ### `health`
 

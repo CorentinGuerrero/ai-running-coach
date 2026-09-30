@@ -2698,6 +2698,26 @@ ASSUMPTIONS["gear_inspection"] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Foulée (#151) : dynamique de course mesurée + indices d'inspection — `scripts/arc_gait.py`
+# ---------------------------------------------------------------------------
+
+ASSUMPTIONS["gait"] = (
+    "Synthèse « Foulée » (#151, `arc_index.py gait-summary`, `/api/gait`) : pour chaque séance de COURSE (route "
+    "+ trail), moyenne pondérée par le temps couvert des échantillons FIT de la dynamique de course Garmin — "
+    "temps de contact au sol, balance du temps de contact, oscillation verticale, ratio vertical, longueur de "
+    "pas — et cadence en pas/min (piège documenté : le champ FIT est par pied, doublé à l'extraction). Une "
+    "grandeur non mesurée reste absente (jamais 0, jamais 50 % de balance). La balance est lue comme un ÉCART à "
+    "50 % : le côté du pourcentage n'est pas établi par le profil FIT de `fitparse`, donc jamais « gauche/droite » "
+    "pour la mesure. « Hors bande » = écart > 1 point : approximation du projet, pas un seuil publié. Les "
+    "inspections photo apportent un indice d'attaque et une asymétrie d'usure — des indices déduits de semelles, "
+    "à faible confiance ; en cas de désaccord avec la balance mesurée, la MESURE prime et l'usure est dite peu "
+    "fiable. `confidence` donne les effectifs ; `contradictions` liste les désaccords sans les arbitrer en "
+    "silence. Jamais un diagnostic, aucune modification de charge ni de plan ; méthode détaillée : "
+    "`arc_gait.ASSUMPTIONS`."
+)
+
+
 def gear_inspection_status(shoes: List[dict], inspections: List[dict],
                            interval_m: float = GEAR_INSPECTION_INTERVAL_M,
                            ignored: Optional[Dict[str, str]] = None) -> List[dict]:
