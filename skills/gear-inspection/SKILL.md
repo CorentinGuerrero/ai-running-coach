@@ -162,20 +162,25 @@ python3 scripts/arc_index.py --validate gear/AAAA-MM-JJ_<gear_id>_inspection.md
 
 **Boîte de dépôt `gear/photos/` (#149).** L'athlète peut y copier ses photos, sous n'importe quel nom,
 avant ou pendant l'inspection (chemin fiable quel que soit le client — voir le skill `inspection`).
-Les images **non citées** par une inspection indexée sont des candidates :
+Les images **non citées** par une inspection (indexée ou non) sont des candidates :
 
 ```bash
-python3 scripts/arc_index.py inspections --unreferenced-photos   # clé `unreferenced_photos`
+python3 scripts/arc_index.py inspections --unreferenced-photos   # clés `unreferenced_photos` et `ignored_files`
 ```
 
+Formats : **JPEG, PNG, WebP uniquement** ; les autres fichiers (HEIC d'iPhone, TIFF…) sont listés dans
+`ignored_files` — le dire à l'athlète (HEIC : exporter en JPEG), ne jamais les renommer ni les citer.
 Si la paire n'est pas évidente, **demander à laquelle elles appartiennent** ; puis les **renommer**
 (simple déplacement dans `gear/photos/`) en `AAAA-MM-JJ_<gear_id>_<vue>.<ext>` — extension d'origine
-conservée, extensions raster du contrat seulement (`.jpg`, `.jpeg`, `.png`, `.webp`) — et les citer
-dans `photos`. **Ne jamais supprimer** une photo, **ne jamais déplacer** un fichier hors de
-`gear/photos/`.
+conservée — et les citer dans `photos`. **Jamais d'écrasement** : vérifier que la cible n'existe pas
+(`mv -n` ou test d'existence) ; en cas de collision (deux vues du même type, seconde inspection le
+même jour, nom déjà pris), suffixer — `_profil-gauche` / `_profil-droite` si le côté est connu, sinon
+`_profil-2`, `-3`… Ne jamais renommer une photo qu'un `gear/*.md` cite déjà. **Ne jamais supprimer**
+une photo, **ne jamais déplacer** un fichier hors de `gear/photos/`.
 
 **Photos.** Si l'image est disponible comme fichier, la copier dans
-`gear/photos/AAAA-MM-JJ_<gear_id>_<vue>.jpg` (`semelles`, `profil`, `arriere`, `tige`) et la
+`gear/photos/AAAA-MM-JJ_<gear_id>_<vue>.<ext>` (extension d'origine ; `semelles`, `profil`,
+`arriere`, `tige`), sans jamais écraser un fichier existant (mêmes suffixes), et la
 citer dans `photos`. Si elle n'est qu'affichée dans la conversation et ne peut pas être
 enregistrée, **laisser `photos` absent et le dire** — ne jamais citer un chemin qui n'existe pas.
 Le dossier `gear/` est gitignoré, mais un workspace privé versionné (`git_autocommit`) embarque

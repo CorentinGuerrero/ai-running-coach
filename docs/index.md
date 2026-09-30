@@ -96,7 +96,7 @@ Le staff vous suit sur tout le parcours d'une préparation — et chaque étape 
 <li class="arc-stage">
 <span class="arc-stage__km">Préparation</span>
 <h3>Un plan qui sait dire non</h3>
-<p>Des plans sur plusieurs semaines, poussés au calendrier Garmin. Avant chaque push, sept <a href="guardrails/">garde-fous</a> calculés vérifient charge, volume, D+ et enchaînements : un second avis déterministe, pas une intuition de LLM. Vos chaussures aussi sont suivies : kilométrage par paire depuis Garmin, prévision de retraite, <a href="skills/inspection/">inspection photo</a> tous les 200 km.</p>
+<p>Des plans sur plusieurs semaines, poussés au calendrier Garmin. Avant chaque push, sept <a href="guardrails/">garde-fous</a> calculés vérifient charge, volume, D+ et enchaînements : un second avis déterministe, pas une intuition de LLM. Vos chaussures aussi sont suivies : kilométrage par paire depuis Garmin, prévision de retraite, <a href="skills/inspection/">inspection photo</a> proposée environ tous les 200 km, bilan de carrière à la retraite d'une paire.</p>
 </li>
 <li class="arc-stage">
 <span class="arc-stage__km">Chaque matin</span>
@@ -111,7 +111,7 @@ Le staff vous suit sur tout le parcours d'une préparation — et chaque étape 
 <li class="arc-stage">
 <span class="arc-stage__km">Arrivée</span>
 <h3>Le débrief, segment par segment</h3>
-<p>Prévu contre réalisé : écart d'allure et dérive cumulée, fade, glucides par heure, météo. Vos indices ITRA et UTMB rejoignent l'historique, la paire de course reçoit son bilan de carrière — et la préparation suivante part de là.</p>
+<p>Prévu contre réalisé : écart d'allure et dérive cumulée, fade, glucides par heure, météo. Vos indices ITRA et UTMB rejoignent l'historique — et la préparation suivante part de là.</p>
 </li>
 </ol>
 
@@ -123,7 +123,7 @@ Le staff vous suit sur tout le parcours d'une préparation — et chaque étape 
 
 ## Vingt skills, prêts à l'emploi
 
-Des protocoles précis que l'IA suit à la lettre. Six d'entre eux sont des commandes courtes, pensées pour le téléphone : une question, une réponse, rien de plus.
+Des protocoles précis que l'IA suit à la lettre. Six d'entre eux sont des commandes courtes, pensées pour le téléphone : cinq pour une question, une réponse, et `/inspection` pour une inspection guidée.
 { .arc-section__intro }
 
 <div class="arc-daily" markdown>
@@ -135,7 +135,7 @@ Des protocoles précis que l'IA suit à la lettre. Six d'entre eux sont des comm
 <a class="arc-command" href="skills/week/"><code>/week</code><span>La semaine en cours : réalisé face au prévu, garde-fous.</span></a>
 <a class="arc-command" href="skills/race/"><code>/race</code><span>Compte à rebours, score Trail Shape, plan de course.</span></a>
 <a class="arc-command" href="skills/log/"><code>/log</code><span>« 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 » — noté.</span></a>
-<a class="arc-command" href="skills/inspection/"><code>/inspection</code><span>Inspecter une paire de chaussures : la désigner, déposer les photos, lire l'usure.</span></a>
+<a class="arc-command" href="skills/inspection/"><code>/inspection</code><span>Inspecter une paire : photos, usure, état.</span></a>
 
 </div>
 

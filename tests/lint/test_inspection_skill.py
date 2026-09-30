@@ -65,6 +65,22 @@ class TestInspectionSkill(unittest.TestCase):
             self.assertRegex(text, r"(?i)ne jamais supprimer")
             self.assertRegex(text, r"(?i)ne jamais déplacer")
 
+    def test_never_overwrites_and_explains_unsupported_formats(self):
+        skill = (REPO / "skills/gear-inspection/SKILL.md").read_text(encoding="utf-8")
+        coach = (REPO / "agents/coach.md").read_text(encoding="utf-8")
+        for text in (TEXT, skill):
+            self.assertRegex(text, r"(?i)jamais d'écrasement")
+            self.assertIn("mv -n", text)
+            self.assertIn("ignored_files", text)
+            self.assertIn("HEIC", text)
+        self.assertIn("NEVER overwrite", coach)
+        self.assertIn("HEIC", (REPO / "docs/skills/inspection.md").read_text(encoding="utf-8"))
+        self.assertIn("HEIC", (REPO / "docs/mobile.md").read_text(encoding="utf-8"))
+
+    def test_resolution_uses_declared_and_backfill_only_for_garmin_source(self):
+        self.assertIn("`declared`", TEXT)
+        self.assertIn('[data].source = "garmin"', TEXT)
+
 
 class TestSkillCountsConsistent(unittest.TestCase):
     """Les compteurs de skills des pages vivantes suivent le nombre réel de dossiers skills/."""

@@ -1,14 +1,18 @@
 # #149 — `/inspection` sans argument : liste les paires actives avec leur rappel et propose la
 # plus urgente, demande les photos, n'écrit JAMAIS d'inspection sans photo ni description.
 #
-# Fixture `gear-inspection/` : une seule paire (Nike Pegasus, `id: pegasus`), 210 km de départ
-# + 42 km de séances = 252 km, jamais inspectée → `arc_index.py inspections` rend `due: true`
-# (`never_inspected`). Limite du harnais : le runner `claude -p` n'envoie aucune image, l'athlète
-# n'a donc rien fourni — le coach doit demander les photos (ou une description), pas conclure.
+# Fixture `gear-inspection/` : une seule paire (Nike Pegasus, `id: pegasus`, `alerte 240 km`), 210 km
+# de départ + 42 km de séances = 252 km, jamais inspectée → `arc_index.py inspections` rend `due: true`
+# (`threshold_alert`, vérifié en lançant la CLI sur la fixture matérialisée). NB : sans seuil d'alerte,
+# le compteur d'une paire jamais inspectée part du kilométrage de DÉPART et 42 km ne suffiraient pas.
+# Limite du harnais : le runner `claude -p` n'envoie aucune image, l'athlète n'a donc rien fourni —
+# le coach doit demander les photos (ou une description), pas conclure.
 #
 # `must_match` : la paire est nommée, il est question de photos/semelles, et la réponse est une
-# proposition ou une demande (question, « envoie… »). `must_not_match` : jamais `/coach-setup`
-# (commande courte) ; jamais un verdict 🟢🟡🟠🔴 ni une inspection annoncée comme écrite.
+# proposition ou une demande (question, « envoie… »).
+# `must_not_match` : jamais `/coach-setup` (commande courte) ; jamais un verdict 🟢🟡🟠🔴 posé comme
+# résultat ni un fichier d'inspection annoncé comme écrit (« Aucune inspection réalisée jusqu'ici » et
+# « je te donnerai un état 🟢🟡🟠🔴 » restent permis).
 # `files_absent` : aucun fichier `gear/*.md` écrit sans photo.
 id = "inspection-no-arg-due-pair"
 prompt = "/inspection"
@@ -25,7 +29,8 @@ must_match = [
 ]
 must_not_match = [
   "coach-setup",
-  "(verdict|[ée]tat)\\s*:?\\s*\\**\\s*(🟢|🟡|🟠|🔴|\\b(green|yellow|orange|red)\\b)",
-  "inspection\\s+(enregistr[ée]e|[ée]crite|termin[ée]e|r[ée]alis[ée]e)",
+  "(verdict|[ée]tat( global)?)\\s*(:|est|=|→)\\s*\\**\\s*(🟢|🟡|🟠|🔴|\\b(green|yellow|orange|red)\\b)",
+  "gear/\\d{4}-\\d{2}-\\d{2}_[\\w-]+_inspection\\.md",
+  "(j['’]ai|je viens d['’]|je viens de)\\s+(enregistr|[ée]crit|cr[ée]{1,2}|termin|r[ée]alis)",
 ]
 files_absent = ["gear/*.md"]

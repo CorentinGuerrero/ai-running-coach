@@ -19,8 +19,9 @@
 | « Je veux inspecter mes Pegasus » | Même chose en langage naturel |
 
 Si vous n'avez encore déclaré aucune paire, le coach renvoie vers la syntaxe du profil
-(`planning/Runner_Profile.md`, « Matériel & lieux » → `### Chaussures`) ou vers la simulation de
+(`planning/Runner_Profile.md`, « Matériel & lieux » → `### Chaussures`) ou, avec Garmin comme source de données (`[data].source = "garmin"`, défaut), vers la simulation de
 [reprise du matériel Garmin](../garmin-setup.md#rattraper-le-materiel-de-lhistorique) (elle ne modifie rien sans `--apply`).
+Si toutes vos paires sont retirées ou ignorées, le coach le dit (il ne prétend pas qu'il n'y en a aucune).
 
 ### 3. Désigner la paire
 
@@ -41,13 +42,19 @@ cadre (sans elle, aucune mesure en millimètres).
 |---|---|
 | **Copier les photos** (n'importe quel nom) dans `gear/photos/` de votre workspace, puis dire « c'est fait » | **Chemin recommandé**, valable quel que soit le client : le coach les repère, les renomme et les cite dans l'inspection |
 | **Terminal Claude Code** : donner le chemin du fichier | Le coach lit l'image depuis ce chemin et peut la ranger dans `gear/photos/` |
+| **Application de bureau Claude, VS Code, autres IDE** (Copilot, OpenCode, Gemini CLI…) | Même règle partout : déposez les fichiers dans `gear/photos/` ou donnez leur chemin ; une image collée est lue mais pas enregistrée |
 | **Image collée** dans la conversation | Le coach la **voit** et peut inspecter, mais elle ne peut pas être enregistrée : `photos` reste absent du fichier d'inspection, et il le dit |
 | **Téléphone (Remote Control)** | Envoi d'images **à valider** : voir [Le coach dans la poche](../mobile.md) ; en attendant, copiez les photos dans `gear/photos/` du serveur (synchronisation de fichiers, `scp`…) puis lancez `/inspection` depuis le téléphone |
 
 Les photos déposées dans `gear/photos/` et citées par aucune inspection sont des **candidates** :
 si la paire n'est pas évidente, le coach demande à laquelle elles appartiennent, puis les renomme
-`AAAA-MM-JJ_<gear_id>_<vue>.jpg` (`semelles`, `profil`, `arriere`, `tige`), **dans ce dossier
-uniquement**. Il ne supprime jamais une photo.
+`AAAA-MM-JJ_<gear_id>_<vue>.<ext>` (`semelles`, `profil`, `arriere`, `tige` ; extension d'origine conservée),
+**dans ce dossier uniquement**. Il n'écrase jamais un fichier existant (deux vues du même type :
+`_profil-gauche` / `_profil-droite`, sinon `_profil-2`…) et ne supprime jamais une photo.
+
+!!! warning "Formats : JPEG, PNG ou WebP uniquement"
+    Les photos d'iPhone au format **HEIC** (et TIFF…) ne sont pas prises en charge : exportez-les
+    en JPEG avant de les déposer. Le coach liste les fichiers qu'il a ignorés et vous explique pourquoi.
 
 ### 5. Ce que vous obtenez
 

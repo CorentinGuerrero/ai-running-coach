@@ -112,8 +112,8 @@ Lors de la première installation, le script lance l'authentification Garmin Con
 
 ### ⚡ Commandes courtes du quotidien
 
-Pour un usage rapide depuis le téléphone, six commandes courtes, format
-prévisible — natives sur **Claude Code** et **Gemini CLI** (commande dédiée),
+Pour un usage rapide depuis le téléphone, six commandes courtes (cinq réponses rapides, et `/inspection` pour une
+inspection guidée), format prévisible — natives sur **Claude Code** et **Gemini CLI** (commande dédiée),
 chargées comme n'importe quel skill sur **OpenCode** et **GitHub Copilot**,
 non disponibles sur **Cursor**/**Windsurf** (pas de skills/commandes sur ces
 deux IDE, voir [IDE supportés](docs/ides.md)) :
