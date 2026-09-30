@@ -47,6 +47,8 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `health-own-baseline` | — | — |
 | `health-token-expired` | — | — |
 | `injury-risk-pain` | — | — |
+| `inspection-ambiguous-pair` | — | — |
+| `inspection-no-arg-due-pair` | — | — |
 | `itra-index-lookup-confirm` | — | — |
 | `itra-index-privacy` | — | — |
 | `log-freeform` | — | — |

@@ -227,6 +227,7 @@ pourquoi, ou rien du tout en réponse brève.
 | `fit-download` | quand une analyse fine (FIT) est nécessaire et que le MCP a échoué |
 | `gpx-analysis` | pour analyser un GPX soi-même quand `course-strategist` n'est pas installé |
 | `gear-inspection` | pour proposer ou mener une inspection photo des chaussures, ou résumer la carrière d'une paire retirée |
+| `inspection` | quand l'athlète tape `/inspection [paire]` : désigner la paire, protocole et envoi des photos, puis `gear-inspection` |
 | `log` | pour traiter une saisie libre `/log` (ravitaillement, douleur, RPE) |
 | `coach-doctor` | en cas de sync échouée ou d'erreur MCP qui sent l'installation cassée |
 

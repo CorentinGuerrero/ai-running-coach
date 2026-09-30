@@ -4007,6 +4007,28 @@ def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] 
     return out
 
 
+def unreferenced_gear_photos(conn, workspace: Path) -> List[str]:
+    """Photos déposées dans `gear/photos/` et citées par AUCUNE inspection indexée (#149, boîte de dépôt).
+
+    Rend les chemins relatifs au workspace (`gear/photos/...`), triés. Seules les extensions raster
+    autorisées par le contrat (`arc_contract.GEAR_PHOTO_EXTENSIONS`, les mêmes que la route du tableau
+    de bord) sont candidates ; les liens symboliques, fichiers cachés et tout ce qui sort du dossier
+    sont ignorés. Lecture seule : ne déplace, ne renomme ni ne supprime rien."""
+    root = Path(workspace) / "gear" / "photos"
+    if not root.is_dir() or root.is_symlink():
+        return []
+    cited = {p for row in _inspection_rows(conn) for p in row.get("photos", [])}
+    found = []
+    for path in root.rglob("*"):
+        if (path.is_symlink() or not path.is_file() or path.name.startswith(".")
+                or path.suffix.lower() not in C.GEAR_PHOTO_EXTENSIONS):
+            continue
+        rel = path.relative_to(Path(workspace)).as_posix()
+        if rel not in cited:
+            found.append(rel)
+    return sorted(found)
+
+
 def _activities_of_gear(conn, gear_id: str, today: Optional[date]) -> List[dict]:
     """Séances attribuées à `gear_id` par `M.attribute_gear` — la MÊME règle que `gear_mileage`
     (mêmes requêtes `_gear_defs`/`_gear_activities`, mêmes exclusions : `garmin_unmapped`, paires
@@ -4205,6 +4227,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gear", metavar="GEAR_ID",
                         help="commande « inspections » (#135) : restreint à cette paire ; commande "
                              "« gear-career » : paire dont on veut le bilan de carrière (obligatoire)")
+    parser.add_argument("--unreferenced-photos", action="store_true",
+                        help="commande « inspections » (#149) : ajoute `unreferenced_photos`, la liste des images de "
+                             "`gear/photos/` citées par aucune inspection (boîte de dépôt) — lecture seule")
     parser.add_argument("--assumptions", action="store_true",
                         help="commande « energy » : rend arc_energy.ASSUMPTIONS en entier au lieu du "
                              "résumé court par défaut (assumptions_summary)")
@@ -4291,6 +4316,8 @@ def main(argv=None) -> int:
     if args.command == "inspections":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         report = gear_inspections(conn, args.gear, today_date)
+        if args.unreferenced_photos:
+            report["unreferenced_photos"] = unreferenced_gear_photos(conn, workspace)
         print(json.dumps(report, ensure_ascii=False))
         return 1 if "error" in report else 0
     if args.command == "gear-career":

@@ -303,8 +303,11 @@ juste après une sortie ([saisie libre](skills/log.md), #67).
     Remote Control transmette des images à la session, ni que le coach puisse les enregistrer
     dans `gear/photos/` du workspace. En attendant, faites l'inspection depuis une session
     locale (IDE ou terminal) où l'image peut être jointe, ou décrivez l'usure par écrit
-    (le coach le dit alors, et ne cite aucune photo). Cette note sera levée une fois le
-    parcours testé sur un vrai téléphone.
+    (le coach le dit alors, et ne cite aucune photo). Contournement fiable : copiez les photos
+    dans `gear/photos/` du workspace du serveur (synchronisation de fichiers du téléphone,
+    `scp`…), puis lancez `/inspection` depuis le téléphone : le coach les retrouve dans cette
+    boîte de dépôt. Voir [Faire inspecter une paire](skills/inspection.md). Cette note sera
+    levée une fois le parcours testé sur un vrai téléphone.
 
 ### 6. Voir ce que le coach a stocké
 

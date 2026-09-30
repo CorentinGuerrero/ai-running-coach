@@ -328,6 +328,56 @@ class TestReminder(Workspace):
         self.assertIn("approximation du projet", M.ASSUMPTIONS["gear_inspection"])
 
 
+class TestDropBox(Workspace):
+    """#149 — `inspections --unreferenced-photos` : images de `gear/photos/` citées par aucune inspection."""
+
+    def touch(self, rel: str) -> None:
+        path = self.ws / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+
+    def test_absent_flag_keeps_the_payload_unchanged(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/IMG_0001.jpg")
+        _, out = self.cli("inspections")
+        self.assertNotIn("unreferenced_photos", out)
+
+    def test_lists_only_uncited_images_sorted(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch(PHOTO)
+        self.touch("gear/photos/IMG_0002.JPG")
+        self.touch("gear/photos/IMG_0001.heic.png")
+        self.touch("gear/photos/sub/vue.webp")
+        self.inspection("2026-09-20", photos=[PHOTO])
+        code, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(code, 0)
+        self.assertEqual(out["unreferenced_photos"],
+                         ["gear/photos/IMG_0001.heic.png", "gear/photos/IMG_0002.JPG", "gear/photos/sub/vue.webp"])
+
+    def test_ignores_non_images_hidden_files_and_symlinks(self):
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        self.touch("gear/photos/notes.txt")
+        self.touch("gear/photos/clip.svg")
+        self.touch("gear/photos/.hidden.jpg")
+        outside = self.tmp / "secret.jpg"
+        outside.write_bytes(b"x")
+        try:
+            (self.ws / "gear/photos/link.jpg").symlink_to(outside)
+        except OSError:
+            pass
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], [])
+
+    def test_missing_folder_is_an_empty_list_and_nothing_is_modified(self):
+        shutil.rmtree(self.ws / "gear" / "photos")
+        self.profile("- Nike Pegasus — id: pegasus (par défaut)")
+        _, out = self.cli("inspections", "--unreferenced-photos")
+        self.assertEqual(out["unreferenced_photos"], [])
+        self.touch("gear/photos/a.jpg")
+        self.cli("inspections", "--unreferenced-photos")
+        self.assertTrue((self.ws / "gear/photos/a.jpg").exists())
+
+
 class TestCareer(Workspace):
     def setUp(self):
         super().setUp()

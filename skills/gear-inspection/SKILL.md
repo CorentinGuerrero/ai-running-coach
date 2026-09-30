@@ -33,6 +33,9 @@ inspection n'ayant pas de `distance_m`), `due_reason` (`never_inspected`, `inter
 (`worse`/`same`/`better` entre les deux dernières inspections) et l'historique
 (`inspections`, plus récente d'abord). Le tableau de bord affiche le même rappel.
 
+L'athlète peut aussi la lancer lui-même avec la commande courte **`/inspection [paire]`** (skill `inspection`),
+qui désigne la paire et reçoit les photos avant de revenir ici.
+
 Ne **jamais** proposer une inspection en mode headless (`/garmin-daily-sync`) : c'est
 une conversation, avec des photos. Une proposition par conversation suffit.
 
@@ -156,6 +159,20 @@ avec la précédente, indices de foulée, ce qui n'a pas pu être évalué. Puis
 ```bash
 python3 scripts/arc_index.py --validate gear/AAAA-MM-JJ_<gear_id>_inspection.md
 ```
+
+**Boîte de dépôt `gear/photos/` (#149).** L'athlète peut y copier ses photos, sous n'importe quel nom,
+avant ou pendant l'inspection (chemin fiable quel que soit le client — voir le skill `inspection`).
+Les images **non citées** par une inspection indexée sont des candidates :
+
+```bash
+python3 scripts/arc_index.py inspections --unreferenced-photos   # clé `unreferenced_photos`
+```
+
+Si la paire n'est pas évidente, **demander à laquelle elles appartiennent** ; puis les **renommer**
+(simple déplacement dans `gear/photos/`) en `AAAA-MM-JJ_<gear_id>_<vue>.<ext>` — extension d'origine
+conservée, extensions raster du contrat seulement (`.jpg`, `.jpeg`, `.png`, `.webp`) — et les citer
+dans `photos`. **Ne jamais supprimer** une photo, **ne jamais déplacer** un fichier hors de
+`gear/photos/`.
 
 **Photos.** Si l'image est disponible comme fichier, la copier dans
 `gear/photos/AAAA-MM-JJ_<gear_id>_<vue>.jpg` (`semelles`, `profil`, `arriere`, `tige`) et la

@@ -1,0 +1,31 @@
+# #149 — `/inspection` sans argument : liste les paires actives avec leur rappel et propose la
+# plus urgente, demande les photos, n'écrit JAMAIS d'inspection sans photo ni description.
+#
+# Fixture `gear-inspection/` : une seule paire (Nike Pegasus, `id: pegasus`), 210 km de départ
+# + 42 km de séances = 252 km, jamais inspectée → `arc_index.py inspections` rend `due: true`
+# (`never_inspected`). Limite du harnais : le runner `claude -p` n'envoie aucune image, l'athlète
+# n'a donc rien fourni — le coach doit demander les photos (ou une description), pas conclure.
+#
+# `must_match` : la paire est nommée, il est question de photos/semelles, et la réponse est une
+# proposition ou une demande (question, « envoie… »). `must_not_match` : jamais `/coach-setup`
+# (commande courte) ; jamais un verdict 🟢🟡🟠🔴 ni une inspection annoncée comme écrite.
+# `files_absent` : aucun fichier `gear/*.md` écrit sans photo.
+id = "inspection-no-arg-due-pair"
+prompt = "/inspection"
+fixture = "gear-inspection"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "pegasus",
+  "(photos?|semelles?)",
+  "(\\?|si tu veux|si vous voulez|dis-moi|donne-moi|envoie|envoyez|copie|copiez)",
+]
+must_not_match = [
+  "coach-setup",
+  "(verdict|[ée]tat)\\s*:?\\s*\\**\\s*(🟢|🟡|🟠|🔴|\\b(green|yellow|orange|red)\\b)",
+  "inspection\\s+(enregistr[ée]e|[ée]crite|termin[ée]e|r[ée]alis[ée]e)",
+]
+files_absent = ["gear/*.md"]
