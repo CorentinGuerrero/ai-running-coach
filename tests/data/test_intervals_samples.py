@@ -128,6 +128,20 @@ class TestActivityRef(unittest.TestCase):
         self.assertLess(seed * VM.SEGMENT_ID_CLIMB_MULTIPLIER + 9999, 2 ** 53,
                         "Number.MAX_SAFE_INTEGER : le tableau de bord (JS) manipule cet id")
 
+    def test_climb_segment_seed_rejects_malformed_or_unsafe_ids(self):
+        """Revue #142 : jamais un identifiant de segment faux produit en silence — forme
+        stricte `i<chiffres>` (pas de `lstrip`), graine bornée par Number.MAX_SAFE_INTEGER."""
+        for bad in ("ii123", "123", "i", "i12a"):
+            with self.assertRaises(ValueError, msg=bad):
+                VM.segment_seed(bad)
+        top = VM.MAX_SEGMENT_SEED - VM.INTERVALS_SEED_OFFSET
+        self.assertEqual(VM.segment_seed(f"i{top}"), VM.MAX_SEGMENT_SEED)
+        self.assertLess(VM.MAX_SEGMENT_SEED * VM.SEGMENT_ID_CLIMB_MULTIPLIER + 9999, 2 ** 53)
+        with self.assertRaises(ValueError):
+            VM.segment_seed(f"i{top + 1}")
+        with self.assertRaises(ValueError):
+            VM.segment_seed(-1)
+
 
 class TestIntervalsSampleIngestion(Workspace):
     def _records(self, n=20):

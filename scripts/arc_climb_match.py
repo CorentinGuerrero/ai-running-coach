@@ -80,6 +80,7 @@ Stdlib uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import math
+import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # Tolérance de position (#49, critère d'acceptation : « robuste aux petites variations de
@@ -152,15 +153,30 @@ SEGMENT_ID_CLIMB_MULTIPLIER = 10_000
 # le CLI (`--segment`) et les liens `#/montee/<id>` déjà mémorisés. À reconsidérer
 # dans une évolution dédiée si un troisième espace d'identifiants apparaît.
 INTERVALS_SEED_OFFSET = 500_000_000_000
+# Plus grande graine dont les identifiants de segment (`graine × SEGMENT_ID_CLIMB_MULTIPLIER
+# + indice`) restent sous `Number.MAX_SAFE_INTEGER` (2⁵³ − 1) — au-delà, le tableau de bord
+# arrondirait silencieusement l'identifiant. Chiffres Intervals.icu admis : < ~4·10¹¹.
+MAX_SEGMENT_SEED = (2 ** 53 - 1) // SEGMENT_ID_CLIMB_MULTIPLIER - 1
+_INTERVALS_ID_RE = re.compile(r"^i(\d+)$")   # même forme que `arc_samples.INTERVALS_ID_RE`
 
 
 def segment_seed(ref) -> int:
     """Graine entière de `climb_segment.id` pour l'identifiant externe d'une séance :
     le `garmin_activity_id` tel quel, ou `INTERVALS_SEED_OFFSET + chiffres` pour un
-    `intervals_activity_id` (`i123456789` → 500 123 456 789) — voir ASSUMPTIONS["segment_id"]."""
+    `intervals_activity_id` (`i123456789` → 500 123 456 789) — voir ASSUMPTIONS["segment_id"].
+    `ValueError` sur un identifiant mal formé ou une graine au-delà de `MAX_SEGMENT_SEED` :
+    jamais un identifiant faux produit en silence."""
     if isinstance(ref, str):
-        return INTERVALS_SEED_OFFSET + int(ref.lstrip("i"))
-    return int(ref)
+        match = _INTERVALS_ID_RE.match(ref)
+        if not match:
+            raise ValueError(f"identifiant Intervals.icu invalide : {ref!r} (attendu « i » + chiffres)")
+        seed = INTERVALS_SEED_OFFSET + int(match.group(1))
+    else:
+        seed = int(ref)
+    if not 0 <= seed <= MAX_SEGMENT_SEED:
+        raise ValueError(f"graine de segment hors bornes pour {ref!r} : {seed} (max {MAX_SEGMENT_SEED}, "
+                         "Number.MAX_SAFE_INTEGER côté tableau de bord)")
+    return seed
 
 
 ASSUMPTIONS = {

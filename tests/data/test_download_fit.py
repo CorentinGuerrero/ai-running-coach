@@ -456,6 +456,57 @@ class TestIntervalsDownload(unittest.TestCase):
             self.assertNotIsInstance(cm.exception, D.IntervalsUnavailable)
             self.assertIn("clé API", str(cm.exception))
 
+    def test_403_and_429_have_dedicated_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(D.IntervalsError) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": _http_error(403)}, []))
+            self.assertIn("autre athlète", str(cm.exception))
+            with self.assertRaises(D.IntervalsError) as cm:
+                D._download_one_intervals("i1", Path(tmp), False, "k", opener=_fake_opener({
+                    "/activity/i1": _http_error(429)}, []))
+            self.assertNotIsInstance(cm.exception, D.IntervalsUnavailable)
+            self.assertIn("réessayer plus tard", str(cm.exception))
+
+
+class TestBatchExitCode(unittest.TestCase):
+    """Revue #142 : seul un FAIL réel fait sortir en 1 — une activité INDISPONIBLE
+    (import Strava, saisie manuelle) ou déjà présente n'est pas une panne, sinon
+    `daily-sync.sh` signalerait un échec un jour avec une seule séance Strava."""
+
+    @staticmethod
+    def _run(outcomes, skipped=()):
+        def fetch(aid):
+            if outcomes[aid] == "unavailable":
+                raise D.IntervalsUnavailable("import Strava")
+            if outcomes[aid] == "fail":
+                raise D.IntervalsError("HTTP 500")
+
+        with patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()):
+            return D._download_all(list(outcomes), fetch, lambda aid: aid in skipped)
+
+    def test_only_unavailable_is_not_a_failure(self):
+        counts = self._run({"i1": "unavailable", "i2": "unavailable"})
+        self.assertEqual(counts, {"ok": 0, "unavailable": 2, "skipped": 0, "failed": 0})
+
+    def test_all_skipped_is_not_a_failure(self):
+        counts = self._run({"i1": "ok", "i2": "ok"}, skipped={"i1", "i2"})
+        self.assertEqual(counts, {"ok": 0, "unavailable": 0, "skipped": 2, "failed": 0})
+
+    def test_a_real_failure_is_counted_even_among_successes(self):
+        counts = self._run({"i1": "ok", "i2": "fail", "i3": "unavailable"})
+        self.assertEqual(counts, {"ok": 1, "unavailable": 1, "skipped": 0, "failed": 1})
+
+    def test_main_exit_code_follows_real_failures_only(self):
+        for outcome, expected in (("unavailable", 0), ("fail", 1)):
+            with tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(D, "_intervals_api_key", return_value="k"), \
+                    patch.object(D, "_download_one_intervals", side_effect=(
+                        D.IntervalsUnavailable("Strava") if outcome == "unavailable" else D.IntervalsError("x"))), \
+                    patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()):
+                rc = D.main(["--source", "intervals", "--output-dir", tmp, "i1"])
+            self.assertEqual(rc, expected, outcome)
+
 
 class TestIntervalsIdsFromMarkdown(unittest.TestCase):
     def _md(self, data: dict) -> str:

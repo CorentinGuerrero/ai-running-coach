@@ -316,9 +316,16 @@ def _intervals_get(path: str, api_key: str, opener=None) -> bytes:
         with (opener or urllib.request.urlopen)(req, timeout=_HTTP_TIMEOUT_S) as resp:
             return resp.read()
     except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise IntervalsError(f"HTTP {exc.code} sur {path} : clé API Intervals.icu refusée "
+        if exc.code == 401:
+            raise IntervalsError(f"HTTP 401 sur {path} : clé API Intervals.icu refusée "
                                  "(régénérer la clé : https://intervals.icu/settings, section Developer)") from exc
+        if exc.code == 403:
+            raise IntervalsError(f"HTTP 403 sur {path} : accès refusé — clé API Intervals.icu refusée, ou "
+                                 "activité d'un autre athlète (régénérer la clé : https://intervals.icu/settings, "
+                                 "section Developer)") from exc
+        if exc.code == 429:
+            raise IntervalsError(f"HTTP 429 sur {path} : limite de requêtes Intervals.icu atteinte — "
+                                 "réessayer plus tard") from exc
         if exc.code == 404:
             raise IntervalsUnavailable(f"HTTP 404 sur {path} : activité introuvable, ou sans fichier FIT "
                                        "(saisie manuelle)") from exc
@@ -528,7 +535,8 @@ def main(argv: list[str] | None = None) -> int:
 
     ids = _parse_ids(args.activity_ids, source, ap)
     if args.from_dir:
-        ids = sorted(set(ids + _ids_from_dir(args.from_dir, source)), key=str)
+        # Entiers Garmin en ordre numérique (9 avant 10), puis identifiants Intervals.icu.
+        ids = sorted(set(ids + _ids_from_dir(args.from_dir, source)), key=lambda x: (isinstance(x, str), x))
     if not ids:
         ap.error("aucun identifiant fourni (args ou --from-dir)")
 
@@ -554,25 +562,37 @@ def main(argv: list[str] | None = None) -> int:
         def fetch(aid):
             return _download_one(client, aid, out_dir, args.json)
 
-    ok = unavailable = 0
+    counts = _download_all(ids, fetch, lambda aid: _should_skip_download(
+        out_dir / f"{aid}.fit", out_dir, aid, overwrite=args.overwrite, want_json=args.json))
+    suffix = f", {counts['unavailable']} sans FIT disponible" if counts["unavailable"] else ""
+    if counts["skipped"]:
+        suffix += f", {counts['skipped']} déjà présents"
+    print(f"{counts['ok']}/{len(ids)} téléchargements OK dans {out_dir}{suffix}")
+    return 1 if counts["failed"] else 0
+
+
+def _download_all(ids, fetch, should_skip) -> dict:
+    """Télécharge chaque identifiant et compte les issues. Seul un `FAIL` (erreur réelle :
+    réseau, clé refusée, FIT illisible…) est une panne : une activité INDISPONIBLE
+    (import Strava, saisie manuelle) ou déjà présente n'en est pas une — sinon un jour
+    avec une seule séance Strava ferait échouer `daily-sync.sh` en headless."""
+    counts = {"ok": 0, "unavailable": 0, "skipped": 0, "failed": 0}
     for aid in ids:
-        dst = out_dir / f"{aid}.fit"
-        if _should_skip_download(dst, out_dir, aid, overwrite=args.overwrite, want_json=args.json):
+        if should_skip(aid):
             print(f"skip {aid} (existe) — --overwrite pour forcer")
+            counts["skipped"] += 1
             continue
         try:
             fetch(aid)
-            ok += 1
+            counts["ok"] += 1
         except IntervalsUnavailable as e:
             # Pas une panne : la séance reste valide sans échantillons — raison dite, puis on continue.
-            unavailable += 1
+            counts["unavailable"] += 1
             print(f"INDISPONIBLE {aid}: {e}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001
+            counts["failed"] += 1
             print(f"FAIL {aid}: {e}", file=sys.stderr)
-    suffix = f", {unavailable} sans FIT disponible" if unavailable else ""
-    print(f"{ok}/{len(ids)} téléchargements OK dans {out_dir}{suffix}")
-    return 0 if ok else 1
-
+    return counts
 
 if __name__ == "__main__":
     sys.exit(main())
