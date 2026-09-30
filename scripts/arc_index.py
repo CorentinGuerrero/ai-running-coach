@@ -221,7 +221,7 @@ import statistics
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_climb as VC  # noqa: E402
@@ -3269,8 +3269,8 @@ def _equipment_defs(conn) -> List[dict]:
 
 def _equipment_activities(conn) -> List[dict]:
     activities = [dict(r) for r in conn.execute(
-        "SELECT sport, date, distance_m, duration_s, gear_ids, garmin_activity_id, intervals_activity_id, "
-        "source_path FROM activity WHERE gear_ids IS NOT NULL")]
+        "SELECT id, name, sport, date, distance_m, duration_s, gear_ids, garmin_activity_id, "
+        "intervals_activity_id, source_path FROM activity WHERE gear_ids IS NOT NULL")]
     for a in activities:
         try:
             a["gear_ids"] = [g for g in json.loads(a["gear_ids"]) if isinstance(g, str)]
@@ -3987,14 +3987,15 @@ def _inspection_rows(conn, gear_id: Optional[str] = None) -> List[dict]:
     return rows
 
 
-def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] = None) -> dict:
+def gear_inspections(conn, gear_id: Optional[str] = None, today: Optional[date] = None,
+                     mileage: Optional[dict] = None) -> dict:
     """Inspections photo par paire (#135) — commande « inspections » et `/api/summary.gear_inspections`.
 
     Rend `{"interval_m", "gear": [...], "due": [gear_id…]}` : par paire, `inspections` (récentes d'abord),
     `latest`, `condition_change` (deux dernières), `km_since_inspection_m` et `due`/`due_reason` (rappel
     « inspection conseillée », jamais imposé — `arc_metrics.ASSUMPTIONS["gear_inspection"]`). N'est PAS
     soumis à `[health].morning_check` (aucune donnée de santé) ni à `[data].source`."""
-    shoes = gear_mileage(conn, today)["shoes"]
+    shoes = (mileage if mileage is not None else gear_mileage(conn, today))["shoes"]   # `mileage` : déjà calculé (#147)
     ignored = {r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear WHERE ignored = 1")}
     entries = M.gear_inspection_status(shoes, _inspection_rows(conn), ignored=ignored)
     if gear_id:
@@ -4014,23 +4015,125 @@ def _activities_of_gear(conn, gear_id: str, today: Optional[date]) -> List[dict]
             if owner == gear_id]
 
 
-def gear_career(conn, gear_id: str, today: Optional[date] = None) -> dict:
+def gear_career(conn, gear_id: str, today: Optional[date] = None, mileage: Optional[dict] = None,
+                acts: Optional[List[dict]] = None) -> dict:
     """Bilan de carrière d'une paire (#135, item 7) — commande « gear-career --gear ID » : km, séances,
     courses (intensité PLANIFIÉE `race` le jour de la séance), meilleurs efforts (séances à splits),
     dernière inspection. Rend `{"error": ...}` si `gear_id` est inconnu du profil ET des activités."""
-    shoes = gear_mileage(conn, today)
+    shoes = mileage if mileage is not None else gear_mileage(conn, today)
     shoe = next((sh for sh in shoes["shoes"] if sh["gear_id"] == gear_id), None)
     if shoe is None:
         unknown = next((u for u in shoes["unknown"] if u["gear_id"] == gear_id), None)
         if unknown is None:
             return {"error": f"paire inconnue : {gear_id}"}
         shoe = {"gear_id": gear_id, "name": gear_id, "distance_m": unknown["distance_m"], "retired": False}
-    acts = _activities_of_gear(conn, gear_id, today)
-    for act in acts:
+    if acts is None:
+        acts = _activities_of_gear(conn, gear_id, today)
+    for act in acts:    # `is_race`/`splits` posés en place : `gear_detail` les réutilise (#147)
         act["is_race"] = planned_intensity_for(conn, act["date"], act["sport"]) == "race"
         act["splits"] = [dict(r) for r in conn.execute(
             "SELECT km, distance_m, duration_s FROM activity_split WHERE activity_id = ?", (act["id"],))]
     return M.gear_career(shoe, acts, _inspection_rows(conn, gear_id))
+
+
+def _monthly_km(acts: List[dict]) -> List[dict]:
+    """Kilométrage par mois civil (`AAAA-MM`, ordre chronologique, mois vides intercalés à 0 pour un
+    axe continu) des séances DÉJÀ attribuées — le départ (`start_m`) n'est daté nulle part : il
+    n'entre pas dans ce graphe (dit à l'écran)."""
+    totals: Dict[str, float] = {}
+    for a in acts:
+        if a.get("date") and a.get("distance_m"):
+            totals[a["date"][:7]] = totals.get(a["date"][:7], 0.0) + a["distance_m"]
+    if not totals:
+        return []
+    y, m = (int(v) for v in min(totals).split("-"))
+    ey, em = (int(v) for v in max(totals).split("-"))
+    out = []
+    while (y, m) <= (ey, em):
+        key = f"{y:04d}-{m:02d}"
+        out.append({"month": key, "distance_m": round(totals.get(key, 0.0))})
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def gear_detail(conn, gear_id: str, today: Optional[date] = None) -> Optional[dict]:
+    """Fiche d'une paire ou d'un objet d'équipement (#147) — `/api/gear/<id>`. `None` si `gear_id` est
+    inconnu du profil ET des séances. Bâtie sur les MÊMES fonctions que le kilométrage et le bilan de
+    carrière (`gear_mileage`, `gear_career`, `_activities_of_gear` → `M.attribute_gear`,
+    `equipment_usage`) : aucune règle d'attribution réécrite ici."""
+    today = today or date.today()
+    ignored_row = conn.execute("SELECT name, garmin_uuid FROM gear WHERE gear_id = ? AND ignored = 1",
+                               (gear_id,)).fetchone()
+    if ignored_row is not None:
+        insp = gear_inspections(conn, gear_id, today)
+        return {"kind": "shoe", "gear_id": gear_id, "name": ignored_row["name"] or gear_id, "ignored": True,
+                "garmin_linked": bool(ignored_row["garmin_uuid"]), "sessions": [], "monthly": [],
+                "inspections": (insp["gear"][0] if insp.get("gear") else None)}
+    shoes = gear_mileage(conn, today)
+    known_shoe = any(sh["gear_id"] == gear_id for sh in shoes["shoes"])
+    unknown_shoe = any(u["gear_id"] == gear_id for u in shoes["unknown"])
+    if known_shoe or unknown_shoe:
+        acts = _activities_of_gear(conn, gear_id, today)
+        career = gear_career(conn, gear_id, today, mileage=shoes, acts=acts)    # pose `is_race` sur `acts`
+        shoe = next((sh for sh in shoes["shoes"] if sh["gear_id"] == gear_id), None)
+        row = conn.execute("SELECT garmin_uuid FROM gear WHERE gear_id = ?", (gear_id,)).fetchone()
+        sessions = [{"id": a["id"], "date": a["date"], "name": a["name"], "sport": a["sport"],
+                     "distance_m": a["distance_m"], "duration_s": a["duration_s"], "is_race": a["is_race"]}
+                    for a in sorted(acts, key=lambda a: (a["date"] or "", a["id"]), reverse=True)]
+        insp = gear_inspections(conn, gear_id, today, mileage=shoes)
+        return {"kind": "shoe", "gear_id": gear_id, "name": career["name"], "unknown": shoe is None,
+                "retired": bool(career.get("retired")), "shoe": shoe, "career": career,
+                "garmin_linked": bool(row and row["garmin_uuid"]), "monthly": _monthly_km(acts),
+                "sessions": sessions,
+                "inspections": (insp["gear"][0] if insp.get("gear") else None)}
+    usage = equipment_usage(conn, today)
+    item = next((i for i in usage["items"] if i["gear_id"] == gear_id), None)
+    unknown = next((u for u in usage["unknown"] if u["gear_id"] == gear_id), None)
+    if item is None and unknown is None:
+        return None
+    category = item.get("category") if item else None
+    sessions = []
+    maintenance = (item or {}).get("maintenance_date")
+    for a in _equipment_activities(conn):
+        if M.equipment_session_counts(a, gear_id, category, today.isoformat()):
+            # `counted` : même règle qu'`equipment_usage` — une séance d'avant (ou du jour de) le
+            # dernier entretien n'entre plus dans les compteurs des déclencheurs.
+            sessions.append({"id": a["id"], "date": a["date"], "name": a["name"], "sport": a["sport"],
+                             "distance_m": a["distance_m"], "duration_s": a["duration_s"],
+                             "counted": not (maintenance and (not a["date"] or a["date"] <= maintenance))})
+    sessions.sort(key=lambda s: (s["date"] or "", s["id"]), reverse=True)
+    names = {i["gear_id"]: i["name"] for i in usage["items"]}
+    kits = {k: [{"gear_id": g, "name": names.get(g, g)} for g in usage["kits"].get(k, [])]
+            for k in (item.get("kits") or [])} if item else {}
+    return {"kind": "equipment", "gear_id": gear_id, "name": (item or {}).get("name") or gear_id,
+            "unknown": item is None, "retired": bool((item or {}).get("retired")),
+            "item": item, "unknown_usage": unknown, "kits": kits, "sessions": sessions}
+
+
+def gear_of_activity(conn, activity_id: int, today: Optional[date] = None) -> dict:
+    """Matériel d'UNE séance (#147, page séance) : la chaussure attribuée par la règle unique
+    `M.attribute_gear` (explicite, sinon défaut) et l'équipement cité dans `gear_ids`."""
+    today = today or date.today()
+    row = conn.execute("SELECT id, name, duration_s, sport, distance_m, gear_id, gear_source, date, gear_ids "
+                       "FROM activity WHERE id = ?", (activity_id,)).fetchone()
+    out: Dict[str, Any] = {"shoe": None, "equipment": []}
+    if row is None:
+        return out
+    act = dict(row)
+    defs = _gear_defs(conn)
+    for _act, owner in M.attribute_gear([act], defs, today):
+        d = next((g for g in defs if g["gear_id"] == owner), None)
+        out["shoe"] = {"gear_id": owner, "name": (d or {}).get("name") or owner, "unknown": d is None,
+                       "retired": bool((d or {}).get("retired")), "source": "declared" if act.get("gear_id") else "default"}
+    try:
+        ids = [g for g in json.loads(act["gear_ids"] or "[]") if isinstance(g, str)]
+    except (TypeError, ValueError):
+        ids = []
+    names = {r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM equipment")}
+    shoe_ids = {r["gear_id"] for r in conn.execute("SELECT gear_id FROM gear")}   # règle d'`equipment_usage`
+    out["equipment"] = [{"gear_id": g, "name": names.get(g) or g, "unknown": g not in names}
+                        for g in dict.fromkeys(ids) if g not in shoe_ids]
+    return out
 
 
 def build_parser() -> argparse.ArgumentParser:

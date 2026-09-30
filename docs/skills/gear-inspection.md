@@ -46,7 +46,7 @@ jamais un diagnostic.
   une analyse de foulée en laboratoire
 
 Dans le tableau de bord, chaque inspection rejoint l'historique de sa paire (vue
-Performance) :
+[Matériel](../dashboard/views.md#materiel)) :
 
 ![Inspections photo dans le tableau de bord](../assets/dashboard/inspections.webp)
 

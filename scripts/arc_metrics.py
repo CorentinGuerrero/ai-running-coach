@@ -1938,6 +1938,18 @@ def equipment_sports(category: Optional[str]) -> Optional[Tuple[str, ...]]:
     return EQUIPMENT_CATEGORY_SPORTS.get(category) if category else None
 
 
+def equipment_session_counts(act: dict, gear_id: str, category: Optional[str], today_iso: Optional[str]) -> bool:
+    """Une séance compte-t-elle pour l'objet `gear_id` ? MÊME filtre que la boucle d'`equipment_usage`
+    (`gear_ids` cite l'objet, pas postérieure à `today`, sport de sa catégorie) — utilisé par la
+    fiche `/api/gear/<id>` (#147) pour lister EXACTEMENT les séances comptées, jamais une variante."""
+    if gear_id not in (act.get("gear_ids") or []):
+        return False
+    if today_iso and act.get("date") and act["date"] > today_iso:
+        return False
+    sports = equipment_sports(category)
+    return sports is None or act.get("sport") in sports
+
+
 def equipment_usage(activities: List[dict], equipment_defs: List[dict], today: Optional[date] = None,
                     run_refs: Optional[Iterable[str]] = None, last_pass: Optional[date] = None,
                     known_ids: Iterable[str] = ()) -> dict:
