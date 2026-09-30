@@ -600,6 +600,16 @@ kilomètre : pas de graphique, c'est normal.
   donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
   récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
   et le rôle `usage:` déclaré s'affiche à côté du nom.
+- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
+  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
+  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
+  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
+  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
+  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
+  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
+  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
+  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
+  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
 - **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
   récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
   et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de
@@ -635,8 +645,17 @@ divergent disent que le terrain ou la forme du jour pèsent.
 
 *La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
 leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
-visible en grisé. Liste de chaussures d'illustration, kilométrages calculés sur les
-séances réelles du workspace des captures.*
+visible en grisé ; la dernière inspection photo (#135) s'affiche à côté (« inspectée
+22 sept. », état « Usure visible ») et « Inspection conseillée » signale une paire à
+inspecter. Liste de chaussures d'illustration, kilométrages calculés sur les séances
+réelles du workspace des captures.*
+
+![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
+
+*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
+conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
+relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
+schématiques), jamais de vraies photos dans le dépôt.*
 
 **Équipement (#134)** — sous la carte Matériel, un tableau pour tout ce qui n'est pas
 chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,

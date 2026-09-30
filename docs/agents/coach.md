@@ -118,6 +118,19 @@ N h | N séances | N jours`, le premier atteint déclenche). Le coach :
   tout objet sous alerte ou à 90 %, jamais un seuil que vous n'avez pas déclaré ;
 - rappelle avant une séance de nuit (batterie de la frontale) ou une sortie longue (hygiène
   de la poche et des flasques) — un rappel, jamais un blocage.
+### Inspection photo des chaussures (#135)
+
+Le coach **propose** (jamais ne l'impose) une inspection photo d'une paire environ
+tous les 200 km, à l'alerte de seuil ou sur demande, d'après
+`python3 scripts/arc_index.py inspections` (`due`) — une seule fois par conversation,
+et **jamais** en synchronisation automatique. Il charge le skill
+[`gear-inspection`](../skills/gear-inspection.md) : protocole photo, état 🟢🟡🟠🔴 justifié
+visuellement, comparaison avec l'inspection précédente de la même paire, indices de
+foulée formulés comme des indices. Asymétrie marquée ou lien plausible avec une
+douleur : relais à `medical` **seulement s'il est activé**, sinon suggestion d'un
+kiné ou d'une analyse de foulée en laboratoire. Quand une paire passe en « retirée »,
+`python3 scripts/arc_index.py gear-career --gear <id>` donne son bilan de carrière
+(km, séances, courses, meilleurs efforts si des splits existent, dernière inspection).
 
 ### Débrief post-course (#61)
 
@@ -213,6 +226,7 @@ pourquoi, ou rien du tout en réponse brève.
 | `course-comparison` | pour comparer des séances sur le même parcours |
 | `fit-download` | quand une analyse fine (FIT) est nécessaire et que le MCP a échoué |
 | `gpx-analysis` | pour analyser un GPX soi-même quand `course-strategist` n'est pas installé |
+| `gear-inspection` | pour proposer ou mener une inspection photo des chaussures, ou résumer la carrière d'une paire retirée |
 | `log` | pour traiter une saisie libre `/log` (ravitaillement, douleur, RPE) |
 | `coach-doctor` | en cas de sync échouée ou d'erreur MCP qui sent l'installation cassée |
 

@@ -13,7 +13,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | Composant | Description |
 |---|---|
 | 🧠 **4 agents spécialisés** | `coach`, `course-strategist`, `medical`, `nutritionist` — installez seulement ceux que vous voulez |
-| 🛠️ **18 skills** | commandes courtes `/today` `/why` `/week` `/race` `/log`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, etc. |
+| 🛠️ **19 skills** | commandes courtes `/today` `/why` `/week` `/race` `/log`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, inspection photo des chaussures, etc. |
 | 📡 **Accès Garmin Connect** | via `garmin-mcp` (mode direct, liste blanche d'outils) — passerelle `leanproxy-mcp` optionnelle |
 | 🚀 **Installation automatisée** | un script pour installer et configurer tout (uv, Garmin, IDE) |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
@@ -70,7 +70,7 @@ Le script installe et configure automatiquement :
 1. **uv** (gestionnaire Python)
 2. **garmin-mcp** + **garmin-mcp-auth** (accès Garmin Connect)
 3. La configuration de votre **IDE** (Claude Code, GitHub Copilot, OpenCode, Gemini CLI, Cursor, Windsurf) — serveur MCP `garmin` en mode direct avec liste blanche d'outils
-4. Les dossiers de travail (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/`)
+4. Les dossiers de travail (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/`)
 
 ### Options du script
 

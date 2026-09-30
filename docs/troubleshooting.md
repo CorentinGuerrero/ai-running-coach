@@ -157,7 +157,7 @@ la demande de confiance, puis vérifiez avec `/mcp`.
 
 ### Les dossiers de travail sont vides
 
-Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/` sont créés par le script d'installation. Ils sont **exclus du dépôt** (voir `.gitignore`).
+Les dossiers `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/` sont créés par le script d'installation. Ils sont **exclus du dépôt** (voir `.gitignore`).
 
 ### Les données Garmin ne se synchronisent pas
 

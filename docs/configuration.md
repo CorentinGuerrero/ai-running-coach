@@ -304,7 +304,7 @@ responses = "auto"  # auto = même langue que la requête de l'utilisateur
 
 | Clé | Effet |
 |---|---|
-| `documents` | Langue des fichiers Markdown écrits par les agents/skills (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`) — titres, tableaux, labels, contenu. Défaut `fr`. |
+| `documents` | Langue des fichiers Markdown écrits par les agents/skills (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`) — titres, tableaux, labels, contenu. Défaut `fr`. |
 | `responses` | Langue des réponses à l'utilisateur dans la conversation. `auto` (défaut) reprend la langue de la requête ; une valeur explicite (`en`, `nl`…) la fige, y compris pour les commandes headless (`/garmin-daily-sync`) qui n'ont pas de requête à imiter. |
 
 Les instructions des agents/skills restent en anglais ou en français selon le
