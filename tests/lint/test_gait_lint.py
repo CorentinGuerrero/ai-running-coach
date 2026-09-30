@@ -122,6 +122,36 @@ class TestWearContrast(unittest.TestCase):
         self.assertNotRegex(css, r"\.wear__sev--(moderate|marked)\s*\{\s*color:\s*var\(--(yellow|orange)\)")
 
 
+class TestGaitTableResponsive(unittest.TestCase):
+    """La table de la carte Foulée doit rester lisible à 375 px (vérifié au navigateur : pas de défilement
+    horizontal dans la carte) : règles mobiles présentes dans le `@media (max-width: 36em)` existant."""
+
+    css = (REPO / "web/css/app.css").read_text(encoding="utf-8")
+
+    def mobile_block(self) -> str:
+        start = self.css.index("@media (max-width: 36em)")
+        depth, i = 0, self.css.index("{", start)
+        begin = i
+        while True:
+            depth += {"{": 1, "}": -1}.get(self.css[i], 0)
+            if depth == 0:
+                return self.css[begin:i + 1]
+            i += 1
+
+    def test_mobile_rules(self):
+        block = self.mobile_block()
+        self.assertRegex(block, r"\.gait-table \.gait-col-n[^{]*\{\s*display:\s*none")      # colonne « Séances » repliée
+        self.assertRegex(block, r"\.gait-table \.gait-n-inline\s*\{\s*display:\s*block")     # …sous le nom de la grandeur
+        self.assertRegex(block, r"\.gait-table \.gait-counts\s*\{\s*display:\s*block")       # effectifs sur une 2e ligne
+        self.assertRegex(block, r"\.gait-table \.gait-short\s*\{\s*display:\s*inline")       # en-tête raccourci
+        self.assertRegex(self.css, r"\.nowrap\s*\{\s*white-space:\s*nowrap")
+
+    def test_desktop_hides_mobile_only_bits_and_markup_uses_the_classes(self):
+        self.assertRegex(self.css, r"\.gait-short, \.gait-n-inline\s*\{\s*display:\s*none")
+        for cls in ("gait-table", "gait-col-n", "gait-n-inline", "gait-counts", "gait-short", "gait-long", "nowrap"):
+            self.assertIn(cls, APP_JS)
+
+
 class TestDocsReferences(unittest.TestCase):
     def test_views_documents_the_card_and_its_screenshot(self):
         self.assertIn("### Foulée", VIEWS)

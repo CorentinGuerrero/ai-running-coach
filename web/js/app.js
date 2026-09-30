@@ -1043,9 +1043,9 @@ const NB = " ";
 const GAIT_ARROW = { up: "↑", down: "↓", flat: "→" };
 function gaitTrend(direction, magnitudeText) {
   if (!direction) return "";
-  if (direction === "flat") return `<span aria-label="stable">${GAIT_ARROW.flat}</span> stable`;
+  if (direction === "flat") return `<span class="nowrap"><span aria-label="stable">${GAIT_ARROW.flat}</span> stable</span>`;
   const sign = direction === "up" ? "+" : "\u2212";
-  return `<span aria-label="${direction === "up" ? "en hausse" : "en baisse"}">${GAIT_ARROW[direction]}</span> ${sign}${magnitudeText}`;
+  return `<span class="nowrap"><span aria-label="${direction === "up" ? "en hausse" : "en baisse"}">${GAIT_ARROW[direction]}</span> ${sign}${magnitudeText}</span>`;
 }
 const GAIT_ROWS = [
   ["ground_contact_s", "Temps de contact au sol", (v) => `${F.num(v * 1000, 0)}${NB}ms`, (d) => `${F.num(Math.abs(d) * 1000, 0)}${NB}ms`],
@@ -1091,9 +1091,9 @@ function gaitCard(g) {
   const dyn = g.dynamics || {};
   const rowsHtml = GAIT_ROWS.filter(([k]) => dyn[k]).map(([k, label, fmt, fmtDelta]) => {
     const d = dyn[k];
-    const change = d.change != null ? `${gaitTrend(d.direction, fmtDelta(d.change))} <small class="muted">(${d.recent_n} récentes / ${d.prior_n} avant)</small>` : `<span class="muted">pas assez de séances de chaque côté</span>`;
+    const change = d.change != null ? `${gaitTrend(d.direction, fmtDelta(d.change))} <small class="muted gait-counts">(${d.recent_n} récentes / ${d.prior_n} avant)</small>` : `<span class="muted">pas assez de séances de chaque côté</span>`;
     const extra = k === "stance_balance_pct" ? `<br><small class="muted">écart moyen à 50${NB}% : ${F.num(d.mean_gap_pts, 1)}${NB}pt</small>` : "";
-    return `<tr><th scope="row">${F.esc(label)}</th><td class="num">${fmt(d.mean)}${extra}</td><td>${change}</td><td class="num">${d.n}</td></tr>`;
+    return `<tr><th scope="row">${F.esc(label)}<small class="muted gait-n-inline">${d.n} séance${d.n > 1 ? "s" : ""}</small></th><td class="num">${fmt(d.mean)}${extra}</td><td class="gait-trend">${change}</td><td class="num gait-col-n">${d.n}</td></tr>`;
   }).join("");
   const bal = dyn.stance_balance_pct;
   const balanceNote = bal
@@ -1102,7 +1102,7 @@ function gaitCard(g) {
   const noDynamics = !conf.sessions_with_dynamics;      // la cadence seule remplit une ligne : elle ne dit rien de la dynamique
   const refreshHint = `<p class="muted">Aucune séance de course de la fenêtre ne porte de dynamique de course (temps de contact, balance, oscillation…) : les échantillons FIT sont absents, ou l'index a été reconstruit avant l'extraction. Pour les FIT déjà téléchargés : <code>python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics</code>, puis rechargez.</p>`;
   const table = rowsHtml
-    ? `${noDynamics ? refreshHint : ""}<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Grandeur</th><th scope="col" class="num">Moyenne</th><th scope="col">4 dernières semaines vs avant</th><th scope="col" class="num">Séances</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+    ? `${noDynamics ? refreshHint : ""}<div class="table-wrap"><table class="data data--compact gait-table"><thead><tr><th scope="col">Grandeur</th><th scope="col" class="num">Moyenne</th><th scope="col"><span class="gait-long">4 dernières semaines vs avant</span><span class="gait-short">4 sem. vs avant</span></th><th scope="col" class="num gait-col-n">Séances</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
     : refreshHint;
 
   const charts = [];

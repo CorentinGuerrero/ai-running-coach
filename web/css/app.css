@@ -320,6 +320,10 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .wear__sev--marked::before { background: var(--orange); }
 /* Carte « Foulée » (#151) */
 .gait h3 { margin: 1.1rem 0 0.3rem; font-size: 0.98rem; }
+.nowrap { white-space: nowrap; }
+.gait-short, .gait-n-inline { display: none; }
+.gait-n-inline { font-weight: 400; }
+.gait-table .gait-long { display: inline; }
 .gait-contradictions { margin: 0.3rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.4rem; max-width: 72ch; }
 .chart .line--gait { stroke: var(--s-rhr); }
 .chart .dot--gait { fill: var(--s-rhr); }
@@ -575,6 +579,15 @@ article.prose { background: var(--surface); border: 1px solid var(--line); borde
   .triad__bar { display: none; }
   .triad__value { width: auto; }
   .objective__text span { display: none; }
+  /* Carte Foulée (#151) : tableau lisible à 375 px — colonne « Séances » repliée sous le nom de la
+     grandeur, effectifs récent/avant sous la valeur, flèche + valeur signée jamais coupées. */
+  .gait-table th, .gait-table td { padding: 0.4rem 0.4rem; }
+  .gait-table .gait-col-n, .gait-table .gait-long { display: none; }
+  .gait-table .gait-short { display: inline; }
+  .gait-table .gait-n-inline { display: block; }
+  .gait-table .gait-counts { display: block; }
+  .gait-table .num { white-space: normal; }
+  #foulee { overflow-x: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
