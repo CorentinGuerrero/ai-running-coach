@@ -288,6 +288,17 @@ SCHEMA = {
             "ef_whole": "num+",
             "time_in_zone_s": "obj",
             "best_climb_vam_m_h": "num+",
+            # Dynamique de course (#151) : moyennes de séance de la montre Garmin (champs FIT
+            # `avg_stance_time`, `avg_stance_time_balance`, `avg_vertical_oscillation`,
+            # `avg_vertical_ratio`, `avg_step_length`), SI. Clé ABSENTE = non mesurée — jamais 0, jamais
+            # 50 % de balance. REPLI seulement : quand les échantillons FIT de la séance sont ingérés
+            # (`activity_sample`), `arc_index.py gait-summary` calcule sa propre moyenne et c'est elle qui
+            # fait foi. La balance est un ÉCART à 50 % (le côté du pourcentage n'est pas établi).
+            "avg_ground_contact_s": "num+",
+            "avg_stance_balance_pct": "gait_pct",
+            "avg_vertical_oscillation_m": "num+",
+            "avg_vertical_ratio_pct": "gait_pct",
+            "avg_step_length_m": "num+",
         },
     },
     "health": {
@@ -743,6 +754,11 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
         lo, hi = DECOUPLING_PCT_PLAUSIBLE
         if not lo <= value <= hi:
             warnings.append(f"{where} : {value} hors de la plage plausible ({lo:g} à {hi:g} %) — à vérifier")
+        return
+    if spec == "gait_pct":
+        # Pourcentage de dynamique de course (#151) : balance du temps de contact, ratio vertical.
+        if not _is_number(value) or not 0 < value < 100:
+            fail("un pourcentage strictement entre 0 et 100")
         return
     if spec == "hr":
         if not _is_number(value) or not 20 <= value <= 250:

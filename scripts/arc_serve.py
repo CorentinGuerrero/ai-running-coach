@@ -315,6 +315,11 @@ class Store:
         with self.lock:
             return I.gear_inspections(self.conn, None, today)
 
+    def gait(self, today: date, weeks: int) -> dict:
+        """Réutilise `arc_index.gait_summary` (#151) — voir aussi la CLI `gait-summary`."""
+        with self.lock:
+            return I.gait_summary(self.conn, today, weeks)
+
     def gear_detail(self, gear_id: str, today: date):
         """Réutilise `arc_index.gear_detail` (#147) — fiche d'une paire/d'un objet, `None` si inconnu."""
         with self.lock:
@@ -437,6 +442,16 @@ def api_summary(store: Store, q: dict) -> dict:
             "nutrition": (store.one("SELECT COUNT(*) AS n FROM nutrition_day") or {}).get("n", 0),
         },
     }
+
+
+def api_gait(store: Store, q: dict) -> dict:
+    """Synthèse « Foulée » (#151) : `/api/gait?weeks=N` (défaut 26, 1 à 104). Additive : ne touche à
+    aucune route existante. Délègue à `arc_index.gait_summary` (mêmes chiffres que la CLI
+    `gait-summary`) — dynamique de course mesurée, indices d'inspection, `confidence`,
+    `contradictions`. Jamais un diagnostic ; aucune donnée GPS ni de santé du matin."""
+    weeks_raw = q.get("weeks", [""])[0]
+    weeks = int(weeks_raw) if weeks_raw.isdigit() else I.GAIT_DEFAULT_WEEKS
+    return store.gait(_today(store), max(1, min(104, weeks)))
 
 
 def api_assumptions(store: Store, q: dict) -> dict:
@@ -1413,6 +1428,7 @@ ROUTES = {
     "/api/trail-shape": api_trail_shape, "/api/energy-trend": api_energy_trend,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
+    "/api/gait": api_gait,
 }
 
 # ---------------------------------------------------------------------------

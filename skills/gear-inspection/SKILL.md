@@ -113,10 +113,14 @@ de blessures… ou simplement d'un terrain camboré (route, chemin en dévers) �
 - **Historique de blessures et douleurs** : `medical/` (fichiers `*_health.md`, champ
   `pain`), section blessures du profil. Une usure asymétrique côté gauche et une douleur
   déclarée au genou gauche sont un **rapprochement**, pas une cause établie.
-- **Dynamiques de course du FIT (temps de contact au sol, équilibre G/D)** : **indisponible**
-  dans ce dépôt. Le pipeline FIT (`skills/fit-download`, `scripts/arc_samples.py`) n'extrait
-  pas ce champ et aucun KPI du projet ne l'exploite. Le dire honnêtement s'il est demandé ;
-  **ne jamais l'inventer ni le déduire**. La cadence, elle, existe mais ne dit rien de l'appui.
+- **Dynamiques de course du FIT (temps de contact au sol, balance du temps de contact,
+  oscillation…)** : extraites depuis #151 et consolidées par `python3 scripts/arc_index.py
+  gait-summary` (carte « Foulée » de la vue Santé). Le sens gauche/droite de la balance n'est
+  **pas établi** : parler d'écart à 50 %, jamais d'un pied ; ne jamais déduire une mesure d'une
+  photo. Sans mesure (source intervals.icu, capteur sans balance), la dire **indisponible** — ne jamais l'inventer.
+  Les règles d'usage détaillées de ces mesures par le coach viennent avec une story
+  ultérieure ; en attendant, ne pas présenter une mesure comme confirmant ou infirmant un
+  indice de semelle.
 - **Source de données (`[data].source`)** : rien de spécifique à Garmin ici ; le kilométrage
   de la paire vient de `arc_index.py gear`, qui lit les fichiers `activities/`, quelle que soit la source.
 

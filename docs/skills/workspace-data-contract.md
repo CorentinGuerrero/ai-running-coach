@@ -50,6 +50,16 @@ Votre profil (`planning/Runner_Profile.md`) et votre objectif
 (`planning/active_objective.md`) n'ont **pas** de bloc : vous les éditez à la
 main, et leurs puces suffisent. Gardez simplement les libellés du modèle.
 
+## Dynamique de course (clés optionnelles d'une séance)
+
+Depuis #151, une séance de course peut porter les moyennes de la dynamique de course
+Garmin, en unités SI : `avg_ground_contact_s` (temps de contact, secondes),
+`avg_stance_balance_pct` (balance du temps de contact, %), `avg_vertical_oscillation_m`
+(mètres), `avg_vertical_ratio_pct` (%) et `avg_step_length_m` (mètres). Une clé **absente**
+veut dire « non mesuré » — jamais `0`, jamais `50` pour une balance. Ce n'est qu'un repli : quand les
+échantillons FIT sont ingérés, `arc_index.py gait-summary` calcule sa propre moyenne et c'est elle
+qui fait foi. Voir la carte [Foulée](../dashboard/views.md#foulee).
+
 ## Vérifier un fichier
 
 ```bash

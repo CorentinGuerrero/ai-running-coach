@@ -198,6 +198,13 @@ UNIQUEMENT aux prévisions (`arc_race_pacing`), JAMAIS à ce listing de séances
 mesurées : `energy`/`energy --calibration` restent deux calculs INDÉPENDANTS, jamais
 l'un ne recalibre l'autre.
 
+`gait-summary [--weeks N]` (#151) rend la synthèse « Foulée » : tendances de la dynamique de course
+mesurée (temps de contact, balance du temps de contact, oscillation et ratio verticaux, longueur de
+pas, cadence) sur les séances de course (route + trail, défaut 26 semaines), indices d'attaque et
+asymétrie des inspections photo, `confidence` (effectifs) et `contradictions` (la mesure prime sur
+l'usure). Jamais un diagnostic, aucune modification de charge — voir `arc_gait.ASSUMPTIONS` et
+`arc_metrics.ASSUMPTIONS["gait"]`. Lecture seule ; `/api/gait` la sert au tableau de bord.
+
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
 <workspace>/.arc/coach.db), `--memory` (base en mémoire, rien sur disque),
@@ -231,6 +238,7 @@ import arc_decoupling as DC  # noqa: E402
 import arc_descent as DS  # noqa: E402
 import arc_durability as DU  # noqa: E402
 import arc_energy as EN  # noqa: E402
+import arc_gait as GT  # noqa: E402
 import arc_gap as G  # noqa: E402
 import arc_legacy as L  # noqa: E402
 import arc_metrics as M  # noqa: E402
@@ -287,7 +295,12 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # secondes réellement couvertes par les mesures du bucket, `arc_samples.ASSUMPTIONS
 # ["covered_s"]`). Version 30 et non 29 : #135 a déjà publié la 29 sans cette colonne — une
 # base construite en 29 doit être reconstruite, sinon l'ingestion échouerait avec « no such column ».
-SCHEMA_VERSION = 30
+# #151 : `activity_sample` gagne la dynamique de course Garmin (`ground_contact_s`,
+# `stance_balance_pct`, `vertical_oscillation_m`, `vertical_ratio_pct`, `step_length_m`, NULL quand le
+# capteur ne les fournit pas — `arc_samples.ASSUMPTIONS["running_dynamics"]`) — sans ce bump, une base déjà
+# construite n'a pas les colonnes (« no such column »). Les `activities/fit/*.json` existants n'en portent
+# pas : les re-extraire avec `download_fit.py --refresh-dynamics`.
+SCHEMA_VERSION = 31
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports", "gear")
 
@@ -658,7 +671,9 @@ CREATE TABLE metric_day (
 -- `arc_climb_match.ASSUMPTIONS["privacy"]`).
 CREATE TABLE activity_sample (
     garmin_activity_id INTEGER, source_path TEXT, t_s REAL, distance_m REAL, altitude_m REAL,
-    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, covered_s REAL
+    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, covered_s REAL,
+    ground_contact_s REAL, stance_balance_pct REAL, vertical_oscillation_m REAL, vertical_ratio_pct REAL,
+    step_length_m REAL
 );
 CREATE INDEX activity_sample_garmin ON activity_sample(garmin_activity_id);
 CREATE INDEX activity_sample_source ON activity_sample(source_path);
@@ -2086,10 +2101,12 @@ def ingest_samples(conn, workspace: Path, resolution_s: int = S.DEFAULT_RESOLUTI
         conn.executemany(
             "INSERT INTO activity_sample "
             "(garmin_activity_id, source_path, t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, "
-            "lat, lon, covered_s) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "lat, lon, covered_s, ground_contact_s, stance_balance_pct, vertical_oscillation_m, "
+            "vertical_ratio_pct, step_length_m) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(garmin_id, rel, rec["t_s"], rec["distance_m"], rec["altitude_m"],
               rec["hr_bpm"], rec["speed_ms"], rec["cadence_spm"],
-              rec.get("lat_deg"), rec.get("lon_deg"), rec.get("covered_s")) for rec in records],
+              rec.get("lat_deg"), rec.get("lon_deg"), rec.get("covered_s"),
+              *(rec.get(key) for key in S.DYNAMICS_KEYS)) for rec in records],
         )
         conn.execute(
             "INSERT OR REPLACE INTO sample_file VALUES (?, ?, ?, ?, ?, ?)",
@@ -4194,6 +4211,54 @@ def gear_of_activity(conn, activity_id: int, today: Optional[date] = None) -> di
     return out
 
 
+GAIT_DEFAULT_WEEKS = 26
+
+
+def _gait_session_rows(conn, since: date, until: date) -> List[dict]:
+    """Séances de COURSE (route + trail) de la fenêtre, avec la moyenne PONDÉRÉE (par `covered_s`, 1 s si
+    absent) de chaque grandeur de foulée sur leurs échantillons FIT — `NULL` quand aucun échantillon ne la
+    porte (jamais 0). Une seule requête, jointe par `garmin_activity_id` (comme `samples()`)."""
+    weight = "CASE WHEN covered_s IS NULL OR covered_s <= 0 THEN 1.0 ELSE covered_s END"
+    cols = []
+    for metric in GT.METRICS:
+        cols.append(f"SUM(CASE WHEN {metric_col(metric)} IS NOT NULL THEN {metric_col(metric)} * {weight} END) / "
+                    f"NULLIF(SUM(CASE WHEN {metric_col(metric)} IS NOT NULL THEN {weight} END), 0) AS {metric}")
+    marks = ",".join("?" for _ in M.RUNNING_SPORTS)
+    sql = (f"SELECT a.id AS activity_id, a.date, a.name, a.sport, a.garmin_activity_id, a.data_json, "
+           f"{', '.join('s.' + m for m in GT.METRICS)} FROM activity a LEFT JOIN ("
+           f"SELECT garmin_activity_id, {', '.join(cols)} FROM activity_sample GROUP BY garmin_activity_id) s "
+           f"ON s.garmin_activity_id = a.garmin_activity_id "
+           f"WHERE a.sport IN ({marks}) AND a.date >= ? AND a.date <= ? ORDER BY a.date, a.id")
+    return [dict(r) for r in conn.execute(sql, (*M.RUNNING_SPORTS, since.isoformat(), until.isoformat()))]
+
+
+def metric_col(metric: str) -> str:
+    return metric   # les noms de grandeur de `arc_gait.METRICS` SONT les colonnes de `activity_sample`
+
+
+def gait_summary(conn, today: Optional[date] = None, weeks: int = GAIT_DEFAULT_WEEKS) -> dict:
+    """Synthèse « Foulée » (#151) — commande « gait-summary » et `/api/gait`.
+
+    Séances de course de la fenêtre (dynamique mesurée, `arc_gait.resolve_session`) + toutes les inspections
+    indexées (indices d'attaque, asymétrie) + confiance et contradictions. Jamais un diagnostic, aucune
+    modification de charge : voir `arc_gait.ASSUMPTIONS` et `arc_metrics.ASSUMPTIONS["gait"]`."""
+    today = today or date.today()
+    weeks = max(1, min(104, int(weeks)))
+    since = today - timedelta(days=weeks * 7 - 1)
+    sessions = []
+    for row in _gait_session_rows(conn, since, today):
+        try:
+            arc = json.loads(row.pop("data_json") or "{}")
+        except (TypeError, ValueError):
+            arc = {}
+        values, notes = GT.resolve_session(row, arc if isinstance(arc, dict) else {})
+        sessions.append({"date": row["date"], "activity_id": row["activity_id"], "name": row["name"],
+                         "sport": row["sport"], "values": values, "notes": notes})
+    names = {r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear")}
+    names.update({r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear WHERE ignored = 1")})
+    return GT.gait_summary(sessions, _inspection_rows(conn), today, weeks, names)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
@@ -4201,7 +4266,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
-                                 "inspections", "gear-career"))
+                                 "inspections", "gear-career", "gait-summary"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id pour « samples »)")
     parser.add_argument("--workspace")
@@ -4216,9 +4281,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "descente, durabilité ou dépense énergétique d'une séance (garmin_activity_id)")
     parser.add_argument("--weeks", type=int, metavar="N",
                         help="commande « zones »/« decoupling »/« vam »/« descent »/« durability »/"
-                             "« energy --calibration » : polarisation ou tendance sur les N dernières "
-                             "semaines (défaut 8 pour « zones », 12 pour « decoupling »/« vam »/"
-                             "« descent »/« durability », 26 pour « energy --calibration »)")
+                             "« energy --calibration »/« gait-summary » : polarisation ou tendance sur les N "
+                             "dernières semaines (défaut 8 pour « zones », 12 pour « decoupling »/« vam »/"
+                             "« descent »/« durability », 26 pour « energy --calibration »/« gait-summary »)")
     parser.add_argument("--segment", type=int, metavar="SEGMENT_ID",
                         help="commande « climb-history » : historique complet d'un segment (#49)")
     parser.add_argument("--with-gps", action="store_true",
@@ -4358,6 +4423,10 @@ def main(argv=None) -> int:
             report.update(gear_photo_dropbox(conn, workspace))
         print(json.dumps(report, ensure_ascii=False))
         return 1 if "error" in report else 0
+    if args.command == "gait-summary":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(gait_summary(conn, today_date, args.weeks or GAIT_DEFAULT_WEEKS), ensure_ascii=False))
+        return 0
     if args.command == "gear-career":
         if not args.gear:
             raise ConfigError("commande « gear-career » : --gear GEAR_ID est obligatoire.")

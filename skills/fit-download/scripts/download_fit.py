@@ -18,6 +18,15 @@ Options:
   --json         Écrit aussi <id>.records.json (bruts fitparse) ET la copie normalisée
                  activities/fit/<id>.json (#42 — ingérée par `scripts/arc_index.py`)
   --overwrite    Ré-télécharge même si le fichier existe
+  --refresh-dynamics
+                 (#151) RÉ-EXTRAIT la dynamique de course (temps de contact, balance, oscillation et
+                 ratio verticaux, longueur de pas) depuis les `.fit` DÉJÀ présents dans le répertoire
+                 de sortie, vers `activities/fit/<id>.json`. Aucun téléchargement, aucune connexion
+                 Garmin : nécessite seulement `fitparse` (relance avec le python de garmin-mcp).
+                 N'écrit que ces JSON dérivés (jetables, jamais versionnés) — jamais un Markdown, jamais
+                 un `.fit`. Idempotent : un JSON déjà à jour est laissé tel quel. Ensuite, relancer
+                 `scripts/arc_index.py` (ou ouvrir le tableau de bord) réingère les fichiers changés.
+  --dry-run      Avec `--refresh-dynamics` : liste ce qui serait réécrit, sans rien écrire
   --python PATH  Interpréteur contenant garminconnect (auto-détecté sinon)
 
 Sans `--overwrite`, une séance déjà téléchargée est sautée — avec `--json`, ce
@@ -112,10 +121,11 @@ def pick_relaunch_candidate(candidates, prefix: str = None, executable: str = No
     return None
 
 
-def _auto_relaunch(argv: list[str]) -> None:
-    """Relance ce script avec le python de garmin-mcp si garminconnect est absent."""
+def _auto_relaunch(argv: list[str], module: str = "garminconnect") -> None:
+    """Relance ce script avec le python de garmin-mcp si `module` est absent (`garminconnect` pour
+    un téléchargement ; `fitparse` suffit pour `--refresh-dynamics`, sans connexion Garmin)."""
     try:
-        import garminconnect  # noqa: F401
+        __import__(module)
         return
     except ImportError:
         pass
@@ -128,7 +138,7 @@ def _auto_relaunch(argv: list[str]) -> None:
         sys.exit(r.returncode)
 
     print(
-        "ERREUR : module 'garminconnect' introuvable dans cet interpréteur.\n"
+        f"ERREUR : module '{module}' introuvable dans cet interpréteur.\n"
         "→ utilisez le python de garmin-mcp : --python ~/.local/share/uv/tools/garmin-mcp/bin/python3",
         file=sys.stderr,
     )
@@ -211,14 +221,10 @@ def _download_one(client, activity_id: int, out_dir: Path, want_json: bool) -> P
     return out
 
 
-def _write_records_json(fit: bytes, out: Path) -> tuple[list[dict], str | None]:
-    """Extrait les records (timestamp, lat/long, altitude, FC, cadence, power) → JSON
-    BRUT (champs `fitparse` tels quels), et le sport de la séance (message FIT
-    `session`, ex. `"running"`, `"cycling"`). Rend `(records, sport)` pour
-    `_write_canonical_samples`, qui les normalise (#42) sans reparser le FIT une
-    seconde fois — `sport` gouverne le doublement (ou non) de la cadence, spécifique
-    aux sports à pied (voir `arc_samples.CADENCE_DOUBLING_SPORTS` — un FIT vélo lu
-    sans ce paramètre verrait sa cadence, déjà complète, doublée à tort)."""
+def _read_fit(fit: bytes) -> tuple[list[dict], str | None]:
+    """Records FIT bruts (champs `fitparse` tels quels, valeurs nulles/binaires écartées) et sport
+    de la séance (message `session`, minuscules) — sans rien écrire. Partagé par l'écriture du
+    dump brut et par `--refresh-dynamics`."""
     import fitparse
 
     f = fitparse.FitFile(io.BytesIO(fit))
@@ -237,6 +243,68 @@ def _write_records_json(fit: bytes, out: Path) -> tuple[list[dict], str | None]:
         if value is not None:
             sport = str(value).lower()
             break
+    return records, sport
+
+
+def refresh_dynamics(out_dir: Path, dry_run: bool = False) -> dict:
+    """Ré-extrait la copie normalisée `<out_dir>/fit/<id>.json` de chaque `<out_dir>/<id>.fit` présent
+    (#151) — pour rattraper la dynamique de course sur les FIT déjà téléchargés avant qu'elle soit
+    extraite. Ne touche QUE ces JSON dérivés (pas de Markdown, pas de `.fit`, pas de réseau) ; les
+    clés du JSON existant autres que `records` sont conservées. Idempotent : contenu identique =
+    fichier laissé intact. Rend des compteurs `{"rewritten", "unchanged", "failed", "with_dynamics",
+    "files": [(id, statut)]}` ; `dry_run` compte sans écrire."""
+    import arc_samples as S  # noqa: E402 (sys.path déjà préparé en tête de module)
+
+    fit_dir = out_dir / "fit"
+    result: dict = {"rewritten": 0, "unchanged": 0, "failed": 0, "with_dynamics": 0, "files": []}
+    for fit_path in sorted(out_dir.glob("*.fit")):
+        if not fit_path.stem.isdigit():
+            continue
+        activity_id = int(fit_path.stem)
+        try:
+            records, sport = _read_fit(fit_path.read_bytes())
+            normalised = S.normalise_records(records, sport=sport)
+        except Exception as e:  # noqa: BLE001 — un FIT illisible ne doit pas arrêter le lot
+            print(f"FAIL {activity_id}: {e}", file=sys.stderr)
+            result["failed"] += 1
+            result["files"].append((activity_id, "failed"))
+            continue
+        if any(rec.get(k) is not None for rec in normalised for k in S.DYNAMICS_KEYS):
+            result["with_dynamics"] += 1
+        target = fit_dir / f"{activity_id}.json"
+        payload: dict = {}
+        if target.is_file():
+            try:
+                existing = json.loads(target.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    payload = existing
+            except (ValueError, OSError):
+                payload = {}
+        payload.update({"activity_id": activity_id, "records": normalised})
+        text = json.dumps(payload, ensure_ascii=False)
+        if target.is_file() and target.read_text(encoding="utf-8") == text:
+            result["unchanged"] += 1
+            result["files"].append((activity_id, "unchanged"))
+            continue
+        if not dry_run:
+            fit_dir.mkdir(parents=True, exist_ok=True)
+            _ensure_gitignore(fit_dir, "# Échantillons FIT normalisés : jetables, jamais versionnés.\n",
+                               ["*", "!.gitignore"])
+            target.write_text(text, encoding="utf-8")
+        result["rewritten"] += 1
+        result["files"].append((activity_id, "would_rewrite" if dry_run else "rewritten"))
+    return result
+
+
+def _write_records_json(fit: bytes, out: Path) -> tuple[list[dict], str | None]:
+    """Extrait les records (timestamp, lat/long, altitude, FC, cadence, power) → JSON
+    BRUT (champs `fitparse` tels quels), et le sport de la séance (message FIT
+    `session`, ex. `"running"`, `"cycling"`). Rend `(records, sport)` pour
+    `_write_canonical_samples`, qui les normalise (#42) sans reparser le FIT une
+    seconde fois — `sport` gouverne le doublement (ou non) de la cadence, spécifique
+    aux sports à pied (voir `arc_samples.CADENCE_DOUBLING_SPORTS` — un FIT vélo lu
+    sans ce paramètre verrait sa cadence, déjà complète, doublée à tort)."""
+    records, sport = _read_fit(fit)
 
     out.write_text(json.dumps(records, default=str))
     print(f"OK {len(records)} records -> {out} (sport: {sport or 'inconnu'})")
@@ -314,10 +382,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--overwrite", action="store_true", help="Réécrire même si présent")
     ap.add_argument("--from-dir", type=Path, default=None, help="Scan de fichiers MD pour activity_id")
     ap.add_argument("--python", type=Path, default=None, help="Interpréteur garminconnect (override)")
+    ap.add_argument("--refresh-dynamics", action="store_true",
+                    help="Ré-extrait la dynamique de course des .fit déjà présents (aucun téléchargement)")
+    ap.add_argument("--dry-run", action="store_true", help="Avec --refresh-dynamics : n'écrit rien")
     args = ap.parse_args(argv)
 
     if args.python:
         os.environ["GARMIN_PYTHON"] = str(args.python)
+    if args.refresh_dynamics:
+        # Hors ligne : ni `garminconnect` ni tokens — seul `fitparse` est requis.
+        _auto_relaunch(sys.argv[1:], "fitparse")
+        out_dir = args.output_dir or _activity_dir_out()
+        result = refresh_dynamics(out_dir, dry_run=args.dry_run)
+        verb = "à réécrire" if args.dry_run else "réécrits"
+        print(f"{result['rewritten']} JSON {verb}, {result['unchanged']} déjà à jour, {result['failed']} échec(s) ; "
+              f"{result['with_dynamics']} séance(s) avec dynamique de course — {out_dir / 'fit'}")
+        return 1 if result["failed"] else 0
     _auto_relaunch(sys.argv[1:])
 
     ids: list[int] = list(args.activity_ids)

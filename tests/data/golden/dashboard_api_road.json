@@ -1156,6 +1156,7 @@
           "equipment_usage": "Matériel hors chaussures (#134, `arc_index.py equipment`) : objets de la section « ### Matériel » du profil (`arc_legacy.parse_equipment`). Attribution : UNIQUEMENT explicite — une activité compte pour un objet si son `gear_ids` (liste de slugs, en plus de `gear_id` qui reste la chaussure) le cite ; aucun objet par défaut, jamais deviné du nom ni de la catégorie (un ceinture cardio portée à chaque séance se déclare par un kit ou dans `gear_ids`). Une activité sans `gear_ids` compte donc pour aucun objet. Sports : chaque catégorie déclarée par « catégorie: … » (jamais devinée) n'use l'objet que sur certains sports (`EQUIPMENT_CATEGORY_SPORTS` : bâtons = trail et randonnée ; gilet, poche, flasques, veste, semelles, lacets = course, trail, randonnée ; frontale, ceinture, autre = tout sport) — approximation du projet, pas une norme fabricant ; une séance d'un autre sport qui cite l'objet n'est pas comptée. Catégorie inconnue ou absente : objet indexé et compté sur toute séance qui le cite, mais AUCUNE alerte inventée — seuls ses déclencheurs déclarés jouent, et il n'y a aucun seuil par défaut pour le matériel (contrairement aux chaussures, 700 km). Compteurs : `distance_m` (somme de `distance_m`), `duration_s` (somme de `duration_s` — la durée totale de la séance, pas le temps en mouvement), `sessions` (nombre de séances comptées), `days` (jours civils écoulés entre `today` et la date de référence, jamais négatifs). Date de référence = `entretien`/`révisé` le plus récent, sinon `depuis` ; sans aucune des deux, `days` n'est pas calculable (déclencheur en jours inopérant, avertissement — jamais 0). Un entretien remet à zéro TOUS les compteurs des déclencheurs : les séances datées jusqu'à la date `entretien` INCLUSE sont exclues, celles datées APRÈS comptent : le coach écrit donc comme `entretien` la date de la DERNIÈRE séance faite avant l'entretien (à défaut, la veille de l'entretien), pour qu'une séance du jour faite après l'entretien reste comptée — la date de référence des jours peut ainsi précéder l'entretien réel de quelques jours (approximation du projet, prudente : l'alerte arrive plutôt plus tôt que trop tard) ; le `départ` (usage antérieur au suivi) est aussi ignoré ; les cumuls à vie restent rendus (`lifetime`). `depuis` ne filtre jamais une attribution explicite (même règle que les chaussures). Le `départ N km|h|séances` s'ajoute aux compteurs correspondants tant qu'aucun entretien n'existe ; il n'existe pas de départ en jours (les jours partent de `depuis`). Déclencheurs : « alerte N km | N h (ou NhMM) | N séances | N jours | N semaines | N mois | N ans » (semaine = 7 j, mois = 30 j, an = 365 j — approximation du projet), un segment `alerte`/`départ` sans unité lisible est ignoré AVEC un avertissement (jamais silencieux, jamais un type deviné), combinables, le premier atteint (valeur ≥ seuil) fait `alert` ; `near_threshold` = un déclencheur à ≥ 90 % sans qu'aucun soit atteint. Objet `(retirée)` : compteurs rendus, jamais d'alerte. Alerte « une seule fois » sans état persistant (`--activities` et/ou `--last-pass` fournis, clé `crossed_in_run` présente seulement alors) : déclencheurs km/h/séances = le cumul HORS les séances désignées était sous le seuil et le total l'atteint (par identifiant de séance, comme les chaussures) ; déclencheur en jours = le seuil est franchi ENTRE `--last-pass` (jour du dernier passage, EXCLU — à l'inverse de `--since` de la commande `energy`, inclus) et `today` (inclus) ; SANS `--last-pass`, un déclencheur en jours ne marque JAMAIS de franchissement (aucun repli « jour exact » : un second passage le ré-émettrait). Le `garmin-daily-sync` n'émet aucune alerte en jours (aucun horodatage fiable du dernier passage réussi) : ils ne se lisent que dans le tableau de bord, `/week`, le rapport hebdomadaire et les contrôles avant séance du coach, qui montrent toujours l'état courant. Kits : « kit: <slug> » sur les objets ; `equipment --kit <slug> --sport <sport>` rend les objets à attribuer à une séance (non retirés, dont la catégorie porte ce sport) et ceux écartés avec la raison. Un `gear_ids` cité sur une activité mais absent du profil (et de la section Chaussures) est rendu sous `unknown`, jamais éliminé (un `gear_ids` qui cite une CHAUSSURE du profil est signalé, pas compté). Sports : walking compte pour bâtons (marche nordique), gilet, poche, flasques, veste. Non soumis à `[health].morning_check`.",
           "form": "Modèle impulsion-réponse de Banister : condition = moyenne exponentielle 42 j de la charge, fatigue = 7 j, forme = condition(j-1) − fatigue(j-1). D'autres outils nomment ces grandeurs CTL, ATL et TSB (marques revendiquées par Peaksware LLC / TrainingPeaks) ; calculées ici sur le TRIMP, nos valeurs ne sont pas comparables aux leurs.",
           "fueling": "Glucides/h et taux de sudation sur les sorties longues (#41), entraînement digestif. `carbs_per_hour_g` (fonction `carbs_per_hour_g`) = `carbs_g` / (`duration_s` en heures), calculé UNIQUEMENT pour les séances de plus de 90 min (`LONG_RUN_MIN_DURATION_S`, la même borne que le repère 60-90 g/h cité aux plans de course) — sous ce seuil, `None` (pas une sortie longue au sens de ce KPI), tout comme si `carbs_g` est absent (jamais 0 par défaut : un `carbs_g` explicitement à 0 reste un 0 g/h légitime, une absence de déclaration n'en est pas un). Sport : `FUELING_SPORTS` (running, trail) SEULEMENT (revue de code #41, blocker) — jamais `GEAR_WEAR_SPORTS`, qui inclut aussi la randonnée pour l'usure de semelle : une randonnée est typiquement bien plus lente qu'un effort de course (allure, FC, dépense horaire), et le vélo a une intensité et une digestion à l'effort différentes ; sans ce filtre, un long vélo à haut débit glucidique gonflerait `max_carbs_per_hour_g` et donc le plafond d'un plan de COURSE À PIED. Durée : `duration_s` (durée TOTALE), la même que `sweat_rate_l_h` ci-dessus — cohérence entre les deux KPI dérivés de la même sortie, tous deux encadrés par la pesée/le ravitaillement sur la sortie entière, arrêts compris. `sweat_rate_l_h` n'est JAMAIS recalculé ici : `fueling_trend` réutilise tel quel le champ déjà dérivé à l'indexation (`arc_metrics.sweat_rate_l_h`), pour ne jamais faire dériver deux définitions du même chiffre. `fueling_trend` agrège les sorties longues des `FUELING_TREND_WEEKS` (12) dernières semaines glissantes (aujourd'hui inclus) : `max_carbs_per_hour_g` (le plus haut débit observé sur une sortie longue de la fenêtre — c'est le seul repère de tolérance dont on dispose : le contrat n'a AUCUN champ de trouble digestif déclaré, donc « toléré » veut seulement dire « ingéré sans qu'un problème n'ait été signalé ailleurs », jamais une vraie mesure de tolérance — à confirmer par l'athlète ou l'agent avant de s'en servir comme plafond dur), `carbs_per_hour_n` (nombre de sorties longues AVEC un `carbs_per_hour_g` défini, pour que l'appelant sache si le maximum repose sur une ou dix séances), `median_sweat_rate_l_h` et `sweat_rate_n` (médiane et effectif des `sweat_rate_l_h` non `None` sur la même fenêtre — une médiane plutôt qu'une moyenne : un seul jour très chaud ne doit pas à lui seul déplacer le repère). Une sortie longue sans aucune des deux valeurs compte quand même dans `long_runs` (nombre total de sorties longues de la fenêtre) : elle prouve qu'un entraînement digestif a eu lieu, même non chiffré. Fenêtre volontairement identique pour les deux KPI (jamais une fenêtre glucides et une fenêtre sudation différentes) : ce sont les mêmes séances qui alimentent les deux courbes du même graphique de tendance. `fueling_carbs_ceiling` = min(`max_carbs_per_hour_g` + `FUELING_MAX_MARGIN_G_H`, max(`FUELING_TARGET_BAND_G_H[1]` (90), `max_carbs_per_hour_g`)), arrondi PAR EXCÈS (`math.ceil`, jamais `round` : un plafond ne doit jamais tomber sous le débit réellement observé) — plafond réaliste proposé à `course-strategist` pour un plan de course, PAS une limite physiologique dure. La marge (`FUELING_MAX_MARGIN_G_H`, 10 g/h) reste une étape de projet CONSERVATRICE, cohérente avec la littérature sur l'entraînement progressif de la tolérance digestive (Jeukendrup 2017, « Training the Gut for Athletes », Sports Medicine ; Costa et al. 2017, revue sur les troubles gastro-intestinaux d'exercice) qui documente une tolérance qui s'accroît par exposition répétée à l'effort, sans fixer de pourcentage de progression consensuel — PAS une valeur tirée telle quelle de ces sources. Le plafond ne dépasse JAMAIS le haut du repère généraliste (90 g/h) sauf si l'athlète a DÉJÀ personnellement démontré un débit supérieur, auquel cas aucune marge supplémentaire n'est ajoutée au-delà de ce qu'il a prouvé (revue de code #41, SHOULD-FIX 3 : sans cette borne, un athlète déjà à 85 g/h recevait un plafond à 95 g/h, au-dessus du haut de la fourchette généraliste sans qu'un dixième gramme au-delà de 90 n'ait jamais été démontré). `None` sans aucune sortie longue chiffrée sur la fenêtre : le stratège garde alors le repère générique 60-90 g/h (`FUELING_TARGET_BAND_G_H`) et doit suggérer un entraînement digestif progressif plutôt que d'inventer un plafond. Moins de 3 sorties longues chiffrées (`carbs_per_hour_n` < 3) : le plafond tient sur trop peu de données pour être présenté comme fiable — `course-strategist`/`nutritionist` doivent le signaler (« repose sur seulement N sortie(s) ») et suggérer de le confirmer à la prochaine sortie longue, plutôt que de le donner pour acquis. Non soumis à `[health].morning_check` : ne dépend d'aucune donnée de santé, seulement des activités déjà indexées.",
+          "gait": "Synthèse « Foulée » (#151, `arc_index.py gait-summary`, `/api/gait`) : pour chaque séance de COURSE (route + trail), moyenne pondérée par le temps couvert des échantillons FIT de la dynamique de course Garmin — temps de contact au sol, balance du temps de contact, oscillation verticale, ratio vertical, longueur de pas — et cadence en pas/min (piège documenté : le champ FIT est par pied, doublé à l'extraction). Une grandeur non mesurée reste absente (jamais 0, jamais 50 % de balance). La balance est lue comme un ÉCART à 50 % : le côté du pourcentage n'est pas établi par le profil FIT de `fitparse`, donc jamais « gauche/droite » pour la mesure. « Hors bande » = écart > 1 point : approximation du projet, pas un seuil publié. Les inspections photo apportent un indice d'attaque et une asymétrie d'usure — des indices déduits de semelles, à faible confiance ; en cas de désaccord avec la balance mesurée, la MESURE prime et l'usure est dite peu fiable. `confidence` donne les effectifs ; `contradictions` liste les désaccords sans les arbitrer en silence. Jamais un diagnostic, aucune modification de charge ni de plan ; méthode détaillée : `arc_gait.ASSUMPTIONS`.",
           "gear_inspection": "Inspection photo des chaussures (#135) : l'état (🟢🟡🟠🔴), les zones d'usure et les indices de foulée sont posés par le coach à partir de photos (skill `gear-inspection`) et lus tels quels dans `gear/AAAA-MM-JJ_<gear_id>_inspection.md` — aucun calcul d'image ici. Le script ne calcule que le RAPPEL : « inspection conseillée » quand la paire (non retirée) a parcouru >= 200 km depuis sa dernière inspection (`distance_m` de l'inspection ; sans inspection, le kilométrage de DÉPART `départ N km` de la paire — une paire d'occasion à 250 km de départ n'est pas due le premier jour), ou a franchi son seuil d'alerte sans inspection faite au-delà de ce seuil (test prioritaire, jamais masqué par une inspection sans kilométrage). Si la dernière inspection n'a pas de `distance_m`, le rappel est indéterminé (`due: null`) — jamais deviné. `km_since_inspection_m` est plafonné à 0 ; un kilométrage d'inspection supérieur au kilométrage actuel produit un avertissement (`warnings`). L'intervalle de 200 km est une approximation du projet (aucune norme : l'usure dépend du modèle, du terrain et du poids du coureur). `condition_change` compare les DEUX dernières inspections d'une même paire (pire/identique/meilleur) : c'est le signal le plus fiable, plus qu'un verdict isolé. L'usure d'une semelle est un signal faible — les chaussures modernes (pile haute, rocker, mousses) la déforment — et un indice de foulée n'est jamais un diagnostic.",
           "gear_mileage": "Kilométrage chaussures (#40) : somme de `distance_m` des activités de sport dans `GEAR_WEAR_SPORTS` (running, trail, hiking) — course et randonnée seulement (la marche, `walking`, n'y est délibérément PAS incluse : elle use une semelle bien plus lentement et le contrat ne distingue pas une marche d'entraînement d'une simple promenade), un sport hors de cette liste (vélo, natation, renforcement…) n'est jamais compté, même avec un `gear_id` renseigné par erreur. Attribution : `gear_id` explicite de l'activité si présent — JAMAIS filtré par une date, voir plus bas — sinon la chaussure marquée `(par défaut)` dans le profil si une seule l'est (la première rencontrée si plusieurs, cas non censé arriver mais pas une erreur), sinon la séance est IGNORÉE (ni comptée nulle part, ni signalée) — c'est le comportement documenté par #40 : sans chaussure par défaut déclarée, une activité sans `gear_id` n'a simplement rien à raconter côté matériel. `gear_id` explicite qui ne correspond à AUCUNE chaussure du profil (faute de frappe, chaussure jamais déclarée) : jamais éliminé silencieusement, regroupé sous `unknown` avec son kilométrage — libellé « inconnue » côté tableau de bord. Date `depuis` du profil : filtre l'attribution PAR DÉFAUT SEULEMENT (revue PR #85, blocker 1) — une séance sans `gear_id` datée AVANT le `depuis` de la chaussure `(par défaut)` n'y est PAS attribuée (sans ce filtre, toute activité antérieure à #39, y compris des années d'historique sans `gear_id` au contrat, se retrouverait comptée sur une paire achetée hier) ; sans `depuis` déclaré sur la chaussure par défaut, aucun filtre, comme avant. À l'inverse, une activité portant un `gear_id` EXPLICITE compte quel que soit son rapport à `depuis` (même avant) : l'explicite du `gear_id` prime toujours sur une date de début possiblement oubliée ou approximative — ne pas la compter risquerait de sous-estimer silencieusement l'usure réelle, l'erreur la plus coûteuse ici. Seuil d'alerte : celui de la puce (segment « alerte NNN km », ou « alerte NNN miles/mi » — converti × 1609,344 — voir `arc_legacy.parse_gear`) si renseigné, sinon 700 km par défaut (`GEAR_ALERT_THRESHOLD_M_DEFAULT`) — TOUTE chaussure déclarée peut donc alerter, avec ou sans seuil explicite ; `threshold_m` toujours arrondi à l'entier avant sérialisation (cohérence de type JSON, valeur déclarée ou valeur par défaut). Chaussure `(retirée)` : kilométrage affiché (historique), mais jamais d'alerte, et jamais candidate à l'attribution par défaut même si `(par défaut)` est aussi coché sur la même puce (une chaussure qu'on ne porte plus ne doit pas absorber les séances sans `gear_id`) — priorité documentée : retraite avant défaut. Deux puces qui dérivent le même slug (rachat du même modèle sans `id:` pour les distinguer) : `arc_legacy.parse_gear` renomme les suivantes `-2`, `-3`… plutôt que de laisser la dernière écraser la première dans l'index, et la collision remonte dans `warnings`. Kilométrage de départ (#132) : segment « départ N km » de la puce (`start_m`, « mi » converti) = kilométrage déjà parcouru avant le suivi, AJOUTÉ à `distance_m` (donc au seuil d'alerte, à la prévision et à `near_threshold`), y compris pour une paire `(retirée)` (historique) ; il ne dépend d'aucune date et n'est jamais recalculé depuis les activités — le corriger par chat = réécrire ce seul segment (total déclaré − km déjà comptés par les activités, jamais négatif). Prévision de retraite (#132, `today` fourni) : rythme = km attribués à la paire sur les 28 derniers jours (`today` inclus, séances datées seulement — la même attribution que le cumul) ÷ 28 ; jours restants = (seuil − cumul) ÷ rythme ; date = `today` + ⌈jours⌉ (donc toujours future) et `retire_forecast_weeks` = jours ÷ 7 arrondi à 0,1. Clés OMISES (jamais 0, jamais une date passée) : aucun usage sur 28 jours, paire retirée, seuil déjà atteint (`alert`, le texte dit alors « seuil dépassé »). Approximation linéaire : ne tient pas compte d'un bloc de repos, d'une préparation de course ou d'un changement de rotation ; `near_threshold` (clé présente seulement si vraie) = cumul ≥ 90 % du seuil sans l'avoir atteint. Alerte « une seule fois » (`run_refs`, #132) : `crossed_in_run` (clé présente seulement si `run_refs` est fourni) vaut vrai si le cumul HORS les séances désignées (par `garmin_activity_id`, `intervals_activity_id` ou chemin du fichier) était sous le seuil et que le cumul total l'atteint : la séance qui franchit le seuil est identifiée par son identifiant, jamais par sa date — une seconde synchronisation le même jour, ou la fusion d'une séance déjà synchronisée (que l'appelant ne passe pas), ne ré-émet donc jamais l'alerte. Sans état persistant. Le cumul est plafonné à `today` quand il est fourni (une séance postérieure n'est comptée ni dans `distance_m` ni dans la prévision), et le séparateur décimal du départ est toujours le point ou la virgule (« 1.200 km » = 1,2 km ; espace = milliers). #133 : une séance sans `gear_id` marquée `gear_source: \"garmin_unmapped\"` (matériel Garmin non associé, ambigu ou ignoré) est EXCLUE de l'attribution par défaut — ni comptée, ni source de `crossed_in_run` — pour ne jamais créditer en silence une autre paire ; les puces `(ignorée)` ne sont pas des chaussures.",
           "grade_source": "La pente est calculée sur une fenêtre de distance (20 à 50 m), après un lissage de l'altitude par moyenne glissante — jamais une différence brute entre deux points rapprochés de 5 secondes, qui amplifierait le bruit du capteur barométrique sur une distance trop courte pour être fiable.",
@@ -3146,6 +3147,301 @@
           90
         ],
         "window_weeks": 12
+      },
+      "status": 200
+    },
+    "/api/gait": {
+      "body": {
+        "balance_side_verified": false,
+        "caveat": "Indice, jamais un diagnostic : cette synthèse ne modifie ni la charge ni le plan d'entraînement. Une douleur ou une gêne relève d'un avis médical.",
+        "confidence": {
+          "dynamics_level": "low",
+          "inspections": 2,
+          "inspections_level": "low",
+          "pairs_inspected": 1,
+          "running_sessions": 23,
+          "sessions_with_balance": 1,
+          "sessions_with_dynamics": 1
+        },
+        "contradictions": [],
+        "dynamics": {
+          "cadence_spm": {
+            "change": 0.3,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 172.0
+            },
+            "max": 172.0,
+            "mean": 168.2,
+            "min": 168.0,
+            "n": 23,
+            "prior_mean": 168.0,
+            "prior_n": 8,
+            "recent_mean": 168.3,
+            "recent_n": 15,
+            "sd": 0.8,
+            "series": [
+              {
+                "date": "2026-08-15",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-16",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-18",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-19",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-22",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-23",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-25",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-26",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-29",
+                "value": 168.0
+              },
+              {
+                "date": "2026-08-30",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-01",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-02",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-05",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-08",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-09",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-12",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-13",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-15",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-16",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-19",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-20",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-22",
+                "value": 168.0
+              },
+              {
+                "date": "2026-09-23",
+                "value": 172.0
+              }
+            ]
+          },
+          "ground_contact_s": {
+            "change": null,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 0.25
+            },
+            "max": 0.25,
+            "mean": 0.25,
+            "min": 0.25,
+            "n": 1,
+            "prior_mean": null,
+            "prior_n": 0,
+            "recent_mean": 0.25,
+            "recent_n": 1,
+            "sd": null,
+            "series": [
+              {
+                "date": "2026-09-23",
+                "value": 0.25
+              }
+            ]
+          },
+          "stance_balance_pct": {
+            "band_label": "approximation du projet",
+            "band_pts": 1.0,
+            "beyond_band_n": 0,
+            "beyond_band_share": 0.0,
+            "change": null,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 50.4
+            },
+            "max": 50.4,
+            "max_gap_pts": 0.4,
+            "mean": 50.4,
+            "mean_gap_pts": 0.4,
+            "min": 50.4,
+            "n": 1,
+            "prior_mean": null,
+            "prior_n": 0,
+            "recent_mean": 50.4,
+            "recent_n": 1,
+            "sd": null,
+            "series": [
+              {
+                "date": "2026-09-23",
+                "value": 50.4
+              }
+            ],
+            "side_named": false
+          },
+          "step_length_m": {
+            "change": null,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 1.17
+            },
+            "max": 1.17,
+            "mean": 1.17,
+            "min": 1.17,
+            "n": 1,
+            "prior_mean": null,
+            "prior_n": 0,
+            "recent_mean": 1.17,
+            "recent_n": 1,
+            "sd": null,
+            "series": [
+              {
+                "date": "2026-09-23",
+                "value": 1.17
+              }
+            ]
+          },
+          "vertical_oscillation_m": {
+            "change": null,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 0.095
+            },
+            "max": 0.095,
+            "mean": 0.095,
+            "min": 0.095,
+            "n": 1,
+            "prior_mean": null,
+            "prior_n": 0,
+            "recent_mean": 0.095,
+            "recent_n": 1,
+            "sd": null,
+            "series": [
+              {
+                "date": "2026-09-23",
+                "value": 0.095
+              }
+            ]
+          },
+          "vertical_ratio_pct": {
+            "change": null,
+            "latest": {
+              "date": "2026-09-23",
+              "value": 8.6
+            },
+            "max": 8.6,
+            "mean": 8.6,
+            "min": 8.6,
+            "n": 1,
+            "prior_mean": null,
+            "prior_n": 0,
+            "recent_mean": 8.6,
+            "recent_n": 1,
+            "sd": null,
+            "series": [
+              {
+                "date": "2026-09-23",
+                "value": 8.6
+              }
+            ]
+          }
+        },
+        "inspections": {
+          "n": 2,
+          "pairs": [
+            {
+              "asymmetry": [
+                {
+                  "date": "2026-08-14",
+                  "level": "none"
+                },
+                {
+                  "date": "2026-09-18",
+                  "level": "mild",
+                  "side": "left"
+                }
+              ],
+              "asymmetry_repeats": null,
+              "asymmetry_side_changes": false,
+              "dominant_strike": "heel_strike",
+              "gear_id": "adizero-sl",
+              "latest_date": "2026-09-18",
+              "latest_strike": [
+                "heel_strike"
+              ],
+              "n": 2,
+              "name": "Adidas Adizero SL",
+              "strike_hints": {
+                "heel_strike": 2
+              }
+            }
+          ],
+          "strike_hint_tally": {
+            "heel_strike": 2
+          }
+        },
+        "notes": {
+          "cadence_suspect": 0,
+          "values_from_arc_block": {
+            "cadence_spm": 22
+          }
+        },
+        "sport_scope": [
+          "running",
+          "trail"
+        ],
+        "window": {
+          "since": "2026-03-26",
+          "until": "2026-09-23",
+          "weeks": 26
+        }
       },
       "status": 200
     },

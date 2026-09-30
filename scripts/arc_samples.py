@@ -188,6 +188,23 @@ NORMALISED_KEYS = ("t_s", "distance_m", "altitude_m", "hr_bpm", "speed_ms", "cad
 # `NORMALISED_KEYS` (toujours requises pour un `t_s` exploitable) à dessein.
 GPS_KEYS = ("lat_deg", "lon_deg")
 
+# Dynamique de course Garmin (#151) — clés OPTIONNELLES comme le GPS : une séance sans
+# capteur de dynamique (montre seule sans ceinture/pod compatible, vélo, marche…) les garde à
+# `None`, JAMAIS à 0 ni (pour la balance) à 50 %. Unités SI ; conversions FIT documentées par
+# `ASSUMPTIONS["running_dynamics"]`. Noms = colonnes `activity_sample`.
+DYNAMICS_KEYS = ("ground_contact_s", "stance_balance_pct", "vertical_oscillation_m",
+                 "vertical_ratio_pct", "step_length_m")
+
+# Plages physiologiquement plausibles : hors plage → mesure absente (`None`), jamais clampée.
+# Un capteur qui renvoie 0 (pas de mesure) ou une valeur aberrante ne doit pas tirer une moyenne.
+DYNAMICS_PLAUSIBLE = {
+    "ground_contact_s": (0.05, 1.0),          # 50 ms – 1 s
+    "stance_balance_pct": (30.0, 70.0),       # jamais 0 ni 100 ; 50 = symétrique
+    "vertical_oscillation_m": (0.01, 0.30),   # 1 – 30 cm
+    "vertical_ratio_pct": (1.0, 30.0),
+    "step_length_m": (0.2, 3.0),
+}
+
 # FIT/ANT+ code les positions en "semi-cercles" (entier signé 32 bits, plage complète du
 # type = 360°) : conversion vers des degrés décimaux usuels. `fitparse` NE convertit PAS
 # lui-même `position_lat`/`position_long` (aucun scale/offset défini par le profil FIT
@@ -223,6 +240,18 @@ ASSUMPTIONS = {
                          "`sport=None` (non résolu) applique le doublement par défaut — l'immense majorité des "
                          "FIT ingérés par ce moteur trail-running sont des séances à pied ; `download_fit.py` "
                          "lit le sport réel dans le message FIT `session` dès que possible pour éviter ce défaut.",
+    "running_dynamics": "Dynamique de course Garmin (#151), champs `record` FIT lus par `fitparse` (l'échelle du "
+                         "profil FIT est DÉJÀ appliquée par `fitparse`) : `stance_time` (ms) → ground_contact_s "
+                         "= ms / 1000 ; `vertical_oscillation` (mm) → vertical_oscillation_m = mm / 1000 ; "
+                         "`step_length` (mm) → step_length_m = mm / 1000 ; `vertical_ratio` (%) → "
+                         "vertical_ratio_pct (inchangé) ; `stance_time_balance` (%) → stance_balance_pct "
+                         "(inchangé). `stance_time_percent` (% de la foulée, autre champ) n'est PAS repris. Une "
+                         "valeur absente, nulle ou hors DYNAMICS_PLAUSIBLE reste `None` — en particulier une "
+                         "balance absente (capteur qui ne la fournit pas : 15 séances de course sur 80 dans "
+                         "l'installation observée) n'est JAMAIS remplacée par 50 %. Sous-échantillonnage : "
+                         "moyenne des valeurs présentes du bucket (comme cadence_spm). Le SENS de la balance "
+                         "(quel pied porte le pourcentage) n'est pas établi par le profil FIT de `fitparse` : "
+                         "voir arc_gait.ASSUMPTIONS[\"balance_side\"].",
     "downsampling": f"Bucket de resolution_s secondes (défaut {DEFAULT_RESOLUTION_S} s), horodaté à sa borne "
                      "inférieure. hr_bpm/speed_ms/cadence_spm : moyenne du bucket. distance_m/altitude_m/"
                      "lat_deg/lon_deg : dernière valeur (temporellement) du bucket (cumuls monotones ou "
@@ -357,6 +386,31 @@ def _cadence_spm(record: dict, sport: Optional[str]) -> Optional[float]:
     return value
 
 
+def _dynamics(record: dict) -> dict:
+    """Dynamique de course d'un enregistrement fitparse brut → clés SI de `DYNAMICS_KEYS`
+    (`None` si absente/hors plage plausible) — voir `ASSUMPTIONS["running_dynamics"]`."""
+    raw = {
+        "ground_contact_s": _scaled(record.get("stance_time"), 1 / 1000.0),
+        "stance_balance_pct": _num(record.get("stance_time_balance")),
+        "vertical_oscillation_m": _scaled(record.get("vertical_oscillation"), 1 / 1000.0),
+        "vertical_ratio_pct": _num(record.get("vertical_ratio")),
+        "step_length_m": _scaled(record.get("step_length"), 1 / 1000.0),
+    }
+    return {k: _plausible(k, v) for k, v in raw.items()}
+
+
+def _scaled(value, factor: float) -> Optional[float]:
+    number = _num(value)
+    return None if number is None else number * factor
+
+
+def _plausible(key: str, value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    lo, hi = DYNAMICS_PLAUSIBLE[key]
+    return round(value, 6) if lo <= value <= hi else None
+
+
 def _position_deg(record: dict) -> tuple:
     """`(lat_deg, lon_deg)` d'un enregistrement fitparse brut — voir `_semicircle_to_deg`
     pour la conversion/le plafond par axe. « Île nulle » (`lat == lon == 0.0` EXACTEMENT,
@@ -392,6 +446,7 @@ def _normalise_fitparse(records: Sequence[dict], sport: Optional[str]) -> List[d
             "cadence_spm": _cadence_spm(record, sport),
             "lat_deg": lat_deg,
             "lon_deg": lon_deg,
+            **_dynamics(record),
         })
     out.sort(key=lambda r: r["t_s"])
     return out
@@ -407,6 +462,10 @@ def _clean_normalised(record: dict) -> Optional[dict]:
     # dict stable, comme le reste de ce module).
     for key in GPS_KEYS:
         cleaned[key] = _num(record.get(key))
+    # Dynamique de course (#151) : déjà en SI au format normalisé, repassée (plausibilité
+    # rejouée) — `None` si absente, jamais une clé manquante.
+    for key in DYNAMICS_KEYS:
+        cleaned[key] = _plausible(key, _num(record.get(key)))
     return cleaned
 
 
@@ -521,6 +580,9 @@ def downsample(records: Sequence[dict], resolution_s: int = DEFAULT_RESOLUTION_S
             # connue du bucket reste la plus proche de la borne du bucket suivant.
             "lat_deg": last.get("lat_deg"),
             "lon_deg": last.get("lon_deg"),
+            # Dynamique de course (#151) : moyenne des valeurs PRÉSENTES du bucket (une mesure
+            # absente reste absente — jamais 0, jamais 50 % de balance).
+            **{key: _mean(r.get(key) for r in group) for key in DYNAMICS_KEYS},
         })
     return out
 

@@ -367,6 +367,54 @@ regarde avant de poser son verdict.
 dit au lieu d'afficher des trous. Un jour sans verdict dans la frise est un jour où
 le coach n'a pas tranché : rien n'est inventé.
 
+### Foulée
+
+**Comment évolue ma foulée ?**
+
+![Santé, carte Foulée : tendances mesurées par la montre, indices des inspections photo, confiance et désaccords](../assets/dashboard/sante-foulee.webp)
+
+Une carte en bas de la vue Santé (#151), montrée **même quand le bilan matinal est désactivé**
+(elle ne dépend pas de `[health].morning_check` : aucune donnée de santé du matin). Elle sépare
+ce qui est **mesuré** de ce qui est **deviné** :
+
+- **Mesuré par la montre** — sur les séances de **course** (route et trail ; marche, randonnée et
+  vélo exclus), les 26 dernières semaines : temps de contact au sol, **balance du temps de
+  contact**, oscillation verticale, ratio vertical, longueur de pas et cadence (en pas/min, deux
+  pieds — le champ FIT est par pied, doublé à l'extraction). Pour chacun : la moyenne, la
+  variation des 4 dernières semaines face à la période antérieure (seulement avec au moins deux
+  séances de chaque côté) et le nombre de séances. Deux petits graphiques : temps de contact et
+  balance, cette dernière avec sa bande grisée.
+- **Deviné d'après les photos** — depuis les inspections de chaussures : l'indice d'attaque
+  (talon ou médio/avant-pied) compté par paire, l'asymétrie d'usure de chaque inspection, et si elle
+  se répète **du même côté**.
+- **Confiance** — le nombre de séances avec dynamique (dont avec balance) et d'inspections, avec
+  la mention « confiance faible » sous 5 séances mesurées ou 3 inspections.
+- **Désaccords entre les sources** — jamais arbitrés en silence : des indices d'attaque
+  différents selon les paires, une usure asymétrique alors que la balance mesurée reste dans la
+  bande (ou l'inverse), un côté d'asymétrie qui change d'une inspection à l'autre. Quand une
+  mesure existe, **la mesure prime** et l'usure est dite peu fiable.
+
+**Comment la lire** : c'est un **indice, jamais un diagnostic**, et elle ne modifie ni la charge ni
+le plan. Deux réserves à garder en tête. (1) La balance est lue comme un **écart à 50 %** :
+le côté que porte le pourcentage (gauche ou droite) n'est pas établi par le format FIT, donc la
+carte ne dit jamais « pied gauche » ou « pied droit » pour la mesure — et ne compare jamais le côté de
+l'usure au côté de la balance. (2) La bande « hors bande » (plus de 1 point d'écart à 50 %) est
+une **approximation du projet**, pas un seuil publié. Un écart de quelques dixièmes de point est
+banal ; le bruit d'un capteur de poignet, la pente, l'allure et la fatigue font varier ces
+grandeurs.
+
+| Alimentée par | Écrit par |
+|---|---|
+| `activities/fit/<id>.json` (échantillons FIT : `ground_contact_s`, `stance_balance_pct`, `vertical_oscillation_m`, `vertical_ratio_pct`, `step_length_m`, `cadence_spm`) ; à défaut, les clés `avg_*` du bloc `arc` de la séance ; `gear/*_inspection.md` | skill `fit-download` (extraction), synchronisation, coach (inspections) |
+
+La même synthèse, hors tableau de bord : `python3 scripts/arc_index.py gait-summary [--weeks N]`
+(`/api/gait`). **Si c'est vide** : sans dynamique de course, la carte le dit et donne la commande de
+rattrapage — sur un FIT déjà téléchargé avant #151, relancer
+`python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics` (voir
+[Téléchargement FIT](../skills/fit-download.md#rattraper-la-dynamique-de-course)). Certains capteurs ne fournissent pas la
+balance : elle reste alors absente, jamais remplacée par 50 %. Sans inspection, la carte invite à
+en demander une au coach.
+
 ## Semaine
 
 **Qu'est-ce qui était prévu, qu'est-ce qui a été fait ?**
@@ -693,8 +741,11 @@ rappel d'hygiène (28 j / 30 j depuis le dernier entretien) ; les objets du kit
 
 **Inspections photo** (#135) — pour chaque paire, l'historique des inspections du dossier
 `gear/` (plus récente d'abord) : état 🟢🟡🟠🔴 écrit aussi en toutes lettres, kilométrage à
-l'inspection, zones d'usure par semelle (gauche/droite), asymétrie, indices de foulée et
-vignettes des photos. La ligne de la paire dans « Chaussures » porte la dernière inspection ;
+l'inspection, zones d'usure en **petit tableau zone × pied gauche / pied droit** (sévérité en
+toutes lettres), **badge d'asymétrie** (neutre quand « aucune asymétrie », mis en avant avec le
+côté le plus usé sinon), **badge d'indice de foulée** et vignettes des photos — chaque inspection
+en lignes distinctes, lisibles sur téléphone. Le rappel « indice, pas un diagnostic » figure
+**une fois par carte**, avec le lien vers la carte [Foulée](#foulee) de la vue Santé. La ligne de la paire dans « Chaussures » porte la dernière inspection ;
 « Inspection conseillée » apparaît après ~200 km sans inspection, ou une fois le seuil d'alerte
 franchi (rappel, jamais une obligation) : pour agir, tapez `/inspection <paire>` (ou `/inspection`
 pour laisser le coach proposer la plus urgente), voir [Faire inspecter une paire](../skills/inspection.md). Une inspection plus dégradée que la précédente est
@@ -993,7 +1044,7 @@ nourrit :
 | Aujourd'hui | `medical/<date>_health.md`, `medical/<date>_meteo.md`, `planning/Semaine_<lundi>.md` | synchronisation, coach |
 | Forme & charge | `activities/*.md`, `planning/Runner_Profile.md` | synchronisation, vous |
 | Analyse | `activities/fit/*.json`, `planning/Runner_Profile.md` | skill `fit-download`, synchronisation |
-| Santé | `medical/<date>_health.md` | synchronisation, coach |
+| Santé | `medical/<date>_health.md` ; carte Foulée : `activities/fit/*.json`, `gear/*_inspection.md` | synchronisation, coach, skill `fit-download` |
 | Semaine | `planning/Semaine_<lundi>.md`, `activities/*.md` | coach, synchronisation |
 | Séances | `activities/<date>_<sport>.md` | synchronisation |
 | Performance | `activities/*.md`, `planning/Runner_Profile.md`, `planning/active_objective.md` | synchronisation, vous |

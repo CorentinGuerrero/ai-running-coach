@@ -30,6 +30,32 @@ Avec `--json`, écrit aussi une copie **normalisée** au chemin canonique
 table dérivée `activity_sample` (voir [Mode headless](../dashboard/headless.md)).
 Donnée brute et jetable, jamais versionnée.
 
+## Rattraper la dynamique de course
+
+Depuis #151, l'extraction normalisée reprend aussi la **dynamique de course** Garmin :
+temps de contact au sol (`stance_time`, ms → `ground_contact_s`, s), balance du temps de
+contact (`stance_time_balance`, % → `stance_balance_pct`), oscillation verticale
+(`vertical_oscillation`, mm → `vertical_oscillation_m`, m), ratio vertical (`vertical_ratio`, %
+→ `vertical_ratio_pct`) et longueur de pas (`step_length`, mm → `step_length_m`, m). Une mesure
+absente reste absente — **jamais 0, jamais 50 % de balance** (certains capteurs ne fournissent pas
+la balance). Les nouveaux téléchargements `--json` l'embarquent d'office ; les
+`activities/fit/<id>.json` déjà écrits **n'ont pas ces champs**. Pour les rattraper **sans rien
+re-télécharger**, depuis les `.fit` déjà présents dans `activities/` :
+
+```bash
+python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics --dry-run   # compte, n'écrit rien
+python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics             # réécrit les JSON dérivés
+python3 scripts/arc_index.py gait-summary                                          # réindexe et rend la synthèse
+```
+
+`--refresh-dynamics` ne nécessite que `fitparse` (le script se relance dans l'environnement
+`garmin-mcp`) : **aucune connexion Garmin, aucun token**. Il n'écrit que les copies normalisées
+`activities/fit/<id>.json` (jetables, jamais versionnées) — jamais un Markdown de séance, jamais un
+`.fit`. Il est **idempotent** : un JSON déjà à jour est laissé tel quel. Seuls les `.fit`
+présents sont traités ; pour ceux que vous avez supprimés, relancez un téléchargement
+(`--from-dir activities/ --json --overwrite` sur les séances concernées). Voir la carte
+[Foulée](../dashboard/views.md#foulee) du tableau de bord.
+
 ## Rattraper l'historique pour la dépense énergétique modèle
 
 Le [modèle de dépense énergétique](../energie.md) (`scripts/arc_energy.py`,

@@ -149,7 +149,11 @@ def _write_fixed_fit_samples(ws: Path, today: str) -> int:
     garmin_id = int(match.group(1))
     records = [
         {"t_s": t, "distance_m": round(t * 2.7, 2), "altitude_m": _fixed_altitude_m(t),
-         "hr_bpm": _fixed_hr_bpm(t), "speed_ms": 2.7, "cadence_spm": 172.0}
+         "hr_bpm": _fixed_hr_bpm(t), "speed_ms": 2.7, "cadence_spm": 172.0,
+         # Dynamique de course (#151) : constantes fixes (aucun tirage) — verrouille la synthèse
+         # « Foulée » de `/api/gait` dans le golden, balance à +0,4 point de 50 % (dans la bande).
+         "ground_contact_s": 0.25, "stance_balance_pct": 50.4, "vertical_oscillation_m": 0.095,
+         "vertical_ratio_pct": 8.6, "step_length_m": 1.17}
         for t in range(0, FIXED_FIT_DURATION_S, 5)
     ]
     fit_dir = ws / "activities/fit"
