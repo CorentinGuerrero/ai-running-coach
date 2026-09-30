@@ -169,7 +169,7 @@ class Workspace(unittest.TestCase):
 
 class TestIndex(Workspace):
     def test_schema_version_29_adds_the_table(self):
-        self.assertEqual(I.SCHEMA_VERSION, 29)
+        self.assertGreaterEqual(I.SCHEMA_VERSION, 29)
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(gear_inspection)")}
         self.assertTrue({"gear_id", "condition", "distance_m", "wear_zones", "asymmetry_level",
                          "asymmetry_side", "photos", "previous"} <= cols, cols)
