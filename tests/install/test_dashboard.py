@@ -127,6 +127,28 @@ class TestDashboardServer(InstallAsserts):
         self.assertEqual(self.server.get("/media/gear-photo?path=x", host="evil.example")[0], 403)
         self.assertEqual(self.server.get("/media/gear-photo?path=x", method="POST")[0], 405)
 
+    def test_gear_detail_route(self):
+        """#147 : `/api/gear/<id>` — paire (bilan, mois, séances), paire retirée, objet d'équipement ;
+        inconnu / identifiant invalide → 404 ; même contrôle d'hôte et lecture seule que les autres routes."""
+        status, body, _ = self.server.get("/api/gear/adizero-sl")
+        self.assertEqual(status, 200)
+        shoe = json.loads(body)
+        self.assertEqual((shoe["kind"], shoe["gear_id"]), ("shoe", "adizero-sl"))
+        self.assertTrue(shoe["sessions"] and shoe["monthly"])
+        self.assertEqual(shoe["career"]["distance_m"], shoe["shoe"]["distance_m"])
+        summary = json.loads(self.server.get("/api/summary")[1])
+        listed = next(s for s in summary["gear"]["shoes"] if s["gear_id"] == "adizero-sl")
+        self.assertEqual(listed["distance_m"], shoe["shoe"]["distance_m"])
+        retired = json.loads(self.server.get("/api/gear/nike-pegasus")[1])
+        self.assertTrue(retired["retired"])
+        item = json.loads(self.server.get("/api/gear/poche-eau")[1])
+        self.assertEqual(item["kind"], "equipment")
+        self.assertIn("trail-long", item["kits"])
+        for bad in ("absent", "Adizero-SL", "..", "a%2Fb", "%2e%2e%2fsummary"):
+            self.assertEqual(self.server.get("/api/gear/" + bad)[0], 404, bad)
+        self.assertEqual(self.server.get("/api/gear/adizero-sl", host="evil.example")[0], 403)
+        self.assertEqual(self.server.get("/api/gear/adizero-sl", method="POST")[0], 405)
+
     def test_new_file_appears_without_restart(self):
         """Un fichier écrit par un agent apparaît sans relancer le serveur."""
         self.server.stop()

@@ -47,11 +47,11 @@ La page du matin, à ouvrir avant de lacer ses chaussures. De haut en bas :
    « Matériel & lieux » du profil (hors chaussures retirées) atteint son seuil
    d'alerte (700 km par défaut, ou celui précisé sur sa puce) — détail complet
    (toutes les paires, y compris retirées, et tout `gear_id` inconnu du profil)
-   dans **Performance**, où chaque paire affiche aussi sa **prévision de retraite**
+   dans **[Matériel](#materiel)**, où chaque paire affiche aussi sa **prévision de retraite**
    (« ≈ 6 sem. » à partir du rythme des 28 derniers jours, absente sans usage
    récent), « proche du seuil » dès 90 %, et son éventuel kilométrage de départ.
    Depuis #134, la tuile **Matériel à contrôler** signale de même les objets hors
-   chaussures (bâtons, poche, frontale…) sous alerte.
+   chaussures (bâtons, poche, frontale…) sous alerte ; chaque nom renvoie vers sa fiche.
 4. **Forme** : condition, fatigue, forme et ratio de charge, avec une phrase qui les
    lit pour vous (« la fatigue est sous la condition physique »), puis une **mini
    tendance de conformité sur 4 semaines** (une barre par semaine, hauteur = % de
@@ -591,25 +591,6 @@ kilomètre : pas de graphique, c'est normal.
   dénivelé (1 000 m D+ ≈ 1,75 km de plat).
 - **Records** sur des fenêtres de kilomètres consécutifs (1, 5, 10, 21 km) : seuls
   les tours d'environ 1 km comptent.
-- **Matériel** (#40) : kilométrage cumulé de chaque paire déclarée dans « Matériel &
-  lieux » du profil (course et randonnée seulement), une ligne « à surveiller »
-  au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
-  alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
-  profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
-  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
-  donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
-  récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
-  et le rôle `usage:` déclaré s'affiche à côté du nom.
-- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
-  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
-  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
-  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
-  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
-  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
-  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
-  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
-  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
-  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
 - **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
   récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
   et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de
@@ -637,10 +618,53 @@ kilomètre : pas de graphique, c'est normal.
   domine le panier.
 - **Hypothèses** : toutes les formules et leurs limites, en clair.
 
+Le kilométrage des chaussures, l'équipement et les inspections photo ont leur propre vue :
+[Matériel](#materiel).
+
 **Comment la lire** : ce sont des ordres de grandeur, calculés sur l'allure et la FC
 *moyennes* de chaque séance — pas une mesure de laboratoire. Deux estimations qui
 divergent disent que le terrain ou la forme du jour pèsent.
 
+| Alimentée par | Calcul |
+|---|---|
+| `activities/*.md` (course et trail : allure, FC, splits) | `scripts/arc_metrics.py` |
+| `planning/Runner_Profile.md`, `planning/active_objective.md` | FC max ; distance et D+ de l'objectif |
+| `activities/fit/*.json` (échantillons seconde par seconde) | `scripts/arc_slope_model.py` (#58) |
+| `planning/Runner_Profile.md` → « Indices de performance » | `arc_legacy.parse_performance_index`, `arc_index.performance_index` (#62) |
+
+## Matériel
+
+**Mon matériel est-il en état ? Que dois-je remplacer ?**
+
+Vue dédiée (#147), toujours présente dans le menu pour être trouvée même avant la première
+déclaration. Elle réunit, dans cet ordre : une synthèse **À traiter** (toute paire ou tout
+objet au-delà de son seuil, toute inspection conseillée — une ligne par élément, avec ses
+raisons, chacune renvoyant vers sa fiche), puis les **chaussures**, l'**équipement** (kits
+compris) et les **inspections photo**. Les trois cartes vivaient jusque-là dans Performance.
+
+Sans matériel déclaré, la vue montre un état vide utile : la syntaxe à écrire dans « Matériel &
+lieux » du profil, la commande de simulation `python3 scripts/garmin_gear_backfill.py` pour
+rattraper l'historique Garmin (rien n'est écrit sans `--apply`) et des liens vers la documentation.
+
+- **Chaussures** (#40) : kilométrage cumulé de chaque paire déclarée dans « Matériel &
+  lieux » du profil (course et randonnée seulement), une ligne « à surveiller »
+  au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
+  alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
+  profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
+  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
+  donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
+  récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
+  et le rôle `usage:` déclaré s'affiche à côté du nom.
+- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
+  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
+  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
+  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
+  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
+  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
+  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
+  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
+  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
+  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
 ![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
 
 *La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
@@ -657,7 +681,7 @@ conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, 
 relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
 schématiques), jamais de vraies photos dans le dépôt.*
 
-**Équipement (#134)** — sous la carte Matériel, un tableau pour tout ce qui n'est pas
+**Équipement (#134)** — sous les chaussures, un tableau pour tout ce qui n'est pas
 chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,
 séances, jours depuis la date de référence — `depuis` ou dernier `entretien`), ses
 **déclencheurs** avec la valeur atteinte face au seuil dans l'unité de chacun (km, h,
@@ -676,12 +700,35 @@ le dernier entretien, la ceinture cardio approche de son année (« 12 mois » c
 les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
 d'illustration, usage calculé sur les séances réelles du workspace des captures.*
 
+### Fiche d'une paire ou d'un objet
+
+Chaque nom de paire ou d'objet (tableaux, synthèse, tuiles d'Aujourd'hui, page d'une séance)
+ouvre sa fiche, à l'adresse partageable `#/materiel/<gear_id>` :
+
+- **Une paire** : bilan de carrière (kilométrage départ compris, séances et période, courses,
+  sortie la plus longue, meilleurs efforts 1/5/10 km sur les séances qui ont des splits,
+  seuil et prévision de retraite, paire rattachée ou non à Garmin Connect), **kilomètres par
+  mois**, **liste des séances** (chacune renvoie vers son détail) et **historique des
+  inspections** de la paire. Une paire retirée reste consultable ; une paire marquée
+  « ignorée » le dit et n'affiche aucun kilométrage.
+- **Un objet d'équipement** : usage, **déclencheurs** (valeur atteinte face au seuil), **kits**
+  et leurs autres membres, séances où il a servi.
+- **Identifiant inconnu** : un état « introuvable » clair, jamais une page vide.
+
+La page d'une séance affiche de son côté « Chaussure » (paire attribuée, mention « paire par
+défaut » quand elle n'est pas déclarée sur la séance) et « Équipement porté » (`gear_ids`),
+lorsqu'ils existent.
+
+**Comment la lire** : les kilométrages viennent tous de la même règle d'attribution des
+séances aux paires (`gear_id` explicite, sinon paire par défaut — voir les Hypothèses de
+[Performance](#performance)) ; la fiche, le tableau et la commande `arc_index.py gear-career`
+ne peuvent donc pas diverger.
+
 | Alimentée par | Calcul |
 |---|---|
-| `activities/*.md` (course et trail : allure, FC, splits) | `scripts/arc_metrics.py` |
-| `planning/Runner_Profile.md`, `planning/active_objective.md` | FC max ; distance et D+ de l'objectif |
-| `activities/fit/*.json` (échantillons seconde par seconde) | `scripts/arc_slope_model.py` (#58) |
-| `planning/Runner_Profile.md` → « Indices de performance » | `arc_legacy.parse_performance_index`, `arc_index.performance_index` (#62) |
+| `planning/Runner_Profile.md` → « Matériel & lieux » (`### Chaussures`, `### Matériel`) | `arc_legacy.parse_gear`, `arc_legacy.parse_equipment` |
+| `activities/*.md` (`gear_id`, `gear_ids`, distance, durée) | `arc_metrics.attribute_gear`, `arc_index.gear_mileage`, `arc_index.equipment_usage`, `/api/gear/<id>` (#147) |
+| `gear/*.md` (inspections photo) | `arc_index.gear_inspections` (#135) |
 
 ## Trail Shape
 
@@ -914,6 +961,7 @@ nourrit :
 | Semaine | `planning/Semaine_<lundi>.md`, `activities/*.md` | coach, synchronisation |
 | Séances | `activities/<date>_<sport>.md` | synchronisation |
 | Performance | `activities/*.md`, `planning/Runner_Profile.md`, `planning/active_objective.md` | synchronisation, vous |
+| Matériel | `planning/Runner_Profile.md`, `activities/*.md`, `gear/*.md` | vous, coach, synchronisation |
 | Trail Shape | `activities/*.md` (8 dernières semaines), `planning/active_objective.md` | synchronisation, vous |
 | Calendrier | `activities/*.md` | synchronisation |
 | Rapports | `rapports/*.md` | coach |

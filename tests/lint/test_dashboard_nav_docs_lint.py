@@ -76,5 +76,26 @@ class TestDashboardNavDocsParity(unittest.TestCase):
             self.assertIn(label, headings, f"« {label} » (#/{route}) sans « ## {label} » dans docs/dashboard/views.md")
 
 
+class TestMaterielView(unittest.TestCase):
+    """#147 : le matériel a sa propre vue, toujours dans le menu ; Performance n'en porte plus les cartes."""
+
+    def test_materiel_is_a_nav_entry_with_a_route(self):
+        self.assertIn(("materiel", "Matériel"), _nav_items())
+        self.assertIn("materiel", _routes_keys())
+
+    def test_performance_no_longer_renders_the_gear_cards(self):
+        source = APP_JS.read_text(encoding="utf-8")
+        body = source[source.index("async function viewPerformance"):source.index("// Vue : Matériel")]
+        for card in ("gearSection(", "equipmentSection(", "gearInspectionSection("):
+            self.assertNotIn(card, body, f"Performance ne doit plus appeler {card} (vue Matériel, #147)")
+        self.assertIn('href="#/materiel"', body)
+
+    def test_materiel_view_renders_the_three_cards(self):
+        source = APP_JS.read_text(encoding="utf-8")
+        body = source[source.index("async function viewMateriel"):source.index("function gearSessionsTable")]
+        for card in ("gearAlertsSection(", "gearSection(", "equipmentSection(", "gearInspectionSection("):
+            self.assertIn(card, body)
+
+
 if __name__ == "__main__":
     unittest.main()

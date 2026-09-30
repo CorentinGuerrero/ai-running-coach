@@ -906,6 +906,16 @@
           "weight_kg": 68.9,
           "weight_source": "health_day"
         },
+        "gear": {
+          "equipment": [],
+          "shoe": {
+            "gear_id": "hoka-speedgoat-5-bleue",
+            "name": "Hoka Speedgoat 5 (bleue)",
+            "retired": false,
+            "source": "default",
+            "unknown": false
+          }
+        },
         "hr_zones": {
           "bounds_bpm": [
             0.0,
@@ -3242,6 +3252,391 @@
           90
         ],
         "window_weeks": 12
+      },
+      "status": 200
+    },
+    "/api/gear/{equipment}": {
+      "body": {
+        "gear_id": "poche-eau",
+        "item": {
+          "alert": true,
+          "category": "poche",
+          "category_known": true,
+          "gear_id": "poche-eau",
+          "kits": [
+            "trail-long"
+          ],
+          "lifetime": {
+            "distance_m": 100000,
+            "duration_s": 40930,
+            "sessions": 6
+          },
+          "maintenance_date": null,
+          "name": "Poche à eau 2 L",
+          "pre_session_check": "hygiène (rinçage, séchage) avant une sortie longue",
+          "reference_date": "2026-01-01",
+          "retired": false,
+          "sports": [
+            "running",
+            "trail",
+            "hiking",
+            "walking"
+          ],
+          "start_date": "2026-01-01",
+          "triggers": [
+            {
+              "ratio": 8.833,
+              "reached": true,
+              "threshold": 30,
+              "type": "days",
+              "value": 265
+            }
+          ],
+          "usage": {
+            "days": 265,
+            "distance_m": 100000,
+            "duration_s": 40930,
+            "sessions": 6
+          }
+        },
+        "kind": "equipment",
+        "kits": {
+          "trail-long": [
+            {
+              "gear_id": "poche-eau",
+              "name": "Poche à eau 2 L"
+            },
+            {
+              "gear_id": "frontale-nuit",
+              "name": "Frontale Petzl"
+            },
+            {
+              "gear_id": "batons-leki",
+              "name": "Bâtons Leki"
+            }
+          ]
+        },
+        "name": "Poche à eau 2 L",
+        "retired": false,
+        "sessions": [
+          {
+            "date": "2026-09-19",
+            "distance_m": 21000.0,
+            "duration_s": 8386.0,
+            "id": 25,
+            "name": "Sortie longue",
+            "sport": "trail"
+          },
+          {
+            "date": "2026-09-12",
+            "distance_m": 20000.0,
+            "duration_s": 8020.0,
+            "id": 20,
+            "name": "Sortie longue",
+            "sport": "trail"
+          },
+          {
+            "date": "2026-09-05",
+            "distance_m": 13000.0,
+            "duration_s": 5538.0,
+            "id": 16,
+            "name": "Sortie longue",
+            "sport": "trail"
+          },
+          {
+            "date": "2026-08-29",
+            "distance_m": 17000.0,
+            "duration_s": 7225.0,
+            "id": 11,
+            "name": "Sortie longue",
+            "sport": "trail"
+          },
+          {
+            "date": "2026-08-22",
+            "distance_m": 15000.0,
+            "duration_s": 6091.0,
+            "id": 6,
+            "name": "Sortie longue",
+            "sport": "trail"
+          },
+          {
+            "date": "2026-08-15",
+            "distance_m": 14000.0,
+            "duration_s": 5670.0,
+            "id": 1,
+            "name": "Sortie longue",
+            "sport": "trail"
+          }
+        ],
+        "unknown": false,
+        "unknown_usage": null
+      },
+      "status": 200
+    },
+    "/api/gear/{shoe}": {
+      "body": {
+        "career": {
+          "best_efforts": [
+            {
+              "activity_name": "Côtes 8 × 90 s",
+              "date": "2026-09-22",
+              "km": 1,
+              "time_s": 297
+            },
+            {
+              "activity_name": "Côtes 8 × 90 s",
+              "date": "2026-09-15",
+              "km": 5,
+              "time_s": 1528
+            },
+            {
+              "activity_name": "Côtes 8 × 90 s",
+              "date": "2026-09-22",
+              "km": 10,
+              "time_s": 3081
+            }
+          ],
+          "condition_history": [
+            {
+              "condition": "green",
+              "date": "2026-08-14",
+              "distance_m": 12000.0
+            },
+            {
+              "condition": "yellow",
+              "date": "2026-09-18",
+              "distance_m": 45000.0
+            }
+          ],
+          "counted_distance_m": 57000,
+          "distance_m": 57000,
+          "first_date": "2026-08-18",
+          "gear_id": "adizero-sl",
+          "inspections_count": 2,
+          "last_date": "2026-09-22",
+          "last_inspection": {
+            "asymmetry": {
+              "level": "mild",
+              "side": "left"
+            },
+            "condition": "yellow",
+            "date": "2026-09-18",
+            "distance_m": 45000.0,
+            "gait_hints": [
+              "heel_strike"
+            ],
+            "gear_id": "adizero-sl",
+            "path": "gear/2026-09-18_adizero-sl_inspection.md",
+            "photos": [
+              "gear/photos/2026-09-18_adizero-sl_semelles.png"
+            ],
+            "previous": "gear/2026-08-14_adizero-sl_inspection.md",
+            "scale_reference": true,
+            "wear_zones": [
+              {
+                "severity": "moderate",
+                "side": "left",
+                "zone": "heel_posterolateral"
+              },
+              {
+                "severity": "light",
+                "side": "right",
+                "zone": "heel_posterolateral"
+              }
+            ]
+          },
+          "longest": {
+            "date": "2026-09-22",
+            "distance_m": 12000.0,
+            "name": "Côtes 8 × 90 s"
+          },
+          "name": "Adidas Adizero SL",
+          "races": [],
+          "retired": false,
+          "sessions": 6
+        },
+        "garmin_linked": false,
+        "gear_id": "adizero-sl",
+        "inspections": {
+          "condition_change": "worse",
+          "distance_m": 57000,
+          "due": true,
+          "due_reason": "threshold_alert",
+          "gear_id": "adizero-sl",
+          "inspections": [
+            {
+              "asymmetry": {
+                "level": "mild",
+                "side": "left"
+              },
+              "condition": "yellow",
+              "date": "2026-09-18",
+              "distance_m": 45000.0,
+              "gait_hints": [
+                "heel_strike"
+              ],
+              "gear_id": "adizero-sl",
+              "path": "gear/2026-09-18_adizero-sl_inspection.md",
+              "photos": [
+                "gear/photos/2026-09-18_adizero-sl_semelles.png"
+              ],
+              "previous": "gear/2026-08-14_adizero-sl_inspection.md",
+              "scale_reference": true,
+              "wear_zones": [
+                {
+                  "severity": "moderate",
+                  "side": "left",
+                  "zone": "heel_posterolateral"
+                },
+                {
+                  "severity": "light",
+                  "side": "right",
+                  "zone": "heel_posterolateral"
+                }
+              ]
+            },
+            {
+              "asymmetry": {
+                "level": "none"
+              },
+              "condition": "green",
+              "date": "2026-08-14",
+              "distance_m": 12000.0,
+              "gait_hints": [
+                "heel_strike"
+              ],
+              "gear_id": "adizero-sl",
+              "path": "gear/2026-08-14_adizero-sl_inspection.md",
+              "wear_zones": [
+                {
+                  "severity": "light",
+                  "side": "left",
+                  "zone": "heel_posterolateral"
+                },
+                {
+                  "severity": "light",
+                  "side": "right",
+                  "zone": "heel_posterolateral"
+                }
+              ]
+            }
+          ],
+          "km_since_inspection_m": 12000,
+          "latest": {
+            "asymmetry": {
+              "level": "mild",
+              "side": "left"
+            },
+            "condition": "yellow",
+            "date": "2026-09-18",
+            "distance_m": 45000.0,
+            "gait_hints": [
+              "heel_strike"
+            ],
+            "gear_id": "adizero-sl",
+            "path": "gear/2026-09-18_adizero-sl_inspection.md",
+            "photos": [
+              "gear/photos/2026-09-18_adizero-sl_semelles.png"
+            ],
+            "previous": "gear/2026-08-14_adizero-sl_inspection.md",
+            "scale_reference": true,
+            "wear_zones": [
+              {
+                "severity": "moderate",
+                "side": "left",
+                "zone": "heel_posterolateral"
+              },
+              {
+                "severity": "light",
+                "side": "right",
+                "zone": "heel_posterolateral"
+              }
+            ]
+          },
+          "name": "Adidas Adizero SL",
+          "retired": false,
+          "unknown": false
+        },
+        "kind": "shoe",
+        "monthly": [
+          {
+            "distance_m": 17000,
+            "month": "2026-08"
+          },
+          {
+            "distance_m": 40000,
+            "month": "2026-09"
+          }
+        ],
+        "name": "Adidas Adizero SL",
+        "retired": false,
+        "sessions": [
+          {
+            "date": "2026-09-22",
+            "distance_m": 12000.0,
+            "duration_s": 3757.0,
+            "id": 27,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          },
+          {
+            "date": "2026-09-15",
+            "distance_m": 11000.0,
+            "duration_s": 3509.0,
+            "id": 22,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          },
+          {
+            "date": "2026-09-08",
+            "distance_m": 7000.0,
+            "duration_s": 2234.0,
+            "id": 17,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          },
+          {
+            "date": "2026-09-01",
+            "distance_m": 10000.0,
+            "duration_s": 3168.0,
+            "id": 13,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          },
+          {
+            "date": "2026-08-25",
+            "distance_m": 9000.0,
+            "duration_s": 2878.0,
+            "id": 8,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          },
+          {
+            "date": "2026-08-18",
+            "distance_m": 8000.0,
+            "duration_s": 2594.0,
+            "id": 3,
+            "is_race": false,
+            "name": "Côtes 8 × 90 s",
+            "sport": "running"
+          }
+        ],
+        "shoe": {
+          "alert": true,
+          "default": false,
+          "distance_m": 57000,
+          "gear_id": "adizero-sl",
+          "name": "Adidas Adizero SL",
+          "retired": false,
+          "start_date": null,
+          "threshold_m": 50000
+        },
+        "unknown": false
       },
       "status": 200
     },

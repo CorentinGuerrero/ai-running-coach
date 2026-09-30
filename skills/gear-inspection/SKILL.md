@@ -164,7 +164,7 @@ enregistrée, **laisser `photos` absent et le dire** — ne jamais citer un chem
 Le dossier `gear/` est gitignoré, mais un workspace privé versionné (`git_autocommit`) embarque
 son contenu : des photos redimensionnées (~1 Mo) suffisent.
 
-Après l'écriture, `python3 scripts/arc_index.py` met à jour le tableau de bord (vue Performance,
+Après l'écriture, `python3 scripts/arc_index.py` met à jour le tableau de bord (vue Matériel,
 carte « Inspections photo »).
 
 ## 10. Bilan de carrière d'une paire retirée
