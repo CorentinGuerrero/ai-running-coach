@@ -169,7 +169,7 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
 ## Rattraper le matériel de l'historique
 
 Le matériel attaché par la montre n'est attribué qu'aux séances **nouvelles** (`get_activity_gear` à la
-synchronisation). Un historique déjà dans `activities/` reste sans `gear_id` : la carte « Matériel » est vide
+synchronisation). Un historique déjà dans `activities/` reste sans `gear_id` : la vue « Matériel » du tableau de bord est vide
 alors que Garmin Connect connaît la paire de chaque séance. Le script `scripts/garmin_gear_backfill.py` (#145)
 les rattrape avec **un appel Garmin par paire** de chaussures (`get_gear_activities`), jamais un par séance.
 

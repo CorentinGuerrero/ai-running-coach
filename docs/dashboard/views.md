@@ -637,60 +637,47 @@ divergent disent que le terrain ou la forme du jour pèsent.
 **Mon matériel est-il en état ? Que dois-je remplacer ?**
 
 Vue dédiée (#147), toujours présente dans le menu pour être trouvée même avant la première
-déclaration. Elle réunit, dans cet ordre : une synthèse **À traiter** (toute paire ou tout
-objet au-delà de son seuil, toute inspection conseillée — une ligne par élément, avec ses
-raisons, chacune renvoyant vers sa fiche), puis les **chaussures**, l'**équipement** (kits
-compris) et les **inspections photo**. Les trois cartes vivaient jusque-là dans Performance.
+déclaration. Un lien « Hypothèses des modèles » en tête renvoie vers celles de
+[Performance](#performance). Elle réunit, dans cet ordre : une synthèse **À traiter**, les
+**chaussures**, l'**équipement** (kits compris) et les **inspections photo**. Les trois cartes
+vivaient jusque-là dans Performance.
 
 Sans matériel déclaré, la vue montre un état vide utile : la syntaxe à écrire dans « Matériel &
 lieux » du profil, la commande de simulation `python3 scripts/garmin_gear_backfill.py` pour
 rattraper l'historique Garmin (rien n'est écrit sans `--apply`) et des liens vers la documentation.
 
-- **Chaussures** (#40) : kilométrage cumulé de chaque paire déclarée dans « Matériel &
-  lieux » du profil (course et randonnée seulement), une ligne « à surveiller »
-  au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
-  alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
-  profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
-  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
-  donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
-  récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
-  et le rôle `usage:` déclaré s'affiche à côté du nom.
-- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
-  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
-  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
-  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
-  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
-  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
-  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
-  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
-  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
-  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
+**À traiter** — toute paire ou tout objet au-delà de son seuil, toute inspection conseillée :
+une ligne par élément, avec ses raisons, chacune renvoyant vers sa fiche. Sans rien à signaler,
+la carte le dit. Les paires marquées « ignorées » dans le profil sont listées à part, en bas de
+la vue.
+
+**Chaussures** (#40) — kilométrage cumulé de chaque paire déclarée dans « Matériel & lieux » du
+profil (course et randonnée seulement), une ligne « à surveiller » au-delà du seuil d'alerte,
+les paires retirées affichées en grisé sans jamais alerter, et une ligne « inconnue » par
+`gear_id` vu sur une séance mais absent du profil — jamais masqué silencieusement. Depuis #132 :
+le kilométrage inclut le « départ » déclaré sur la puce (rappelé sous le total : « dont N km de
+départ »), un badge **« ≈ N sem. »** donne la prévision de retraite au rythme des 28 derniers
+jours (rien sans usage récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît
+dès 90 %, et le rôle `usage:` déclaré s'affiche à côté du nom.
+
 ![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
 
-*La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
+*La carte Chaussures : la paire par défaut a dépassé son seuil, deux paires affichent
 leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
 visible en grisé ; la dernière inspection photo (#135) s'affiche à côté (« inspectée
 22 sept. », état « Usure visible ») et « Inspection conseillée » signale une paire à
 inspecter. Liste de chaussures d'illustration, kilométrages calculés sur les séances
 réelles du workspace des captures.*
 
-![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
-
-*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
-conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
-relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
-schématiques), jamais de vraies photos dans le dépôt.*
-
-**Équipement (#134)** — sous les chaussures, un tableau pour tout ce qui n'est pas
-chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,
-séances, jours depuis la date de référence — `depuis` ou dernier `entretien`), ses
-**déclencheurs** avec la valeur atteinte face au seuil dans l'unité de chacun (km, h,
-séances, jours), ses kits, et un statut « À surveiller » (un déclencheur atteint — le
-premier suffit) ou « Proche du seuil » (≥ 90 %). Un objet sans déclencheur déclaré affiche
-« aucun seuil déclaré » et n'alerte jamais ; un déclencheur en jours sans `depuis` ni
-`entretien` est dit inopérant plutôt que compté à zéro. Un identifiant cité dans `gear_ids`
-d'une séance mais absent du profil apparaît en « inconnu ». Le tableau ne s'affiche que si
-le profil déclare du matériel ; le détail des règles est dans les Hypothèses
+**Équipement** (#134) — un tableau pour tout ce qui n'est pas chaussure (`### Matériel` du
+profil) : par objet, son **usage** (distance, heures, séances, jours depuis la date de
+référence — `depuis` ou dernier `entretien`), ses **déclencheurs** avec la valeur atteinte face
+au seuil dans l'unité de chacun (km, h, séances, jours), ses kits, et un statut « À surveiller »
+(un déclencheur atteint — le premier suffit) ou « Proche du seuil » (≥ 90 %). Un objet sans
+déclencheur déclaré affiche « aucun seuil déclaré » et n'alerte jamais ; un déclencheur en jours
+sans `depuis` ni `entretien` est dit inopérant plutôt que compté à zéro. Un identifiant cité
+dans `gear_ids` d'une séance mais absent du profil apparaît en « inconnu ». Le tableau ne
+s'affiche que si le profil déclare du matériel ; le détail des règles est dans les Hypothèses
 (`equipment_usage`).
 
 ![Équipement : usage par objet, déclencheurs en heures, séances et jours, poche à eau à nettoyer](../assets/dashboard/equipement.webp)
@@ -700,24 +687,49 @@ le dernier entretien, la ceinture cardio approche de son année (« 12 mois » c
 les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
 d'illustration, usage calculé sur les séances réelles du workspace des captures.*
 
+**Inspections photo** (#135) — pour chaque paire, l'historique des inspections du dossier
+`gear/` (plus récente d'abord) : état 🟢🟡🟠🔴 écrit aussi en toutes lettres, kilométrage à
+l'inspection, zones d'usure par semelle (gauche/droite), asymétrie, indices de foulée et
+vignettes des photos. La ligne de la paire dans « Chaussures » porte la dernière inspection ;
+« Inspection conseillée » apparaît après ~200 km sans inspection, ou une fois le seuil d'alerte
+franchi (rappel, jamais une obligation). Une inspection plus dégradée que la précédente est
+signalée. Les vignettes sont servies par une route dédiée en lecture seule, limitée aux images
+(`.jpg`, `.png`, `.webp`) de `gear/photos/` **citées par une inspection** ; rien d'autre du
+workspace n'est exposé. Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire
+n'est à inspecter.
+
+![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
+
+*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
+conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
+relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
+schématiques), jamais de vraies photos dans le dépôt.*
+
 ### Fiche d'une paire ou d'un objet
 
 Chaque nom de paire ou d'objet (tableaux, synthèse, tuiles d'Aujourd'hui, page d'une séance)
 ouvre sa fiche, à l'adresse partageable `#/materiel/<gear_id>` :
 
 - **Une paire** : bilan de carrière (kilométrage départ compris, séances et période, courses,
-  sortie la plus longue, meilleurs efforts 1/5/10 km sur les séances qui ont des splits,
+  sortie la plus longue, meilleurs efforts 1/5/10/21 km sur les séances qui ont des splits,
   seuil et prévision de retraite, paire rattachée ou non à Garmin Connect), **kilomètres par
   mois**, **liste des séances** (chacune renvoie vers son détail) et **historique des
   inspections** de la paire. Une paire retirée reste consultable ; une paire marquée
-  « ignorée » le dit et n'affiche aucun kilométrage.
-- **Un objet d'équipement** : usage, **déclencheurs** (valeur atteinte face au seuil), **kits**
-  et leurs autres membres, séances où il a servi.
+  « ignorée » le dit, garde ses inspections et n'affiche aucun kilométrage.
+- **Un objet d'équipement** : usage (depuis le dernier entretien, avec le total à vie à côté),
+  **déclencheurs** (valeur atteinte face au seuil), **kits** et leurs autres membres, séances où
+  il a servi — celles d'avant le dernier entretien sont grisées : elles ne comptent plus dans
+  les déclencheurs.
 - **Identifiant inconnu** : un état « introuvable » clair, jamais une page vide.
 
+![Fiche d'une paire : bilan de carrière, kilomètres par mois, séances et inspections](../assets/dashboard/materiel-fiche.webp)
+
+*La fiche d'une paire : bilan de carrière, kilomètres par mois, liste des séances (chacune
+renvoie vers son détail) et inspections de la paire.*
+
 La page d'une séance affiche de son côté « Chaussure » (paire attribuée, mention « paire par
-défaut » quand elle n'est pas déclarée sur la séance) et « Équipement porté » (`gear_ids`),
-lorsqu'ils existent.
+défaut » quand elle n'est pas déclarée sur la séance) et « Équipement porté » (`gear_ids`,
+hors chaussures), lorsqu'ils existent.
 
 **Comment la lire** : les kilométrages viennent tous de la même règle d'attribution des
 séances aux paires (`gear_id` explicite, sinon paire par défaut — voir les Hypothèses de

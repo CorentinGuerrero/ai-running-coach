@@ -85,6 +85,18 @@ class TestShoeDetail(DetailCase):
         self.assertTrue(d["ignored"])
         self.assertEqual(d["sessions"], [])
 
+    def test_ignored_shoe_keeps_its_inspections_and_is_listed_in_the_summary(self):
+        self.profile("- Vieilles Trail — id: vieilles (ignorée)")
+        (self.ws / "gear").mkdir()
+        self.write("gear/2026-08-01_vieilles_inspection.md",
+                   arc(json.dumps({"arc": 1, "kind": "gear_inspection", "date": "2026-08-01",
+                                   "gear_id": "vieilles", "condition": "orange"})))
+        store = self.store()
+        d = S.api_gear(store, "vieilles")
+        self.assertTrue(d["ignored"])
+        self.assertEqual([i["condition"] for i in d["inspections"]["inspections"]], ["orange"])
+        self.assertEqual(S.api_summary(store, {})["gear_ignored"], [{"gear_id": "vieilles", "name": "Vieilles Trail"}])
+
     def test_unknown_and_invalid_ids_are_none(self):
         self.profile("- Nike Pegasus — id: pegasus")
         store = self.store()
@@ -121,6 +133,24 @@ class TestEquipmentDetail(DetailCase):
         self.assertTrue(d["unknown"])
         self.assertEqual(d["unknown_usage"]["sessions"], 1)
 
+    def test_maintenance_marks_sessions_before_the_last_service_as_not_counted(self):
+        self.equipment_profile("- Nike Pegasus — id: pegasus (par défaut)",
+                               "- Poche à eau — catégorie: poche — alerte 50 km — entretien 2026-09-03 — id: poche")
+        self.worn("2026-09-01", ["poche"])
+        self.worn("2026-09-03", ["poche"])          # le jour même de l'entretien : non comptée (règle d'usage)
+        self.worn("2026-09-10", ["poche"])
+        d = S.api_gear(self.store(), "poche")
+        self.assertEqual([(x["date"], x["counted"]) for x in d["sessions"]],
+                         [("2026-09-10", True), ("2026-09-03", False), ("2026-09-01", False)])
+        self.assertEqual(d["item"]["usage"]["sessions"], sum(1 for x in d["sessions"] if x["counted"]))
+        self.assertEqual(d["item"]["lifetime"]["sessions"], 3)
+
+    def test_sessions_without_maintenance_are_all_counted(self):
+        self.equipment_profile("- Nike Pegasus — id: pegasus (par défaut)", "- Frontale — id: frontale")
+        self.worn("2026-09-01", ["frontale"])
+        d = S.api_gear(self.store(), "frontale")
+        self.assertTrue(all(x["counted"] for x in d["sessions"]))
+
     def test_session_counts_helper_mirrors_usage_filter(self):
         act = {"gear_ids": ["x"], "date": "2026-09-01", "sport": "strength"}
         self.assertFalse(M.equipment_session_counts(act, "x", "batons", "2026-09-23"))
@@ -145,6 +175,13 @@ class TestActivityGear(DetailCase):
         explicit = S.api_activity(store, by_date["2026-09-02"])["gear"]
         self.assertEqual((explicit["shoe"]["gear_id"], explicit["shoe"]["source"]), ("speedgoat", "declared"))
         self.assertEqual(explicit["equipment"], [])
+
+    def test_a_shoe_slug_in_gear_ids_is_not_worn_equipment(self):
+        self.equipment_profile("- Nike Pegasus — id: pegasus (par défaut)", "- Frontale — id: frontale")
+        self.worn("2026-09-01", ["frontale", "pegasus"])
+        store = self.store()
+        aid = store.rows("SELECT id FROM activity")[0]["id"]
+        self.assertEqual([g["gear_id"] for g in S.api_activity(store, aid)["gear"]["equipment"]], ["frontale"])
 
     def test_no_shoe_without_profile(self):
         self.activity("2026-09-02", distance_m=10000)

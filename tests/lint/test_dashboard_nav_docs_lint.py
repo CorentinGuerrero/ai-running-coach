@@ -90,6 +90,11 @@ class TestMaterielView(unittest.TestCase):
             self.assertNotIn(card, body, f"Performance ne doit plus appeler {card} (vue Matériel, #147)")
         self.assertIn('href="#/materiel"', body)
 
+    def test_gear_route_survives_a_malformed_url(self):
+        source = APP_JS.read_text(encoding="utf-8")
+        self.assertIn("viewGearDetail(safeDecode(arg))", source)
+        self.assertNotIn("decodeURIComponent(arg)", source)
+
     def test_materiel_view_renders_the_three_cards(self):
         source = APP_JS.read_text(encoding="utf-8")
         body = source[source.index("async function viewMateriel"):source.index("function gearSessionsTable")]

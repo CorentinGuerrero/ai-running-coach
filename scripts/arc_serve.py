@@ -426,6 +426,7 @@ def api_summary(store: Store, q: dict) -> dict:
         "gear": store.gear_mileage(today),
         "equipment": store.equipment_usage(today),
         "gear_inspections": store.gear_inspections(today),
+        "gear_ignored": store.rows("SELECT gear_id, name FROM gear WHERE ignored = 1 ORDER BY name, gear_id"),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,

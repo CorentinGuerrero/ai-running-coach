@@ -3214,6 +3214,7 @@
         "retired": false,
         "sessions": [
           {
+            "counted": true,
             "date": "2026-09-19",
             "distance_m": 21000.0,
             "duration_s": 7593.0,
@@ -3222,6 +3223,7 @@
             "sport": "running"
           },
           {
+            "counted": true,
             "date": "2026-09-12",
             "distance_m": 20000.0,
             "duration_s": 7333.0,
@@ -3230,6 +3232,7 @@
             "sport": "running"
           },
           {
+            "counted": true,
             "date": "2026-09-05",
             "distance_m": 13000.0,
             "duration_s": 4887.0,
@@ -3238,6 +3241,7 @@
             "sport": "running"
           },
           {
+            "counted": true,
             "date": "2026-08-29",
             "distance_m": 17000.0,
             "duration_s": 6346.0,
@@ -3246,6 +3250,7 @@
             "sport": "running"
           },
           {
+            "counted": true,
             "date": "2026-08-22",
             "distance_m": 15000.0,
             "duration_s": 5663.0,
@@ -3254,6 +3259,7 @@
             "sport": "running"
           },
           {
+            "counted": true,
             "date": "2026-08-15",
             "distance_m": 14000.0,
             "duration_s": 5254.0,
@@ -7395,6 +7401,7 @@
           "unknown": [],
           "warnings": []
         },
+        "gear_ignored": [],
         "gear_inspections": {
           "due": [
             "adizero-sl"
