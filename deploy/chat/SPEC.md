@@ -41,7 +41,7 @@ your final report.
 [chat]
 enabled = false
 backend = "claude"                 # "claude" | "opencode" | "mock"
-model = "claude-sonnet-5-5"        # opencode: provider/model id, e.g. "openrouter/deepseek/deepseek-chat"
+model = "claude-sonnet-5-5"        # opencode: provider/model id, e.g. "openrouter/deepseek/deepseek-v4-pro"
 base_url = ""                      # opencode + OpenAI-compatible endpoint other than OpenRouter
 api_key_env = "ANTHROPIC_API_KEY"  # NAME of the variable in llm.env / environment
 port = 8766                        # chat service, 127.0.0.1 unless listen is set
@@ -71,7 +71,7 @@ daily_budget_eur = 0.5             # enforced only when the runner reports cost
 ```
 
 Default models when `install.sh --llm` writes them: `--llm openrouter` → chat + sync
-`openrouter/deepseek/deepseek-chat` (exact id verified at implementation, keep one
+`openrouter/deepseek/deepseek-v4-pro` (exact id verified at implementation, keep one
 constant); `--llm anthropic` → chat `claude-sonnet-5-5`, sync `claude-haiku-4-5`.
 
 ## HTTP API (chat service, all under `/api/chat`)

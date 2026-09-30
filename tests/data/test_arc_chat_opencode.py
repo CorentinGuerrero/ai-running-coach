@@ -253,7 +253,7 @@ class OpenCodeCase(unittest.TestCase):
         self._env = dict(os.environ)
         os.environ["OPENROUTER_API_KEY"] = "sk-or-secret-test-value"
         self.addCleanup(self._cleanup)
-        self.backend = O.OpenCodeBackend(self.ws, {"model": "openrouter/deepseek/deepseek-chat"})
+        self.backend = O.OpenCodeBackend(self.ws, {"model": "openrouter/deepseek/deepseek-v4-pro"})
 
         def fake_spawn(cmd, env, cwd, log_path):
             self.spawned.append({"cmd": cmd, "env": dict(env), "cwd": cwd})
@@ -336,7 +336,7 @@ class TestMapping(unittest.TestCase):
                          "mcp:garmin.schedule_week")
 
     def test_split_model(self):
-        self.assertEqual(O.split_model("openrouter/deepseek/deepseek-chat"), ("openrouter", "deepseek/deepseek-chat"))
+        self.assertEqual(O.split_model("openrouter/deepseek/deepseek-v4-pro"), ("openrouter", "deepseek/deepseek-v4-pro"))
         with self.assertRaises(BackendError):
             O.split_model("nomodel")
 
@@ -360,8 +360,8 @@ class TestConfigGeneration(OpenCodeCase):
         cfg = json.loads(text)
         self.assertNotIn("sk-or-secret-test-value", text)
         self.assertEqual(cfg["provider"]["openrouter"]["options"]["apiKey"], "{env:OPENROUTER_API_KEY}")
-        self.assertEqual(cfg["model"], "openrouter/deepseek/deepseek-chat")
-        self.assertIn("deepseek/deepseek-chat", cfg["provider"]["openrouter"]["models"])
+        self.assertEqual(cfg["model"], "openrouter/deepseek/deepseek-v4-pro")
+        self.assertIn("deepseek/deepseek-v4-pro", cfg["provider"]["openrouter"]["models"])
         self.assertEqual(cfg["permission"]["*"], "ask")
         self.assertEqual(cfg["permission"]["question"], "deny")
         self.assertEqual(cfg["mcp"]["garmin"]["command"], ["garmin-mcp", "stdio"])
@@ -417,7 +417,7 @@ class TestTurns(OpenCodeCase):
         self.assertAlmostEqual(usage["cost_eur"], 0.00016 * 0.5, places=6)
         self.assertEqual(h.ctx.backend_state["opencode_session_id"], SID)
         prompt = next(b for m, p, b in self.fake.requests if p.endswith("/prompt_async"))
-        self.assertEqual(prompt["model"], {"providerID": "openrouter", "modelID": "deepseek/deepseek-chat"})
+        self.assertEqual(prompt["model"], {"providerID": "openrouter", "modelID": "deepseek/deepseek-v4-pro"})
         self.assertTrue(prompt["system"].startswith(SYSTEM_ADDENDUM))
         self.assertIn("en français", prompt["system"])      # langue explicite (commande seule)
         self.assertEqual(prompt["parts"], [{"type": "text", "text": "salut"}])

@@ -319,7 +319,7 @@ pour les changer, sauf `mode`/`times`, voir [Le coach dans la poche](mobile.md))
 | Clé | Effet |
 |---|---|
 | `runner` | `"claude"` (Claude Code, `claude -p`, défaut) \| `"codex"` (`codex exec`) \| `"opencode"` (`opencode run`, OpenRouter ou API compatible OpenAI). |
-| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-chat`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
+| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-v4-pro`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
 | `base_url` | Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner `opencode`). |
 | `api_key_env` | **Nom** de la variable qui porte la clé, lue dans `~/.config/ai-running-coach/llm.env` (mode 600). Non vide = mode API, facturé au token ; vide (défaut) = abonnement. Jamais la clé elle-même. |
 | `daily_budget_eur` | Plafond de dépense quotidien (défaut `0.5`), appliqué seulement quand le runner rapporte son coût (`opencode`, `claude` en mode API). Atteint : run sauté, une notification par jour. |
@@ -354,7 +354,8 @@ défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
 La clé API n'est jamais dans ce fichier : `~/.config/ai-running-coach/llm.env`.
 Variables d'environnement (dépannage, jamais nécessaires en usage courant) : `ARC_LLM_ENV` (autre chemin que
 `llm.env`, lu par le service, `daily-sync.sh` et `install.sh`), `ARC_CHAT_PING_S` (intervalle des
-commentaires `: ping` du flux SSE, 15 s).
+commentaires `: ping` du flux SSE, 15 s), `ARC_OPENCODE_TRACE` (fichier où recopier chaque évènement brut
+d'OpenCode — contenu des échanges compris : diagnostic seulement, fichier à supprimer ensuite).
 `./install.sh --chat-budget EUR` écrit `daily_budget_eur`. Le diagnostic :
 `python3 scripts/coach_doctor.py --check llm_config` (et `chat_service`, `opencode_cli`).
 

@@ -5,7 +5,7 @@ OpenCode est le harnais (agents `.opencode/agents`, skills, MCP, outils fichiers
 ce module est un adaptateur mince : il supervise un `opencode serve` local, lui envoie
 les messages de l'athlète, traduit son flux d'évènements vers le protocole du chat
 et répond à ses demandes de permission après passage par la politique du coach.
-Fournisseur par défaut : OpenRouter (`openrouter/deepseek/deepseek-chat`), ou tout
+Fournisseur par défaut : OpenRouter (`openrouter/deepseek/deepseek-v4-pro`), ou tout
 endpoint compatible OpenAI via `[chat].base_url`.
 
 Bibliothèque standard uniquement (urllib, threads, subprocess).
@@ -70,7 +70,7 @@ from arc_chat_tools import (REFUSAL_DENY, display_input, fs_list_input, gate, ma
                             parse_unified_diff, short, summarize_tool, usd_to_eur)
 
 OPENCODE_TESTED_VERSION = "1.18.32"
-DEFAULT_MODEL = "openrouter/deepseek/deepseek-chat"
+DEFAULT_MODEL = "openrouter/deepseek/deepseek-v4-pro"
 DEFAULT_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 HEALTH_TIMEOUT_S = 40.0
@@ -144,7 +144,7 @@ def canonical_tool(name: str, tool_input: Optional[dict], mcp_servers: Any = ())
 # ---------------------------------------------------------------------------
 
 def split_model(model: str) -> tuple:
-    """« openrouter/deepseek/deepseek-chat » -> (« openrouter », « deepseek/deepseek-chat »)."""
+    """« openrouter/deepseek/deepseek-v4-pro » -> (« openrouter », « deepseek/deepseek-v4-pro »)."""
     provider, _, model_id = (model or DEFAULT_MODEL).partition("/")
     if not model_id:
         raise BackendError(f"Modèle OpenCode invalide : {model!r} (attendu « fournisseur/modèle »).")

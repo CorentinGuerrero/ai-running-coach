@@ -26,7 +26,7 @@ TODAY = date.today().isoformat()
 OPENCODE_SYNC = """\
 [sync]
 runner = "opencode"
-model = "openrouter/deepseek/deepseek-chat"
+model = "openrouter/deepseek/deepseek-v4-pro"
 api_key_env = "OPENROUTER_API_KEY"
 {extra}
 [notifications]
@@ -94,7 +94,7 @@ class TestOpencodeRunnerDryRun(InstallAsserts):
                 "env": {"GARMIN_ENABLED_TOOLS": "get_activities,schedule_workouts,get_sleep_data"}}}}))
             proc = sb.script("daily-sync.sh", "--dry-run")
             self.assertSucceeded(proc)
-            self.assertOutputContains(proc, "opencode run --format json --model openrouter/deepseek/deepseek-chat")
+            self.assertOutputContains(proc, "opencode run --format json --model openrouter/deepseek/deepseek-v4-pro")
             self.assertOutputContains(proc, f"--dir {sb.repo}")
             self.assertOutputContains(proc, "OPENCODE_CONFIG=")
             # Config : clé par référence, bash refusé, écritures Garmin refusées et retirées.
@@ -146,7 +146,7 @@ class TestOpencodeRunnerDryRun(InstallAsserts):
     def test_base_url_builds_an_openai_compatible_provider(self):
         with Sandbox() as sb:
             _write_config(sb, OPENCODE_SYNC.format(extra='base_url = "https://llm.example.org/v1"\n')
-                          .replace("openrouter/deepseek/deepseek-chat", "openai/gpt-4.1-mini"))
+                          .replace("openrouter/deepseek/deepseek-v4-pro", "openai/gpt-4.1-mini"))
             proc = sb.script("daily-sync.sh", "--dry-run")
             self.assertSucceeded(proc)
             self.assertOutputContains(proc, "@ai-sdk/openai-compatible")
@@ -359,7 +359,7 @@ class TestInstallLlm(InstallAsserts):
         with Sandbox() as sb:
             proc = sb.install("--no-auth", "--ide", "claude", "--llm", "openrouter")
             self.assertSucceeded(proc)
-            model = "openrouter/deepseek/deepseek-chat"
+            model = "openrouter/deepseek/deepseek-v4-pro"
             self.assertEqual(self._get(sb, "chat", "backend"), "opencode")
             self.assertEqual(self._get(sb, "chat", "model"), model)
             self.assertEqual(self._get(sb, "chat", "api_key_env"), "OPENROUTER_API_KEY")
@@ -388,7 +388,7 @@ class TestInstallLlm(InstallAsserts):
             proc = sb.install("--no-auth", "--ide", "claude", "--llm", "openrouter")
             self.assertSucceeded(proc)
             self.assertOutputContains(proc, "[sync].runner : codex → opencode")
-            self.assertOutputContains(proc, "[sync].model : vieux → openrouter/deepseek/deepseek-chat")
+            self.assertOutputContains(proc, "[sync].model : vieux → openrouter/deepseek/deepseek-v4-pro")
             self.assertOutputContains(proc, "Pour revenir")
             self.assertEqual(self._get(sb, "sync", "runner"), "opencode")
 
@@ -405,7 +405,7 @@ class TestInstallLlm(InstallAsserts):
         with Sandbox() as sb:
             self.assertSucceeded(sb.install("--no-auth", "--ide", "claude", "--llm", "openrouter"))
             cfg = sb.repo / "config/workspace.user.toml"
-            cfg.write_text(cfg.read_text().replace('model = "openrouter/deepseek/deepseek-chat"',
+            cfg.write_text(cfg.read_text().replace('model = "openrouter/deepseek/deepseek-v4-pro"',
                                                     'model = "openrouter/perso/mon-modele"'))
             proc = sb.install("--no-auth", "--ide", "claude")
             self.assertSucceeded(proc)

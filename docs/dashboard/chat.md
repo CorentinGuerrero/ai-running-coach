@@ -5,8 +5,11 @@ ou téléphone —, avec la même connexion que le reste du tableau de bord. Der
 mêmes agents, les mêmes skills, le même serveur MCP Garmin et les mêmes fichiers Markdown
 qu'en session dans votre IDE : le chat n'invente aucune source de vérité.
 
-- chaque étape (fichier lu, outil appelé) apparaît dans une trace repliable ;
-- les réponses arrivent au fil de l'eau ;
+- chaque étape (fichier lu, outil appelé) apparaît dans une trace repliable, avec ce que le
+  coach en dit en travaillant — seule la réponse finale reste affichée ;
+- les réponses arrivent au fil de l'eau ; si le fournisseur est saturé, une ligne l'indique
+  pendant les nouvelles tentatives au lieu d'une page muette ;
+- les blocs de données (` ```arc `, JSON) sont repliés, les tableaux mis en forme ;
 - **toute écriture vers Garmin ou Intervals.icu attend votre accord** : une carte montre
   l'avant/après, vous appliquez ou refusez — depuis la page ou depuis la notification ;
 - un compteur affiche le coût de la conversation et le budget du jour.
@@ -39,7 +42,7 @@ Le tableau de bord reste **en lecture seule** et ne voit jamais la clé API : c'
 | | Claude (API Anthropic) | OpenRouter (ou API compatible OpenAI) |
 |---|---|---|
 | Harnais | Claude Agent SDK — le moteur de Claude Code | serveur OpenCode |
-| Modèle par défaut | `claude-sonnet-5-5` | `openrouter/deepseek/deepseek-chat` |
+| Modèle par défaut | `claude-sonnet-5-5` | `openrouter/deepseek/deepseek-v4-pro` |
 | Fidélité aux agents/skills | identique à Claude Code | bonne ; dépend du modèle |
 | Prérequis | `pip install claude-agent-sdk` (Python ≥ 3.10) | binaire `opencode` |
 | Coût indicatif | quelques centimes par échange | moins, selon le modèle |
@@ -225,7 +228,8 @@ confidentialité du compte). Voir aussi
 
 Toutes les clés : [Configuration — `[chat]`](../configuration.md#le-chat-avec-le-coach-chat).
 Variables d'environnement utiles au dépannage : `ARC_LLM_ENV` (autre chemin que `llm.env`),
-`ARC_CHAT_PING_S` (intervalle des pings du flux, 15 s).
+`ARC_CHAT_PING_S` (intervalle des pings du flux, 15 s), `ARC_OPENCODE_TRACE` (évènements bruts
+d'OpenCode recopiés dans un fichier — échanges compris, à supprimer après le diagnostic).
 
 ## Dépannage
 
