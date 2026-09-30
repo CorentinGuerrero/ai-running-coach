@@ -42,7 +42,11 @@ set -euo pipefail
 # Constantes
 # ---------------------------------------------------------------------------
 VERSION="0.2.0"
-GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp"
+# Épinglé à un commit précis, comme INTERVALS_MCP_REF ci-dessous : ce serveur reçoit le
+# mot de passe et le code MFA Garmin à l'authentification, puis tourne à chaque
+# synchronisation — un changement en amont ne doit jamais être exécuté sans relecture.
+# Mettre à jour après vérification du diff amont.
+GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7"
 # Source alternative (#68) : serveur MCP communautaire déjà référencé par
 # docs/faq.md avant cette story (hypothèse de travail des tests, désormais
 # celui réellement installé par --source intervals). project.scripts expose

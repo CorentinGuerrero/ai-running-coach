@@ -3,6 +3,10 @@
 !scripts/
 !web/
 !config/
+# Personnel (sujet ntfy, réglages) : le conteneur lit la configuration utilisateur
+# depuis le workspace monté, jamais depuis l'image.
+config/workspace.user.toml
+**/*.bak
 **/__pycache__
 **/*.py[cod]
 **/.DS_Store
