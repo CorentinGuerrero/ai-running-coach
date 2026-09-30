@@ -787,12 +787,13 @@ main() {
     load_llm_env || key_missing=1
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        # Le prompt inline du skill (codex, opencode) est long : on n'en montre que la taille.
+        # Le prompt inline du skill (codex, opencode), multi-ligne, n'est montré que par sa
+        # taille ; les listes d'outils autorisés/interdits restent affichées en entier.
         local shown=() arg
         for arg in "${CMD[@]}"; do
-            if [[ "${#arg}" -gt 240 ]]; then shown+=("<prompt : ${#arg} caractères>"); else shown+=("$arg"); fi
+            if [[ "$arg" == *$'\n'* ]]; then shown+=("<prompt : ${#arg} caractères>"); else shown+=("$arg"); fi
         done
-        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${shown[*]}" | head -c 2000; echo
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${shown[*]}" | head -c 4000; echo
         if [[ -n "$API_KEY_ENV" ]]; then
             # Le NOM de la variable seulement — jamais sa valeur.
             if [[ "$key_missing" -eq 0 ]]; then
