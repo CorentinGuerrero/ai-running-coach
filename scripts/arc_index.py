@@ -285,13 +285,16 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # déjà construite n'a ni la table ni la colonne (« no such table »/« no such column »).
 # #135 : nouvelle table `gear_inspection` (inspections photo de chaussures, `gear/*_inspection.md`, dossier
 # `gear/` ajouté à `DATA_DIRS`) — sans ce bump, une base déjà construite n'a pas la table (« no such table »).
+# Temps en zone surestimé (buckets partiels) : `activity_sample` gagne `covered_s` (REAL,
+# secondes réellement couvertes par les mesures du bucket, `arc_samples.ASSUMPTIONS
+# ["covered_s"]`) — version 30 (#139).
 # FIT Intervals.icu (#68, suite) : `activity_sample` et `sample_file` gagnent la colonne
 # `intervals_activity_id` (TEXT) — les échantillons d'une séance synchronisée depuis
 # Intervals.icu (`activities/fit/i<chiffres>.json`, `skills/fit-download --source
 # intervals`) s'y rattachent comme ceux d'une séance Garmin à `garmin_activity_id`.
-# Version 30 et non 29 : #135 a déjà publié la 29 sans cette colonne — une base construite
-# en 29 doit être reconstruite, sinon l'ingestion échouerait avec « no such column ».
-SCHEMA_VERSION = 30
+# Version 31 et non 30 : #139 a déjà publié la 30 sans cette colonne — une base construite
+# en 30 doit être reconstruite, sinon l'ingestion échouerait avec « no such column ».
+SCHEMA_VERSION = 31
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports", "gear")
 
@@ -665,7 +668,8 @@ CREATE TABLE metric_day (
 -- par ligne, selon la forme de l'identifiant du fichier (`arc_samples.parse_activity_ref`).
 CREATE TABLE activity_sample (
     garmin_activity_id INTEGER, source_path TEXT, t_s REAL, distance_m REAL, altitude_m REAL,
-    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, intervals_activity_id TEXT
+    hr_bpm REAL, speed_ms REAL, cadence_spm REAL, lat REAL, lon REAL, covered_s REAL,
+    intervals_activity_id TEXT
 );
 CREATE INDEX activity_sample_garmin ON activity_sample(garmin_activity_id);
 CREATE INDEX activity_sample_intervals ON activity_sample(intervals_activity_id);
@@ -1429,7 +1433,7 @@ def _sample_stats(conn) -> Dict[int, list]:
             f"SELECT {col}, COUNT(*), TOTAL(t_s), MIN(t_s), MAX(t_s), "
             "COUNT(distance_m), TOTAL(distance_m), COUNT(altitude_m), TOTAL(altitude_m), "
             "COUNT(hr_bpm), TOTAL(hr_bpm), COUNT(speed_ms), TOTAL(speed_ms), "
-            "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon) "
+            "COUNT(cadence_spm), TOTAL(cadence_spm), COUNT(lat), TOTAL(lat), TOTAL(lon), TOTAL(covered_s) "
             f"FROM activity_sample WHERE {col} IS NOT NULL GROUP BY {col}"
         ).fetchall():
             stats[row[0]] = [repr(v) for v in tuple(row)[1:]]
@@ -2145,10 +2149,10 @@ def ingest_samples(conn, workspace: Path, resolution_s: int = S.DEFAULT_RESOLUTI
         conn.executemany(
             "INSERT INTO activity_sample "
             f"({col}, source_path, t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, "
-            "lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "lat, lon, covered_s) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(ref, rel, rec["t_s"], rec["distance_m"], rec["altitude_m"],
               rec["hr_bpm"], rec["speed_ms"], rec["cadence_spm"],
-              rec.get("lat_deg"), rec.get("lon_deg")) for rec in records],
+              rec.get("lat_deg"), rec.get("lon_deg"), rec.get("covered_s")) for rec in records],
         )
         conn.execute(
             f"INSERT OR REPLACE INTO sample_file (path, sha256, mtime, {col}, status, issues) "
@@ -2230,7 +2234,8 @@ def samples_by_ref(conn, ref: Union[int, str]) -> dict:
     # coordonnée (voir `arc_climb_match.ASSUMPTIONS["privacy"]`).
     col = ref_column(ref)
     rows = conn.execute(
-        "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg "
+        "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg, "
+        "covered_s "
         f"FROM activity_sample WHERE {col} = ? ORDER BY t_s", (ref,),
     ).fetchall()
     result = {col: ref, "samples": [dict(r) for r in rows]}
