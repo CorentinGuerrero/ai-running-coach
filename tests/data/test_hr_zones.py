@@ -186,6 +186,27 @@ class TestTimeInZone(unittest.TestCase):
         # 4 échantillons, chacun plafonné à 5 s (dernier compris) : jamais 615 s.
         self.assertEqual(sum(zone_seconds.values()), 20.0)
 
+    def test_partial_buckets_around_pauses_are_not_overcounted(self):
+        """Régression : autour d'une pause (et en fin de séance), un bucket de 5 s n'est
+        que partiellement rempli. Pesé 5 s entières, le temps en zone dépassait la
+        vérité — et parfois la durée de la séance, que la validation du contrat
+        refuse. `covered_s` (arc_samples.ASSUMPTIONS["covered_s"]) le borne. Pauses
+        volontairement non alignées sur la grille de 5 s. Sans `covered_s`, ce cas
+        surestime de ~23 s."""
+        records, truth = sample_session(
+            seed=11, duration_s=1800, zone_shares={2: 0.6, 4: 0.4}, noise=False,
+            dropout_windows=((401, 413), (733, 751), (1002, 1009), (1307, 1321), (1555, 1562)))
+        downsampled = S.downsample(records, S.DEFAULT_RESOLUTION_S)
+        total = sum(M.time_in_zone_seconds(downsampled, tuple(ZONE_BOUNDS_BPM), S.DEFAULT_RESOLUTION_S).values())
+        self.assertAlmostEqual(total, sum(truth["zone_seconds_measured"].values()), delta=2)
+        self.assertLessEqual(total, records[-1]["t_s"] - records[0]["t_s"])
+
+    def test_covered_s_caps_a_partial_bucket(self):
+        samples = [{"t_s": 0, "hr_bpm": 120, "covered_s": 5.0}, {"t_s": 5, "hr_bpm": 120, "covered_s": 2.0},
+                   {"t_s": 10, "hr_bpm": 120, "covered_s": 0.0}]
+        bounds = (100, 130, 150, 160, 170, 190)
+        self.assertEqual(M.time_in_zone_seconds(samples, bounds, 5), {1: 7.0})
+
     def test_none_hr_is_ignored(self):
         samples = [{"t_s": 0, "hr_bpm": 120}, {"t_s": 5, "hr_bpm": None}, {"t_s": 10, "hr_bpm": 120}]
         bounds = (100, 130, 150, 160, 170, 190)
@@ -537,7 +558,9 @@ class TestActivityZoneReportAndCli(Workspace):
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
         self.assertEqual(payload["method"], "karvonen")
-        self.assertEqual(payload["zone_seconds"], {"2": 20.0})
+        # 20 mesures à 1 Hz (t = 0…19) couvrent 19 s — pas 4 buckets × 5 s = 20 s
+        # (arc_samples.ASSUMPTIONS["covered_s"]).
+        self.assertEqual(payload["zone_seconds"], {"2": 19.0})
         self.assertIsNotNone(payload["polarisation"])
 
     def test_cli_zones_command_with_invalid_override_falls_back_to_auto(self):

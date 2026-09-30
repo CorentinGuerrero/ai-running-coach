@@ -41,7 +41,7 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
                 | "daily_sync_scheduled" | "ntfy_configured" | "gear_sync"
-                | "llm_config" | "chat_service" | "opencode_cli",
+                | "gear_history" | "llm_config" | "chat_service" | "opencode_cli",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -165,7 +165,7 @@ GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/T
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
-    "gear_sync", "llm_config", "chat_service", "opencode_cli",
+    "gear_sync", "gear_history", "llm_config", "chat_service", "opencode_cli",
 )
 
 CHAT_SYSTEMD_UNIT_REL = ".config/systemd/user/ai-running-coach-chat.service"
@@ -1124,6 +1124,42 @@ def check_gear_sync(workspace: Path, config: dict) -> dict:
     )
 
 
+GEAR_HISTORY_MIN_ACTIVITIES = 5
+GEAR_HISTORY_MIN_RATIO = 0.5
+
+
+def check_gear_history(workspace: Path, config: dict) -> dict:
+    """#145 — historique sans matériel : information quand au moins `GEAR_HISTORY_MIN_ACTIVITIES`
+    séances portent un `garmin_activity_id` ET que plus de la moitié (`GEAR_HISTORY_MIN_RATIO`) n'a pas de
+    `gear_id` — un seul `gear_id` déclaré ne fait donc pas taire le signal. STATIQUE (lit les blocs `arc` de
+    `activities/`, jamais l'index ni Garmin) ; jamais un avertissement."""
+    check_id = "gear_history"
+    if (config.get("data") or {}).get("source", "garmin") == "intervals":
+        return build_check(check_id, "info",
+                           "[data].source = \"intervals\" — pas de matériel Garmin à rattraper.", fix=None)
+    with_id = without_gear = 0
+    folder = workspace / "activities"
+    for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+        try:
+            block = arc_index.C.extract_block(path.read_text(encoding="utf-8", errors="replace"))
+        except (arc_index.C.ContractError, OSError):
+            continue
+        if not block or block.get("kind") != "activity":
+            continue
+        if block.get("garmin_activity_id") is not None:
+            with_id += 1
+            if not block.get("gear_id"):
+                without_gear += 1
+    if with_id >= GEAR_HISTORY_MIN_ACTIVITIES and without_gear / with_id > GEAR_HISTORY_MIN_RATIO:
+        return build_check(
+            check_id, "info",
+            f"{without_gear} séance(s) sur {with_id} avec garmin_activity_id n'ont pas de gear_id — historique sans matériel : "
+            "la carte Matériel reste vide. Lancer le rattrapage (simulation d'abord, aucun écrit sans --apply).",
+            fix="python3 scripts/garmin_gear_backfill.py   # simulation ; ajouter --apply après relecture",
+        )
+    return build_check(check_id, "ok", "Historique cohérent (pas de rattrapage du matériel à proposer).", fix=None)
+
+
 def check_garmin_check_not_applicable(check_id: str) -> dict:
     """#68 : `[data].source = "intervals"` — ni tokens OAuth Garmin ni serveur
     MCP `garmin` à vérifier ici (aucun des deux n'est installé/enregistré
@@ -1160,6 +1196,8 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_ntfy(config)
     if check_id == "gear_sync":
         return check_gear_sync(workspace, config)
+    if check_id == "gear_history":
+        return check_gear_history(workspace, config)
     if check_id == "llm_config":
         return check_llm_config(config, workspace)
     if check_id == "chat_service":

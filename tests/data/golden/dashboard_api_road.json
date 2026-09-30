@@ -919,16 +919,16 @@
           "polarisation": {
             "high_pct": 0.0,
             "high_s": 0.0,
-            "low_pct": 57.7,
+            "low_pct": 57.8,
             "low_s": 2250.0,
-            "moderate_pct": 42.3,
-            "moderate_s": 1650.0,
-            "total_s": 3900.0
+            "moderate_pct": 42.2,
+            "moderate_s": 1645.0,
+            "total_s": 3895.0
           },
           "reason": null,
           "zone_seconds": {
             "2": 2250.0,
-            "3": 1650.0
+            "3": 1645.0
           }
         },
         "splits": [
@@ -5506,11 +5506,11 @@
             "polarisation": {
               "high_pct": 0.0,
               "high_s": 0.0,
-              "low_pct": 57.7,
+              "low_pct": 57.8,
               "low_s": 2250.0,
-              "moderate_pct": 42.3,
-              "moderate_s": 1650.0,
-              "total_s": 3900.0
+              "moderate_pct": 42.2,
+              "moderate_s": 1645.0,
+              "total_s": 3895.0
             },
             "week_start": "2026-09-21"
           }
@@ -5784,11 +5784,11 @@
             "polarisation": {
               "high_pct": 0.0,
               "high_s": 0.0,
-              "low_pct": 57.7,
+              "low_pct": 57.8,
               "low_s": 2250.0,
-              "moderate_pct": 42.3,
-              "moderate_s": 1650.0,
-              "total_s": 3900.0
+              "moderate_pct": 42.2,
+              "moderate_s": 1645.0,
+              "total_s": 3895.0
             },
             "week_start": "2026-09-21"
           }

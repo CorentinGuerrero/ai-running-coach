@@ -78,6 +78,40 @@ def _activity_dir_out() -> Path:
     return workspace_root() / "activities"
 
 
+def relaunch_candidates(garmin_python=None, garmin_mcp_exe=None, home=None) -> list[str]:
+    """Interpréteurs candidats (ordre de priorité) : `GARMIN_PYTHON`, le venv du binaire `garmin-mcp` du PATH, puis
+    l'emplacement uv par défaut. `python3` ET `python` à chaque fois (sur Linux l'un est un lien vers l'autre)."""
+    candidates: list[str] = []
+    if garmin_python:
+        candidates.append(os.path.expanduser(garmin_python))
+    if garmin_mcp_exe:
+        bindir = os.path.dirname(os.path.realpath(garmin_mcp_exe))
+        candidates += [os.path.join(bindir, n) for n in ("python3", "python")]
+    base = os.path.join(home or os.path.expanduser("~"), ".local/share/uv/tools/garmin-mcp/bin")
+    candidates += [os.path.join(base, n) for n in ("python3", "python")]
+    return candidates
+
+
+def is_current_interpreter(candidate: str, prefix: str = None, executable: str = None) -> bool:
+    """Le candidat est-il l'interpréteur courant ? Un venv se reconnaît à son dossier (`pyvenv.cfg` à côté de
+    `bin/`), PAS au `realpath` de son python : sur Linux `bin/python` d'un venv uv est un lien vers
+    `/usr/bin/python3.x`, donc identique au python système une fois résolu — alors que les deux n'ont pas les
+    mêmes paquets. Sans `pyvenv.cfg`, repli sur la comparaison des chemins résolus."""
+    prefix = prefix or sys.prefix
+    executable = executable or sys.executable
+    venv_dir = os.path.dirname(os.path.dirname(os.path.abspath(candidate)))
+    if os.path.isfile(os.path.join(venv_dir, "pyvenv.cfg")):
+        return os.path.realpath(venv_dir) == os.path.realpath(prefix)
+    return os.path.realpath(candidate) == os.path.realpath(executable)
+
+
+def pick_relaunch_candidate(candidates, prefix: str = None, executable: str = None) -> str | None:
+    for py in candidates:
+        if os.path.exists(py) and not is_current_interpreter(py, prefix, executable):
+            return py
+    return None
+
+
 def _auto_relaunch(argv: list[str]) -> None:
     """Relance ce script avec le python de garmin-mcp si garminconnect est absent."""
     try:
@@ -88,18 +122,10 @@ def _auto_relaunch(argv: list[str]) -> None:
 
     # Ordre : --python (via GARMIN_PYTHON), garmin-mcp du PATH, puis l'emplacement uv
     # par défaut — ~/.local/bin est souvent absent du PATH d'une session SSH/cron.
-    candidates: list[str] = []
-    if os.environ.get("GARMIN_PYTHON"):
-        candidates.append(os.path.expanduser(os.environ["GARMIN_PYTHON"]))
-    exe = shutil.which("garmin-mcp")
-    if exe:
-        real = os.path.realpath(exe)  # symlink uv -> bin/garmin-mcp
-        candidates += [os.path.join(os.path.dirname(real), n) for n in ("python3", "python")]
-    candidates.append(os.path.expanduser("~/.local/share/uv/tools/garmin-mcp/bin/python3"))
-    for py in candidates:
-        if os.path.exists(py) and os.path.realpath(py) != os.path.realpath(sys.executable):
-            r = subprocess.run([py, os.path.abspath(__file__)] + argv)
-            sys.exit(r.returncode)
+    py = pick_relaunch_candidate(relaunch_candidates(os.environ.get("GARMIN_PYTHON"), shutil.which("garmin-mcp")))
+    if py:
+        r = subprocess.run([py, os.path.abspath(__file__)] + argv)
+        sys.exit(r.returncode)
 
     print(
         "ERREUR : module 'garminconnect' introuvable dans cet interpréteur.\n"

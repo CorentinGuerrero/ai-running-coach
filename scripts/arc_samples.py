@@ -149,6 +149,9 @@ supérieure, pour rester alignée sur une grille prévisible côté consommateur
   son propre point) — utile en test, jamais le défaut en production.
 - Un trou de signal (voir ci-dessus) laisse simplement des buckets absents de
   la sortie — jamais un bucket `None` inséré pour combler.
+- `covered_s` : secondes que les mesures du bucket couvrent réellement (≤
+  `resolution_s`) — un bucket autour d'une pause ou en fin de séance n'est que
+  partiellement rempli. Voir `ASSUMPTIONS["covered_s"]`.
 
 `resolution_s = 5` donne, pour une sortie d'1 h : 720 lignes. Voir le budget de
 taille documenté dans `arc_index.ingest_samples`.
@@ -249,6 +252,18 @@ ASSUMPTIONS = {
                      "les consommateurs la traitent déjà comme « altitude toujours identique ». Sans ce masque, "
                      "chaque bord de plage produit un dénivelé de plusieurs centaines de mètres en quelques "
                      "secondes (VAM > 100 000 m/h, GAP et découplage faussés).",
+    "covered_s": "Chaque bucket sous-échantillonné porte `covered_s` : les secondes que ses mesures couvrent "
+                  "réellement, ≤ resolution_s. Un bucket autour d'une pause (montre en veille), ou le dernier "
+                  "de la séance, n'est que partiellement rempli : sans ce champ, tout consommateur qui pèse un "
+                  "échantillon par min(dt, resolution_s) le compterait pour resolution_s entières et "
+                  "surestimerait le temps total (observé : jusqu'à ~4 % de temps en zone en trop, au-delà de "
+                  "la durée de la séance). Méthode : chaque mesure couvre [t, t + dt_suivant) si dt_suivant "
+                  "≤ resolution_s (enregistrement irrégulier mais continu) ; au-delà c'est une pause, jamais "
+                  "comptée : la mesure ne couvre qu'un pas typique (écart médian entre mesures de la séance, "
+                  "1 s pour un enregistrement à 1 Hz). Intervalle réparti sur les buckets chevauchés ; la "
+                  "dernière mesure de la séance ne couvre rien (N mesures = N − 1 intervalles). Somme des covered_s ≤ durée écoulée entre la première et "
+                  "la dernière mesure. `resolution_s <= 1` (pas de regroupement) : pas de covered_s, "
+                  "min(dt, resolution_s) suffit alors.",
     "gaps": "Les pauses/trous de signal (montre en veille, perte GPS/FC) ne sont JAMAIS interpolés : le t_s du "
             "record suivant reprend tel quel, sans bucket comblé pour la période silencieuse. dt entre deux "
             "échantillons consécutifs (avant ou après sous-échantillonnage) peut donc dépasser resolution_s — "
@@ -451,6 +466,28 @@ def _mean(values: Iterable) -> Optional[float]:
     return sum(values) / len(values) if values else None
 
 
+def _bucket_coverage(records: Sequence[dict], resolution_s: int) -> Dict[int, float]:
+    """Secondes réellement couvertes par les mesures dans chaque bucket — voir
+    ASSUMPTIONS["covered_s"]. Chaque mesure couvre `[t, t + dt)` (dt = écart jusqu'à la
+    mesure suivante) si `dt <= resolution_s` ; au-delà, c'est une pause et la mesure ne
+    couvre qu'un pas d'enregistrement typique (écart médian de la séance). La dernière
+    mesure de la séance ne couvre rien. L'intervalle est réparti sur les buckets qu'il
+    chevauche."""
+    times = sorted({r["t_s"] for r in records if r.get("t_s") is not None})
+    steps = sorted(b - a for a, b in zip(times, times[1:]))
+    typical = min(steps[len(steps) // 2], resolution_s) if steps else 0.0
+    coverage: Dict[int, float] = {}
+    for t, nxt in zip(times, times[1:]):
+        dt = nxt - t
+        start, end = t, t + (dt if dt <= resolution_s else typical)
+        while start < end:
+            idx = int(start // resolution_s)
+            stop = min(end, (idx + 1) * resolution_s)
+            coverage[idx] = coverage.get(idx, 0.0) + (stop - start)
+            start = stop
+    return coverage
+
+
 def downsample(records: Sequence[dict], resolution_s: int = DEFAULT_RESOLUTION_S) -> List[dict]:
     """Regroupe des échantillons normalisés (triés ou non) par buckets de `resolution_s`
     secondes. Voir la docstring du module pour la méthode (moyenne vs dernière valeur,
@@ -465,12 +502,14 @@ def downsample(records: Sequence[dict], resolution_s: int = DEFAULT_RESOLUTION_S
             continue
         idx = int(t_s // resolution_s)
         buckets.setdefault(idx, []).append(record)
+    covered = _bucket_coverage(records, resolution_s)
     out = []
     for idx in sorted(buckets):
         group = sorted(buckets[idx], key=lambda r: r["t_s"])   # dernière valeur = dernière DANS LE TEMPS
         last = group[-1]
         out.append({
             "t_s": idx * resolution_s,
+            "covered_s": round(covered.get(idx, 0.0), 3),
             "distance_m": last.get("distance_m"),
             "altitude_m": last.get("altitude_m"),
             "hr_bpm": _mean(r.get("hr_bpm") for r in group),

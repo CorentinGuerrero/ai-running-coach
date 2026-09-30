@@ -327,6 +327,43 @@ class TestGearAlertsWiring(unittest.TestCase):
         self.assertIn("near_threshold", text)
 
 
+class TestGearBackfillWiring(unittest.TestCase):
+    """#145 — le rattrapage du matériel Garmin sur l'historique n'existe pour l'agent que par le prompt :
+    proposé UNE fois en interactif, toujours en simulation d'abord, `--apply` après un « oui » explicite,
+    jamais dans la synchronisation headless (qui ne le mentionne même pas)."""
+
+    COACH = REPO / "agents/coach.md"
+    SYNC = REPO / "skills/garmin-daily-sync/SKILL.md"
+    SYNC_SH = REPO / "scripts/daily-sync.sh"
+
+    def test_coach_offers_backfill_once_interactive_dry_run_first(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("scripts/garmin_gear_backfill.py", text)
+        self.assertIn("History backfill (#145)", text)
+        self.assertRegex(text, r"(?s)History backfill.*?interactive only, proposed ONCE")
+        self.assertRegex(text, r"(?s)History backfill.*?DRY RUN")
+        self.assertRegex(text, r"(?s)History backfill.*?`--apply`.*?ONLY after an explicit yes")
+        self.assertRegex(text, r"(?s)History backfill.*?NEVER in a headless run")
+
+    def test_coach_trigger_is_a_ratio_and_mentions_long_timeout(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?s)History backfill.*?MORE THAN HALF")
+        self.assertRegex(text, r"(?s)History backfill.*?long timeout")
+        self.assertRegex(text, r"(?s)History backfill.*?APPLY REFUS|History backfill.*?--apply REFUS")
+
+    def test_coach_never_sets_default_pair_automatically(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?s)History backfill.*?never sets `\(par défaut\)`")
+
+    def test_headless_sync_never_runs_or_mentions_backfill(self):
+        for path in (self.SYNC, self.SYNC_SH):
+            self.assertNotIn("garmin_gear_backfill", path.read_text(encoding="utf-8"), path)
+
+    def test_gemini_command_is_regenerated(self):
+        toml = (REPO / "config/gemini/commands/coach.toml").read_text(encoding="utf-8")
+        self.assertIn("garmin_gear_backfill.py", toml)
+
+
 class TestGarminGearWhitelist(unittest.TestCase):
     """#133 — liste blanche `install.sh` ↔ prompts/skills/docs qui citent les outils matériel.
 
