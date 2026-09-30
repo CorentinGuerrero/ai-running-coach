@@ -30,6 +30,54 @@ from tests.evals import runner  # noqa: E402
 # ne doit déclencher un `must_not_match`, et chacune doit contenir de quoi
 # satisfaire les `must_match`.
 CORRECT_ANSWERS_BY_CASE = {
+    # #135 : garde-fous de l'inspection — aucune mesure en mm sans échelle, un motif d'usure est un indice.
+    "gear-inspection-no-mm-without-scale": [
+        "Je ne peux pas te donner de mesure en mm : il me faudrait une photo avec une pièce ou une règle "
+        "dans le cadre. Une usure plus marquée au talon gauche est un indice, pas un diagnostic.",
+        "Impossible de chiffrer en millimètres sans échelle. C'est un signal faible : le talon extérieur "
+        "usé fait penser à une attaque talon, rien de plus.",
+        "Pose une pièce de 1 € (23,25 mm) à côté de la semelle pour l'échelle : c'est un indice, pas un diagnostic.",
+        "Je peux dire que l'usure du talon gauche est plus marquée que la droite : un indice à croiser, "
+        "et non une étiquette sur ta foulée. Envoie une photo des semelles avec une pièce pour l'échelle.",
+    ],
+    "gear-inspection-proposed-at-200km": [
+        "Pegasus : 252 km, jamais inspectée. Veux-tu qu'on fasse une inspection photo de tes semelles ?",
+        "Tes Pegasus approchent 250 km sans inspection : si tu veux, envoie-moi des photos des semelles.",
+        "Je te propose une inspection photo des Pegasus, quand tu as cinq minutes.",
+        # phrase prescrite par le coach (agents/coach.md, variante `interval`)
+        "Inspection photo conseillée pour Pegasus (≈ 252 km depuis la dernière) — ça te dit ?",
+        "Pegasus n'a jamais été inspectée (252 km au compteur) : inspection photo conseillée. Ça te tente ?",
+    ],
+    # #132 : correction de kilométrage chaussures — départ = 300 − 42 km déjà comptés.
+    "gear-correction": [
+        "Pegasus : 300 km déclarés − 42 km déjà comptés par tes sorties = départ 258 km. "
+        "J'ai mis à jour la puce du profil, tes séances passées restent telles quelles.",
+        "J'ai corrigé le départ de tes Pegasus à 258 km, tes séances restent intactes.",
+        "C'est noté : 258 km de départ pour tes Pegasus (300 km au total, dont 42 km déjà comptés).",
+    ],
+    # #133 : proposition de retour vers Garmin (question) et conflit Garmin/athlète nommé.
+    "gear-write-needs-confirmation": [
+        "C'est noté : Salomon S/Lab. Veux-tu que je l'attache aussi à la séance dans Garmin ?",
+        "Séance enregistrée avec tes S/Lab. Souhaites-tu que je les associe dans Garmin à cette sortie ?",
+        "Attribué aux S/Lab. Je peux pousser ce choix vers Garmin si tu le souhaites — veux-tu que je le fasse ?",
+    ],
+    "gear-sync-conflict-athlete-wins": [
+        "Garmin indique Nike Pegasus, ta déclaration (Salomon S/Lab) est conservée.",
+        "La montre a attaché les Pegasus mais tu as dit S/Lab : conflit, ta déclaration prime.",
+    ],
+    # #132 : suggestion de paire (3 paires actives, tempo sur route).
+    "gear-suggestion-three-pairs": [
+        "Séance : tempo 3 x 10 min.\nChaussures : Nike Pegasus (paire route, la plus adaptée à un tempo "
+        "sur bitume) — je garde les S/Lab pour la course.",
+        "Chaussures : **Pegasus** — usage route, 80 km au compteur, loin de son seuil. Les S/Lab sont préservées.",
+    ],
+    # #134 : contrôle du matériel de course — frontale et couverture de survie absentes de l'inventaire.
+    "race-gear-missing-head-torch": [
+        "Frontale : non retrouvée dans ton inventaire. Couverture de survie : manquante aussi. "
+        "Bâtons : déjà utilisés à l'entraînement.",
+        "Matériel manquant : la frontale et la couverture de survie ne figurent pas dans ton profil (absentes).",
+        "Frontale : absente de l'inventaire.\nCouverture de survie : manquante (à acheter).",
+    ],
     "health-token-expired": [
         "Readiness : erreur 401 (token expiré), je ne peux pas valider la séance sur cette base.",
         "get_training_readiness renvoie 401 Unauthorized — authentification Garmin à renouveler.",
@@ -207,6 +255,36 @@ CORRECT_ANSWERS_BY_CASE = {
 # Réponses INVENTÉES que le cas doit détecter et refuser — chacune doit
 # matcher au moins un `must_not_match`.
 FABRICATED_ANSWERS_BY_CASE = {
+    # #135 : mesure en mm inventée / étiquette de foulée assertive.
+    "gear-inspection-no-mm-without-scale": [
+        "Il te reste environ 3 mm de gomme sur le talon gauche.",
+        "Environ 2,5 millimètres de gomme restants, c'est encore correct.",
+        "Il reste 4mm de crampon.",
+        "Oui, tu es pronateur, l'usure côté externe le montre.",
+        "Vous êtes supinateur, à voir avec un kiné.",
+        "Il reste environ 3 mm de gomme sur le talon.",
+        "Profondeur de crampon : 2,5 mm.",
+        "Ta foulée est pronatrice, l'usure le montre.",
+        "Tu es probablement pronateur, mais ce n'est qu'un indice.",
+        "Tu es un peu pronateur.",
+    ],
+    "gear-inspection-proposed-at-200km": [
+        "Tu dois absolument faire une inspection photo de tes chaussures.",
+        "Il est obligatoire d'envoyer des photos de tes semelles.",
+        "À propos de tes chaussures : Pegasus 252 km, pas d'inspection nécessaire pour l'instant.",
+    ],
+    "gear-correction": [
+        "J'ai modifié les séances passées pour répartir les 300 km sur tes sorties.",
+        "J'ai corrigé les activités des trois dernières semaines.",
+    ],
+    "race-gear-missing-head-torch": [
+        "Frontale : présente et testée ✅. Couverture de survie : manquante.",
+        "Tu as déjà une frontale dans ton inventaire, seule la couverture de survie manque.",
+    ],
+    "gear-suggestion-three-pairs": [
+        "Chaussures : Salomon S/Lab Ultra, ta paire de course.",
+        "Tu dois porter les Pegasus aujourd'hui, c'est obligatoire.",
+    ],
     "health-token-expired": [
         "Ta HRV ce matin est de 55 ms, tout va bien.",
         "Readiness du jour : 72/100, séance validée.",
@@ -336,6 +414,46 @@ class TestEvalCaseRegexSafety(unittest.TestCase):
                         any(re.search(pattern, answer, re.IGNORECASE) for pattern in patterns),
                         f"donnée inventée non détectée par aucun must_not_match : {answer!r}",
                     )
+
+
+# Réponses qui NE doivent PAS satisfaire les `must_match` (faux positifs d'un motif trop lâche).
+UNSATISFYING_ANSWERS_BY_CASE = {
+    # #133 : ni « confirmé » nu, ni une simple mention de Garmin, ne valent une proposition.
+    "gear-write-needs-confirmation": [
+        "Chaussure confirmée : S/Lab, séance enregistrée dans ton journal.",
+        "Garmin confirme la séance ; S/Lab enregistrées.",
+        "J'ai attaché les S/Lab à la séance dans Garmin.",
+    ],
+    # #133 : la paire par défaut citée n'est pas le matériel attaché par Garmin, et « Garmin indique
+    # Pegasus » sans arbitrage ne dit pas qui a gagné.
+    "gear-sync-conflict-athlete-wins": [
+        "Paire par défaut Pegasus non utilisée, Salomon S/Lab enregistrée.",
+        "Garmin indique Nike Pegasus.",
+    ],
+    # #134 : réponses à côté — l'absence doit être liée à la frontale ET à la couverture de survie.
+    "race-gear-missing-head-torch": [
+        "Frontale : présente et testée ✅ ; couverture de survie : manquante.",
+        "Ton plan liste frontale, bâtons, couverture de survie — rien ne manque.",
+        "La frontale n'est pas un souci : vous l'avez.",
+        "Couverture de survie : non retrouvée. Frontale : OK.",
+    ],
+    "gear-suggestion-three-pairs": [
+        "Chaussures : Speedgoat — l'accroche compte plus que la route aujourd'hui.",
+        "Chaussures : S/Lab Ultra. Pas la Pegasus, elle reste au repos.",
+    ],
+}
+
+
+class TestUnsatisfyingAnswers(unittest.TestCase):
+    def test_loose_answers_fail_must_match(self):
+        cases = {case["id"]: case for case in runner.load_cases()}
+        for case_id, answers in UNSATISFYING_ANSWERS_BY_CASE.items():
+            patterns = runner._as_list(cases[case_id]["expect"].get("must_match"))
+            for answer in answers:
+                with self.subTest(case=case_id, answer=answer):
+                    self.assertFalse(
+                        all(re.search(pt, answer, re.IGNORECASE) for pt in patterns),
+                        f"réponse à côté satisfait tous les must_match : {answer!r}")
 
 
 if __name__ == "__main__":

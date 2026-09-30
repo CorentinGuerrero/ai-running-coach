@@ -91,6 +91,11 @@ CONTENT_TYPES = {
 # d'URL, sans avoir à la détecter explicitement (`/api/decision/../../etc/passwd`
 # ne correspond simplement jamais à ce motif).
 DECISION_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_decision_[^/.]+$")
+# Photos d'inspection de chaussures (#135) servies par `/media/gear-photo?path=gear/photos/…` : SEULS
+# des rasters (jamais SVG — un SVG servi de notre origine exécuterait du script), SEULEMENT sous
+# `<workspace>/gear/photos/`, SEULEMENT si une inspection indexée cite ce chemin exact dans `photos`.
+GEAR_PHOTO_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+GEAR_PHOTO_MAX_BYTES = 15 * 1024 * 1024
 GUARDRAILS_DOC_URL = "https://mmornati.github.io/ai-running-coach/guardrails/#les-sept-regles"
 
 # ---------------------------------------------------------------------------
@@ -295,10 +300,21 @@ class Store:
         with self.lock:
             return I.heat_acclimation_today(self.conn, {"heat_threshold_c": threshold_c}, today)
 
-    def gear_mileage(self) -> dict:
-        """Réutilise `arc_index.gear_mileage` (même SQL) — voir aussi la CLI `gear`."""
+    def gear_mileage(self, today: date) -> dict:
+        """Réutilise `arc_index.gear_mileage` (même SQL) — voir aussi la CLI `gear`.
+        `today` : jour de référence de la prévision de retraite (#132)."""
         with self.lock:
-            return I.gear_mileage(self.conn)
+            return I.gear_mileage(self.conn, today)
+
+    def equipment_usage(self, today: date) -> dict:
+        """Réutilise `arc_index.equipment_usage` (#134, matériel hors chaussures) — voir aussi la
+        CLI `equipment`. `gear_mileage` (chaussures) reste inchangé."""
+        with self.lock:
+            return I.equipment_usage(self.conn, today)
+    def gear_inspections(self, today: date) -> dict:
+        """Réutilise `arc_index.gear_inspections` (#135) — voir aussi la CLI `inspections`."""
+        with self.lock:
+            return I.gear_inspections(self.conn, None, today)
 
     def performance_index(self, today: date) -> dict:
         """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
@@ -398,7 +414,9 @@ def api_summary(store: Store, q: dict) -> dict:
     return {
         "today": today.isoformat(), "settings": settings, "objective": objective, "athlete": athlete,
         "form": latest, "health": health, "sleep_debt": sleep_debt, "heat_acclimation": heat_acclimation,
-        "gear": store.gear_mileage(),
+        "gear": store.gear_mileage(today),
+        "equipment": store.equipment_usage(today),
+        "gear_inspections": store.gear_inspections(today),
         "performance_index": store.performance_index(today),
         "files": {r["parsed_ok"]: r["n"] for r in files},
         "incomplete_files": incomplete, "week_collisions_count": week_collisions_count,
@@ -1118,6 +1136,41 @@ def api_energy_trend(store: Store, q: dict) -> dict:
         return I.energy_trend(store.conn, today, weeks)
 
 
+def gear_photo_file(store: Store, rel) -> Optional[Tuple[Path, str]]:
+    """(chemin absolu, type MIME) de la photo `rel` (relatif au workspace), `None` si elle ne peut pas
+    être servie. Quatre barrières successives (#135) : chemin relatif propre (`arc_contract`, ni `..`,
+    ni antislash, ni `:`, ni absolu) sous `gear/photos/` ; extension raster ; citée par une inspection
+    indexée ; résolution réelle (liens symboliques compris) toujours DANS `gear/photos/` ; fichier
+    ordinaire de taille raisonnable."""
+    if not isinstance(rel, str) or I.C._invalid_workspace_path_reason(rel):
+        return None
+    if not rel.startswith(I.C.GEAR_PHOTO_DIR):
+        return None
+    ctype = GEAR_PHOTO_TYPES.get(Path(rel).suffix.lower())
+    if ctype is None:
+        return None
+    cited = False
+    for row in store.rows("SELECT photos FROM gear_inspection WHERE photos IS NOT NULL"):
+        try:
+            if rel in json.loads(row["photos"]):
+                cited = True
+                break
+        except (TypeError, ValueError):
+            continue
+    if not cited:
+        return None
+    try:
+        root = (store.workspace / "gear" / "photos").resolve()
+        target = (store.workspace / rel).resolve()
+        if root not in target.parents or not target.is_file():
+            return None
+        if target.stat().st_size > GEAR_PHOTO_MAX_BYTES:
+            return None
+    except (OSError, ValueError):     # NUL, nom trop long, permission…
+        return None
+    return target, ctype
+
+
 def api_files(store: Store, q: dict) -> dict:
     return {"items": store.backfill()}
 
@@ -1437,6 +1490,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"status": "ok"})
         elif url.path.startswith(CHAT_PREFIX) and self.chat_port:
             self._chat_proxy()
+        elif url.path == "/media/gear-photo":
+            self._gear_photo(url)
         elif url.path.startswith("/api/"):
             self._api(url)
         else:
@@ -1526,6 +1581,19 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
         else:
             self._json(HTTPStatus.OK, payload)
+
+    def _gear_photo(self, url) -> None:
+        found = gear_photo_file(self.store, (parse_qs(url.query).get("path") or [None])[0])
+        if found is None:
+            self._json(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
+            return
+        target, ctype = found
+        try:
+            body = target.read_bytes()
+        except (OSError, ValueError):
+            self._json(HTTPStatus.NOT_FOUND, {"error": "introuvable"})
+            return
+        self._send(HTTPStatus.OK, body, ctype, cache="private, no-cache")
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")

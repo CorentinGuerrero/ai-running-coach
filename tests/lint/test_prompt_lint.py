@@ -21,7 +21,7 @@ ENGINE_PREFIXES = ("agents/", "skills/", "config/", "scripts/", "templates/", "d
 # Préfixes qui désignent le WORKSPACE de l'athlète : créés à l'usage, jamais
 # versionnés (cf. .gitignore).
 WORKSPACE_PREFIXES = (
-    "activities/", "medical/", "nutrition/", "planning/", "rapports/", "resources/", "logs/",
+    "activities/", "medical/", "nutrition/", "planning/", "rapports/", "resources/", "gear/", "logs/",
 )
 
 # Chemins cités qui ne sont ni l'un ni l'autre (exemples, dossiers générés par
@@ -286,3 +286,275 @@ class TestGuardrailsWiring(unittest.TestCase):
         text = self.SCHEDULING_SKILL.read_text(encoding="utf-8")
         self.assertIn("Exit 1", text, "le skill de push doit nommer explicitement l'issue « block » (exit 1)")
         self.assertIn("Exit 2", text, "le skill de push doit nommer explicitement l'issue « erreur d'entrée » (exit 2)")
+
+
+class TestGearAlertsWiring(unittest.TestCase):
+    """#132 — l'alerte d'usure des chaussures, la correction par chat et la
+    suggestion de paire n'existent que par les prompts : verrouille que le coach,
+    `garmin-daily-sync` et `/week` citent bien les commandes et les garde-fous
+    (une seule alerte par franchissement, suggestion seulement à partir de deux
+    paires actives, jamais imposée, source du rodage honnête)."""
+
+    COACH = REPO / "agents/coach.md"
+    SYNC = REPO / "skills/garmin-daily-sync/SKILL.md"
+    WEEK = REPO / "skills/week/SKILL.md"
+
+    def test_coach_cites_the_gear_command_and_chat_correction(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("scripts/arc_index.py gear", text)
+        self.assertIn("départ", text)
+        self.assertIn("never negative", text)
+
+    def test_coach_suggestion_needs_two_active_pairs_and_is_not_imposed(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("SHOE SUGGESTION MANDATE", text)
+        self.assertIn("at least 2 non-retired pairs", text)
+        self.assertIn("SUGGESTION, never an instruction", text)
+
+    def test_coach_break_in_budget_is_labelled_as_a_project_approximation(self):
+        text = self.COACH.read_text(encoding="utf-8")
+        self.assertIn("approximation du projet", text)
+
+    def test_daily_sync_alerts_once_per_crossing(self):
+        text = self.SYNC.read_text(encoding="utf-8")
+        self.assertIn("arc_index.py gear --activities", text)
+        self.assertIn("crossed_in_run", text)
+        self.assertIn("une seule fois", text)
+
+    def test_week_skill_mentions_pairs_over_or_near_threshold(self):
+        text = self.WEEK.read_text(encoding="utf-8")
+        self.assertIn("arc_index.py gear", text)
+        self.assertIn("near_threshold", text)
+
+
+class TestGarminGearWhitelist(unittest.TestCase):
+    """#133 — liste blanche `install.sh` ↔ prompts/skills/docs qui citent les outils matériel.
+
+    Lecture (`get_gear`, `get_activity_gear`) et écriture (`add_gear_to_activity`) doivent être
+    autorisées côté serveur ; l'écriture doit toujours être encadrée par « confirmation » dans tout
+    fichier qui la cite, et interdite dans la synchronisation headless."""
+
+    TOOLS = ("get_gear", "get_activity_gear", "add_gear_to_activity")
+
+    @classmethod
+    def setUpClass(cls):
+        install = (REPO / "install.sh").read_text(encoding="utf-8")
+        m = re.search(r'GARMIN_TOOL_WHITELIST="([^"]+)"', install)
+        cls.whitelist = m.group(1).split(",")
+
+    def test_gear_tools_are_whitelisted(self):
+        for tool in self.TOOLS:
+            self.assertIn(tool, self.whitelist)
+
+    def test_remove_gear_is_not_whitelisted(self):
+        self.assertNotIn("remove_gear_from_activity", self.whitelist)
+
+    def test_docs_whitelist_copies_match_install_sh(self):
+        text = (REPO / "docs/garmin-setup.md").read_text(encoding="utf-8")
+        copies = re.findall(r'GARMIN_ENABLED_TOOLS"?:\s*"([^"]+)"', text)
+        self.assertGreaterEqual(len(copies), 2)
+        for copy in copies:
+            self.assertEqual(copy.split(","), self.whitelist)
+
+    def test_every_file_citing_the_write_tool_requires_confirmation(self):
+        files = list(AGENTS.glob("*.md")) + list(SKILLS.glob("*/SKILL.md")) + [REPO / "AGENTS.md"]
+        cited = [f for f in files if "add_gear_to_activity" in f.read_text(encoding="utf-8")]
+        self.assertTrue(cited)
+        for f in cited:
+            with self.subTest(file=f.name):
+                self.assertRegex(f.read_text(encoding="utf-8"), r"(?i)confirm")
+
+    def test_daily_sync_script_disallows_gear_writes(self):
+        text = (REPO / "scripts/daily-sync.sh").read_text(encoding="utf-8")
+        self.assertIn("mcp__garmin__add_gear_to_activity", text)
+        self.assertIn("mcp__garmin__remove_gear_from_activity", text)
+        self.assertIn("--disallowedTools", text)
+        # Limite documentée : en mode passerelle l'outil `invoke_tool` n'est pas filtrable par sous-outil.
+        self.assertRegex(text, r"(?i)invoke_tool[^\n]*\n[^\n]*filtr")
+
+    def test_priority_wording_is_consistent_everywhere(self):
+        """Priorité = déclaration de l'athlète > Garmin > défaut ; jamais « Garmin > chat »."""
+        for rel in ("AGENTS.md", "agents/coach.md", "skills/garmin-daily-sync/SKILL.md",
+                    "skills/garmin-sync-efficiency/SKILL.md", "skills/workspace-data-contract/SKILL.md",
+                    "docs/garmin-setup.md", "docs/workspace.md", "docs/agents/coach.md", "docs/skills.md",
+                    "docs/skills/garmin-daily-sync.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(file=rel):
+                self.assertNotRegex(text, r"(?i)garmin\s*>\s*(gear_id|chat|d[ée]claration)")
+                self.assertNotRegex(text, r"(?i)matériel garmin\s*>\s*(gear_id|paire (que|cit)|chat|d[ée]claration)")
+
+    def test_headless_sync_never_writes_gear(self):
+        text = (SKILLS / "garmin-daily-sync/SKILL.md").read_text(encoding="utf-8")
+        self.assertRegex(text, r"NEVER call `add_gear_to_activity`")
+
+    def test_read_tools_cited_by_sync_skills_are_whitelisted(self):
+        for rel in ("skills/garmin-daily-sync/SKILL.md", "skills/garmin-sync-efficiency/SKILL.md", "agents/coach.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            for tool in ("get_gear", "get_activity_gear"):
+                if re.search(rf"`{tool}\b", text):
+                    self.assertIn(tool, self.whitelist, f"{rel} cite {tool}")
+
+    def test_sync_efficiency_limits_gear_calls_to_new_activities(self):
+        text = (SKILLS / "garmin-sync-efficiency/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("one `get_activity_gear(activity_id)` call per NEW activity", text)
+        self.assertIn("include_stats=False", text)
+class TestEquipmentWiring(unittest.TestCase):
+    """#134 — matériel hors chaussures : kits, entretien, alertes une seule fois et contrôle du
+    matériel de course n'existent que par les prompts ; verrouille les commandes citées, les
+    garde-fous (jamais inventer un objet ni un seuil) et la cohérence avec le CLI réel."""
+
+    COACH = REPO / "agents/coach.md"
+    STRATEGIST = REPO / "agents/course-strategist.md"
+    SYNC = REPO / "skills/garmin-daily-sync/SKILL.md"
+    WEEK = REPO / "skills/week/SKILL.md"
+    CONTRACT = REPO / "skills/workspace-data-contract/SKILL.md"
+
+    def read(self, path):
+        return path.read_text(encoding="utf-8")
+
+    def test_strategist_crosses_race_gear_with_inventory(self):
+        text = self.read(self.STRATEGIST)
+        self.assertIn("arc_index.py equipment --race-plan", text)
+        for status in ("missing", "never_used", "alert"):
+            self.assertIn(f"`{status}`", text)
+        self.assertRegex(text, r"(?i)rien de nouveau le jour J")
+        self.assertRegex(text, r"(?i)n'invente aucun objet")
+        self.assertIn("inventory_empty", text)
+
+    def test_strategist_gear_list_is_written_in_the_race_plan_block(self):
+        self.assertIn("`gear` du bloc `arc`", self.read(self.STRATEGIST))
+
+    def test_coach_kit_and_maintenance_rules(self):
+        text = self.read(self.COACH)
+        self.assertIn("arc_index.py equipment --kit", text)
+        self.assertIn("gear_ids", text)
+        self.assertIn("entretien <date>", text)
+        self.assertRegex(text, r"(?i)never add an item of your own")
+        self.assertRegex(text, r"never invent a threshold")
+        self.assertIn("pre_session_check", text)
+
+    def test_gear_ids_preserved_on_garmin_merge(self):
+        for rel in ("skills/garmin-daily-sync/SKILL.md", "skills/garmin-sync-efficiency/SKILL.md"):
+            self.assertIn("`gear_ids`", (REPO / rel).read_text(encoding="utf-8"), rel)
+
+    def test_coach_never_touches_gear_id_for_kits_and_defines_kit_and_maintenance_rule(self):
+        text = self.read(self.COACH)
+        self.assertIn("Never touch `gear_id`/`gear_source`", text)
+        self.assertIn("planned kit", text)
+        self.assertNotIn("usual kit", text)
+        self.assertIn("LAST session done BEFORE the maintenance", text)
+
+    def test_dashboard_shows_category_display_label(self):
+        js = (REPO / "web/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("EQUIP_CATEGORY_LABEL", js)
+        self.assertIn('batons: "bâtons"', js)
+
+    def test_coach_keeps_gear_id_as_the_shoe(self):
+        self.assertIn("never replaces `gear_id`", self.read(self.COACH))
+
+    def test_sync_emits_equipment_alert_once_without_state(self):
+        text = self.read(self.SYNC)
+        self.assertIn("arc_index.py equipment --activities", text)
+        self.assertRegex(text, r"(?i)AUCUNE alerte ici")          # jours : jamais dans le resume
+        self.assertRegex(text, r"(?i)aucune séance nouvelle = ne PAS lancer")
+        self.assertRegex(text, r"(?i)tout sport")
+        self.assertRegex(text, r"(?i)sans état persistant")
+        step3c = text[text.index("3c. **Alerte matériel"):text.index("4. **Garde-fou r5")]
+        self.assertNotIn("--since", step3c.replace("N'utiliser jamais `--last-pass`", ""))
+
+    def test_week_skill_reports_equipment(self):
+        text = self.read(self.WEEK)
+        self.assertIn("arc_index.py equipment", text)
+        self.assertIn("Matériel :", text)
+
+    def test_cited_equipment_flags_exist_in_the_cli(self):
+        cli = (REPO / "scripts/arc_index.py").read_text(encoding="utf-8")
+        for flag in ("--kit", "--race-plan", "--sport", "--since", "--activities"):
+            self.assertIn(f'"{flag}"', cli)
+        for path in (self.COACH, self.STRATEGIST, self.SYNC, self.CONTRACT):
+            for flag in re.findall(r"arc_index\.py equipment[^`\n]*?(--[a-z-]+)", self.read(path)):
+                self.assertIn(f'"{flag}"', cli, f"{path.name} : {flag}")
+
+    def test_contract_documents_gear_ids_and_triggers(self):
+        text = self.read(self.CONTRACT)
+        for needle in ("`gear_ids`", "alerte N km", "N séances", "N jours", "entretien", "kit:", "catégorie:"):
+            self.assertIn(needle, text)
+class TestGearInspectionWiring(unittest.TestCase):
+    """#135 — le skill `gear-inspection` n'existe que par son prompt : verrouille ses
+    garde-fous (signal faible, jamais un diagnostic, aucune mesure sans échelle, pas de
+    changement de foulée recommandé sur une photo, relais médical conditionné, proposition
+    jamais imposée), l'absence de vocabulaire de diagnostic, et le câblage du coach et de
+    la documentation mobile (envoi de photos non validé)."""
+
+    SKILL = REPO / "skills/gear-inspection/SKILL.md"
+    COACH = REPO / "agents/coach.md"
+    MOBILE = REPO / "docs/mobile.md"
+    DOC = REPO / "docs/skills/gear-inspection.md"
+
+    # Formulations qui affirment un diagnostic ou étiquettent l'athlète.
+    DIAGNOSIS_VOCABULARY = re.compile(
+        r"diagnostic\s+(de|d['’])|vous\s+souffrez|tu\s+souffres|pronateur|supinateur|"
+        r"sur-?pronat|sous-?pronat|syndrome\b|pathologi", re.IGNORECASE)
+
+    def text(self, path) -> str:
+        return path.read_text(encoding="utf-8")
+
+    def test_skill_has_frontmatter_within_limit(self):
+        fields = read_frontmatter(self.SKILL)
+        self.assertEqual(fields.get("name"), "gear-inspection")
+        self.assertTrue(0 < len(fields.get("description", "")) <= 1024)
+
+    def test_guardrail_phrases_are_present(self):
+        text = self.text(self.SKILL)
+        for phrase in (
+            "signal faible",
+            "jamais un diagnostic",
+            "Aucune mesure en mm sans référence d'échelle",
+            "Ne jamais recommander de changer de technique de foulée",
+            "proposée, jamais imposée",
+            "approximation du projet",
+            "redemander l'angle manquant",
+            "comparaison explicite",
+            "asymétrie",
+            "indisponible",
+        ):
+            self.assertIn(phrase, text, f"garde-fou absent du skill : {phrase}")
+
+    def test_medical_handoff_is_gated_on_enabled_agents(self):
+        text = self.text(self.SKILL)
+        self.assertIn("[agents].enabled", text)
+        self.assertIn("kiné", text)
+        self.assertIn("analyse de foulée", text)
+
+    def test_no_diagnosis_vocabulary(self):
+        for path in (self.SKILL, self.DOC):
+            hits = self.DIAGNOSIS_VOCABULARY.findall(self.text(path))
+            self.assertFalse(hits, f"vocabulaire de diagnostic dans {path.relative_to(REPO)} : {hits}")
+
+    def test_only_the_two_verified_sources_are_cited(self):
+        urls = set(re.findall(r"https?://[^\s)]+", self.text(self.SKILL)))
+        self.assertEqual(urls, {
+            "https://www.doctorsofrunning.com/footwear-science-outsole-wear-patterns/",
+            "https://marathonhandbook.com/wear-on-running-shoes/",
+        })
+
+    def test_no_ground_contact_claim(self):
+        """Le temps de contact au sol n'est extrait nulle part : le skill doit le dire, pas l'utiliser."""
+        text = self.text(self.SKILL)
+        self.assertIn("temps de contact au sol", text)
+        self.assertIn("ne jamais l'inventer", text)
+
+    def test_coach_wires_the_skill_command_and_guardrails(self):
+        text = self.text(self.COACH)
+        for needle in ("GEAR INSPECTION MANDATE", "scripts/arc_index.py inspections",
+                       "scripts/arc_index.py gear-career", "a proposal, never an imposition",
+                       "NEVER recommend changing foot strike", "ONLY IF `medical` is in `[agents].enabled`",
+                       "Never in headless mode", "not extracted anywhere",
+                       "worded by `due_reason`", "`threshold_alert` →", "`never_inspected` →",
+                       "belongs to the chat reply ONLY"):
+            self.assertIn(needle, text, f"coach.md : {needle}")
+
+    def test_mobile_doc_flags_photo_upload_as_unvalidated(self):
+        text = self.text(self.MOBILE)
+        self.assertIn("à valider", text)
+        self.assertIn("pas validé", text)

@@ -1,0 +1,33 @@
+# Inspection photo des chaussures (#135) : le coach PROPOSE, il n'impose pas.
+#
+# Fixture `gear-inspection/` : une paire (Nike Pegasus, `id: pegasus`, par défaut) à
+# 210 km de départ + 42 km de séances = 252 km, jamais inspectée — au-delà des ~200 km
+# depuis l'entrée en service, `arc_index.py inspections` rend `due: true`
+# (`never_inspected`). L'athlète demande seulement où en sont ses chaussures.
+#
+# Limite du harnais : le runner `claude -p` n'envoie aucune image. Le cas « photo de
+# référence » de l'issue (usure talon latérale, asymétrie, semelle neuve, photo sans échelle)
+# n'est donc PAS testable ici ; on vérifie ce qui l'est en texte seul : la proposition
+# d'inspection (jamais l'écriture d'un fichier `gear/`, jamais une obligation) et, dans le cas
+# jumeau `gear-inspection-no-mm-without-scale`, les garde-fous sur une usure décrite à l'écrit.
+#
+# `must_match` : le mot « inspection » (ou « photo » des semelles) ET une forme de
+# proposition (question, « si tu veux »…) — pas un simple constat. `must_not_match` : ton
+# d'obligation. `files_absent` : aucun fichier `gear/` écrit sans photo.
+id = "gear-inspection-proposed-at-200km"
+prompt = "Où en sont mes chaussures ?"
+fixture = "gear-inspection"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "inspection|photos? (de|des) (tes |vos )?(semelles|chaussures)",
+  "(veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|si tu veux|si vous voulez|[àa] ta convenance|[çc]a te (dit|tente)|conseill|(je te |on peut te )?propos(e|er))",
+]
+must_not_match = [
+  "pas (d['’]|besoin d['’])inspection",
+  "(tu dois|vous devez|il faut absolument|il est obligatoire|c['’]est obligatoire)[^\\n]{0,60}(inspect|photo)",
+]
+files_absent = ["gear/*.md"]

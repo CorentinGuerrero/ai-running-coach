@@ -44,7 +44,11 @@ set -euo pipefail
 # Constantes
 # ---------------------------------------------------------------------------
 VERSION="0.2.0"
-GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp"
+# Épinglé à un commit précis, comme INTERVALS_MCP_REF ci-dessous : ce serveur reçoit le
+# mot de passe et le code MFA Garmin à l'authentification, puis tourne à chaque
+# synchronisation — un changement en amont ne doit jamais être exécuté sans relecture.
+# Mettre à jour après vérification du diff amont.
+GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7"
 # Source alternative (#68) : serveur MCP communautaire déjà référencé par
 # docs/faq.md avant cette story (hypothèse de travail des tests, désormais
 # celui réellement installé par --source intervals). project.scripts expose
@@ -69,7 +73,7 @@ LEANPROXY_SERVERS="$HOME/.config/leanproxy_servers.yaml"
 # Liste blanche des outils Garmin utilisés par les agents/skills du projet.
 # Réduit la taxe de contexte (~151 outils → ~30) en mode direct.
 # Noms réels des outils garmin-mcp (sans préfixe garmin_).
-GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status"
+GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
 
 # Chat avec le coach et sync sur une API (--llm) : modèles par défaut, UNE constante
 # chacun. Identifiant OpenRouter « deepseek/deepseek-chat » vérifié sur
@@ -1401,12 +1405,12 @@ configure_ide() {
 # ---------------------------------------------------------------------------
 create_workspace_dirs() {
     log "Création des dossiers de travail (exclus du dépôt)"
-    for d in activities medical nutrition planning rapports resources; do
+    for d in activities medical nutrition planning rapports resources gear; do
         if [[ "$DRY_RUN" -eq 0 ]]; then
             mkdir -p "$WORKSPACE_ROOT/$d"
         fi
     done
-    ok "Dossiers activities/ medical/ nutrition/ planning/ rapports/ resources/ prêts"
+    ok "Dossiers activities/ medical/ nutrition/ planning/ rapports/ resources/ gear/ prêts"
 }
 
 # ---------------------------------------------------------------------------

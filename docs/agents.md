@@ -140,4 +140,5 @@ flowchart TB
 | `medical/` | Santé, sommeil, récupération, météo |
 | `nutrition/` | Journaux nutritionnels |
 | `rapports/` | Rapports de synthèse hebdomadaires et **débriefs post-course** (`YYYY-MM-DD_debrief_<course>.md`) |
+| `gear/` | Inspections photo des chaussures (`YYYY-MM-DD_<gear_id>_inspection.md`, photos dans `gear/photos/`) — coach |
 | `resources/` | Documents de référence (fournis par l'utilisateur) |

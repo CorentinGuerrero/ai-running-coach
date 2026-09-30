@@ -14,7 +14,7 @@ héritage.
 
 | Clé | Effet sur les agents |
 |---|---|
-| `[language].documents` | Langue des MD persistés (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`). Défaut `fr`. |
+| `[language].documents` | Langue des MD persistés (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`). Défaut `fr`. |
 | `[language].responses` | Langue des réponses. Défaut `auto` = celle de la requête. |
 | `[coaching].style` | Voix de l'agent → `config/coaching-styles.md`. |
 | `[coaching].intensity` | Fermeté d'application du style. |
@@ -72,11 +72,12 @@ ci-dessous.
 
 | Dossier | Contenu | Convention |
 |---|---|---|
-| `activities/` | Journaux d'entraînement | `YYYY-MM-DD_type.md` (running, trail, strength, indoor_cycling, home_trainer, hiking, elliptical, rest) |
+| `activities/` | Journaux d'entraînement (`gear_id` = chaussure, `gear_ids` = matériel hors chaussures, #134) | `YYYY-MM-DD_type.md` (running, trail, strength, indoor_cycling, home_trainer, hiking, elliptical, rest) |
 | `medical/` | Sommeil, HRV, récupération, blessures, météo | `YYYY-MM-DD_health.md`, `YYYY-MM-DD_meteo.md` |
 | `nutrition/` | Journaux nutrition & plans de ravitaillement | `YYYY-MM-DD_nutrition.md` |
 | `planning/` | Plans d'entraînement, objectifs, stratégies de course, **décisions tracées** | `active_objective.md` est la **source de vérité** de l'objectif courant ; `Runner_Profile.md` est le profil de l'athlète. Les deux sont installés depuis `templates/` par `/coach-setup`. Une décision (garde-fou, bilan matinal, blessure…) = un fichier `YYYY-MM-DD_decision_<slug>.md`. |
 | `rapports/` | Rapports de synthèse périodiques (propriété du **coach**) | `YYYY-MM-DD_rapport.md` |
+| `gear/` | Inspections photo du matériel (propriété du **coach**, skill `gear-inspection`, #135) ; photos dans `gear/photos/` (jamais dans le dépôt public) | `YYYY-MM-DD_<gear_id>_inspection.md` |
 | `resources/` | Base de connaissances (langue des documents) : running, nutrition, santé, récupération | Matériel de référence, citer lors des conseils. **Catalogues produits** (optionnels) : `resources/nutrition/catalogue-produits-*.md` = valeurs nutritionnelles par produit de l'athlète |
 
 > **Note** : ces dossiers sont créés par l'utilisateur dans son espace de travail
@@ -85,7 +86,7 @@ ci-dessous.
 ### Contrat de données
 
 Tout fichier écrit par un agent dans `activities/`, `medical/`, `nutrition/`,
-`planning/` (semaines, évaluations, plans de course, décisions) ou `rapports/` s'ouvre, sous
+`planning/` (semaines, évaluations, plans de course, décisions), `rapports/` ou `gear/` s'ouvre, sous
 son titre, par **un bloc ```` ```arc ```` de JSON** conforme au skill
 `workspace-data-contract` : clés en anglais, unités SI, mesure absente = clé omise.
 Le texte libre reste en dessous. Valider après écriture avec
@@ -110,10 +111,10 @@ le sujet soi-même dans la limite de sa compétence.
 
 | Agent | Utilisation |
 |---|---|
-| `coach` | Plans d'entraînement, analyse des activités Garmin (**incl. HRR `recovery_hr_bpm` dans chaque retour de séance**), ajustements de séances, **push des séances au calendrier Garmin** (`schedule_workouts`, Garmin d'abord), rapports hebdomadaires. **Bilan matinal avant toute décision de séance, au niveau fixé par `[health].morning_check` : à `full` (défaut), HRV + FC de repos (`get_rhr_day`) + readiness — les trois, jamais deux.** **Inclut toujours la météo + le créneau optimal (matin tôt / midi / soir) dans chaque validation hebdomadaire/journalière (charger le skill `weather-forecast`, résoudre le lieu via la règle de précédence stricte).** **Ligne « Dépense : Garmin X kcal · modèle Y kcal (±Z %) » dans chaque retour de séance running/trail/hiking/walking (`arc_index.py energy`), alerte si écart > 15 % — Garmin reste la référence.** |
+| `coach` | Plans d'entraînement, analyse des activités Garmin (**incl. HRR `recovery_hr_bpm` dans chaque retour de séance**), ajustements de séances, **push des séances au calendrier Garmin** (`schedule_workouts`, Garmin d'abord), rapports hebdomadaires. **Bilan matinal avant toute décision de séance, au niveau fixé par `[health].morning_check` : à `full` (défaut), HRV + FC de repos (`get_rhr_day`) + readiness — les trois, jamais deux.** **Inclut toujours la météo + le créneau optimal (matin tôt / midi / soir) dans chaque validation hebdomadaire/journalière (charger le skill `weather-forecast`, résoudre le lieu via la règle de précédence stricte).** **Ligne « Dépense : Garmin X kcal · modèle Y kcal (±Z %) » dans chaque retour de séance running/trail/hiking/walking (`arc_index.py energy`), alerte si écart > 15 % — Garmin reste la référence.** **Matériel hors chaussures (#134) : kits attribués via `gear_ids` (`arc_index.py equipment --kit`), entretien noté en chat, ligne « Matériel : … » (alerte/proche du seuil), rappel frontale/poche avant séance de nuit/longue.** |
 | `medical` | Analyse sommeil/HRV/récupération (**incl. HRR lors de l'évaluation de l'impact d'une séance**, et **FC de repos dans le bilan matinal**), protocoles blessures, gatekeeper de disponibilité, contraintes de coordination pour coach/nutritionniste |
 | `nutritionist` | Macros, poids de course, plans de ravitaillement. **Pas de serveur MyFitnessPal** — les apports viennent des rapports manuels de l'utilisateur ; croiser avec les calories brûlées Garmin (référence par défaut ; le modèle `energy` n'est qu'un contrôle, jamais additionné au `burned_kcal` journalier — pas de double comptage) |
-| `course-strategist` | Analyse GPX/URL de course → plan de course (allures ×3 scénarios, nutrition, météo, équipement, **dépense énergétique prévue par section/scénario via `arc_race_pacing.py --pack-kg`, en regard du plan de ravitaillement**), enrichissement points d'eau OSM, upload de parcours Garmin via l'outil `upload_course` |
+| `course-strategist` | Analyse GPX/URL de course → plan de course (allures ×3 scénarios, nutrition, météo, équipement, **dépense énergétique prévue par section/scénario via `arc_race_pacing.py --pack-kg`, en regard du plan de ravitaillement**), enrichissement points d'eau OSM, upload de parcours Garmin via l'outil `upload_course` **Contrôle du matériel de course (#134) : `gear` du plan croisé avec l'inventaire du profil (`arc_index.py equipment --race-plan`) → manquant / jamais utilisé à l'entraînement / sous alerte, jamais inventé.** |
 
 Lors d'une délégation, écrire le prompt de tâche en anglais mais ajouter
 explicitement **« Respond in <langue des documents> »** (résolue via
@@ -154,9 +155,27 @@ source du serveur retenu (`src/intervals_icu_mcp/tools/*.py`, `client.py`,
 | Événements planifiés | `get_calendar_events` / `get_scheduled_workouts` | `get_calendar_events` / `get_upcoming_workouts` | |
 | Détail d'une séance planifiée | `get_workout_by_id` | `get_event` | Ne renvoie que id/date/name/category/description/type/metrics — jamais de structure de séance. |
 | Push d'une séance | `schedule_workouts` / `schedule_week` | `create_event` / `bulk_create_events` | **Pas un remplacement direct** — charger le skill `intervals-icu-best-practices` (pas `garmin-workout-scheduling`) : `create_event`/`update_event` n'ont PAS de paramètre structuré (pas de `workout_doc`) ; les cibles (#60) s'écrivent en texte dans `description` ; aucun upsert n'existe (vérifier `get_calendar_events` avant chaque push, pas de réutilisation de `workout_id`) ; la vérification post-push ne porte que sur les champs que `get_event` renvoie réellement. |
+| Matériel (inventaire) | `get_gear` (appeler avec `include_stats=False` : le défaut du serveur est `True`, un appel API par matériel) | `get_gear_list` | **Référence seulement** côté intervals.icu (id, nom, type, `usage.total_distance_km`) — jamais une attribution. Voir « Matériel » sous la table (#133). |
+| Matériel attaché à une activité | `get_activity_gear` | **aucun équivalent** | Le serveur intervals.icu n'a aucun champ matériel sur les activités : `gear_id` reste déclaré en chat ou `(par défaut)`, jamais deviné. |
+| Attacher un matériel à une activité | `add_gear_to_activity` (ÉCRITURE Garmin, confirmation explicite, jamais en headless) | **aucun équivalent** | Voir « Matériel » sous la table. |
 | Modifier/supprimer une séance planifiée | `delete_workout` / `unschedule_workout` | `update_event` / `delete_event` | `update_event` exige un `event_id` déjà existant — jamais un upsert. |
 | Profil athlète (référence, jamais substitué au profil déclaré) | — | `get_athlete_profile` | |
 | Charge/forme (vocabulaire générique du projet, jamais les noms TrainingPeaks) | — (calculée par `scripts/arc_index.py`) | `get_fitness_summary` | Ne jamais citer `ctl`/`atl`/`form` sous ces noms dans une réponse — reformuler en charge/condition/fatigue/forme comme partout ailleurs (`docs/marques.md`). |
+
+**Matériel (#133).** Avec `[data].source = "garmin"`, `get_gear` / `get_activity_gear`
+(lecture) et `add_gear_to_activity` (écriture) sont dans la liste blanche `GARMIN_TOOL_WHITELIST`.
+Le coach associe **une fois** (proposition, jamais devinée) chaque matériel Garmin à une puce
+`### Chaussures` du profil par un segment `garmin: <uuid>`, puis attribue `gear_id` avec la
+priorité **déclaration de l'athlète (chat) > matériel attaché par Garmin > `(par défaut)`** (règle
+exécutée par `python3 scripts/arc_index.py gear-attribution` ; un désaccord Garmin/athlète est
+signalé une fois ; provenance dans `gear_source` ; un matériel Garmin non associé, ambigu ou
+`(ignorée)` laisse `gear_id` absent avec `gear_source: "garmin_unmapped"` : la séance n'est alors
+jamais créditée à la paire par défaut). Un seul `get_activity_gear` par activité NOUVELLE. Aucune
+écriture Garmin sans confirmation dans la conversation, jamais en headless. **Avec
+`[data].source = "intervals"`** : le serveur épinglé expose `get_gear_list` (inventaire, à titre
+de référence — jamais utilisé pour attribuer) mais **aucun matériel par activité**
+(`src/intervals_icu_mcp/tools/activities.py`/`activity_analysis.py` n'ont pas de champ gear,
+vérifié au commit épinglé) : `gear_id` reste chat/`(par défaut)`, dit explicitement, jamais inventé.
 
 **Fonctionnalités/champs Garmin sans portage intervals.icu dans cette story —
 indisponibles et EXPLIQUÉS comme tels quand `[data].source = "intervals"`,
@@ -194,11 +213,12 @@ jamais devinés ou simulés :**
 - `garmin-sync-efficiency` — discipline de récupération pour éviter l'explosion du contexte
 - `workspace-data-contract` — **schéma du bloc ```` ```arc ````** par type de fichier (activité, santé, météo, semaine, nutrition, rapport, évaluation de parcours, plan de course), unités SI, validation par `scripts/arc_index.py --validate`. Charger avant d'écrire un fichier du workspace.
 - `arc-backfill` — met au contrat les fichiers écrits avant lui, par lots, à partir de la liste produite par `python3 scripts/arc_index.py backfill-plan`.
-- `coach-doctor` — **diagnostic d'installation en une commande** (`/coach-doctor`, `python3 scripts/coach_doctor.py`) : âge/échéance des tokens Garmin, joignabilité du MCP `garmin`, validité TOML de la config, complétude du profil athlète, fraîcheur de l'index `.arc/coach.db`, fichiers hors contrat, planification du daily-sync, configuration ntfy. Ne lit ni n'écrit rien de sensible ; à charger dès qu'un symptôme d'installation apparaît, avant de deviner la cause.
-- `garmin-daily-sync` — **prompt d'orchestration headless** (`/garmin-daily-sync`) lancé par le cron de la machine coach (`scripts/daily-sync.sh`) — aux heures fixes, ou seulement quand Garmin a du neuf avec `[sync].mode = "watch"` (`scripts/garmin_watch.py`, sondage sans LLM, indice `trigger=` passé au skill) —, depuis le téléphone (Remote Control) ou l'IDE : délègue au `coach` + `garmin-sync-efficiency`, ne pose aucune question, ne récupère que les dates manquantes, termine par un bloc ```` ```resume ```` (≤ 5 lignes) envoyé en notification push (ntfy). Voir `docs/mobile.md`.
+- `coach-doctor` — **diagnostic d'installation en une commande** (`/coach-doctor`, `python3 scripts/coach_doctor.py`) : âge/échéance des tokens Garmin, joignabilité du MCP `garmin`, validité TOML de la config, complétude du profil athlète, fraîcheur de l'index `.arc/coach.db`, fichiers hors contrat, planification du daily-sync, configuration ntfy, synchronisation du matériel Garmin (`gear_sync`, statique : liste blanche + segments `garmin:` du profil, aucun appel Garmin). Ne lit ni n'écrit rien de sensible ; à charger dès qu'un symptôme d'installation apparaît, avant de deviner la cause.
+- `garmin-daily-sync` — **prompt d'orchestration headless** (`/garmin-daily-sync`) lancé par le cron de la machine coach (`scripts/daily-sync.sh`) — aux heures fixes, ou seulement quand Garmin a du neuf avec `[sync].mode = "watch"` (`scripts/garmin_watch.py`, sondage sans LLM, indice `trigger=` passé au skill) —, depuis le téléphone (Remote Control) ou l'IDE : délègue au `coach` + `garmin-sync-efficiency`, ne pose aucune question, ne récupère que les dates manquantes, termine par un bloc ```` ```resume ```` (≤ 5 lignes) envoyé en notification push (ntfy). Voir `docs/mobile.md`. Ajoute une ligne à `Alerte :` quand une séance synchronisée fait franchir son seuil d'usure à une paire de chaussures (#132, `arc_index.py gear --activities`, une seule fois par franchissement — identifié par la séance, pas par la date).
 - `weather-forecast` — récupération + persistance des prévisions météo (wttr.in via webfetch), résolution du lieu (override fichier semaine → `active_objective.md` défaut → profil défaut → demander), seuils de catégorie (🟢/🟡/🟠/🔴), créneau optimal par séance outdoor. Utilisé par l'agent `coach` à chaque validation hebdo/journalière.
 - `session-parts-analyzer` — analyse au niveau segment des drills (strides, montées, intervalles, sprints) depuis FIT/MCP. L'analyse détaillée délègue le téléchargement FIT à `fit-download`.
 - `fit-download` — **téléchargement des fichiers FIT Garmin + records GPS en bypassant le MCP** (qui timeoute sur les FIT) : `scripts/download_fit.py` utilisant `garminconnect` + tokens locaux `~/.garminconnect`. Charger dès qu'une séance doit être analysée à précision sub-km (profil de parcours, montées, dérive FC×élévation, analyse stride/sprint/intervalle, comparaison de parcours). Toujours persister l'analyse dans le MD de l'activité dans la langue des documents (`config/workspace.toml`), ne jamais dumper le JSON brut.
 - `gpx-analysis` — **analyse générique de parcours GPX** (fichiers Strava/Garmin/course) via `scripts/analyze_gpx.py` (stdlib) : distance réelle, D+/D- (lissage anti-bruit), profil par km, montées significatives, boucle vs point-to-point, verdict de compatibilité vs une cible (distance/D+). Charger dès que l'utilisateur fournit un GPX et veut l'analyser ou l'évaluer contre une séance planifiée. Persister la fiche d'évaluation dans `planning/YYYY-MM-DD_evaluation_parcours_<lieu>.md` (langue des documents). Utilisé par `course-strategist` pour l'entrée GPX.
+- `gear-inspection` — **inspection photo des chaussures** (#135) : le coach la **propose** (jamais imposée) environ tous les 200 km d'une paire, à l'alerte de seuil ou sur demande (`python3 scripts/arc_index.py inspections`, jamais en headless) ; protocole photo (semelles, profil, arrière, tige, échelle), grille de lecture 🟢🟡🟠🔴, comparaison avec l'inspection précédente de la même paire, **indices** de foulée depuis la zone d'usure (signal faible, jamais un diagnostic ; aucune mesure en mm sans échelle ; jamais de changement de foulée recommandé sur une photo), relais à `medical` seulement s'il est dans `[agents].enabled`. Persiste `gear/YYYY-MM-DD_<gear_id>_inspection.md` (type `gear_inspection`) et produit, à la retraite d'une paire, son bilan de carrière (`arc_index.py gear-career --gear ID`). Temps de contact au sol (FIT) : indisponible dans ce dépôt.
 - `course-comparison` — **analyse comparative de séances sur le même parcours/lieu** via `scripts/compare_course.py` : découverte de toutes les activités d'un lieu (fichiers MD Garmin), alignement des boucles/segments, comparaison des montées, tableau global (date, distance, D+, durée, allure, FC moy/max, premier tour, montées) et dump JSON. Charger quand l'utilisateur demande de comparer des séances d'un même lieu ou d'évaluer la progression sur un parcours connu. Prérequis : chaque MD d'activité porte son bloc ```` ```arc ```` avec `location` et `splits` (fichiers anciens : bloc YAML `## Données brutes Garmin (référence)` + `## Analyse par splits (km)`). Persister les rapports dans `rapports/YYYY-MM-DD_comparaison_<lieu>.md`.
 - `log` — **saisie libre en une phrase** (`/log`, #67) : « 2 gels + 500 ml au km 15, genou gauche 3/10, RPE 7 ». Le modèle extrait les entités, `scripts/arc_log.py` (stdlib, JSON-in/JSON-out) fait l'arithmétique et la correspondance catalogue (`resources/nutrition/catalogue-produits-*.md`) — jamais l'inverse. Produit inconnu/ambigu → toujours demander, jamais inventer. Écrit `carbs_g`/`fluid_intake_ml`/`rpe` dans l'activité du jour (`activities/`, agent coach) et `pain` dans `medical/YYYY-MM-DD_health.md` (agent medical si activé, sinon coach) ; une douleur ≥ 7/10 déclenche une recommandation de consultation.

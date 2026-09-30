@@ -87,9 +87,31 @@ DECISION_OUTCOME = ("applied", "proposed", "rejected_by_athlete", "superseded")
 # renvoi explicite vers `arc_guardrails.RULE_IDS`).
 RULE_ID_RE = re.compile(r"^r\d+_[a-z][a-z0-9_]*$")
 
+# `gear_inspection` (#135) : inspection photo d'une paire. `condition` reprend le vocabulaire
+# 🟢/🟡/🟠/🔴 (mêmes valeurs que `WEATHER_CATEGORY`, jamais un second vocabulaire de couleur) ;
+# `wear_zones[].zone` nomme un endroit de la semelle (jamais un diagnostic) ; `gait_hints` reste
+# un INDICE de foulée, jamais une conclusion clinique — voir `skills/gear-inspection/SKILL.md`.
+GEAR_CONDITION = ("green", "yellow", "orange", "red")
+GEAR_SIDE = ("left", "right")
+GEAR_WEAR_ZONE = (
+    "heel_posterolateral", "heel_lateral", "heel_medial", "heel_central",
+    "midfoot_lateral", "midfoot_medial", "midfoot_central",
+    "forefoot_lateral", "forefoot_medial", "forefoot_central", "toe",
+)
+GEAR_WEAR_SEVERITY = ("light", "moderate", "marked")
+GEAR_ASYMMETRY_LEVEL = ("none", "mild", "marked")
+GEAR_GAIT_HINT = ("heel_strike", "midfoot_forefoot_strike", "pronation_hint", "supination_hint")
+GEAR_INSPECTION_FOLDER = "gear"
+GEAR_PHOTO_DIR = "gear/photos/"
+GEAR_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+GEAR_PHOTOS_MAX = 12
+GEAR_LUG_DEPTH_MM_PLAUSIBLE_MAX = 15.0
+
 # Matériel, sudation, glucides pendant l'effort (#39 — champs consommés par #40
 # kilométrage chaussures, #41 KPI glucides/h et taux de sudation).
 GEAR_ID_MAX_LEN = 40
+# `activity.gear_ids` (#134) : nombre maximal d'objets par séance (un kit complet tient largement).
+GEAR_IDS_MAX = 30
 # Format slug : minuscules, chiffres, tirets simples, jamais en tête/fin — même
 # convention que la plupart des identifiants stables lisibles par un humain
 # (ex. "hoka-speedgoat-5-bleue"). La section « Matériel & lieux » du profil
@@ -184,6 +206,9 @@ DECOUPLING_PCT_PLAUSIBLE = (-50.0, 100.0)
 # ---------------------------------------------------------------------------
 
 
+GEAR_SOURCES = ("garmin", "chat", "garmin_unmapped")
+
+
 def _enum(values) -> str:
     return "enum:" + "|".join(values)
 
@@ -228,10 +253,20 @@ SCHEMA = {
             "splits_cols": "list",
             "splits": "list",
             "gear_id": "gear_id",
+            # #133 : provenance du `gear_id` — « garmin » (matériel attaché par la montre,
+            # `get_activity_gear`) ou « chat » (déclaré par l'athlète) ; « garmin_unmapped » =
+            # la montre a attaché un matériel SANS puce correspondante (ou ambigu/ignoré) : SANS
+            # `gear_id`, et exclu de l'attribution par défaut (`arc_metrics.gear_mileage`).
+            # Jamais « default » : sans `gear_id`, la paire par défaut est calculée à la lecture.
+            "gear_source": _enum(GEAR_SOURCES),
             "carbs_g": "carbs_g",
             "fluid_intake_ml": "fluid_ml",
             "weight_pre_kg": "body_weight_kg",
             "weight_post_kg": "body_weight_kg",
+            # #134 : matériel hors chaussures porté sur la séance (liste de slugs, `gear_id` reste
+            # LA chaussure). Absent = aucun objet attribué, jamais « aucun » écrit en liste vide
+            # (une liste vide est acceptée mais sans effet). Ancien fichier sans `gear_ids` : valide.
+            "gear_ids": "gear_id_list",
             "missing_reason": "obj",
             # KPI FIT (#51, épopée #21) : snapshot narratif écrit par le coach APRÈS
             # avoir lu la sortie des CLI dédiées (`scripts/arc_index.py gap/decoupling/
@@ -394,6 +429,31 @@ SCHEMA = {
             "segments": "[race_segment]",
         },
     },
+    # Inspection photo d'une paire de chaussures (#135, épopée #131) — fichier
+    # `gear/AAAA-MM-JJ_<gear_id>_inspection.md`. Clés en anglais, SI (`distance_m`).
+    # `distance_m` = kilométrage de la paire AU MOMENT de l'inspection (lu dans
+    # `arc_index.py gear`), jamais deviné ; `previous` chaîne vers l'inspection précédente de
+    # la MÊME paire (le signal le plus fiable est la comparaison, pas le verdict isolé).
+    # `lug_depth_mm` n'existe que si `scale_reference` est vrai (pièce/règle dans le cadre) :
+    # règle transverse de `validate()`. Le texte libre (justification visuelle, indices de
+    # foulée, comparaison) reste SOUS le bloc.
+    "gear_inspection": {
+        "required": {
+            "date": "date",
+            "gear_id": "gear_id",
+            "condition": _enum(GEAR_CONDITION),
+        },
+        "optional": {
+            "distance_m": "num+",
+            "wear_zones": "[wear_zone]",
+            "asymmetry": "{gear_asymmetry}",
+            "gait_hints": "enums:" + "|".join(GEAR_GAIT_HINT),
+            "photos": "photo_paths",
+            "previous": "inspection_path",
+            "scale_reference": "bool",
+            "lug_depth_mm": "num+",
+        },
+    },
     "decision": {
         "required": {
             "date": "date",
@@ -474,6 +534,16 @@ SUBSCHEMA = {
             "weather_category": _enum(WEATHER_CATEGORY),
             "best_slot": _enum(SLOT),
         },
+    },
+    # `gear_inspection.wear_zones[]` (#135) : une zone d'usure constatée sur UNE semelle.
+    "wear_zone": {
+        "required": {"side": _enum(GEAR_SIDE), "zone": _enum(GEAR_WEAR_ZONE)},
+        "optional": {"severity": _enum(GEAR_WEAR_SEVERITY)},
+    },
+    # `gear_inspection.asymmetry` (#135) : `side` = le côté le PLUS usé (absent si `none`).
+    "gear_asymmetry": {
+        "required": {"level": _enum(GEAR_ASYMMETRY_LEVEL)},
+        "optional": {"side": _enum(GEAR_SIDE)},
     },
     "aid_station": {
         "required": {"km": "num+", "name": "str"},
@@ -558,6 +628,7 @@ KIND_FOLDERS = {
     "course_eval": "planning",
     "race_plan": "planning",
     "decision": "planning",
+    "gear_inspection": "gear",
 }
 
 # ---------------------------------------------------------------------------
@@ -621,6 +692,17 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
         allowed = spec[5:].split("|")
         if value not in allowed:
             fail("une valeur parmi " + ", ".join(allowed))
+        return
+    if spec.startswith("enums:"):
+        # Liste de valeurs d'une énumération (`gear_inspection.gait_hints`, #135).
+        allowed = spec[6:].split("|")
+        if not isinstance(value, list):
+            fail("une liste de valeurs parmi " + ", ".join(allowed))
+            return
+        for i, item in enumerate(value):
+            if item not in allowed:
+                errors.append(f"{where}[{i}] : une valeur parmi {', '.join(allowed)} attendue, "
+                              f"{json.dumps(item, ensure_ascii=False)} trouvé")
         return
     if spec.startswith("[") and spec.endswith("]"):
         sub = SUBSCHEMA[spec[1:-1]]
@@ -688,6 +770,24 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
             fail(f"un identifiant de matériel au format slug (minuscules, chiffres, tirets, "
                  f"{GEAR_ID_MAX_LEN} caractères max)")
         return
+    if spec == "gear_id_list":
+        if not isinstance(value, list):
+            fail("une liste d'identifiants de matériel (slugs)")
+            return
+        if len(value) > GEAR_IDS_MAX:
+            fail(f"{GEAR_IDS_MAX} identifiants de matériel au plus")
+            return
+        seen = set()
+        for i, gid in enumerate(value):
+            if not isinstance(gid, str) or len(gid) > GEAR_ID_MAX_LEN or not GEAR_ID_RE.match(gid):
+                errors.append(f"{where}[{i}] : un identifiant de matériel au format slug (minuscules, chiffres, "
+                              f"tirets, {GEAR_ID_MAX_LEN} caractères max) attendu, "
+                              f"{json.dumps(gid, ensure_ascii=False)} trouvé")
+            elif gid in seen:
+                errors.append(f"{where}[{i}] : identifiant « {gid} » en double")
+            else:
+                seen.add(gid)
+        return
     if spec == "carbs_g":
         if not _is_number(value) or not 0 <= value <= CARBS_G_PLAUSIBLE_MAX:
             fail(f"une quantité de glucides en g (0-{CARBS_G_PLAUSIBLE_MAX:g})")
@@ -716,6 +816,33 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
                     f"{where}[{i}] : identifiant de règle attendu au format rN_nom_de_regle, "
                     f"{json.dumps(item, ensure_ascii=False)} trouvé"
                 )
+        return
+    if spec == "photo_paths":
+        # `gear_inspection.photos` (#135) : chemins de photos DANS `gear/photos/`, images
+        # raster seulement (jamais SVG : le tableau de bord les sert — voir
+        # `arc_serve.gear_photo_file`). Jamais dans le dépôt public : `gear/` est gitignoré.
+        if not isinstance(value, list):
+            fail("une liste de chemins de photos sous gear/photos/")
+            return
+        if len(value) > GEAR_PHOTOS_MAX:
+            warnings.append(f"{where} : {len(value)} photos, plus de {GEAR_PHOTOS_MAX} — vérifier les doublons")
+        for i, item in enumerate(value):
+            reason = _invalid_workspace_path_reason(item)
+            if reason is None and not (item.startswith(GEAR_PHOTO_DIR)
+                                       and item.lower().endswith(GEAR_PHOTO_EXTENSIONS)):
+                reason = (f"photo attendue sous {GEAR_PHOTO_DIR} avec une extension parmi "
+                          f"{', '.join(GEAR_PHOTO_EXTENSIONS)}")
+            if reason:
+                errors.append(f"{where}[{i}] : {reason} ({json.dumps(item, ensure_ascii=False)})")
+        return
+    if spec == "inspection_path":
+        # `gear_inspection.previous` (#135) : chemin d'une AUTRE inspection.
+        reason = _invalid_workspace_path_reason(value)
+        if reason is None and not (value.startswith(GEAR_INSPECTION_FOLDER + "/")
+                                   and value.endswith("_inspection.md")):
+            reason = "inspection attendue sous gear/ (gear/AAAA-MM-JJ_<gear_id>_inspection.md)"
+        if reason:
+            errors.append(f"{where} : {reason} ({json.dumps(value, ensure_ascii=False)})")
         return
     if spec == "source_paths":
         # `decision.sources` (#54) : liste de chemins relatifs au workspace —
@@ -801,6 +928,8 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
 def _invalid_workspace_path_reason(value) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return "chemin non vide attendu"
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        return "caractère de contrôle interdit (NUL, retour à la ligne, tabulation…)"
     if "\\" in value:
         return "antislash interdit (jamais un séparateur valide dans ce contrat)"
     if ":" in value:
@@ -1033,6 +1162,11 @@ def validate(data: dict) -> tuple:
             # Garmin (ex. BMR quotidien entier collé sur une activité courte),
             # jamais une valeur physiologiquement plausible à laisser passer.
             errors.append("activity.calories_bmr_kcal : ne peut dépasser calories_kcal")
+        source = data.get("gear_source")
+        if source in ("garmin", "chat") and not data.get("gear_id"):
+            errors.append(f"activity.gear_source : « {source} » exige un gear_id")
+        if source == "garmin_unmapped" and data.get("gear_id"):
+            errors.append("activity.gear_source : « garmin_unmapped » exclut gear_id (matériel Garmin non associé)")
         pre, post = data.get("weight_pre_kg"), data.get("weight_post_kg")
         if _is_number(pre) and _is_number(post) and post > pre + WEIGHT_POST_TOLERANCE_KG:
             # Pas une erreur : une pesée maison a de l'imprécision (habits, balance), et le
@@ -1045,7 +1179,35 @@ def validate(data: dict) -> tuple:
             )
     if kind == "decision":
         _check_decision_created_at(data, errors)
+    if kind == "gear_inspection":
+        _check_gear_inspection(data, errors, warnings)
     return errors, warnings
+
+
+def _check_gear_inspection(data: dict, errors: list, warnings: list) -> None:
+    """Règles transverses de `gear_inspection` (#135)."""
+    depth = data.get("lug_depth_mm")
+    if depth is not None and not data.get("scale_reference"):
+        # Garde-fou du skill : aucune mesure en mm sans référence d'échelle dans la photo.
+        errors.append("gear_inspection.lug_depth_mm : interdit sans scale_reference: true "
+                      "(aucune mesure en mm sans pièce ou règle dans le cadre)")
+    if _is_number(depth) and depth > GEAR_LUG_DEPTH_MM_PLAUSIBLE_MAX:
+        warnings.append(f"gear_inspection.lug_depth_mm : {depth:g} mm dépasse "
+                        f"{GEAR_LUG_DEPTH_MM_PLAUSIBLE_MAX:g} mm — faute de frappe probable")
+    asym = data.get("asymmetry")
+    if isinstance(asym, dict):
+        level, side = asym.get("level"), asym.get("side")
+        if level in ("mild", "marked") and side is None:
+            errors.append("gear_inspection.asymmetry.side : obligatoire dès que level vaut mild ou marked "
+                          "(le côté le plus usé)")
+        if level == "none" and side is not None:
+            warnings.append("gear_inspection.asymmetry.side : ignoré quand level vaut none")
+    zones = data.get("wear_zones")
+    if isinstance(zones, list) and zones:
+        sides = {z.get("side") for z in zones if isinstance(z, dict)}
+        if sides in ({"left"}, {"right"}):
+            warnings.append("gear_inspection.wear_zones : une seule semelle documentée — "
+                            "le protocole demande les DEUX (l'asymétrie ne peut pas être jugée)")
 
 
 # `created_at` (horodatage d'écriture) ne doit pas s'écarter dans le futur, au-delà

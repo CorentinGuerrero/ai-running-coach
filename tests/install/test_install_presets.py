@@ -89,6 +89,7 @@ EXPECTED_ADDED_PATHS = {
         "repo/medical",
         "repo/nutrition",
         "repo/planning",
+        "repo/gear",
         "repo/rapports",
         "repo/resources",
     },
@@ -115,6 +116,7 @@ EXPECTED_ADDED_PATHS = {
         "repo/medical",
         "repo/nutrition",
         "repo/planning",
+        "repo/gear",
         "repo/rapports",
         "repo/resources",
     },
@@ -140,6 +142,7 @@ EXPECTED_ADDED_PATHS = {
         "repo/medical",
         "repo/nutrition",
         "repo/planning",
+        "repo/gear",
         "repo/rapports",
         "repo/resources",
     },
@@ -373,3 +376,42 @@ class TestUnknownPreset(InstallAsserts):
         with Sandbox() as sb:
             proc = sb.install("--preset", "laptop", "--preset", "laptop", "--dry-run", **DARWIN)
             self.assertSucceeded(proc, "--preset répété avec la même valeur")
+
+
+class TestGearWhitelistInstalled(InstallAsserts):
+    """#133 — `install.sh` écrit la liste blanche (avec les outils matériel) dans `.mcp.json` et
+    `opencode.json`, et une relance la met à jour sans toucher aux autres serveurs de l'athlète."""
+
+    TOOLS = ("get_gear", "get_activity_gear", "add_gear_to_activity")
+
+    @staticmethod
+    def _garmin_tools(entry: dict) -> list:
+        env = entry.get("env") or entry.get("environment") or {}
+        return env["GARMIN_ENABLED_TOOLS"].split(",")
+
+    def test_whitelist_reaches_mcp_json_and_opencode_json(self):
+        import json
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--preset", "laptop", **DARWIN))
+            mcp = json.loads((sb.repo / ".mcp.json").read_text())
+            tools = self._garmin_tools(mcp["mcpServers"]["garmin"])
+            for tool in self.TOOLS:
+                self.assertIn(tool, tools)
+            self.assertNotIn("remove_gear_from_activity", tools)
+            opencode = json.loads((sb.home / ".config/opencode/opencode.json").read_text())
+            entry = opencode["mcp"]["garmin"]
+            for tool in self.TOOLS:
+                self.assertIn(tool, self._garmin_tools(entry))
+
+    def test_rerun_upgrades_an_old_whitelist_and_keeps_other_servers(self):
+        import json
+        with Sandbox() as sb:
+            (sb.repo / ".mcp.json").write_text(json.dumps({"mcpServers": {
+                "garmin": {"command": "garmin-mcp", "args": ["stdio"],
+                           "env": {"GARMIN_ENABLED_TOOLS": "get_activities,get_sleep_data"}},
+                "autre": {"command": "mon-serveur", "args": []},
+            }}))
+            self.assertSucceeded(sb.install("--preset", "laptop", **DARWIN))
+            mcp = json.loads((sb.repo / ".mcp.json").read_text())
+            self.assertIn("get_gear", self._garmin_tools(mcp["mcpServers"]["garmin"]))
+            self.assertEqual(mcp["mcpServers"]["autre"], {"command": "mon-serveur", "args": []})

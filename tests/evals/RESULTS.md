@@ -27,8 +27,17 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `daily-sync-red-why` | — | — |
 | `daily-sync-resume-block` | — | — |
 | `doctor-token-expiring` | — | — |
+| `equipment-kit-attribution` | — | — |
 | `feedback-with-fit` | — | — |
 | `feedback-without-fit` | — | — |
+| `gear-correction` | — | — |
+| `gear-inspection-no-mm-without-scale` | — | — |
+| `gear-inspection-proposed-at-200km` | — | — |
+| `gear-suggestion-three-pairs` | — | — |
+| `gear-sync-conflict-athlete-wins` | — | — |
+| `gear-sync-garmin-attached` | — | — |
+| `gear-sync-unmapped-not-attributed` | — | — |
+| `gear-write-needs-confirmation` | — | — |
 | `guardrail-block-red-verdict` | — | — |
 | `guardrail-ok` | — | — |
 | `health-full-triad` | — | — |
@@ -45,6 +54,7 @@ ARC_LLM_TESTS=1 python3 tests/run_tests.py --tier c --repeat 3
 | `no-medical-no-delegation` | — | — |
 | `race-countdown-trail-shape` | — | — |
 | `race-debrief` | — | — |
+| `race-gear-missing-head-torch` | — | — |
 | `race-plan-personal-model` | — | — |
 | `setup-first-run` | — | — |
 | `setup-idempotent` | — | — |

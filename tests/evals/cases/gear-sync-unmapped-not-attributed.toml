@@ -1,0 +1,28 @@
+# Matériel Garmin (#133) : un matériel Garmin sans puce correspondante n'est JAMAIS attribué
+# en silence. Stub : la montre attache une Brooks Ghost absente du profil (fixture `gear-sync/`).
+# Attendu : `gear_id` absent de l'activité, marqueur `gear_source: "garmin_unmapped"` (exclut la
+# séance de l'attribution par la paire par défaut), la paire non associée est mentionnée dans le
+# résumé, aucune écriture Garmin (headless).
+id = "gear-sync-unmapped-not-attributed"
+prompt = "/garmin-daily-sync"
+fixture = "gear-sync"
+
+[config.sync]
+lookback_days = 3
+
+[stub.garmin.get_activity_gear]
+file = "gear-activity-unmapped.json"
+
+[expect]
+files_with_arc_block = ["activities/*.md"]
+tools_not_called = ["add_gear_to_activity"]
+must_match = ["Brooks|Ghost"]
+
+[[expect.arc_field]]
+glob = "activities/*.md"
+path = "gear_source"
+equals = "garmin_unmapped"
+
+[[expect.arc_field_absent]]
+glob = "activities/*.md"
+paths = ["gear_id"]

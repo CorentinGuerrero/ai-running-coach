@@ -4,7 +4,7 @@
 ![](assets/ridge.jpg)
 </div>
 
-`ai-running-coach` fournit **18 skills** que les agents chargent à la demande pour des tâches spécifiques.
+`ai-running-coach` fournit **19 skills** que les agents chargent à la demande pour des tâches spécifiques.
 
 ## Vue d'ensemble
 
@@ -27,6 +27,7 @@
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/workspace-data-contract.md">Contrat de données</a></span><span class="arc-skill__desc">Schéma JSON du bloc <code>arc</code> pour la persistance structurée des données</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/arc-backfill.md">Backfill du contrat</a></span><span class="arc-skill__desc">Migration des fichiers Markdown existants pour les conformer au contrat de données</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/coach-doctor.md">Diagnostic d'installation</a></span><span class="arc-skill__desc">Vérification en une commande des tokens Garmin, du MCP, de la configuration et du daily-sync</span></div>
+<div class="arc-skill"><span class="arc-skill__name"><a href="skills/gear-inspection.md">Inspection des chaussures</a></span><span class="arc-skill__desc">Photos des semelles : état 🟢🟡🟠🔴, comparaison avec l'inspection précédente, indices de foulée (jamais un diagnostic)</span></div>
 <div class="arc-skill"><span class="arc-skill__name"><a href="skills/log.md">Saisie libre (/log)</a></span><span class="arc-skill__desc">Ravitaillement, douleur et RPE en une phrase, convertis en blocs arc sans jamais inventer une valeur nutritionnelle</span></div>
 
 </div>
@@ -96,6 +97,8 @@ python3 scripts/arc_index.py <commande> [options]
 | `sleep-debt` | Dette de sommeil sur 7 jours (#37) |
 | `heat-acclimation` | Séances « chaudes » sur 14 jours vs `[health].heat_threshold_c` (#38) |
 | `gear` | Kilométrage des chaussures et seuils d'alerte (#40) |
+| `gear-attribution` | Priorité d'attribution du matériel d'une séance : déclaration de l'athlète > Garmin > défaut (`--garmin-gear`, `--chat-gear`, #133) |
+| `equipment` | Matériel hors chaussures : usage (km, h, séances, jours), déclencheurs typés, kits (`--kit`), alerte unique (`--activities`, `--since`), contrôle du matériel d'un plan de course (`--race-plan`) (#134) |
 | `performance-index` | Lecture des indices ITRA/UTMB déclarés au profil (#62) |
 | `fueling` | Plafond de glucides/h réellement toléré (sorties longues running/trail, #41) |
 | `samples` | Échantillons FIT bruts d'une activité (`--activity`) |

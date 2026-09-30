@@ -301,6 +301,15 @@ juste après une sortie ([saisie libre](skills/log.md), #67).
     les outils Garmin d'écriture (`schedule_workouts`, `upload_course`…) restent confirmés
     depuis le téléphone. Modifiez avec `--permission-mode` si besoin.
 
+!!! warning "Envoyer des photos de chaussures depuis le téléphone : à valider"
+    L'[inspection photo des chaussures](skills/gear-inspection.md) suppose que vous envoyiez
+    des photos au coach. **Ce parcours n'est pas validé** : nous n'avons pas vérifié que
+    Remote Control transmette des images à la session, ni que le coach puisse les enregistrer
+    dans `gear/photos/` du workspace. En attendant, faites l'inspection depuis une session
+    locale (IDE ou terminal) où l'image peut être jointe, ou décrivez l'usure par écrit
+    (le coach le dit alors, et ne cite aucune photo). Cette note sera levée une fois le
+    parcours testé sur un vrai téléphone.
+
 ### 6. Voir ce que le coach a stocké
 
 La notification résume ; le [tableau de bord](dashboard/index.md) montre tout — verdict

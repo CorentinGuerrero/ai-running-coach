@@ -47,7 +47,11 @@ La page du matin, à ouvrir avant de lacer ses chaussures. De haut en bas :
    « Matériel & lieux » du profil (hors chaussures retirées) atteint son seuil
    d'alerte (700 km par défaut, ou celui précisé sur sa puce) — détail complet
    (toutes les paires, y compris retirées, et tout `gear_id` inconnu du profil)
-   dans **Performance**.
+   dans **Performance**, où chaque paire affiche aussi sa **prévision de retraite**
+   (« ≈ 6 sem. » à partir du rythme des 28 derniers jours, absente sans usage
+   récent), « proche du seuil » dès 90 %, et son éventuel kilométrage de départ.
+   Depuis #134, la tuile **Matériel à contrôler** signale de même les objets hors
+   chaussures (bâtons, poche, frontale…) sous alerte.
 4. **Forme** : condition, fatigue, forme et ratio de charge, avec une phrase qui les
    lit pour vous (« la fatigue est sous la condition physique »), puis une **mini
    tendance de conformité sur 4 semaines** (une barre par semaine, hauteur = % de
@@ -591,7 +595,21 @@ kilomètre : pas de graphique, c'est normal.
   lieux » du profil (course et randonnée seulement), une ligne « à surveiller »
   au-delà du seuil d'alerte, les paires retirées affichées en grisé sans jamais
   alerter, et une ligne « inconnue » par `gear_id` vu sur une séance mais absent du
-  profil — jamais masqué silencieusement.
+  profil — jamais masqué silencieusement. Depuis #132 : le kilométrage inclut le
+  « départ » déclaré sur la puce (rappelé sous le total : « dont N km de départ »), un badge **« ≈ N sem. »**
+  donne la prévision de retraite au rythme des 28 derniers jours (rien sans usage
+  récent, « seuil dépassé » au-delà du seuil), « proche du seuil » apparaît dès 90 %,
+  et le rôle `usage:` déclaré s'affiche à côté du nom.
+- **Inspections photo** (#135) : pour chaque paire, l'historique des inspections du
+  dossier `gear/` (plus récente d'abord) — état 🟢🟡🟠🔴 écrit aussi en toutes lettres,
+  kilométrage à l'inspection, zones d'usure par semelle (gauche/droite), asymétrie,
+  indices de foulée et vignettes des photos. La ligne de la paire dans « Matériel »
+  porte la dernière inspection ; « Inspection conseillée » apparaît après ~200 km sans
+  inspection, ou une fois le seuil d'alerte franchi (rappel, jamais une obligation).
+  Une inspection plus dégradée que la précédente est signalée. Les vignettes sont servies
+  par une route dédiée en lecture seule, limitée aux images (`.jpg`, `.png`, `.webp`) de
+  `gear/photos/` **citées par une inspection** ; rien d'autre du workspace n'est exposé.
+  Rien n'apparaît tant qu'aucune inspection n'existe et qu'aucune paire n'est à inspecter.
 - **Indices de performance ITRA / UTMB** (#62, facultatif) : la valeur la plus
   récente de chaque indice déclaré (ITRA global et par catégorie, UTMB général
   et par distance 20K/50K/100K/100M), avec sa date, plus un graphique de
@@ -622,6 +640,41 @@ kilomètre : pas de graphique, c'est normal.
 **Comment la lire** : ce sont des ordres de grandeur, calculés sur l'allure et la FC
 *moyennes* de chaque séance — pas une mesure de laboratoire. Deux estimations qui
 divergent disent que le terrain ou la forme du jour pèsent.
+
+![Matériel : kilométrage par paire, départ déclaré, prévision de retraite et paire au-delà du seuil](../assets/dashboard/materiel.webp)
+
+*La carte Matériel : la paire par défaut a dépassé son seuil, deux paires affichent
+leur prévision de retraite au rythme des 28 derniers jours, la paire retirée reste
+visible en grisé ; la dernière inspection photo (#135) s'affiche à côté (« inspectée
+22 sept. », état « Usure visible ») et « Inspection conseillée » signale une paire à
+inspecter. Liste de chaussures d'illustration, kilométrages calculés sur les séances
+réelles du workspace des captures.*
+
+![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
+
+*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
+conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
+relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
+schématiques), jamais de vraies photos dans le dépôt.*
+
+**Équipement (#134)** — sous la carte Matériel, un tableau pour tout ce qui n'est pas
+chaussure (`### Matériel` du profil) : par objet, son **usage** (distance, heures,
+séances, jours depuis la date de référence — `depuis` ou dernier `entretien`), ses
+**déclencheurs** avec la valeur atteinte face au seuil dans l'unité de chacun (km, h,
+séances, jours), ses kits, et un statut « À surveiller » (un déclencheur atteint — le
+premier suffit) ou « Proche du seuil » (≥ 90 %). Un objet sans déclencheur déclaré affiche
+« aucun seuil déclaré » et n'alerte jamais ; un déclencheur en jours sans `depuis` ni
+`entretien` est dit inopérant plutôt que compté à zéro. Un identifiant cité dans `gear_ids`
+d'une séance mais absent du profil apparaît en « inconnu ». Le tableau ne s'affiche que si
+le profil déclare du matériel ; le détail des règles est dans les Hypothèses
+(`equipment_usage`).
+
+![Équipement : usage par objet, déclencheurs en heures, séances et jours, poche à eau à nettoyer](../assets/dashboard/equipement.webp)
+
+*Le tableau Équipement : la poche à eau a passé son rappel d'hygiène de 30 jours depuis
+le dernier entretien, la ceinture cardio approche de son année (« 12 mois » compté 360 j),
+les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
+d'illustration, usage calculé sur les séances réelles du workspace des captures.*
 
 | Alimentée par | Calcul |
 |---|---|

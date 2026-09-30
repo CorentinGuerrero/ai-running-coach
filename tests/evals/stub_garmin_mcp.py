@@ -132,6 +132,28 @@ CANNED = {
         "distance": 24800.0, "duration": 9660.0, "elevationGain": 890.0,
         "averageHR": 141, "maxHR": 168, "recovery_hr_bpm": 28,
     }],
+    # #133 — matériel. Formes vérifiées dans `garmin_mcp/gear_management.py` (Taxuspt/garmin_mcp,
+    # ref épinglée `GARMIN_MCP_REF`) : `get_gear` rend `{gear_count, active_count, retired_count,
+    # defaults, gear: [{uuid, name, full_name, type, status, date_begin, date_end, max_distance_km?,
+    # is_default_for?, stats?}]}` ; `get_activity_gear` rend la liste brute de `garminconnect`
+    # (`uuid`, `displayName`, `customMakeModel`, `gearTypeName`, `gearStatusName`…) ou, sans matériel
+    # attaché, le TEXTE BRUT (non JSON) « No gear data found for activity with ID N ». `defaults` /
+    # `is_default_for` : noms de `ACTIVITY_TYPE_MAPPING` (« Running », « Hiking »…, `activity_<pk>`
+    # pour un pk inconnu), jamais les `typeKey` de `get_activities` (`trail_running`). Par défaut : aucun matériel
+    # attaché (les cas qui en ont besoin scriptent `[stub.garmin.get_activity_gear]`).
+    "get_gear": {
+        "gear_count": 2, "active_count": 2, "retired_count": 0,
+        "defaults": {"Running": "Nike Pegasus", "Hiking": "Salomon S/Lab"},
+        "gear": [
+            {"uuid": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "name": "Nike Pegasus", "full_name": "Nike Pegasus 41",
+             "type": "Shoes", "status": "active", "date_begin": "2026-01-10", "date_end": None,
+             "max_distance_km": 700.0, "is_default_for": ["Running"]},
+            {"uuid": "0f9e8d7c6b5a49382716f5e4d3c2b1a0", "name": "Salomon S/Lab", "full_name": "Salomon S/Lab Ultra 3",
+             "type": "Shoes", "status": "active", "date_begin": "2026-03-01", "date_end": None,
+             "max_distance_km": 600.0, "is_default_for": ["Hiking"]},
+        ],
+    },
+    "get_activity_gear": "No gear data found for activity with ID 99000001",
     "get_scheduled_workouts": [],
     "get_calendar_events": [],
     "get_workouts": [],
@@ -155,6 +177,9 @@ TOOLS = [
     ("get_workouts", "Séances enregistrées."),
     ("get_workout_by_id", "Détail d'une séance."),
     ("get_courses", "Parcours enregistrés."),
+    ("get_gear", "Inventaire du matériel Garmin Connect (include_stats optionnel)."),
+    ("get_activity_gear", "Matériel attaché à une activité (activity_id)."),
+    ("add_gear_to_activity", "Attache un matériel à une activité — ÉCRITURE côté Garmin."),
     ("schedule_workouts", "Planifie des séances dans le calendrier Garmin."),
     ("schedule_week", "Planifie une semaine de séances."),
     ("upload_workout", "Téléverse une séance."),
@@ -167,6 +192,9 @@ TOOLS = [
 def result_for(name: str, arguments: dict):
     if name in CANNED:
         return CANNED[name]
+    if name == "add_gear_to_activity":
+        return {"success": True, "stub": True, "activity_id": arguments.get("activity_id"),
+                "gear_uuid": arguments.get("gear_uuid")}
     if name.startswith(("schedule_", "upload_", "delete_", "unschedule_")):
         return {"status": "ok", "stub": True, "tool": name, "received": arguments}
     return {"status": "ok", "stub": True, "tool": name, "data": []}

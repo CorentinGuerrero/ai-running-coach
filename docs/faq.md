@@ -122,7 +122,7 @@ Oui. L'agent `coach` pousse les séances planifiées directement dans le **calen
 
 ### Où sont stockées mes données ?
 
-Dans les dossiers de travail du projet : `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/`. Ces dossiers sont **exclus du dépôt** (voir `.gitignore`).
+Dans les dossiers de travail du projet : `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/`. Ces dossiers sont **exclus du dépôt** (voir `.gitignore`).
 
 ### Mes données personnelles sont-elles publiées ?
 

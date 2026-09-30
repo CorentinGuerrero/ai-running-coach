@@ -42,7 +42,7 @@ point d'entrée : elle doit donner envie de l'essayer.
 
 - Installation via `./install.sh` (uv, garmin-mcp, garmin-mcp-auth, leanproxy-mcp, config IDE).
 - Les agents persistent des fichiers Markdown en français dans des dossiers de travail
-  (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/`).
+  (`activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/`).
 - Garmin Connect est la source de données primaire ; Intervals.icu est supporté
   en secondaire, à la demande explicite de l'utilisateur (v1).
 - Documentation construite avec MkDocs + thème Material, déployée sur GitHub Pages.

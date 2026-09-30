@@ -26,7 +26,7 @@ Le script effectue les étapes suivantes :
 2. **garmin-mcp** — serveur MCP d'accès à Garmin Connect
 3. **garmin-mcp-auth** — authentification Garmin (tokens valides ~6 mois)
 4. **Configuration IDE** — serveur MCP `garmin` (mode direct, liste blanche d'outils) pour Claude Code, GitHub Copilot, OpenCode, Gemini CLI, Cursor, Windsurf
-5. **Dossiers de travail** — `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `resources/`
+5. **Dossiers de travail** — `activities/`, `medical/`, `nutrition/`, `planning/`, `rapports/`, `gear/`, `resources/`
 
 ## Authentification Garmin
 

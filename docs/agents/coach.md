@@ -79,6 +79,59 @@ dans le profil (`planning/Runner_Profile.md`, section « Matériel & lieux »).
 Le rapport hebdomadaire du coach nomme toute paire non retirée ayant atteint
 son seuil d'alerte (propre à la paire, sinon 700 km par défaut).
 
+Depuis #132 : le segment `départ N km` d'une puce (kilométrage avant le suivi) est
+compté dans le cumul, le coach le corrige en discutant (« mes Pegasus ont en fait
+~300 km » — seul le segment `départ` change, jamais une séance passée), la sortie
+porte une **prévision de retraite** (rythme des 28 derniers jours) et
+`near_threshold` (≥ 90 %), le retour de séance ajoute une ligne « Chaussures : … »
+quand la paire portée est proche du seuil ou à moins de 4 semaines de la retraite,
+et, dès deux paires actives, la validation quotidienne/hebdomadaire **suggère** une
+paire par séance (type de séance, météo, kilométrage restant, rodage de la paire de
+course) — jamais imposée.
+
+### Synchronisation du matériel Garmin (#133)
+
+Avec la source Garmin, le coach **propose une fois** d'associer chaque matériel Garmin
+(`get_gear`) à une puce `### Chaussures` du profil — ajout du seul segment `garmin: <uuid>`, ou
+création d'une puce (`alerte` ← seuil Garmin, `depuis` ← date de début, `(retirée)` ← statut ;
+le total Garmin peut alimenter `départ`, en soustrayant les kilomètres déjà comptés par vos
+séances). Jamais d'association devinée. Ensuite `gear_id` est renseigné avec la priorité
+**votre déclaration en chat > matériel Garmin > `(par défaut)`** (`arc_index.py gear-attribution`) ; en
+cas de désaccord vous gagnez, signalé une fois. Un matériel Garmin non associé n'est ni attribué ni
+crédité à la paire par défaut (`gear_source: garmin_unmapped`) ; `(ignorée)` fait taire les rappels. Avec votre accord explicite, une attribution faite en
+chat peut être poussée vers Garmin (`add_gear_to_activity`) — jamais en headless. Source
+intervals.icu : pas de matériel par séance, attribution par chat/défaut uniquement.
+Détails : [Synchronisation du matériel Garmin](../garmin-setup.md#synchronisation-du-materiel-garmin).
+### Matériel hors chaussures, kits et entretien (#134)
+
+La sous-section `### Matériel` du profil (voir `docs/workspace.md`) déclare bâtons,
+gilet, poche, frontale, ceinture, veste… avec des **déclencheurs typés** (`alerte N km |
+N h | N séances | N jours`, le premier atteint déclenche). Le coach :
+
+- attribue un **kit** à une séance quand vous le dites (« kit trail long ») : il lance
+  `arc_index.py equipment --kit trail-long --sport <sport>` et écrit `gear_ids` (jamais un
+  objet de son cru ; les objets retirés ou dont la catégorie ne porte pas le sport sont
+  écartés et signalés) ;
+- note l'**entretien** sur la puce quand vous dites « j'ai nettoyé la poche » (seul ce segment
+  change ; il y met la date de la dernière séance faite avant l'entretien, celles d'après comptent) ;
+- ajoute une ligne « Matériel : … » au rapport hebdomadaire et au retour de séance pour
+  tout objet sous alerte ou à 90 %, jamais un seuil que vous n'avez pas déclaré ;
+- rappelle avant une séance de nuit (batterie de la frontale) ou une sortie longue (hygiène
+  de la poche et des flasques) — un rappel, jamais un blocage.
+### Inspection photo des chaussures (#135)
+
+Le coach **propose** (jamais ne l'impose) une inspection photo d'une paire environ
+tous les 200 km, à l'alerte de seuil ou sur demande, d'après
+`python3 scripts/arc_index.py inspections` (`due`) — une seule fois par conversation,
+et **jamais** en synchronisation automatique. Il charge le skill
+[`gear-inspection`](../skills/gear-inspection.md) : protocole photo, état 🟢🟡🟠🔴 justifié
+visuellement, comparaison avec l'inspection précédente de la même paire, indices de
+foulée formulés comme des indices. Asymétrie marquée ou lien plausible avec une
+douleur : relais à `medical` **seulement s'il est activé**, sinon suggestion d'un
+kiné ou d'une analyse de foulée en laboratoire. Quand une paire passe en « retirée »,
+`python3 scripts/arc_index.py gear-career --gear <id>` donne son bilan de carrière
+(km, séances, courses, meilleurs efforts si des splits existent, dernière inspection).
+
 ### Débrief post-course (#61)
 
 Après une course (`intensity: "race"`) dont le plan (`planning/`,
@@ -173,6 +226,7 @@ pourquoi, ou rien du tout en réponse brève.
 | `course-comparison` | pour comparer des séances sur le même parcours |
 | `fit-download` | quand une analyse fine (FIT) est nécessaire et que le MCP a échoué |
 | `gpx-analysis` | pour analyser un GPX soi-même quand `course-strategist` n'est pas installé |
+| `gear-inspection` | pour proposer ou mener une inspection photo des chaussures, ou résumer la carrière d'une paire retirée |
 | `log` | pour traiter une saisie libre `/log` (ravitaillement, douleur, RPE) |
 | `coach-doctor` | en cas de sync échouée ou d'erreur MCP qui sent l'installation cassée |
 

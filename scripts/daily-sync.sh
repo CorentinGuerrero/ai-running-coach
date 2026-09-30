@@ -80,19 +80,41 @@ mkdir -p "$LOG_DIR"
 # « Backends MCP », et install.sh --source). Décide le serveur MCP autorisé,
 # le libellé des notifications et la commande de renouvellement suggérée.
 SOURCE="$(toml_get data source garmin)"
+# Durcissement du run non surveillé : une consigne injectée dans une donnée synchronisée
+# (nom d'activité, description d'événement, fichier tiré par `git pull`) ne doit pas pouvoir
+# exécuter du Python arbitraire ni réécrire ce que cron exécutera ensuite.
+#   - Python : seulement les scripts du moteur (`scripts/`, `skills/*/scripts/`), jamais
+#     `python3 -c …` ni un fichier écrit ailleurs pendant le run.
+#   - Écriture refusée sur ces mêmes scripts, sur les skills et sur la configuration MCP/IDE
+#     (une règle `Edit(…)` couvre tous les outils d'écriture de fichiers, Write compris).
+PYTHON_TOOLS="Bash(python3 scripts/*),Bash(python3 skills/*)"
+PROTECTED_PATHS="Edit(scripts/**),Edit(skills/**),Edit(local/skills/**),Edit(local/agents/**),Edit(.claude/**),Edit(.mcp.json)"
 if [[ "$SOURCE" == "intervals" ]]; then
     # Outils autorisés en mode non interactif : serveur MCP intervals (tous ses
     # outils), délégation au coach (Agent/Task), skills, lecture/écriture des
     # MD, scripts Python du projet. Rien d'autre. Pas de leanproxy : passerelle
     # garmin uniquement (install.sh refuse déjà --use-leanproxy + --source intervals).
-    CLAUDE_TOOLS="mcp__intervals,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    CLAUDE_TOOLS="mcp__intervals,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,$PYTHON_TOOLS"
+    CLAUDE_DISALLOWED="$PROTECTED_PATHS"
     SOURCE_LABEL="Intervals.icu"
     AUTH_CMD_HINT="(cd \"$HOME/.config/ai-running-coach/intervals-icu-mcp\" && intervals-icu-mcp-auth)"
 else
     # Outils autorisés en mode non interactif : serveur MCP garmin (tous ses outils),
     # délégation au coach (Agent/Task), skills, lecture/écriture des MD, scripts
     # Python du projet. Rien d'autre.
-    CLAUDE_TOOLS="mcp__garmin,mcp__leanproxy,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,Bash(python3:*)"
+    CLAUDE_TOOLS="mcp__garmin,mcp__leanproxy,Agent,Task,Skill,Read,Write,Edit,Glob,Grep,$PYTHON_TOOLS"
+    # #133 : la synchronisation headless ne doit JAMAIS écrire côté Garmin (personne ne peut
+    # confirmer) — ni matériel, ni séance planifiée, ni parcours (le skill l'interdit déjà :
+    # « jamais d'écriture de plan ni de push ici »). `mcp__garmin` autorise tous les outils du
+    # serveur : on retire explicitement ses outils d'écriture. LIMITE : en mode passerelle, l'appel
+    # passe par `mcp__leanproxy__invoke_tool(server="garmin", tool=...)`, dont l'outil est unique
+    # et ne peut pas être filtré par nom de sous-outil — seule la consigne du skill
+    # (`garmin-daily-sync`) protège alors ; préférer le mode direct pour un run non surveillé.
+    CLAUDE_DISALLOWED="mcp__garmin__add_gear_to_activity,mcp__garmin__remove_gear_from_activity"
+    CLAUDE_DISALLOWED+=",mcp__garmin__schedule_workouts,mcp__garmin__schedule_week,mcp__garmin__upload_workout"
+    CLAUDE_DISALLOWED+=",mcp__garmin__create_strength_workout,mcp__garmin__delete_workout"
+    CLAUDE_DISALLOWED+=",mcp__garmin__unschedule_workout,mcp__garmin__unschedule_workouts,mcp__garmin__upload_course"
+    CLAUDE_DISALLOWED+=",$PROTECTED_PATHS"
     SOURCE_LABEL="Garmin"
     AUTH_CMD_HINT="uv run garmin-mcp-auth"
 fi
@@ -362,6 +384,9 @@ build_command() {
             CMD=(claude -p "/garmin-daily-sync ($SYNC_ARGS)"
                  --permission-mode acceptEdits
                  --allowedTools "$CLAUDE_TOOLS")
+            if [[ -n "$CLAUDE_DISALLOWED" ]]; then
+                CMD+=(--disallowedTools "$CLAUDE_DISALLOWED")
+            fi
             if [[ -n "$API_KEY_ENV" ]]; then
                 # Mode API : sortie JSON pour lire le coût (budget) et l'erreur du
                 # fournisseur ; le texte de l'agent en est extrait avant tout
@@ -767,7 +792,7 @@ main() {
         for arg in "${CMD[@]}"; do
             if [[ "${#arg}" -gt 240 ]]; then shown+=("<prompt : ${#arg} caractères>"); else shown+=("$arg"); fi
         done
-        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${shown[*]}" | head -c 900; echo
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${shown[*]}" | head -c 2000; echo
         if [[ -n "$API_KEY_ENV" ]]; then
             # Le NOM de la variable seulement — jamais sa valeur.
             if [[ "$key_missing" -eq 0 ]]; then
