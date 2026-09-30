@@ -43,10 +43,14 @@ la balance). Les nouveaux téléchargements `--json` l'embarquent d'office ; les
 re-télécharger**, depuis les `.fit` déjà présents dans `activities/` :
 
 ```bash
-python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics --dry-run   # compte, n'écrit rien
+python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics --dry-run   # liste id par id, n'écrit rien
 python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics             # réécrit les JSON dérivés
 python3 scripts/arc_index.py gait-summary                                          # réindexe et rend la synthèse
 ```
+
+Le compte rendu distingue les JSON **à créer** (un `.fit` téléchargé sans `--json` n'avait pas de copie
+normalisée : elle est créée) de ceux **à réécrire** (copie existante sans dynamique), liste les id concernés
+(`-v` ajoute ceux déjà à jour) et compte les échecs.
 
 `--refresh-dynamics` ne nécessite que `fitparse` (le script se relance dans l'environnement
 `garmin-mcp`) : **aucune connexion Garmin, aucun token**. Il n'écrit que les copies normalisées

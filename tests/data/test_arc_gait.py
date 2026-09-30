@@ -154,7 +154,64 @@ def insp(gear, day, hints=(), level=None, side=None, path=None):
     return d
 
 
+class TestTrendDirection(unittest.TestCase):
+    """Le SENS d'une variation est décidé côté serveur (palier D), jamais par un regex sur un nombre arrondi
+    dans le JS — régression : -0,26 pt ne doit JAMAIS perdre son signe."""
+
+    def test_small_but_displayable_changes_keep_their_sign(self):
+        self.assertEqual(GT.change_direction("stance_balance_pct", -0.26), "down")
+        self.assertEqual(GT.change_direction("stance_balance_pct", 0.26), "up")
+        self.assertEqual(GT.change_direction("ground_contact_s", -0.006), "down")      # -6 ms
+        self.assertEqual(GT.change_direction("vertical_oscillation_m", 0.0007), "up")   # +0,1 cm (0,07 cm arrondi)
+
+    def test_flat_only_when_it_displays_as_zero(self):
+        self.assertEqual(GT.change_direction("stance_balance_pct", 0.004), "flat")     # < 0,005 pt : « 0,00 »
+        self.assertEqual(GT.change_direction("ground_contact_s", -0.0004), "flat")     # -0,4 ms : « 0 ms »
+        self.assertEqual(GT.change_direction("cadence_spm", -0.3), "flat")
+        self.assertEqual(GT.change_direction("cadence_spm", -0.6), "down")
+        self.assertIsNone(GT.change_direction("cadence_spm", None))
+
+    def test_trend_exposes_direction_and_never_negative_zero(self):
+        old = [("2026-07-01", 50.0), ("2026-07-10", 50.0)]
+        recent = [("2026-09-20", 49.74), ("2026-09-22", 49.74)]
+        t = GT.metric_trend("stance_balance_pct", old + recent, TODAY)
+        self.assertEqual((t["change"], t["direction"]), (-0.26, "down"))
+        flat = GT.metric_trend("stance_balance_pct", [(d, 50.0) for d, _ in old + recent], TODAY)
+        self.assertEqual(flat["direction"], "flat")
+        self.assertNotIn("-0.0", json.dumps(flat))
+        self.assertIsNone(GT.metric_trend("stance_balance_pct", recent[:1], TODAY)["direction"])
+
+    def test_js_does_not_decide_the_sign_from_a_rounded_string(self):
+        js = (REPO / "web/js/app.js").read_text(encoding="utf-8")
+        self.assertNotIn("const signed", js)
+        self.assertIn("gaitTrend(d.direction", js)
+
+
 class TestInspectionGait(unittest.TestCase):
+    def test_pronation_is_not_a_strike_hint(self):
+        out = GT.inspection_gait([insp("a", "2026-08-01", ["heel_strike"]),
+                                   insp("a", "2026-09-01", ["heel_strike", "pronation_hint"])])
+        self.assertEqual(out["pairs"][0]["strike_sets"], [["heel_strike"], ["heel_strike"]])
+        codes = {c["code"] for c in GT.find_contradictions({}, out)}
+        self.assertEqual(codes, set())
+
+    def test_change_of_strike_between_inspections(self):
+        out = GT.inspection_gait([insp("a", "2026-08-01", ["heel_strike"]),
+                                   insp("a", "2026-09-01", ["midfoot_forefoot_strike", "supination_hint"])])
+        codes = {c["code"]: c for c in GT.find_contradictions({}, out)}
+        self.assertIn("strike_hint_changes_within_pair", codes)
+        self.assertNotIn("strike_hints_conflict_in_inspection", codes)
+
+    def test_two_strike_hints_in_one_inspection_is_worded_differently(self):
+        out = GT.inspection_gait([insp("a", "2026-09-01", ["heel_strike", "midfoot_forefoot_strike"])])
+        codes = {c["code"]: c for c in GT.find_contradictions({}, out)}
+        self.assertEqual(set(codes), {"strike_hints_conflict_in_inspection"})
+        self.assertIn("même inspection", codes["strike_hints_conflict_in_inspection"]["message"])
+
+    def test_same_strike_hints_repeated_is_stable(self):
+        out = GT.inspection_gait([insp("a", "2026-08-01", ["heel_strike"]), insp("a", "2026-09-01", ["heel_strike"])])
+        self.assertEqual(GT.find_contradictions({}, out), [])
+
     def test_strike_tally_and_dominant(self):
         out = GT.inspection_gait([insp("a", "2026-08-01", ["heel_strike"]), insp("a", "2026-09-01", ["heel_strike"]),
                                    insp("a", "2026-09-10", ["midfoot_forefoot_strike"])], {"a": "Paire A"})
@@ -286,6 +343,13 @@ class TestContractKeys(unittest.TestCase):
         self.assertEqual(self.check(avg_ground_contact_s=0.25, avg_stance_balance_pct=50.4,
                                      avg_vertical_oscillation_m=0.095, avg_vertical_ratio_pct=8.6,
                                      avg_step_length_m=1.1), ([], []))
+
+    def test_balance_outside_30_70_warns(self):
+        errors, warnings = self.check(avg_stance_balance_pct=80)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("plage plausible" in w for w in warnings), warnings)
+        self.assertEqual(self.check(avg_stance_balance_pct=30), ([], []))
+        self.assertEqual(self.check(avg_stance_balance_pct=70), ([], []))
 
     def test_omitted_is_valid(self):
         self.assertEqual(self.check(), ([], []))
@@ -462,7 +526,9 @@ class TestRefreshDynamics(unittest.TestCase):
                                                   "speed_ms": 3.0, "cadence_spm": 176.0}]}
         (self.tmp / "fit/111.json").write_text(json.dumps(old), encoding="utf-8")
         first = self.refresh()
-        self.assertEqual((first["rewritten"], first["unchanged"], first["failed"]), (2, 0, 0))
+        self.assertEqual((first["created"], first["rewritten"], first["unchanged"], first["failed"]), (1, 1, 0, 0))
+        self.assertIn((111, "rewritten"), first["files"])
+        self.assertIn((222, "created"), first["files"])       # `.fit` sans JSON (téléchargé sans --json) : créé
         self.assertEqual(first["with_dynamics"], 1)              # seul le FIT de course porte de la dynamique
         payload = json.loads((self.tmp / "fit/111.json").read_text(encoding="utf-8"))
         self.assertAlmostEqual(payload["records"][0]["ground_contact_s"], 0.25, places=3)
@@ -471,14 +537,18 @@ class TestRefreshDynamics(unittest.TestCase):
         self.assertEqual(ride["records"][0]["cadence_spm"], 88.0)            # vélo : jamais doublée
         self.assertIsNone(ride["records"][0]["stance_balance_pct"])
         second = self.refresh()
-        self.assertEqual((second["rewritten"], second["unchanged"]), (0, 2))
+        self.assertEqual((second["created"], second["rewritten"], second["unchanged"]), (0, 0, 2))
         self.assertFalse((self.tmp / "fit/notes.json").exists())
 
     def test_dry_run_writes_nothing(self):
+        (self.tmp / "fit/111.json").write_text(json.dumps({"activity_id": 111, "records": []}), encoding="utf-8")
+        before = (self.tmp / "fit/111.json").read_text(encoding="utf-8")
         result = self.refresh(dry_run=True)
-        self.assertEqual(result["rewritten"], 2)
-        self.assertEqual(list((self.tmp / "fit").glob("*.json")), [])
+        self.assertEqual((result["created"], result["rewritten"]), (1, 1))
+        self.assertEqual([p.name for p in (self.tmp / "fit").glob("*.json")], ["111.json"])
+        self.assertEqual((self.tmp / "fit/111.json").read_text(encoding="utf-8"), before)
         self.assertIn((111, "would_rewrite"), result["files"])
+        self.assertIn((222, "would_create"), result["files"])
 
     def test_keeps_extra_top_level_keys_and_touches_no_markdown(self):
         (self.tmp / "2026-09-01_running.md").write_text("# S\n", encoding="utf-8")
@@ -490,7 +560,7 @@ class TestRefreshDynamics(unittest.TestCase):
     def test_unreadable_fit_is_counted_not_fatal(self):
         self.fits.pop("ride")
         result = self.refresh()
-        self.assertEqual((result["rewritten"], result["failed"]), (1, 1))
+        self.assertEqual((result["created"], result["failed"]), (1, 1))
 
     def test_main_refresh_needs_no_ids_and_reports(self):
         buf = io.StringIO()
@@ -500,7 +570,9 @@ class TestRefreshDynamics(unittest.TestCase):
         self.assertEqual(code, 0)
         relaunch.assert_called_once()
         self.assertEqual(relaunch.call_args[0][1], "fitparse")      # jamais `garminconnect` : aucune connexion Garmin
-        self.assertIn("2 JSON réécrits", buf.getvalue())
+        out = buf.getvalue()
+        self.assertIn("2 JSON créés, 0 réécrits", out)
+        self.assertIn("111 : créé", out)                       # id par id
 
 
 if __name__ == "__main__":

@@ -26,7 +26,9 @@ Options:
                  N'écrit que ces JSON dérivés (jetables, jamais versionnés) — jamais un Markdown, jamais
                  un `.fit`. Idempotent : un JSON déjà à jour est laissé tel quel. Ensuite, relancer
                  `scripts/arc_index.py` (ou ouvrir le tableau de bord) réingère les fichiers changés.
-  --dry-run      Avec `--refresh-dynamics` : liste ce qui serait réécrit, sans rien écrire
+  --dry-run      Avec `--refresh-dynamics` : liste (id par id) ce qui serait créé / réécrit, sans rien écrire
+  -v, --verbose  Avec `--refresh-dynamics` : liste aussi les id déjà à jour
+                 Un `.fit` téléchargé sans `--json` n'a pas de JSON normalisé : `--refresh-dynamics` le CRÉE.
   --python PATH  Interpréteur contenant garminconnect (auto-détecté sinon)
 
 Sans `--overwrite`, une séance déjà téléchargée est sautée — avec `--json`, ce
@@ -251,12 +253,13 @@ def refresh_dynamics(out_dir: Path, dry_run: bool = False) -> dict:
     (#151) — pour rattraper la dynamique de course sur les FIT déjà téléchargés avant qu'elle soit
     extraite. Ne touche QUE ces JSON dérivés (pas de Markdown, pas de `.fit`, pas de réseau) ; les
     clés du JSON existant autres que `records` sont conservées. Idempotent : contenu identique =
-    fichier laissé intact. Rend des compteurs `{"rewritten", "unchanged", "failed", "with_dynamics",
+    fichier laissé intact. Un `.fit` téléchargé SANS `--json` n'a pas encore de JSON : il est CRÉÉ (`created`),
+    pas seulement réécrit. Rend des compteurs `{"created", "rewritten", "unchanged", "failed", "with_dynamics",
     "files": [(id, statut)]}` ; `dry_run` compte sans écrire."""
     import arc_samples as S  # noqa: E402 (sys.path déjà préparé en tête de module)
 
     fit_dir = out_dir / "fit"
-    result: dict = {"rewritten": 0, "unchanged": 0, "failed": 0, "with_dynamics": 0, "files": []}
+    result: dict = {"created": 0, "rewritten": 0, "unchanged": 0, "failed": 0, "with_dynamics": 0, "files": []}
     for fit_path in sorted(out_dir.glob("*.fit")):
         if not fit_path.stem.isdigit():
             continue
@@ -286,13 +289,16 @@ def refresh_dynamics(out_dir: Path, dry_run: bool = False) -> dict:
             result["unchanged"] += 1
             result["files"].append((activity_id, "unchanged"))
             continue
+        existed = target.is_file()       # sinon : `.fit` téléchargé sans `--json`, le JSON est CRÉÉ
         if not dry_run:
             fit_dir.mkdir(parents=True, exist_ok=True)
             _ensure_gitignore(fit_dir, "# Échantillons FIT normalisés : jetables, jamais versionnés.\n",
                                ["*", "!.gitignore"])
             target.write_text(text, encoding="utf-8")
-        result["rewritten"] += 1
-        result["files"].append((activity_id, "would_rewrite" if dry_run else "rewritten"))
+        key = "rewritten" if existed else "created"
+        result[key] += 1
+        result["files"].append((activity_id, ("would_" if dry_run else "") + {"rewritten": "rewrite", "created": "create"}[key]
+                                 if dry_run else key))
     return result
 
 
@@ -385,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--refresh-dynamics", action="store_true",
                     help="Ré-extrait la dynamique de course des .fit déjà présents (aucun téléchargement)")
     ap.add_argument("--dry-run", action="store_true", help="Avec --refresh-dynamics : n'écrit rien")
+    ap.add_argument("-v", "--verbose", action="store_true", help="Avec --refresh-dynamics : liste aussi les id à jour")
     args = ap.parse_args(argv)
 
     if args.python:
@@ -394,8 +401,16 @@ def main(argv: list[str] | None = None) -> int:
         _auto_relaunch(sys.argv[1:], "fitparse")
         out_dir = args.output_dir or _activity_dir_out()
         result = refresh_dynamics(out_dir, dry_run=args.dry_run)
-        verb = "à réécrire" if args.dry_run else "réécrits"
-        print(f"{result['rewritten']} JSON {verb}, {result['unchanged']} déjà à jour, {result['failed']} échec(s) ; "
+        labels = {"create": "à créer", "rewrite": "à réécrire", "created": "créé", "rewritten": "réécrit",
+                  "unchanged": "déjà à jour", "failed": "échec"}
+        for activity_id, status in result["files"]:
+            if status != "unchanged" or args.verbose:
+                print(f"  {activity_id} : {labels.get(status.replace('would_', ''), status)}")
+        if args.dry_run:
+            print(f"{result['created']} JSON à créer, {result['rewritten']} à réécrire, ", end="")
+        else:
+            print(f"{result['created']} JSON créés, {result['rewritten']} réécrits, ", end="")
+        print(f"{result['unchanged']} déjà à jour, {result['failed']} échec(s) ; "
               f"{result['with_dynamics']} séance(s) avec dynamique de course — {out_dir / 'fit'}")
         return 1 if result["failed"] else 0
     _auto_relaunch(sys.argv[1:])

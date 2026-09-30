@@ -572,6 +572,9 @@ mm ÷ 1000), pourcentages inchangés. Toutes optionnelles :
 - **Clé absente = grandeur non mesurée.** Jamais `0`, et surtout jamais `50` pour une balance
   absente : un capteur qui ne fournit pas la balance (15 séances de course sur 80 sur l'installation
   observée) laisse la clé omise.
+- **Aucun writer automatique** : ni le coach ni un script n'écrivent ces clés d'office ; elles servent de
+  repli pour des valeurs saisies à la main ou héritées de fichiers anciens. `avg_stance_balance_pct` hors
+  de 30-70 % → avertissement du validateur (et valeur ignorée par `gait-summary`).
 - **Repli seulement.** Quand les échantillons FIT de la séance sont ingérés
   (`activities/fit/<id>.json`, colonnes `activity_sample.ground_contact_s`… — extraites par
   `download_fit.py`, re-extractibles avec `--refresh-dynamics`), `scripts/arc_index.py gait-summary`

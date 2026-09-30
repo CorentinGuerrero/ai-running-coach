@@ -295,7 +295,7 @@ SCHEMA = {
             # (`activity_sample`), `arc_index.py gait-summary` calcule sa propre moyenne et c'est elle qui
             # fait foi. La balance est un ÉCART à 50 % (le côté du pourcentage n'est pas établi).
             "avg_ground_contact_s": "num+",
-            "avg_stance_balance_pct": "gait_pct",
+            "avg_stance_balance_pct": "stance_balance_pct",
             "avg_vertical_oscillation_m": "num+",
             "avg_vertical_ratio_pct": "gait_pct",
             "avg_step_length_m": "num+",
@@ -754,6 +754,14 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
         lo, hi = DECOUPLING_PCT_PLAUSIBLE
         if not lo <= value <= hi:
             warnings.append(f"{where} : {value} hors de la plage plausible ({lo:g} à {hi:g} %) — à vérifier")
+        return
+    if spec == "stance_balance_pct":
+        # Même fenêtre plausible que `arc_gait.PLAUSIBLE` : hors 30-70 %, avertissement (à vérifier), pas un rejet.
+        if not _is_number(value) or not 0 < value < 100:
+            fail("un pourcentage strictement entre 0 et 100")
+        elif not 30 <= value <= 70:
+            warnings.append(f"{where} : {value} hors de la plage plausible (30 à 70 %) — à vérifier ; "
+                            "ignoré par `gait-summary`")
         return
     if spec == "gait_pct":
         # Pourcentage de dynamique de course (#151) : balance du temps de contact, ratio vertical.

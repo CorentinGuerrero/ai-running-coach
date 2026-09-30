@@ -113,6 +113,15 @@ class TestInspectionCaveatOncePerCard(unittest.TestCase):
         self.assertIn("#/sante?section=foulee", APP_JS)
 
 
+class TestWearContrast(unittest.TestCase):
+    def test_severity_text_never_uses_a_low_contrast_accent_colour(self):
+        css = (REPO / "web/css/app.css").read_text(encoding="utf-8")
+        for sev in ("moderate", "marked"):
+            rule = re.search(r"\.wear__sev--%s[^{]*\{[^}]*\}" % sev, css)
+            self.assertIsNotNone(rule)
+        self.assertNotRegex(css, r"\.wear__sev--(moderate|marked)\s*\{\s*color:\s*var\(--(yellow|orange)\)")
+
+
 class TestDocsReferences(unittest.TestCase):
     def test_views_documents_the_card_and_its_screenshot(self):
         self.assertIn("### Foulée", VIEWS)

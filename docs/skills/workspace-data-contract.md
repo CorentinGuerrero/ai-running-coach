@@ -58,7 +58,9 @@ Garmin, en unités SI : `avg_ground_contact_s` (temps de contact, secondes),
 (mètres), `avg_vertical_ratio_pct` (%) et `avg_step_length_m` (mètres). Une clé **absente**
 veut dire « non mesuré » — jamais `0`, jamais `50` pour une balance. Ce n'est qu'un repli : quand les
 échantillons FIT sont ingérés, `arc_index.py gait-summary` calcule sa propre moyenne et c'est elle
-qui fait foi. Voir la carte [Foulée](../dashboard/views.md#foulee).
+qui fait foi. **Aucun agent ni script n'écrit ces clés automatiquement** : elles servent de repli pour des
+valeurs saisies à la main ou héritées d'anciens fichiers. Une balance hors de 30 à 70 % déclenche un
+avertissement du validateur et est ignorée par la synthèse. Voir la carte [Foulée](../dashboard/views.md#foulee).
 
 ## Vérifier un fichier
 

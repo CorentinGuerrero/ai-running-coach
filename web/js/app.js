@@ -1037,15 +1037,23 @@ function wirePolarisationChart(weeks) {
 // ---------------------------------------------------------------------------
 
 const NB = " ";
-// « +0,1 », « −6 », et jamais « -0 » : une variation qui s'arrondit à zéro s'écrit sans signe.
-const signed = (text, d) => (/^-?0(?:,0+)?(?!\d)/.test(text) ? text.replace(/^-/, "") : d > 0 ? `+${text}` : text);
+// Sens d'une variation : décidé CÔTÉ SERVEUR (`direction` : up / down / flat, `arc_gait.change_direction`,
+// testé en palier D) — jamais déduit ici d'un nombre arrondi. Flèche neutre (ni bon ni mauvais) + valeur signée ;
+// « stable » sans signe quand la variation s'arrondit à zéro à l'affichage.
+const GAIT_ARROW = { up: "↑", down: "↓", flat: "→" };
+function gaitTrend(direction, magnitudeText) {
+  if (!direction) return "";
+  if (direction === "flat") return `<span aria-label="stable">${GAIT_ARROW.flat}</span> stable`;
+  const sign = direction === "up" ? "+" : "\u2212";
+  return `<span aria-label="${direction === "up" ? "en hausse" : "en baisse"}">${GAIT_ARROW[direction]}</span> ${sign}${magnitudeText}`;
+}
 const GAIT_ROWS = [
-  ["ground_contact_s", "Temps de contact au sol", (v) => `${F.num(v * 1000, 0)}${NB}ms`, (d) => signed(`${F.num(d * 1000, 0)}${NB}ms`, d)],
-  ["stance_balance_pct", "Balance du temps de contact", (v) => `${F.num(v, 1)}${NB}%`, (d) => signed(`${F.num(d, 2)}${NB}pt`, d)],
-  ["vertical_oscillation_m", "Oscillation verticale", (v) => F.oscillation(v), (d) => signed(F.oscillation(d), d)],
-  ["vertical_ratio_pct", "Ratio vertical", (v) => `${F.num(v, 1)}${NB}%`, (d) => signed(`${F.num(d, 2)}${NB}pt`, d)],
-  ["step_length_m", "Longueur de pas", (v) => F.stepLength(v), (d) => signed(F.stepLength(d), d)],
-  ["cadence_spm", "Cadence (pas/min, deux pieds)", (v) => `${F.num(v, 0)}${NB}pas/min`, (d) => signed(`${F.num(d, 0)}${NB}pas/min`, d)],
+  ["ground_contact_s", "Temps de contact au sol", (v) => `${F.num(v * 1000, 0)}${NB}ms`, (d) => `${F.num(Math.abs(d) * 1000, 0)}${NB}ms`],
+  ["stance_balance_pct", "Balance du temps de contact", (v) => `${F.num(v, 1)}${NB}%`, (d) => `${F.num(Math.abs(d), 2)}${NB}pt`],
+  ["vertical_oscillation_m", "Oscillation verticale", (v) => F.oscillation(v), (d) => F.oscillation(Math.abs(d))],
+  ["vertical_ratio_pct", "Ratio vertical", (v) => `${F.num(v, 1)}${NB}%`, (d) => `${F.num(Math.abs(d), 2)}${NB}pt`],
+  ["step_length_m", "Longueur de pas", (v) => F.stepLength(v), (d) => F.stepLength(Math.abs(d))],
+  ["cadence_spm", "Cadence (pas/min, deux pieds)", (v) => `${F.num(v, 0)}${NB}pas/min`, (d) => `${F.num(Math.abs(d), 0)}${NB}pas/min`],
 ];
 
 /** Une valeur par date (plusieurs séances le même jour : moyenne) pour l'axe du graphique. */
@@ -1068,7 +1076,7 @@ function gaitInspectionFacts(insp) {
     const rep = p.asymmetry_repeats ? ` <span class="tag">même côté ${p.asymmetry_repeats.count}/${p.asymmetry_repeats.of} fois : ${F.esc(GEAR_SIDE[p.asymmetry_repeats.side] || p.asymmetry_repeats.side)}</span>` : "";
     return `<tr><th scope="row">${gearLink(p.gear_id, p.name)}<br><small class="muted">${p.n} inspection${p.n > 1 ? "s" : ""}</small></th><td>${strike}</td><td>${asym}${rep}</td></tr>`;
   }).join("");
-  return `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Paire</th><th scope="col">Indice d'attaque</th><th scope="col">Asymétrie d'usure</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Paire</th><th scope="col">Indices</th><th scope="col">Asymétrie d'usure</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /** `{html, mount}` : `html` à poser dans la page, `mount()` à appeler ensuite (curseurs des graphiques). */
@@ -1083,7 +1091,7 @@ function gaitCard(g) {
   const dyn = g.dynamics || {};
   const rowsHtml = GAIT_ROWS.filter(([k]) => dyn[k]).map(([k, label, fmt, fmtDelta]) => {
     const d = dyn[k];
-    const change = d.change != null ? `${fmtDelta(d.change)} <small class="muted">(${d.recent_n} récentes / ${d.prior_n} avant)</small>` : `<span class="muted">pas assez de séances de chaque côté</span>`;
+    const change = d.change != null ? `${gaitTrend(d.direction, fmtDelta(d.change))} <small class="muted">(${d.recent_n} récentes / ${d.prior_n} avant)</small>` : `<span class="muted">pas assez de séances de chaque côté</span>`;
     const extra = k === "stance_balance_pct" ? `<br><small class="muted">écart moyen à 50${NB}% : ${F.num(d.mean_gap_pts, 1)}${NB}pt</small>` : "";
     return `<tr><th scope="row">${F.esc(label)}</th><td class="num">${fmt(d.mean)}${extra}</td><td>${change}</td><td class="num">${d.n}</td></tr>`;
   }).join("");
@@ -1091,16 +1099,18 @@ function gaitCard(g) {
   const balanceNote = bal
     ? `<p class="note">Balance : ${F.num(bal.beyond_band_share * 100, 0)}${NB}% des séances mesurées (${bal.beyond_band_n}/${bal.n}) s'écartent de plus de ${F.num(bal.band_pts, 0)}${NB}point de 50${NB}% (bande = ${F.esc(bal.band_label)}, pas un seuil publié). Le côté que porte ce pourcentage (gauche ou droite) n'est pas établi par le format FIT : on parle d'écart, jamais de pied gauche ou droit.</p>`
     : (conf.sessions_with_dynamics ? `<p class="note">Aucune séance n'a de balance du temps de contact (selon le capteur) : elle n'est jamais remplacée par 50${NB}%.</p>` : "");
+  const noDynamics = !conf.sessions_with_dynamics;      // la cadence seule remplit une ligne : elle ne dit rien de la dynamique
+  const refreshHint = `<p class="muted">Aucune séance de course de la fenêtre ne porte de dynamique de course (temps de contact, balance, oscillation…) : les échantillons FIT sont absents, ou l'index a été reconstruit avant l'extraction. Pour les FIT déjà téléchargés : <code>python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics</code>, puis rechargez.</p>`;
   const table = rowsHtml
-    ? `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Grandeur</th><th scope="col" class="num">Moyenne</th><th scope="col">4 dernières semaines vs avant</th><th scope="col" class="num">Séances</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
-    : `<p class="muted">Aucune séance de course de la fenêtre ne porte de dynamique de course : les échantillons FIT sont absents, ou l'index a été reconstruit avant l'extraction. Pour les FIT déjà téléchargés : <code>python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics</code>, puis rechargez.</p>`;
+    ? `${noDynamics ? refreshHint : ""}<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Grandeur</th><th scope="col" class="num">Moyenne</th><th scope="col">4 dernières semaines vs avant</th><th scope="col" class="num">Séances</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+    : refreshHint;
 
   const charts = [];
   const gct = dyn.ground_contact_s;
   if (gct?.series?.length) {
     const { dates, values } = gaitDaily(gct.series);
     const c = timeChart(dates, [{ type: "line", values: values.map((v) => v * 1000), cls: "line line--gait" }, { type: "dots", values: values.map((v) => v * 1000), cls: "dot dot--gait" }], [],
-      { height: 150, label: "Temps de contact au sol en millisecondes", yFormat: (v) => `${F.num(v, 0)}` });
+      { height: 190, label: "Temps de contact au sol en millisecondes", yFormat: (v) => `${F.num(v, 0)}` });
     charts.push({ id: "gct", title: "Temps de contact au sol (ms)", c, show: (i) => `<strong>${F.dayLong(dates[i])}</strong> · ${F.num(values[i] * 1000, 0)}${NB}ms` });
   }
   if (bal?.series?.length) {
@@ -1111,7 +1121,7 @@ function gaitCard(g) {
       { type: "band", lo: dates.map(() => lo), hi: dates.map(() => hi), cls: "band-fill" },
       { type: "line", values, cls: "line line--gait" }, { type: "dots", values, cls: "dot dot--gait" },
     ], [{ type: "hline", value: 50, cls: "mark mark--zero", label: "50 %" }],
-    { height: 150, y: { min: Math.floor(Math.min(lo, ...values) - 0.5), max: Math.ceil(Math.max(hi, ...values) + 0.5) }, label: "Balance du temps de contact en pourcentage", yFormat: (v) => `${F.num(v, 0)}` });
+    { height: 250, y: { min: Math.floor(Math.min(lo, ...values) - 0.5), max: Math.ceil(Math.max(hi, ...values) + 0.5) }, label: "Balance du temps de contact en pourcentage", yFormat: (v) => `${F.num(v, 0)}` });
     charts.push({ id: "bal", title: "Balance du temps de contact (%), bande grisée = bande du projet", c, show: (i) => `<strong>${F.dayLong(dates[i])}</strong> · ${F.num(values[i], 2)}${NB}% (écart ${F.num(Math.abs(values[i] - 50), 2)}${NB}pt)` });
   }
   const chartsHtml = charts.map((x) => `<h3>${F.esc(x.title)}</h3><div class="chart-host" id="c-gait-${x.id}">${x.c.svg}</div><p class="readout" id="r-gait-${x.id}"></p>`).join("");

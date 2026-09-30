@@ -139,7 +139,24 @@ def _fr(value: float) -> str:
 
 
 def _round(value: Optional[float], digits: int) -> Optional[float]:
-    return None if value is None else round(value, digits)
+    return None if value is None else round(value, digits) + 0.0   # `+ 0.0` : jamais « -0.0 » dans le JSON
+
+
+# Plus petite variation AFFICHABLE par grandeur, en unité SI de l'API (= une unité de la dernière décimale
+# montrée par le tableau de bord : 1 ms, 0,01 pt, 0,1 cm, 0,01 pt, 0,01 m, 1 pas/min). Une variation plus petite
+# que la moitié de ce pas s'affiche « 0 » : elle est `flat`, jamais dotée d'un signe. La DÉCISION du sens est prise
+# ici (testée en palier D), pas dans le JS — un arrondi d'affichage ne doit jamais effacer un signe réel.
+DISPLAY_STEP = {"ground_contact_s": 0.001, "stance_balance_pct": 0.01, "vertical_oscillation_m": 0.001,
+                "vertical_ratio_pct": 0.01, "step_length_m": 0.01, "cadence_spm": 1.0}
+
+
+def change_direction(metric: str, change: Optional[float]) -> Optional[str]:
+    """`up` / `down` / `flat` (variation sous la moitié du plus petit pas affichable) ; `None` sans variation."""
+    if change is None:
+        return None
+    if abs(change) < DISPLAY_STEP[metric] / 2:
+        return "flat"
+    return "up" if change > 0 else "down"
 
 
 # Précision d'affichage par grandeur (SI conservé dans l'API ; le tableau de bord convertit).
@@ -204,8 +221,11 @@ def metric_trend(metric: str, points: Iterable[Tuple[str, float]], today: date) 
         "change": None,
         "series": [{"date": d, "value": _round(v, digits)} for d, v in pts],
     }
+    out["direction"] = None
     if len(recent) >= MIN_PER_PERIOD and len(prior) >= MIN_PER_PERIOD:
-        out["change"] = _round(_mean(recent) - _mean(prior), digits)
+        raw_change = _mean(recent) - _mean(prior)
+        out["change"] = _round(raw_change, digits)
+        out["direction"] = change_direction(metric, raw_change)
     if metric == "stance_balance_pct":
         gaps = [abs(v - BALANCE_CENTRE_PCT) for v in values]
         beyond = sum(1 for g in gaps if g > BALANCE_BAND_PTS)
@@ -238,7 +258,11 @@ def inspection_gait(inspections: Sequence[dict], names: Optional[Dict[str, str]]
         rows = sorted(rows, key=lambda r: (r.get("date") or "", r.get("path") or ""))
         tally: Dict[str, int] = {}
         asymmetry = []
+        strike_sets: List[List[str]] = []      # indices d'ATTAQUE seulement (pronation/supination exclus), par inspection
         for r in rows:
+            strikes_here = sorted({h for h in (r.get("gait_hints") or []) if h in STRIKE_HINTS})
+            if strikes_here:
+                strike_sets.append(strikes_here)
             for hint in r.get("gait_hints") or []:
                 tally[hint] = tally.get(hint, 0) + 1
                 tally_all[hint] = tally_all.get(hint, 0) + 1
@@ -265,6 +289,7 @@ def inspection_gait(inspections: Sequence[dict], names: Optional[Dict[str, str]]
             "strike_hints": dict(sorted(tally.items())),
             "dominant_strike": dominant,
             "latest_strike": [h for h in (latest.get("gait_hints") or []) if h in STRIKE_HINTS],
+            "strike_sets": strike_sets,
             "latest_date": latest.get("date"),
             "asymmetry": asymmetry,
             "asymmetry_repeats": repeats,
@@ -306,14 +331,25 @@ def find_contradictions(dynamics: Dict[str, Optional[dict]], insp: dict) -> List
         })
 
     # 1 bis. Indice d'attaque qui change au sein d'une même paire.
+    # Seuls les indices d'ATTAQUE comptent (pronation/supination n'en sont pas). Changement d'une inspection
+    # à l'autre (ensembles différents) != deux indices d'attaque dans UNE même inspection (formulation distincte).
     for p in pairs:
-        if len((p.get("strike_hints") or {})) > 1:
+        sets = p.get("strike_sets") or []
+        label = lambda s: " + ".join(STRIKE_LABEL_FR[h] for h in s)
+        if len({tuple(s) for s in sets}) > 1:
             out.append({
                 "code": "strike_hint_changes_within_pair", "severity": "info",
-                "message": (f"{p['name']} : les inspections donnent des indices d'attaque différents "
-                            f"({', '.join(STRIKE_LABEL_FR[h] for h in STRIKE_HINTS if h in p['strike_hints'])}) — "
-                            "peu fiable."),
-                "evidence": {"gear_id": p["gear_id"], "strike_hints": p["strike_hints"]},
+                "message": (f"{p['name']} : l'indice d'attaque change d'une inspection à l'autre "
+                            f"({' ; '.join(dict.fromkeys(label(s) for s in sets))}) — peu fiable."),
+                "evidence": {"gear_id": p["gear_id"], "strike_sets": sets},
+                "resolution": "unresolved",
+            })
+        if any(len(s) > 1 for s in sets):
+            out.append({
+                "code": "strike_hints_conflict_in_inspection", "severity": "info",
+                "message": (f"{p['name']} : une même inspection note à la fois l'attaque talon et l'attaque "
+                            "médio/avant-pied — lecture ambiguë de la photo, à prendre avec prudence."),
+                "evidence": {"gear_id": p["gear_id"], "strike_sets": [s for s in sets if len(s) > 1]},
                 "resolution": "unresolved",
             })
 

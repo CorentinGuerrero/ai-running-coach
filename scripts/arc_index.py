@@ -4255,7 +4255,6 @@ def gait_summary(conn, today: Optional[date] = None, weeks: int = GAIT_DEFAULT_W
         sessions.append({"date": row["date"], "activity_id": row["activity_id"], "name": row["name"],
                          "sport": row["sport"], "values": values, "notes": notes})
     names = {r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear")}
-    names.update({r["gear_id"]: r["name"] for r in conn.execute("SELECT gear_id, name FROM gear WHERE ignored = 1")})
     return GT.gait_summary(sessions, _inspection_rows(conn), today, weeks, names)
 
 

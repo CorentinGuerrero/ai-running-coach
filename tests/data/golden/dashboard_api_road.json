@@ -3167,6 +3167,7 @@
         "dynamics": {
           "cadence_spm": {
             "change": 0.3,
+            "direction": "flat",
             "latest": {
               "date": "2026-09-23",
               "value": 172.0
@@ -3277,6 +3278,7 @@
           },
           "ground_contact_s": {
             "change": null,
+            "direction": null,
             "latest": {
               "date": "2026-09-23",
               "value": 0.25
@@ -3303,6 +3305,7 @@
             "beyond_band_n": 0,
             "beyond_band_share": 0.0,
             "change": null,
+            "direction": null,
             "latest": {
               "date": "2026-09-23",
               "value": 50.4
@@ -3328,6 +3331,7 @@
           },
           "step_length_m": {
             "change": null,
+            "direction": null,
             "latest": {
               "date": "2026-09-23",
               "value": 1.17
@@ -3350,6 +3354,7 @@
           },
           "vertical_oscillation_m": {
             "change": null,
+            "direction": null,
             "latest": {
               "date": "2026-09-23",
               "value": 0.095
@@ -3372,6 +3377,7 @@
           },
           "vertical_ratio_pct": {
             "change": null,
+            "direction": null,
             "latest": {
               "date": "2026-09-23",
               "value": 8.6
@@ -3420,7 +3426,15 @@
               "name": "Adidas Adizero SL",
               "strike_hints": {
                 "heel_strike": 2
-              }
+              },
+              "strike_sets": [
+                [
+                  "heel_strike"
+                ],
+                [
+                  "heel_strike"
+                ]
+              ]
             }
           ],
           "strike_hint_tally": {

@@ -382,10 +382,11 @@ ce qui est **mesuré** de ce qui est **deviné** :
   contact**, oscillation verticale, ratio vertical, longueur de pas et cadence (en pas/min, deux
   pieds — le champ FIT est par pied, doublé à l'extraction). Pour chacun : la moyenne, la
   variation des 4 dernières semaines face à la période antérieure (seulement avec au moins deux
-  séances de chaque côté) et le nombre de séances. Deux petits graphiques : temps de contact et
+  séances de chaque côté), donnée par une **flèche neutre** (↑ hausse, ↓ baisse, → stable : ni bon ni
+  mauvais) et sa valeur signée, et le nombre de séances. Deux petits graphiques : temps de contact et
   balance, cette dernière avec sa bande grisée.
-- **Deviné d'après les photos** — depuis les inspections de chaussures : l'indice d'attaque
-  (talon ou médio/avant-pied) compté par paire, l'asymétrie d'usure de chaque inspection, et si elle
+- **Deviné d'après les photos** — depuis les inspections de chaussures : les indices de foulée
+  (attaque talon ou médio/avant-pied, pronation/supination) comptés par paire, l'asymétrie d'usure de chaque inspection, et si elle
   se répète **du même côté**.
 - **Confiance** — le nombre de séances avec dynamique (dont avec balance) et d'inspections, avec
   la mention « confiance faible » sous 5 séances mesurées ou 3 inspections.
