@@ -102,7 +102,9 @@ détaillée : comment la lire, d'où viennent ses données, que faire si elle es
     VO2max estimée, temps prédits pour votre objectif, records au kilomètre — et
     toutes les hypothèses.
 
--   **[Matériel](views.md#materiel)** · *Mon matériel est-il en état ?*
+-   [![Matériel](../assets/dashboard/vignette-materiel.webp)](views.md#materiel)
+
+    **[Matériel](views.md#materiel)** · *Mon matériel est-il en état ?*
 
     Kilométrage de chaque paire, équipement et kits, inspections photo, et une fiche par
     paire (bilan de carrière, kilomètres par mois, séances).

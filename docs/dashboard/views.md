@@ -642,6 +642,12 @@ déclaration. Un lien « Hypothèses des modèles » en tête renvoie vers celle
 **chaussures**, l'**équipement** (kits compris) et les **inspections photo**. Les trois cartes
 vivaient jusque-là dans Performance.
 
+!!! note "Captures de cette section"
+    Elles viennent d'un **workspace de démonstration** (générateur des tests,
+    `tests/lib/synthetic.py`), pas du workspace réel des autres captures : un inventaire
+    varié (paire proche du seuil, paire retirée, frontale à contrôler, poche à eau
+    bientôt à nettoyer), sans exposer de données personnelles.
+
 Sans matériel déclaré, la vue montre un état vide utile : la syntaxe à écrire dans « Matériel &
 lieux » du profil, la commande de simulation `python3 scripts/garmin_gear_backfill.py` pour
 rattraper l'historique Garmin (rien n'est écrit sans `--apply`) et des liens vers la documentation.
@@ -662,11 +668,10 @@ dès 90 %, et le rôle `usage:` déclaré s'affiche à côté du nom.
 
 ![Matériel : ce qui est à traiter, puis le kilométrage de chaque paire](../assets/dashboard/materiel.webp)
 
-*La vue Matériel sur un vrai workspace, après le rattrapage Garmin (#145) : en tête « À
-traiter » — la paire principale a dépassé son seuil (920 km pour une alerte à 800 km), deux
-paires n'ont jamais été inspectées —, puis les six paires avec leur « départ » (kilométrage
-antérieur au workspace), la prévision de retraite de la paire en cours et les paires
-retirées en grisé.*
+*La vue Matériel : en tête « À traiter » — la frontale a dépassé ses 40 h, deux paires sont
+à inspecter —, puis les chaussures : l'Adizero SL (« dont 120 km de départ », usure visible
+à la dernière inspection) et la Speedgoat, paire par défaut, affichent leur prévision de
+retraite (≈ 5 et ≈ 4 semaines) ; la Pegasus retirée reste visible en grisé.*
 
 **Équipement** (#134) — un tableau pour tout ce qui n'est pas chaussure (`### Matériel` du
 profil) : par objet, son **usage** (distance, heures, séances, jours depuis la date de
@@ -681,10 +686,10 @@ s'affiche que si le profil déclare du matériel ; le détail des règles est da
 
 ![Équipement : usage par objet, déclencheurs en heures, séances et jours, poche à eau à nettoyer](../assets/dashboard/equipement.webp)
 
-*Le tableau Équipement : la poche à eau a passé son rappel d'hygiène de 30 jours depuis
-le dernier entretien, la ceinture cardio approche de son année (« 12 mois » compté 360 j),
-les bâtons et le gilet du kit « trail-long » cumulent heures et séances. Inventaire
-d'illustration, usage calculé sur les séances réelles du workspace des captures.*
+*Le tableau Équipement : la frontale a atteint son seuil en heures (59,7 h / 40 h), la
+ceinture cardio approche de son année (« 12 mois » compté 360 j) et la poche à eau de son
+rappel d'hygiène (28 j / 30 j depuis le dernier entretien) ; les objets du kit
+« trail-long » portent leur étiquette.*
 
 **Inspections photo** (#135) — pour chaque paire, l'historique des inspections du dossier
 `gear/` (plus récente d'abord) : état 🟢🟡🟠🔴 écrit aussi en toutes lettres, kilométrage à
@@ -699,10 +704,10 @@ n'est à inspecter.
 
 ![Inspections photo : historique par paire, état, zones d'usure, asymétrie et vignettes](../assets/dashboard/inspections.webp)
 
-*Les inspections photo : la paire au-delà du seuil n'a jamais été inspectée (« Inspection
-conseillée ») ; la Pegasus compte deux inspections chaînées — la seconde, plus dégradée,
-relève une asymétrie légère côté gauche. Inspections et photos d'illustration (vignettes
-schématiques), jamais de vraies photos dans le dépôt.*
+*Les inspections photo : l'Adizero SL compte deux inspections chaînées — la seconde, plus
+dégradée que la précédente, relève une asymétrie légère (pied gauche plus usé) ; la Speedgoat
+n'a jamais été inspectée (« Inspection conseillée »). Photo schématique : jamais de vraies
+photos dans le dépôt.*
 
 ### Fiche d'une paire ou d'un objet
 
@@ -723,13 +728,30 @@ ouvre sa fiche, à l'adresse partageable `#/materiel/<gear_id>` :
 
 ![Fiche d'une paire : bilan de carrière, kilomètres par mois, séances et inspections](../assets/dashboard/materiel-fiche.webp)
 
-*La fiche d'une paire (vrai workspace) : bilan de carrière — kilométrage, séances, course et
-sortie la plus longue, meilleurs efforts, seuil, lien Garmin —, kilomètres par mois, puis la
-liste des séances (chacune renvoie vers son détail) et les inspections de la paire.*
+*La fiche d'une paire : bilan de carrière — kilométrage, séances et période, courses, sortie la
+plus longue, meilleurs efforts, seuil et prévision, lien Garmin —, kilomètres par mois, puis
+la liste des séances (chacune renvoie vers son détail) et les inspections de la paire.*
+
+![Fiche d'un objet d'équipement : usage depuis l'entretien et total à vie, déclencheurs, kit, séances](../assets/dashboard/materiel-fiche-equipement.webp)
+
+*La fiche d'un objet : la poche à eau compte 4 séances depuis son dernier entretien
+(2 septembre) pour 34 à vie ; son déclencheur en jours (28 j / 30 j) la met « proche du
+seuil », avec le rappel avant séance ; le kit « trail-long » renvoie vers ses autres objets.
+Plus bas, les séances d'avant l'entretien sont grisées.*
 
 La page d'une séance affiche de son côté « Chaussure » (paire attribuée, mention « paire par
 défaut » quand elle n'est pas déclarée sur la séance) et « Équipement porté » (`gear_ids`,
-hors chaussures), lorsqu'ils existent.
+hors chaussures), lorsqu'ils existent, chacun renvoyant vers sa fiche.
+
+![Détail d'une séance : chaussure attribuée et équipement porté, en lien vers leurs fiches](../assets/dashboard/seance-materiel.webp)
+
+*Une sortie longue : la Speedgoat, « paire par défaut » (aucune paire déclarée sur la séance),
+et l'équipement porté du kit « trail-long ».*
+
+Sur **Aujourd'hui**, une tuile « Matériel à contrôler » (ou « Chaussures à surveiller »)
+apparaît dans « Au programme » dès qu'un élément atteint son seuil, avec un lien vers la vue :
+
+![Aujourd'hui : la tuile « Matériel à contrôler » sous la séance du jour](../assets/dashboard/aujourdhui-materiel.webp)
 
 **Comment la lire** : les kilométrages viennent tous de la même règle d'attribution des
 séances aux paires (`gear_id` explicite, sinon paire par défaut — voir les Hypothèses de
@@ -956,6 +978,7 @@ la [machine coach](headless.md) ou [derrière votre reverse proxy](docker.md).
 ![Semaine sur téléphone](../assets/dashboard/mobile-semaine.webp){ width="260" }
 ![Détail d'une séance sur téléphone](../assets/dashboard/mobile-seance.webp){ width="260" }
 ![Trail Shape sur téléphone](../assets/dashboard/mobile-trail-shape.webp){ width="260" }
+![Matériel sur téléphone](../assets/dashboard/mobile-materiel.webp){ width="260" }
 
 </div>
 
