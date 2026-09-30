@@ -613,13 +613,17 @@ html:has(.arc-hero) .md-content {
 }
 
 .arc-commands {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
+/* Each row borrows the list's columns (subgrid), so the pill column is as
+   wide as the longest command and every description shares one left edge. */
 .md-typeset .arc-command {
   display: grid;
-  grid-template-columns: 6.2rem minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  grid-template-columns: subgrid;
   gap: 1.2rem;
   align-items: baseline;
   padding: 1rem 0.9rem;
@@ -647,6 +651,7 @@ html:has(.arc-hero) .md-content {
   color: var(--arc-lime);
   font-size: 0.85rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .md-typeset .arc-command span {
@@ -1180,6 +1185,10 @@ html {
 
   .arc-hero .md-button {
     text-align: center;
+  }
+
+  .arc-commands {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .md-typeset .arc-command {
