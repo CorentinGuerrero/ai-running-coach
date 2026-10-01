@@ -295,7 +295,8 @@ disponibles à partir du seul résumé Markdown d'une séance :
   l'autre (position GPS quand le FIT en porte, sinon profil distance/D+/pente,
   voir `scripts/arc_climb_match.py`) — un tableau, une ligne par segment avec au
   moins deux occurrences, sans jamais exposer de coordonnée GPS
-  (`arc_climb_match.ASSUMPTIONS["privacy"]`). Chaque ligne ouvre l'historique
+  (`arc_climb_match.ASSUMPTIONS["privacy"]`). Triée par nombre d'occurrences,
+  par pages de 15, avec un filtre par lieu et des colonnes triables. Chaque ligne ouvre l'historique
   complet du segment (`#/montee/<id>`) : toutes ses occurrences, un graphique VAM
   par date, et la progression vs séance précédente/meilleure déjà affichée sur la
   fiche de chaque séance (colonne « vs précédent/meilleur » de la table des
@@ -513,9 +514,14 @@ workspace-data-contract/SKILL.md`, section `week`).
 ![Séances : l'historique complet, triable et filtrable](../assets/dashboard/seances.webp)
 
 Tout l'historique : date, distance, durée, D+ (ou allure sur route), FC moyenne, HRR
-et charge. Chaque colonne se trie ; le filtre isole un sport. Une séance lue dans un
-fichier antérieur au contrat porte la mention **approx.** ; une charge estimée faute
-de fréquence cardiaque et d'effort perçu, un astérisque.
+et charge, par pages de 50. Une recherche (nom ou lieu, sans tenir compte des accents)
+et deux filtres (sport, année) réduisent la liste ; une ligne de totaux (séances,
+distance, durée, D+) suit le filtre. Triée par date, la liste se découpe par mois, chaque
+mois avec ses propres totaux. Les colonnes se trient d'un clic ; recherche, filtres, tri et
+page restent dans l'adresse (un lien partagé rouvre la même liste). Sur téléphone, seules
+la date, la séance, la distance et le D+ (ou l'allure) restent affichés. Une séance lue
+dans un fichier antérieur au contrat porte la mention **approx.** ; une charge estimée
+faute de fréquence cardiaque et d'effort perçu, un astérisque.
 
 ### Détail d'une séance
 
@@ -671,7 +677,8 @@ kilomètre : pas de graphique, c'est normal.
   power-hiking sur les fortes pentes n'est jamais retirée (c'est comment vous
   bougez réellement sur cette pente), seulement signalée au survol quand elle
   domine le panier.
-- **Hypothèses** : toutes les formules et leurs limites, en clair.
+- **Hypothèses** : un lien vers la vue [Hypothèses](#hypotheses), qui réunit toutes les
+  formules et leurs limites.
 
 Le kilométrage des chaussures, l'équipement et les inspections photo ont leur propre vue :
 [Matériel](#materiel).
@@ -692,8 +699,8 @@ divergent disent que le terrain ou la forme du jour pèsent.
 **Mon matériel est-il en état ? Que dois-je remplacer ?**
 
 Vue dédiée (#147), toujours présente dans le menu pour être trouvée même avant la première
-déclaration. Un lien « Hypothèses des modèles » en tête renvoie vers celles de
-[Performance](#performance). Elle réunit, dans cet ordre : une synthèse **À traiter**, les
+déclaration. Un lien « Hypothèses des modèles » en tête renvoie vers celles du
+matériel, dans la vue [Hypothèses](#hypotheses). Elle réunit, dans cet ordre : une synthèse **À traiter**, les
 **chaussures**, l'**équipement** (kits compris) et les **inspections photo**. Les trois cartes
 vivaient jusque-là dans Performance.
 
@@ -813,8 +820,8 @@ apparaît dans « Au programme » dès qu'un élément atteint son seuil, avec u
 ![Aujourd'hui : la tuile « Matériel à contrôler » sous la séance du jour](../assets/dashboard/aujourdhui-materiel.webp)
 
 **Comment la lire** : les kilométrages viennent tous de la même règle d'attribution des
-séances aux paires (`gear_id` explicite, sinon paire par défaut — voir les Hypothèses de
-[Performance](#performance)) ; la fiche, le tableau et la commande `arc_index.py gear-career`
+séances aux paires (`gear_id` explicite, sinon paire par défaut — voir les
+[Hypothèses](#hypotheses)) ; la fiche, le tableau et la commande `arc_index.py gear-career`
 ne peuvent donc pas diverger.
 
 | Alimentée par | Calcul |
@@ -1001,6 +1008,23 @@ contiennent pas encore de valeurs (une liste de courses ou un plan de ravitaille
 n'en contiennent pas). Sans `nutritionist` dans `[agents].enabled`, la vue
 n'apparaît pas du tout.
 
+## Hypothèses
+
+**Que suppose ce calcul, et où s'arrête-t-il ?**
+
+Toutes les hypothèses des modèles du tableau de bord (charge, VO2max, HRV, zones FC,
+allure ajustée, découplage, VAM, descente, durabilité, dépense énergétique, matériel…),
+regroupées par modèle. Un sommaire à gauche (une rangée défilante sur téléphone) affiche
+un modèle à la fois ; chaque hypothèse montre son libellé et sa première phrase, le
+détail se déplie à la demande. La recherche parcourt tous les modèles, ouvre les détails
+qui contiennent le terme et le surligne.
+
+Les liens « Hypothèses des modèles » des autres vues ouvrent directement le modèle
+concerné (`#/hypotheses?modele=vam`, `?modele=decouplage`…). Les textes viennent tels
+quels des modules de calcul (`ASSUMPTIONS` de `scripts/arc_*.py`, servis par
+`/api/assumptions`) ; une hypothèse ajoutée côté Python apparaît sans changement du
+tableau de bord, dans « Autres » tant qu'elle n'est rattachée à aucun modèle.
+
 ## Fichiers hors contrat
 
 **Qu'est-ce que le tableau de bord lit mal ?**
@@ -1061,6 +1085,7 @@ nourrit :
 | Calendrier | `activities/*.md` | synchronisation |
 | Rapports | `rapports/*.md` | coach |
 | Nutrition | `nutrition/<date>_nutrition.md` | nutritionniste |
+| Hypothèses | aucun fichier du workspace : les modules de calcul (`scripts/arc_*.py`) | — |
 
 Chacun de ces fichiers s'ouvre par un bloc de données décrit par le
 [contrat de données](../skills/workspace-data-contract.md) : c'est ce bloc que le
