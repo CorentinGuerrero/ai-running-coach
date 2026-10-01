@@ -411,10 +411,27 @@ class Policy:
             # serait exécutée comme des commandes. Refus.
             if any(line.strip() == tag for line in match.group("body").split("\n")):
                 return None
-        return match.group("cmd").strip()
+        return self._normalize_command(match.group("cmd").strip())
+
+    def _normalize_command(self, command: str) -> str:
+        """Deux écritures inoffensives, très fréquentes chez les modèles, ramenées à la forme
+        canonique AVANT tout contrôle :
+        - `… 2>&1` en fin de commande : fusionne la sortie d'erreur dans la sortie standard,
+          aucune écriture de fichier ;
+        - chemin absolu d'un script du workspace (`python3 /…/ws/scripts/arc_log.py`) : même
+          script que `python3 scripts/arc_log.py` (le chemin doit rester DANS le workspace).
+        """
+        command = re.sub(r"[ \t]+2>&1[ \t]*$", "", command)
+        match = re.match(r"^(python3[ \t]+)(/\S+)(.*)$", command, re.S)
+        if match:
+            root = str(self.workspace) + os.sep
+            script = os.path.normpath(match.group(2))
+            if script.startswith(root):
+                command = match.group(1) + script[len(root):] + match.group(3)
+        return command
 
     def _shell(self, command: str) -> str:
-        command = command.strip()
+        command = self._normalize_command(command.strip())
         inner = self._stdin_command(command)
         if inner is not None:
             if any(ch in SHELL_META for ch in inner) or COMMENT_RE.search(inner):

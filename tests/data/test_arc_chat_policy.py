@@ -484,3 +484,29 @@ class SkillScriptsPolicyTest(PolicyBase):
                         "python3 skills/session-parts-analyzer/scripts/analyze_session_parts.py --output /tmp/x.json",
                         "python3 scripts/arc_race_debrief.py debrief --plan /etc/passwd"):
             self.assertEqual(self.sh(command), "deny", command)
+
+
+class ShellNormalizationTest(PolicyBase):
+    """Écritures inoffensives et fréquentes (observées en essai réel) : `2>&1` final, chemin
+    absolu d'un script du workspace. Toute autre redirection reste refusée."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_2_vers_1_final_accepte(self):
+        self.assertEqual(self.sh("python3 scripts/arc_index.py gear 2>&1"), "allow")
+        self.assertEqual(self.sh("python3 scripts/arc_guardrails.py check --week planning/S.md --memory 2>&1"), "allow")
+
+    def test_chemin_absolu_du_workspace_accepte(self):
+        self.assertEqual(self.sh(f"python3 {self.ws}/scripts/arc_log.py --help"), "allow")
+        self.assertEqual(self.sh(f"echo '{{}}' | python3 {self.ws}/scripts/arc_log.py"), "allow")
+
+    def test_autres_redirections_et_chemins_refuses(self):
+        for command in ("python3 scripts/arc_index.py gear 2>&1 > /tmp/x",
+                        "python3 scripts/arc_index.py gear 2>/tmp/err",
+                        "python3 scripts/arc_index.py gear 1>&2",
+                        "python3 scripts/arc_index.py gear 2>&1; rm x",
+                        "python3 scripts/arc_index.py gear 2>&1 | head -40",
+                        "python3 /etc/scripts/arc_log.py",
+                        f"python3 {self.ws}/../x/scripts/arc_log.py"):
+            self.assertEqual(self.sh(command), "deny", command)
