@@ -7,5 +7,6 @@ export function navItems(settings) {
     ["", "Aujourd'hui"], ["forme", "Forme & charge"], ["analyse", "Analyse"], ["sante", "Santé"], ["semaine", "Semaine"],
     ["seances", "Séances"], ["performance", "Performance"], ["materiel", "Matériel"], ["trail-shape", "Trail Shape"], ["calendrier", "Calendrier"],
     ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
+    ["hypotheses", "Hypothèses"],
   ];
 }

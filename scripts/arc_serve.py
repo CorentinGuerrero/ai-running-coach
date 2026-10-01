@@ -653,7 +653,9 @@ def api_compliance_trend(store: Store, q: dict, weeks: int = 4) -> list:
 
 
 def api_activities(store: Store, q: dict) -> dict:
-    limit = min(500, int(q.get("limit", ["200"])[0])) if q.get("limit", ["200"])[0].isdigit() else 200
+    # Plafond large : la vue Séances charge tout l'historique d'un coup et pagine
+    # côté navigateur — 500 tronquait silencieusement deux ans d'entraînement.
+    limit = min(10000, int(q.get("limit", ["200"])[0])) if q.get("limit", ["200"])[0].isdigit() else 200
     return {"activities": store.rows(
         "SELECT id, date, sport, name, location, distance_m, duration_s, elevation_gain_m, avg_hr_bpm, "
         "max_hr_bpm, recovery_hr_bpm, te_aerobic, load, load_source, vo2max_est, arc_version, "

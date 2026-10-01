@@ -86,6 +86,76 @@ function readout(el, html) {
 }
 
 // ---------------------------------------------------------------------------
+// Listes longues : recherche, tri et pagination côté navigateur
+// ---------------------------------------------------------------------------
+
+// Comparaison insensible à la casse ET aux accents (« eze » trouve « Èze »).
+const fold = (s) => String(s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+const CHEVRON = {
+  left: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>`,
+  right: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg>`,
+  sort: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3-3 3 3M5 10l3 3 3-3"/></svg>`,
+  up: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg>`,
+  down: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>`,
+};
+
+/** Découpe `items` en pages ; `page` est ramenée dans les bornes (filtre plus strict = moins de pages). */
+function paginate(items, page, size) {
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const p = Math.min(Math.max(1, page || 1), pages);
+  const start = (p - 1) * size;
+  return { page: p, pages, from: items.length ? start + 1 : 0, to: Math.min(items.length, start + size), slice: items.slice(start, start + size) };
+}
+
+/** Pages affichées : première, dernière, la courante et ses voisines ; « … » entre deux trous. */
+function pageWindow(page, pages) {
+  const keep = new Set([1, pages, page - 1, page, page + 1].filter((n) => n >= 1 && n <= pages));
+  const out = [];
+  let prev = 0;
+  for (const n of [...keep].sort((a, b) => a - b)) {
+    if (n - prev > 1) out.push(null);
+    out.push(n);
+    prev = n;
+  }
+  return out;
+}
+
+/** Pagination : boutons `data-page`, à câbler par délégation par la vue. Rien sous une seule page. */
+function pagerHtml(pg, total, label) {
+  if (pg.pages <= 1) return "";
+  const nums = pageWindow(pg.page, pg.pages).map((n) => (n === null
+    ? `<span class="pager__gap" aria-hidden="true">…</span>`
+    : `<button type="button" class="pager__num" data-page="${n}" ${n === pg.page ? `aria-current="page"` : ""} aria-label="Page ${n}">${n}</button>`)).join("");
+  return `<nav class="pager" aria-label="${F.esc(label)}">
+    <p class="pager__range"><strong>${F.num(pg.from)}–${F.num(pg.to)}</strong> sur ${F.num(total)}</p>
+    <div class="pager__pages">
+      <button type="button" class="pager__step" data-page="${pg.page - 1}" ${pg.page === 1 ? "disabled" : ""}>${CHEVRON.left}<span>Précédente</span></button>
+      ${nums}
+      <button type="button" class="pager__step" data-page="${pg.page + 1}" ${pg.page === pg.pages ? "disabled" : ""}><span>Suivante</span>${CHEVRON.right}</button>
+    </div></nav>`;
+}
+
+/** En-tête de colonne triable : un bouton `data-sort` (la vue décide du sens). */
+function sortTh(key, label, state, num = true, cls = "") {
+  const on = state.sort === key;
+  const aria = on ? (state.dir === 1 ? "ascending" : "descending") : "none";
+  return `<th scope="col" class="${[num ? "num" : "", cls].filter(Boolean).join(" ")}" aria-sort="${aria}"><button type="button" class="th-sort${on ? " is-on" : ""}" data-sort="${key}">${label}${on ? (state.dir === 1 ? CHEVRON.up : CHEVRON.down) : CHEVRON.sort}</button></th>`;
+}
+
+/** Champ de recherche d'une liste longue (filtré à la frappe, sans recharger la vue). */
+function searchField(id, value, placeholder, label) {
+  return `<label class="search"><span class="visually-hidden">${F.esc(label)}</span>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
+    <input type="search" id="${id}" value="${F.esc(value)}" placeholder="${F.esc(placeholder)}" autocomplete="off" spellcheck="false"></label>`;
+}
+
+const debounce = (fn, ms = 140) => {
+  let t = null;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+};
+
+// ---------------------------------------------------------------------------
 // Conformité plan vs réalisé (#33)
 // ---------------------------------------------------------------------------
 
@@ -767,7 +837,7 @@ async function viewForm(params) {
 
   const periods = [[90, "3 mois"], [180, "6 mois"], [365, "1 an"]].map(([d, l]) => `<a class="seg ${d === days ? "is-on" : ""}" aria-current="${d === days ? "true" : "false"}" href="#/forme?jours=${d}">${l}</a>`).join("");
   const last = series[series.length - 1];
-  main.innerHTML = `${header("Forme & charge", `Charge par séance : TRIMP (fréquence cardiaque), repli sur l'effort perçu. <a href="#/performance">Hypothèses des modèles</a>`)}
+  main.innerHTML = `${header("Forme & charge", `Charge par séance : TRIMP (fréquence cardiaque), repli sur l'effort perçu. ${hypLink("charge")}`)}
     <div class="toolbar">${periods}</div>
     <section class="band"><h2>Courbe de forme</h2>
       <p class="legend"><span class="legend__item"><span class="key key--fitness"></span>Condition (42 j)</span> <span class="legend__item"><span class="key key--fatigue"></span>Fatigue (7 j)</span> <span class="legend__item"><span class="key key--form"></span>Forme</span></p>
@@ -856,7 +926,7 @@ async function viewAnalyse(params) {
         + "récupérer depuis Garmin, puis relancez l'indexation.");
     return;
   }
-  main.innerHTML = `${header("Analyse", `Tendances calculées à partir des échantillons FIT ingérés. <a href="#/performance">Hypothèses des modèles</a>`)}
+  main.innerHTML = `${header("Analyse", `Tendances calculées à partir des échantillons FIT ingérés. ${hypLink()}`)}
     <div class="toolbar">${periods}</div>
     ${polarisationHtml}
     ${decouplingHtml}
@@ -866,6 +936,7 @@ async function viewAnalyse(params) {
     ${energyHtml}
     ${segmentsHtml}`;
   wirePolarisationChart(load.polarisation_weeks);
+  wireClimbSegments(segments.segments);
   if (decouplingChart) {
     attachCursor($("#c-decoupling"), decouplingChart, (i) => {
       const p = decouplingPoints[i];
@@ -928,25 +999,80 @@ async function viewAnalyse(params) {
  * d'ordre côté serveur qui passerait inaperçu. */
 function climbSegmentsSection(segments) {
   if (!segments || !segments.length) return "";
-  const sorted = segments.slice().sort((a, b) => b.occurrences - a.occurrences);
-  const rows = sorted.map((s) => {
-    const label = `${s.location || "Montée"} — ${F.distance(s.distance_m, 2)}, +${F.elevation(s.gain_m)} (depuis ${F.dayShort(s.first_seen_date)})`;
-    return `<tr><td><a href="#/montee/${s.segment_id}">${F.esc(label)}</a></td>
-    <td class="num">${F.distance(s.distance_m, 2)}</td><td class="num">+${F.elevation(s.gain_m)}</td>
-    <td class="num">${F.num(s.avg_grade * 100, 1)} % <span class="tag">${F.esc(s.grade_class)}</span></td>
-    <td class="num">${F.num(s.occurrences)}</td>
-    <td class="num">${s.best_time_elapsed_s != null ? F.clockShort(s.best_time_elapsed_s) : "—"}</td></tr>`;
-  }).join("");
-  return `<section class="band"><h2>Segments de montée (${segments.length})</h2>
+  const many = segments.length > CLIMB_SEGMENTS_PAGE_SIZE;
+  return `<section class="band" id="segments"><h2>Segments de montée (${F.num(segments.length)})</h2>
     <p class="muted">Une même montée, reconnue d'une séance à l'autre (position GPS, ou à défaut profil
       distance/D+/pente — #49) : au moins deux occurrences pour apparaître ici, toutes périodes confondues
       (pas seulement la fenêtre choisie ci-dessus). Détail complet, occurrence par occurrence, dans
       l'historique de chaque segment.</p>
-    <div class="table-wrap"><table class="data data--compact"><thead><tr>
-      <th scope="col">Lieu</th><th scope="col" class="num">Distance</th><th scope="col" class="num">D+</th>
-      <th scope="col" class="num">Pente moy.</th><th scope="col" class="num">Occurrences</th>
-      <th scope="col" class="num">Meilleur temps</th></tr></thead>
-      <tbody>${rows}</tbody></table></div></section>`;
+    ${many ? `<div class="toolbar toolbar--list">${searchField("seg-q", "", "Lieu de la montée", "Filtrer les segments par lieu")}</div>` : ""}
+    <div id="seg-results" class="results"></div></section>`;
+}
+
+// Segments de montée : la liste grandit avec chaque nouveau lieu fréquenté (plusieurs
+// centaines sur deux ans de trail). Tri par occurrences par défaut (les montées les plus
+// régulièrement gravies d'abord — `climb_segment_list` trie déjà ainsi côté serveur, le tri
+// explicite ici protège l'UI d'un changement d'ordre qui passerait inaperçu), filtre par
+// lieu et pages de 15, sans toucher à l'URL : la vue Analyse porte déjà sa fenêtre.
+const CLIMB_SEGMENTS_PAGE_SIZE = 15;
+const CLIMB_SORT = {
+  lieu: (s) => fold(s.location || ""), distance: (s) => s.distance_m || 0, dplus: (s) => s.gain_m || 0,
+  pente: (s) => s.avg_grade || 0, occurrences: (s) => s.occurrences || 0,
+  temps: (s) => (s.best_time_elapsed_s != null ? -s.best_time_elapsed_s : -Infinity),
+};
+
+function wireClimbSegments(segments) {
+  const results = $("#seg-results");
+  if (!results) return;
+  const st = { q: "", sort: "occurrences", dir: -1, page: 1 };
+  const render = () => {
+    const f = fold(st.q.trim());
+    const key = CLIMB_SORT[st.sort];
+    const rows = segments.filter((s) => !f || fold(s.location || "Montée").includes(f))
+      .sort((a, b) => ((key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) || (b.occurrences - a.occurrences)) * st.dir);
+    const pg = paginate(rows, st.page, CLIMB_SEGMENTS_PAGE_SIZE);
+    st.page = pg.page;
+    if (!rows.length) {
+      results.innerHTML = note(`Aucun segment dont le lieu contient « ${F.esc(st.q.trim())} ».`);
+      return;
+    }
+    const body = pg.slice.map((s) => {
+      const label = `${s.location || "Montée"} — ${F.distance(s.distance_m, 2)}, +${F.elevation(s.gain_m)} (depuis ${F.dayShort(s.first_seen_date)})`;
+      return `<tr><td><a href="#/montee/${s.segment_id}">${F.esc(label)}</a></td>
+      <td class="num col-opt">${F.distance(s.distance_m, 2)}</td><td class="num col-opt">+${F.elevation(s.gain_m)}</td>
+      <td class="num col-opt">${F.num(s.avg_grade * 100, 1)} % <span class="tag">${F.esc(s.grade_class)}</span></td>
+      <td class="num">${F.num(s.occurrences)}</td>
+      <td class="num">${s.best_time_elapsed_s != null ? F.clockShort(s.best_time_elapsed_s) : "—"}</td></tr>`;
+    }).join("");
+    // « Meilleur temps » : clé négative, l'ordre décroissant par défaut met donc le plus rapide d'abord.
+    results.innerHTML = `${st.q.trim() ? `<p class="results__sum" aria-live="polite"><strong>${F.num(rows.length)} segment${rows.length > 1 ? "s" : ""}</strong> sur ${F.num(segments.length)}</p>` : ""}
+      <div class="table-wrap"><table class="data data--compact data--segments"><thead><tr>
+      ${sortTh("lieu", "Lieu", st, false)}${sortTh("distance", "Distance", st, true, "col-opt")}${sortTh("dplus", "D+", st, true, "col-opt")}
+      ${sortTh("pente", "Pente moy.", st, true, "col-opt")}${sortTh("occurrences", `<span class="lbl-long">Occurrences</span><span class="lbl-short">Occ.</span>`, st)}${sortTh("temps", `<span class="lbl-long">Meilleur temps</span><span class="lbl-short">Meilleur</span>`, st)}</tr></thead>
+      <tbody>${body}</tbody></table></div>
+      ${pagerHtml(pg, rows.length, "Pages de segments de montée")}`;
+  };
+  render();
+  $("#seg-q")?.addEventListener("input", debounce((e) => { st.q = e.target.value; st.page = 1; render(); }));
+  results.addEventListener("click", (e) => {
+    const sortBtn = e.target.closest("[data-sort]");
+    if (sortBtn) {
+      const k = sortBtn.dataset.sort;
+      st.dir = st.sort === k ? -st.dir : (k === "lieu" ? 1 : -1);
+      st.sort = k;
+      st.page = 1;
+      render();
+      results.querySelector(`[data-sort="${k}"]`)?.focus();
+      return;
+    }
+    const pageBtn = e.target.closest("[data-page]");
+    if (pageBtn && !pageBtn.disabled) {
+      st.page = Number(pageBtn.dataset.page);
+      render();
+      $("#segments").scrollIntoView({ block: "start" });
+      results.querySelector(".pager [aria-current]")?.focus({ preventScroll: true });
+    }
+  });
 }
 
 /** Section « Polarisation 80/20 » de la vue Analyse (#43, #50) : une barre empilée par
@@ -1000,7 +1126,7 @@ function polarisationSection(weeks, hrZonesReason) {
     : "Pas encore de semaine avec échantillons FIT.";
   return `<section class="band"><h2>Polarisation 80/20</h2>
     <p class="muted">Part du temps en zone FC facile, modérée et difficile — seuils propres à la méthode de
-      zones du profil (Karvonen, FC au seuil ou %FC max, voir <a href="#/performance">Hypothèses des modèles</a>),
+      zones du profil (Karvonen, FC au seuil ou %FC max, voir ${hypLink("zones")}),
       sur les semaines avec séances à échantillons FIT.</p>
     <p class="legend"><span class="legend__item"><span class="key key--polar-low"></span>Facile</span> <span class="legend__item"><span class="key key--polar-moderate"></span>Modérée</span> <span class="legend__item"><span class="key key--polar-high"></span>Difficile</span></p>
     <div class="chart-host" id="c-polar"><svg class="polar-chart" viewBox="0 0 ${totalW} ${chartH}">${groups}</svg></div>
@@ -1281,29 +1407,135 @@ async function viewWeek(params) {
 // Vues : Séances, détail
 // ---------------------------------------------------------------------------
 
+// Séances : l'historique entier dépasse vite les 500 lignes. La vue garde TOUT
+// en mémoire (une seule requête, déjà en cache), puis recherche, filtre, trie et
+// pagine côté navigateur — l'état vit dans l'URL (`history.replaceState`, jamais
+// `location.hash` : un `hashchange` relancerait la vue et volerait le focus du
+// champ de recherche à chaque frappe). Trié par date, le tableau se découpe par
+// mois, avec les totaux du mois sur TOUT le filtre (pas seulement la page).
+const SESSIONS_PAGE_SIZE = 50;
+const MONTH_LONG = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" });
+const SESSION_SORT = {
+  date: (a) => a.date, distance: (a) => a.distance_m || 0, duree: (a) => a.duration_s || 0,
+  dplus: (a) => a.elevation_gain_m || 0, fc: (a) => a.avg_hr_bpm || 0, charge: (a) => a.load || 0,
+};
+
+function sessionTotals(rows) {
+  let distance = 0, duration = 0, gain = 0;
+  for (const a of rows) { distance += a.distance_m || 0; duration += a.duration_s || 0; gain += a.elevation_gain_m || 0; }
+  return { n: rows.length, distance, duration, gain };
+}
+
+function sessionRow(a, trail) {
+  return `<tr><td class="nowrap">${F.dayShort(a.date)} <span class="muted year">${a.date.slice(0, 4)}</span></td><td class="session-name"><a href="#/seance/${a.id}">${F.esc(a.name || F.SPORT[a.sport] || a.sport)}</a> <span class="muted">${F.SPORT[a.sport] || a.sport}</span>${a.arc_version === 0 ? ` <span class="tag" title="Fichier hors contrat : lecture approximative">approx.</span>` : ""}</td>
+      <td class="num">${F.distance(a.distance_m)}</td><td class="num col-opt">${F.duration(a.duration_s)}</td><td class="num">${trail ? F.elevation(a.elevation_gain_m) : F.pace(a.distance_m, a.duration_s)}</td>
+      <td class="num col-opt">${F.num(a.avg_hr_bpm)}</td><td class="num col-opt">${a.recovery_hr_bpm != null ? F.num(a.recovery_hr_bpm) : `<span class="muted" title="non mesuré">—</span>`}</td><td class="num col-opt">${F.num(a.load)}${a.load_source === "estimated" ? `<span class="muted" title="Charge estimée : ni FC ni effort perçu">*</span>` : ""}</td></tr>`;
+}
+
 async function viewSessions(params) {
-  const { activities } = await api("activities?limit=500");
-  const sport = params.get("sport") || "";
-  const sort = params.get("tri") || "date";
-  const dir = params.get("sens") === "asc" ? 1 : -1;
+  const { activities } = await api("activities?limit=10000");
   const trail = SUMMARY.settings.sport === "trail";
-  let rows = activities.filter((a) => !sport || a.sport === sport);
-  const key = { date: (a) => a.date, distance: (a) => a.distance_m || 0, duree: (a) => a.duration_s || 0, dplus: (a) => a.elevation_gain_m || 0, fc: (a) => a.avg_hr_bpm || 0, charge: (a) => a.load || 0 }[sort] || ((a) => a.date);
-  rows = rows.slice().sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * dir);
-  const sports = [...new Set(activities.map((a) => a.sport))];
-  const th = (k, label, num = true) => {
-    const on = sort === k;
-    const next = on && dir === -1 ? "asc" : "desc";
-    return `<th scope="col" class="${num ? "num" : ""}" aria-sort="${on ? (dir === 1 ? "ascending" : "descending") : "none"}"><a href="#/seances?${new URLSearchParams({ sport, tri: k, sens: next })}">${label}${on ? (dir === 1 ? " ↑" : " ↓") : ""}</a></th>`;
+  const sports = [...new Set(activities.map((a) => a.sport))].sort((a, b) => (F.SPORT[a] || a).localeCompare(F.SPORT[b] || b, "fr"));
+  const years = [...new Set(activities.map((a) => a.date.slice(0, 4)))].sort().reverse();
+  const st = {
+    q: params.get("q") || "", sport: params.get("sport") || "", year: params.get("annee") || "",
+    sort: SESSION_SORT[params.get("tri")] ? params.get("tri") : "date",
+    dir: params.get("sens") === "asc" ? 1 : -1, page: Number(params.get("page")) || 1,
   };
-  main.innerHTML = `${header("Séances", `${activities.length} séances indexées.`)}
-    <div class="toolbar"><label class="select">Sport : <select id="sport"><option value="">Tous</option>${sports.map((s) => `<option value="${s}" ${s === sport ? "selected" : ""}>${F.SPORT[s] || s}</option>`).join("")}</select></label></div>
-    ${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr>${th("date", "Date", false)}<th scope="col">Séance</th>${th("distance", "Distance")}${th("duree", "Durée")}${trail ? th("dplus", "D+") : `<th scope="col" class="num">Allure</th>`}${th("fc", "FC moy")}<th scope="col" class="num">HRR</th>${th("charge", "Charge")}</tr></thead>
-    <tbody>${rows.map((a) => `<tr><td class="nowrap">${F.dayShort(a.date)} <span class="muted">${a.date.slice(0, 4)}</span></td><td><a href="#/seance/${a.id}">${F.esc(a.name || F.SPORT[a.sport] || a.sport)}</a> <span class="muted">${F.SPORT[a.sport] || a.sport}</span>${a.arc_version === 0 ? ` <span class="tag" title="Fichier hors contrat : lecture approximative">approx.</span>` : ""}</td>
-      <td class="num">${F.distance(a.distance_m)}</td><td class="num">${F.duration(a.duration_s)}</td><td class="num">${trail ? F.elevation(a.elevation_gain_m) : F.pace(a.distance_m, a.duration_s)}</td>
-      <td class="num">${F.num(a.avg_hr_bpm)}</td><td class="num">${a.recovery_hr_bpm != null ? F.num(a.recovery_hr_bpm) : `<span class="muted" title="non mesuré">—</span>`}</td><td class="num">${F.num(a.load)}${a.load_source === "estimated" ? `<span class="muted" title="Charge estimée : ni FC ni effort perçu">*</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
-    : empty("Aucune séance", "Les fichiers <code>activities/AAAA-MM-JJ_&lt;sport&gt;.md</code> apparaissent ici une fois indexés.")}`;
-  $("#sport").addEventListener("change", (e) => { location.hash = `#/seances?${new URLSearchParams({ sport: e.target.value, tri: sort, sens: dir === 1 ? "asc" : "desc" })}`; });
+  if (!activities.length) {
+    main.innerHTML = `${header("Séances")}${empty("Aucune séance", "Les fichiers <code>activities/AAAA-MM-JJ_&lt;sport&gt;.md</code> apparaissent ici une fois indexés.")}`;
+    return;
+  }
+  const total = sessionTotals(activities);
+  main.innerHTML = `${header("Séances", `${F.num(total.n)} séances indexées, depuis le ${F.dateLong(activities[activities.length - 1].date)}.`)}
+    <div class="toolbar toolbar--list">
+      ${searchField("s-q", st.q, "Nom ou lieu de la séance", "Rechercher une séance")}
+      <label class="select">Sport <select id="s-sport"><option value="">Tous</option>${sports.map((s) => `<option value="${s}" ${s === st.sport ? "selected" : ""}>${F.SPORT[s] || s}</option>`).join("")}</select></label>
+      <label class="select select--tight">Année <select id="s-year"><option value="">Toutes</option>${years.map((y) => `<option ${y === st.year ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+    </div>
+    <div id="s-results" class="results"></div>`;
+
+  const results = $("#s-results");
+  const sync = () => {
+    const qs = new URLSearchParams();
+    if (st.q) qs.set("q", st.q);
+    if (st.sport) qs.set("sport", st.sport);
+    if (st.year) qs.set("annee", st.year);
+    if (st.sort !== "date") qs.set("tri", st.sort);
+    if (st.dir === 1) qs.set("sens", "asc");
+    if (st.page > 1) qs.set("page", String(st.page));
+    const q = qs.toString();
+    history.replaceState(null, "", `#/seances${q ? `?${q}` : ""}`);
+  };
+  const render = () => {
+    const needle = fold(st.q.trim());
+    let rows = activities.filter((a) => (!st.sport || a.sport === st.sport) && (!st.year || a.date.startsWith(st.year))
+      && (!needle || fold(`${a.name || ""} ${a.location || ""} ${F.SPORT[a.sport] || a.sport}`).includes(needle)));
+    const key = SESSION_SORT[st.sort];
+    rows = rows.slice().sort((a, b) => ((key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) || (a.id - b.id)) * st.dir);
+    const pg = paginate(rows, st.page, SESSIONS_PAGE_SIZE);
+    st.page = pg.page;
+    sync();
+    if (!rows.length) {
+      results.innerHTML = empty("Aucune séance ne correspond", "Élargissez la recherche, ou choisissez « Tous » / « Toutes » dans les filtres.");
+      return;
+    }
+    const sum = sessionTotals(rows);
+    const filtered = rows.length !== activities.length;
+    const head = `<thead><tr>${sortTh("date", "Date", st, false)}<th scope="col">Séance</th>${sortTh("distance", "Distance", st)}${sortTh("duree", "Durée", st, true, "col-opt")}${trail ? sortTh("dplus", "D+", st) : `<th scope="col" class="num">Allure</th>`}${sortTh("fc", "FC moy", st, true, "col-opt")}<th scope="col" class="num col-opt">HRR</th>${sortTh("charge", "Charge", st, true, "col-opt")}</tr></thead>`;
+    let bodies;
+    if (st.sort === "date") {
+      // Groupes par mois ; totaux calculés sur toutes les lignes filtrées du mois.
+      const byMonth = new Map();
+      for (const a of rows) {
+        const m = a.date.slice(0, 7);
+        if (!byMonth.has(m)) byMonth.set(m, []);
+        byMonth.get(m).push(a);
+      }
+      const groups = [];
+      for (const a of pg.slice) {
+        const m = a.date.slice(0, 7);
+        if (!groups.length || groups[groups.length - 1].m !== m) groups.push({ m, rows: [] });
+        groups[groups.length - 1].rows.push(a);
+      }
+      bodies = groups.map((g, i) => {
+        const t = sessionTotals(byMonth.get(g.m));
+        const cont = i === 0 && pg.page > 1 && pg.slice[0] !== byMonth.get(g.m)[0];
+        return `<tbody><tr class="month"><th scope="rowgroup" colspan="8"><span class="month__name">${MONTH_LONG.format(F.parseDate(`${g.m}-01`))}${cont ? ` <span class="muted">(suite)</span>` : ""}</span>
+          <span class="month__totals">${F.num(t.n)} séance${t.n > 1 ? "s" : ""} · ${F.distance(t.distance, 0)} · ${F.hours(t.duration)}${trail ? ` · ${F.elevation(t.gain)} D+` : ""}</span></th></tr>
+          ${g.rows.map((a) => sessionRow(a, trail)).join("")}</tbody>`;
+      }).join("");
+    } else {
+      bodies = `<tbody>${pg.slice.map((a) => sessionRow(a, trail)).join("")}</tbody>`;
+    }
+    results.innerHTML = `<p class="results__sum" aria-live="polite"><strong>${F.num(sum.n)} séance${sum.n > 1 ? "s" : ""}</strong>${filtered ? ` sur ${F.num(activities.length)}` : ""} · ${F.distance(sum.distance, 0)} · ${F.hours(sum.duration)}${trail ? ` · ${F.elevation(sum.gain)} D+` : ""}</p>
+      <div class="table-wrap"><table class="data data--sessions">${head}${bodies}</table></div>
+      ${pagerHtml(pg, rows.length, "Pages de séances")}`;
+  };
+  const go = (patch, { resetPage = true, scroll = false } = {}) => {
+    Object.assign(st, patch);
+    if (resetPage && !("page" in patch)) st.page = 1;
+    render();
+    if (scroll) results.scrollIntoView({ block: "start" });
+  };
+  render();
+  $("#s-q").addEventListener("input", debounce((e) => go({ q: e.target.value })));
+  $("#s-sport").addEventListener("change", (e) => go({ sport: e.target.value }));
+  $("#s-year").addEventListener("change", (e) => go({ year: e.target.value }));
+  results.addEventListener("click", (e) => {
+    const sortBtn = e.target.closest("[data-sort]");
+    if (sortBtn) {
+      const k = sortBtn.dataset.sort;
+      go({ sort: k, dir: st.sort === k ? -st.dir : -1 });
+      results.querySelector(`[data-sort="${k}"]`)?.focus();
+      return;
+    }
+    const pageBtn = e.target.closest("[data-page]");
+    if (pageBtn && !pageBtn.disabled) {
+      go({ page: Number(pageBtn.dataset.page) }, { scroll: true });
+      results.querySelector(".pager [aria-current]")?.focus({ preventScroll: true });
+    }
+  });
 }
 
 async function viewSession(id) {
@@ -1571,7 +1803,7 @@ function descentSection(descent) {
       des fortes descentes en conditions réelles de trail : une valeur bien sous 1,00× sur les pentes
       les plus raides est normale (prudence, terrain technique), pas un mauvais résultat. C'est sa
       <strong>tendance dans le temps, à pente égale</strong>, qui compte — jamais une comparaison entre
-      classes de pente différentes. <a href="#/performance">Hypothèses des modèles</a></p>
+      classes de pente différentes. ${hypLink("descente")}</p>
     <div class="table-wrap"><table class="data data--compact"><thead><tr>
       <th scope="col">Pente</th><th scope="col" class="num">Pente moy.</th><th scope="col" class="num">Allure</th>
       <th scope="col" class="num">Distance</th><th scope="col" class="num">Durée</th>
@@ -1636,7 +1868,7 @@ function energySection(energy, noFitSamples) {
   return `<section class="band"><h2>Dépense énergétique</h2>
     <p class="muted">Garmin (<code>calories_kcal</code>) reste la référence par défaut partout ailleurs
       (nutrition, rapports) ; le modèle indépendant n'est qu'un contrôle, jamais un remplacement.
-      <a href="#/performance">Hypothèses des modèles</a></p>
+      ${hypLink("energie")}</p>
     <dl class="facts facts--inline">
       <div><dt>Garmin (référence)</dt><dd>${hasGarmin ? F.kcal(energy.garmin_kcal) : "non mesuré"}</dd></div>
       <div><dt>Modèle</dt><dd>${F.kcal(energy.model_kcal)}</dd></div>
@@ -1877,7 +2109,7 @@ function slopeModelSection(model, band) {
       Repli sur le modèle générique (Minetti, trait pointillé) quand l'historique manque sur une classe.
       La bande grisée est un repère de dispersion (quartiles), pas un intervalle de confiance statistique.
       <a href="#/performance?bande=${other}">Voir la bande « ${otherLabel} »</a> ·
-      <a href="#/performance">Hypothèses des modèles</a></p>
+      ${hypLink("pente")}</p>
     <p class="legend"><span class="legend__item"><span class="key key--slope-band"></span>Dispersion (quartiles)</span>
       <span class="legend__item"><span class="key key--slope"></span>Personnel</span>
       <span class="legend__item"><span class="key key--slope-generic"></span>Générique (Minetti)</span>
@@ -1889,11 +2121,7 @@ function slopeModelSection(model, band) {
 
 async function viewPerformance(params) {
   const band = params && params.get("bande") === "all" ? "all" : "endurance";
-  // Hypothèses (~100 Ko de texte) : `/api/assumptions`, chargé ici seulement — plus
-  // dans `/api/summary`, lu à chaque ouverture du tableau de bord.
-  const [p, slope, hyp] = await Promise.all([
-    api("performance"), api(`slope-model?band=${band}`), api("assumptions").catch(() => ({ assumptions: {} })),
-  ]);
+  const [p, slope] = await Promise.all([api("performance"), api(`slope-model?band=${band}`)]);
   const trail = p.sport === "trail";
   let chartHtml = empty("Pas encore d'estimation", "La VO2max effective s'estime sur les séances de course d'au moins 20 minutes, à plus de 70 % de la FC max, avec distance et FC moyenne.");
   let c = null;
@@ -1904,7 +2132,6 @@ async function viewPerformance(params) {
   const names = { 5000: "5 km", 10000: "10 km", 21097.5: "Semi-marathon", 42195: "Marathon" };
   const pred = p.predictions.map((r) => `<tr><th scope="row">${r.tag === "objective" ? `${F.esc(p.objective.name || "Objectif")} <span class="muted">${F.distance(r.distance_m, 1)}${trail && r.effort_distance_m !== Math.round(r.distance_m) ? ` · effort ${F.distance(r.effort_distance_m, 0)}` : ""}</span>` : names[r.distance_m] || F.distance(r.distance_m)}</th><td class="num">${F.clock(r.vdot_s)}</td><td class="num">${F.clock(r.riegel_s)}</td></tr>`).join("");
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
-  const assumptions = hyp.assumptions || {};
   const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
   const { html: indexHtml, charts: indexCharts } = performanceIndexSection(SUMMARY.performance_index);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}
@@ -1915,7 +2142,7 @@ async function viewPerformance(params) {
     ${slopeHtml}
     <p class="note">Kilométrage des chaussures, équipement et inspections : <a href="#/materiel">vue Matériel</a>.</p>
     ${indexHtml}
-    <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
+    <p class="note">Formules, seuils et limites connues de chaque estimation : ${hypLink("performance", "Hypothèses des modèles")}.</p>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
   if (slopeChart) attachCursor($("#c-slope"), slopeChart, (i) => {
     const b = slopeBins[i];
@@ -1930,6 +2157,207 @@ async function viewPerformance(params) {
 }
 
 // ---------------------------------------------------------------------------
+// Vue : Hypothèses des modèles — une référence lisible, plus un mur de texte
+// ---------------------------------------------------------------------------
+
+// `/api/assumptions` (~100 Ko) agrège les `ASSUMPTIONS` de chaque module Python : les
+// clés préfixées (`vam_`, `descent_`…) viennent d'un module dédié, les autres
+// d'`arc_metrics`/`arc_gap` (voir `arc_index.py`, agrégation des hypothèses). Le
+// regroupement par modèle et les libellés ne vivent qu'ici ; une clé inconnue tombe
+// dans « Autres » avec un libellé dérivé de son nom — jamais masquée.
+const HYP_FAMILIES = [
+  { id: "charge", title: "Charge & forme", keys: ["trimp", "trimp_sex_default", "srpe", "form", "acwr", "monotony", "compliance"] },
+  { id: "performance", title: "Performance", keys: ["vo2max", "prediction", "trail_equivalence", "records", "effort_km"] },
+  { id: "sante", title: "Santé & récupération", keys: ["hrv_baseline", "sleep_debt", "heat_acclimation"] },
+  { id: "zones", title: "Zones FC & foulée", keys: ["hr_zones", "gait"] },
+  { id: "nutrition", title: "Poids, sudation & ravitaillement", keys: ["weight_merge", "weight_trend", "sweat_rate", "fueling"] },
+  { id: "materiel", title: "Matériel", keys: ["gear_mileage", "equipment_usage", "gear_inspection"] },
+  { id: "gap", title: "Allure ajustée à la pente (GAP)", keys: ["model", "grade_source", "restricted_to_run_family", "split_distance_default", "noise_robustness", "stopped_samples"] },
+  { id: "decouplage", title: "Découplage aérobie", prefix: "decoupling_" },
+  { id: "vam", title: "Montées & VAM", prefix: "vam_" },
+  { id: "descente", title: "Efficacité en descente", prefix: "descent_" },
+  { id: "durabilite", title: "Durabilité", prefix: "durability_" },
+  { id: "pente", title: "Allure selon la pente", prefix: "slope_model_" },
+  { id: "energie", title: "Dépense énergétique", prefix: "energy_" },
+];
+const HYP_LABELS = {
+  trimp: "TRIMP de Banister", trimp_sex_default: "Sexe non renseigné", srpe: "Charge sans FC (session-RPE)",
+  form: "Condition, fatigue et forme", acwr: "Ratio fatigue / condition (ACWR)", monotony: "Monotonie et strain",
+  compliance: "Conformité plan vs réalisé", vo2max: "VO2max effective", prediction: "Prédictions de course",
+  trail_equivalence: "Équivalence plat en trail", records: "Records", effort_km: "Km-effort ITRA",
+  hrv_baseline: "Ligne de base HRV", sleep_debt: "Dette de sommeil", heat_acclimation: "Acclimatation à la chaleur",
+  hr_zones: "Zones FC et polarisation 80/20", gait: "Synthèse « Foulée »",
+  weight_merge: "Fusion des sources de poids", weight_trend: "Tendance du poids", sweat_rate: "Taux de sudation",
+  fueling: "Glucides par heure", gear_mileage: "Kilométrage des chaussures", equipment_usage: "Matériel hors chaussures",
+  gear_inspection: "Inspection photo", model: "Modèle de Minetti", grade_source: "Calcul de la pente",
+  split_distance_default: "Split sans distance", noise_robustness: "Sensibilité au bruit de pente",
+};
+const HYP_SUFFIX = {
+  model: "Modèle", restricted_to_run_family: "Course à pied uniquement", min_duration: "Durée minimale",
+  warmup: "Échauffement exclu", stopped_samples: "Arrêts exclus", steep_grade_and_walking: "Forte pente et marche",
+  hr_coverage: "Couverture FC", usable_running: "Temps réellement couru", grade_asymmetry: "Asymétrie de pente",
+  halves: "Découpage en moitiés", steady_effort: "Effort stable", whole_activity_ef: "EF de la séance entière",
+  detection: "Détection d'une montée", zigzag: "Simplification en zigzag", trim: "Rognage des extrémités",
+  merge: "Fusion de montées voisines", gap_segmentation: "Trous de signal", vam_basis: "Deux VAM par montée",
+  grade_classes: "Classes de pente", best_window: "Meilleures fenêtres", indicator: "Indicateur",
+  reference: "Allure de référence", thresholds: "Seuils de retenue", moving_only: "Temps de mouvement seul",
+  reading_gap_vs_ef: "Lire GAP et EF ensemble", mountain_long_runs: "Sorties longues en montagne",
+  portions: "Premier et dernier tiers", no_steady_effort_rule: "Sans règle d'effort stable", hr_by_third: "FC par tiers",
+  grade_bins: "Paniers de pente", population: "Séances retenues", walking: "Marche conservée",
+  robust_stats: "Statistiques robustes", recency: "Poids de l'ancienneté", aggregation_cost: "Une valeur par séance",
+  fallback: "Repli générique", smoothing: "Lissage", interpolation: "Interpolation", grade_clamp: "Bornage de la pente",
+  flat_band: "Bande « plat »", classification_smoothing: "Lissage du régime", segmentation: "Segmentation",
+  time_weighting: "Pondération par le temps", missing_speed: "Vitesse manquante", missing_elevation: "Altitude manquante",
+  mass_linearity: "Linéarité en masse", no_exception: "Entrées incomplètes", race_pacing_integration: "Plan de course",
+  delta_alert: "Seuil d'alerte d'écart", calibration: "Calibration personnelle",
+};
+
+/** Lien vers une famille d'hypothèses (`#/hypotheses?modele=<id>`), depuis n'importe quelle vue. */
+function hypLink(family, text = "Hypothèses des modèles") {
+  return `<a href="#/hypotheses${family ? `?modele=${family}` : ""}">${text}</a>`;
+}
+
+function hypLabel(key, family) {
+  if (HYP_LABELS[key]) return HYP_LABELS[key];
+  const suffix = family?.prefix && key.startsWith(family.prefix) ? key.slice(family.prefix.length) : key;
+  if (HYP_SUFFIX[suffix]) return HYP_SUFFIX[suffix];
+  const t = suffix.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+function hypGroups(assumptions) {
+  const used = new Set();
+  const groups = HYP_FAMILIES.map((f) => {
+    const keys = f.keys ? f.keys.filter((k) => k in assumptions) : Object.keys(assumptions).filter((k) => k.startsWith(f.prefix));
+    keys.forEach((k) => used.add(k));
+    return { ...f, entries: keys.map((k) => ({ key: k, label: hypLabel(k, f), text: assumptions[k] })) };
+  });
+  const rest = Object.keys(assumptions).filter((k) => !used.has(k));
+  if (rest.length) groups.push({ id: "autres", title: "Autres", entries: rest.map((k) => ({ key: k, label: hypLabel(k), text: assumptions[k] })) });
+  return groups.filter((g) => g.entries.length);
+}
+
+/** Phrases d'un texte d'hypothèse : coupe après « . » suivi d'une majuscule (jamais « et al. (2002 »). */
+function hypSentences(text) {
+  return String(text).split(/(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Ý«])/u);
+}
+
+/** Texte échappé, `code` rendu, termes recherchés surlignés (hors balises). */
+function hypInline(text, needle) {
+  let html = F.esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+  if (!needle) return html;
+  const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  return html.split(/(<[^>]+>)/).map((part) => (part.startsWith("<") ? part : part.replace(re, (m) => `<mark>${m}</mark>`))).join("");
+}
+
+/** Paragraphes d'environ 420 caractères : un bloc de 6 000 signes devient lisible sans changer un mot. */
+function hypParagraphs(sentences, needle) {
+  const paras = [];
+  let cur = "";
+  for (const sentence of sentences) {
+    cur = cur ? `${cur} ${sentence}` : sentence;
+    if (cur.length >= 420) { paras.push(cur); cur = ""; }
+  }
+  if (cur) paras.push(cur);
+  return paras.map((p) => `<p>${hypInline(p, needle)}</p>`).join("");
+}
+
+function hypEntry(e, needle, open) {
+  const [lead, ...rest] = hypSentences(e.text);
+  const words = rest.join(" ").split(/\s+/).filter(Boolean).length;
+  return `<article class="hyp" id="h-${e.key}">
+    <h3 class="hyp__title">${hypInline(e.label, needle)}</h3>
+    <p class="hyp__lead">${hypInline(lead, needle)}</p>
+    ${rest.length ? `<details class="hyp__more"${open ? " open" : ""}><summary>Détail <span class="muted">· ${F.num(words)} mots</span></summary>${hypParagraphs(rest, needle)}</details>` : ""}
+  </article>`;
+}
+
+async function viewHypotheses(params) {
+  const { assumptions = {} } = await api("assumptions");
+  const groups = hypGroups(assumptions);
+  const total = groups.reduce((n, g) => n + g.entries.length, 0);
+  if (!total) {
+    main.innerHTML = `${header("Hypothèses des modèles")}${empty("Aucune hypothèse indexée", "Relancez <code>scripts/dashboard.sh --rebuild</code> : l'index se reconstruit depuis les fichiers.")}`;
+    return;
+  }
+  // Un modèle à la fois (comme une page de documentation) : 94 hypothèses empilées faisaient
+  // une page de 20 000 px. La recherche, elle, parcourt TOUS les modèles.
+  const famOf = (id) => groups.find((g) => g.id === id) || groups[0];
+  const st = { q: params.get("q") || "", fam: famOf(params.get("modele")).id };
+  main.innerHTML = `${header("Hypothèses des modèles", `Ce que chaque calcul du tableau de bord suppose, et ses limites connues : des approximations d'entraînement, jamais des mesures. ${F.num(total)} hypothèses, regroupées par modèle.`)}
+    <div class="hyp-layout">
+      <nav class="hyp-toc" aria-label="Modèles">
+        ${searchField("h-q", st.q, "Rechercher un terme", "Rechercher dans toutes les hypothèses")}
+        <ul id="h-toc">${groups.map((g) => `<li><a href="#/hypotheses?modele=${g.id}" data-fam="${g.id}"><span>${F.esc(g.title)}</span><span class="hyp-toc__n">${g.entries.length}</span></a></li>`).join("")}</ul>
+      </nav>
+      <div class="hyp-body" id="h-body"></div>
+    </div>`;
+  const body = $("#h-body");
+  const toc = $("#h-toc");
+  const familyHtml = (g, entries, needle, open) => `<section class="hyp-family" id="m-${g.id}" aria-labelledby="mt-${g.id}">
+      <h2 id="mt-${g.id}" tabindex="-1">${F.esc(g.title)} <span class="muted">${entries.length}</span></h2>
+      ${entries.map((e) => hypEntry(e, needle, open)).join("")}</section>`;
+  const render = () => {
+    const needle = st.q.trim();
+    const f = fold(needle);
+    const qs = new URLSearchParams();
+    if (f) {
+      let shown = 0;
+      const html = groups.map((g) => {
+        const entries = g.entries.filter((e) => fold(`${e.label} ${e.text}`).includes(f));
+        toc.querySelector(`[data-fam="${g.id}"] .hyp-toc__n`).textContent = entries.length;
+        toc.querySelector(`[data-fam="${g.id}"]`).classList.toggle("is-empty", !entries.length);
+        shown += entries.length;
+        return entries.length ? familyHtml(g, entries, needle, true) : "";
+      }).join("");
+      body.innerHTML = `<p class="results__sum" aria-live="polite"><strong>${F.num(shown)} hypothèse${shown > 1 ? "s" : ""}</strong> sur ${F.num(total)} contiennent « ${F.esc(needle)} »</p>`
+        + (html || empty("Aucune hypothèse ne contient ce terme", "Essayez un mot plus court, ou le nom d'un modèle (Banister, Minetti, Daniels…)."));
+      qs.set("q", st.q);
+    } else {
+      const i = groups.findIndex((g) => g.id === st.fam);
+      const g = groups[i];
+      for (const x of groups) {
+        toc.querySelector(`[data-fam="${x.id}"] .hyp-toc__n`).textContent = x.entries.length;
+        toc.querySelector(`[data-fam="${x.id}"]`).classList.remove("is-empty");
+      }
+      const prev = groups[i - 1];
+      const next = groups[i + 1];
+      body.innerHTML = familyHtml(g, g.entries, "", false)
+        + `<nav class="hyp-steps" aria-label="Modèle précédent ou suivant">
+          ${prev ? `<a href="#/hypotheses?modele=${prev.id}" data-fam="${prev.id}" class="hyp-steps__prev">${CHEVRON.left}<span><small>Précédent</small>${F.esc(prev.title)}</span></a>` : "<span></span>"}
+          ${next ? `<a href="#/hypotheses?modele=${next.id}" data-fam="${next.id}" class="hyp-steps__next"><span><small>Suivant</small>${F.esc(next.title)}</span>${CHEVRON.right}</a>` : ""}</nav>`;
+      qs.set("modele", g.id);
+    }
+    for (const a of toc.querySelectorAll("[data-fam]")) {
+      if (!f && a.dataset.fam === st.fam) {
+        a.setAttribute("aria-current", "page");
+        // Sommaire en rangée défilante sur téléphone : le modèle courant reste visible (jamais de défilement vertical).
+        if (toc.scrollWidth > toc.clientWidth) toc.scrollLeft = a.parentElement.offsetLeft - (toc.clientWidth - a.offsetWidth) / 2;
+      } else a.removeAttribute("aria-current");
+    }
+    history.replaceState(null, "", `#/hypotheses?${qs}`);
+  };
+  render();
+  $("#h-q").addEventListener("input", debounce((e) => { st.q = e.target.value; render(); }));
+  $(".hyp-layout").addEventListener("click", (e) => {
+    const a = e.target.closest("#h-toc [data-fam], .hyp-steps [data-fam]");
+    if (!a) return;
+    e.preventDefault();
+    const fam = a.dataset.fam;
+    if (st.q.trim()) {
+      // Pendant une recherche, le sommaire saute au modèle dans les résultats.
+      $(`#m-${fam}`)?.scrollIntoView({ block: "start" });
+      $(`#mt-${fam}`)?.focus({ preventScroll: true });
+      return;
+    }
+    st.fam = fam;
+    render();
+    if (body.getBoundingClientRect().top < 0) window.scrollTo(0, 0);
+    $(`#mt-${fam}`)?.focus({ preventScroll: true });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Vue : Matériel (#147) — chaussures, équipement (kits compris), inspections, et fiche par paire
 // ---------------------------------------------------------------------------
 
@@ -1939,7 +2367,7 @@ async function viewPerformance(params) {
 const dayYear = (iso) => `${F.dayShort(iso)} ${iso.slice(0, 4)}`;
 const MONTH_FMT = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "numeric" });
 const monthLabel = (m) => MONTH_FMT.format(F.parseDate(`${m}-01`));
-const HYPOTHESES_LINK = `<a href="#/performance">Hypothèses des modèles</a>`;
+const HYPOTHESES_LINK = hypLink("materiel");
 
 function gearAlertEntries(summary) {
   const byId = new Map();
@@ -2366,7 +2794,7 @@ function decouplingSection(trend) {
     <p class="muted">Dérive de la fréquence cardiaque à allure ajustée (GAP) constante entre les deux
       moitiés d'une sortie longue. Sous 5 %, repère de coaching courant en endurance/ultra pour une
       bonne durabilité aérobie — pas un seuil validé cliniquement.
-      <a href="#/performance">Hypothèses des modèles</a></p>
+      ${hypLink("decouplage")}</p>
     <p class="legend"><span class="legend__item"><span class="key key--decoupling"></span>Découplage mesuré</span></p>
     <div class="chart-host" id="c-decoupling">${chart.svg}</div><p class="readout" id="r-decoupling"></p>
     <dl class="facts facts--inline">
@@ -2399,7 +2827,7 @@ function vamSection(trend) {
     <p class="muted">Gain d'altitude / durée sur les montées détectées (D+ et pente minimaux,
       trous de signal jamais franchis). Deux VAM existent par montée (temps écoulé/temps de
       mouvement, une pause n'est pas comptée deux fois) ; le point ici est le temps écoulé,
-      la valeur la plus simple à interpréter. <a href="#/performance">Hypothèses des modèles</a></p>
+      la valeur la plus simple à interpréter. ${hypLink("vam")}</p>
     <p class="legend"><span class="legend__item"><span class="key key--vam"></span>Meilleure montée de la sortie</span></p>
     <div class="chart-host" id="c-vam">${chart.svg}</div><p class="readout" id="r-vam"></p>
     <dl class="facts facts--inline">
@@ -2465,7 +2893,7 @@ function descentTrendSection(trend, weeks, selectedClass) {
       repère pointillé). Le modèle surestime le bénéfice des fortes descentes en conditions réelles de
       trail : une valeur sous 1,00× sur les pentes les plus raides est normale, pas un mauvais résultat —
       seule la <strong>tendance, à pente égale</strong>, est exploitable : une classe de pente ne se
-      compare JAMAIS à une autre. <a href="#/performance">Hypothèses des modèles</a></p>
+      compare JAMAIS à une autre. ${hypLink("descente")}</p>
     <div class="toolbar">${selector}</div>
     <p class="legend"><span class="legend__item"><span class="key key--descent"></span>Référence plate de la séance</span> <span class="legend__item"><span class="key key--descent-fallback"></span>Référence de repli (hors forte descente, pas de plat suffisant)</span></p>
     ${chart ? `<div class="chart-host" id="c-descent">${chart.svg}</div><p class="readout" id="r-descent"></p>` : note("Pas assez de points pour cette classe.")}
@@ -2502,7 +2930,7 @@ function durabilitySection(trend) {
     const html = `<section class="band"><h2>Durabilité</h2>
       <p class="muted">Baisse de performance en fin de sortie longue : allure ajustée à la pente (GAP) et
         facteur d'efficacité (EF = GAP/FC) du dernier tiers de la sortie comparés au premier tiers.
-        <a href="#/performance">Hypothèses des modèles</a></p>
+        ${hypLink("durabilite")}</p>
       ${note(`${F.num(trend.long_runs)} sortie${trend.long_runs > 1 ? "s" : ""} longue${trend.long_runs > 1 ? "s" : ""}, aucune éligible${trend.dominant_reason ? ` — ${F.esc(trend.dominant_reason)}` : ""}.`)}
       </section>`;
     return { html, chart: null, points: [] };
@@ -2531,7 +2959,7 @@ function durabilitySection(trend) {
       fade GAP</strong> : dérive cardiaque à allure comparable. <strong>Fade GAP marqué, fade EF proche de
       0</strong> : allure et FC ont baissé ensemble (effort réellement réduit). Sans règle d'effort
       stable : une accélération finale, un fartlek ou des intervalles en fin de sortie longue faussent la
-      lecture. <a href="#/performance">Hypothèses des modèles</a></p>
+      lecture. ${hypLink("durabilite")}</p>
     <p class="legend"><span class="legend__item"><span class="key key--durability-gap"></span>Fade GAP</span> <span class="legend__item"><span class="key key--durability-ef"></span>Fade EF</span></p>
     <div class="chart-host" id="c-durability">${chart.svg}</div><p class="readout" id="r-durability"></p>
     <dl class="facts facts--inline">
@@ -2606,7 +3034,7 @@ function energyTrendSection(trend) {
   const hasCalibrationData = ["route", "trail"].some((b) => (calibrationBuckets[b] || {}).n > 0);
   const calibrationHtml = `<p class="legend">Calibration personnelle des prévisions de course
       (${F.num(calibration.window_weeks)} sem.) — route : ${calibrationTxt(calibrationBuckets.route)} ·
-      trail : ${calibrationTxt(calibrationBuckets.trail)} <a href="#/performance">détail</a></p>`;
+      trail : ${calibrationTxt(calibrationBuckets.trail)} ${hypLink("energie", "détail")}</p>`;
 
   if (!points.length) {
     // Fenêtre COURTE du graphique vide : pas de courbe possible, mais la ligne de
@@ -2642,7 +3070,7 @@ function energyTrendSection(trend) {
       rapports) ; ce graphique suit la fidélité du modèle indépendant (RE3 course + marche de Minetti)
       dans le temps — un écart mis en évidence au-delà de ±${F.num(band)} % (bande grisée) n'est jamais
       un verdict sur la séance, seulement un signal de contrôle du modèle.
-      <a href="#/performance">Hypothèses des modèles</a></p>
+      ${hypLink("energie")}</p>
     <p class="legend"><span class="legend__item"><span class="key key--band"></span>Repère ±${F.num(band)} %</span> <span class="legend__item"><span class="key key--energy"></span>${F.SPORT.trail}</span> <span class="legend__item"><span class="key key--energy-route"></span>${F.SPORT.running}</span></p>
     <div class="chart-host" id="c-energy">${chart.svg}</div><p class="readout" id="r-energy"></p>
     <dl class="facts facts--inline">
@@ -2842,7 +3270,7 @@ function daysToWeeksPeriod(days) {
 const ROUTES = {
   "": viewToday, forme: viewForm, analyse: viewAnalyse, sante: viewHealth, semaine: viewWeek, seances: viewSessions,
   performance: viewPerformance, materiel: viewMateriel, "trail-shape": viewTrailShape, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
-  nutrition: viewNutrition, fichiers: viewFiles, decisions: viewDecisions, decision: viewDecision,
+  nutrition: viewNutrition, fichiers: viewFiles, hypotheses: viewHypotheses, decisions: viewDecisions, decision: viewDecision,
 };
 
 // `decodeURIComponent` lève sur `%E0` (#/materiel/%E0) : repli sur l'identifiant brut → « introuvable ».
