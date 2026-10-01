@@ -408,7 +408,7 @@ build_command() {
             CMD=(codex exec --full-auto --cd "$ARC_WORKSPACE" "$(skill_prompt)") ;;
         opencode)
             have opencode || [[ "$DRY_RUN" -eq 1 ]] || die "opencode introuvable — installez OpenCode : curl -fsSL https://opencode.ai/install | bash"
-            [[ "$SYNC_MODEL" == */* ]] || die "[sync].model requis pour le runner opencode, au format fournisseur/modèle (ex. openrouter/deepseek/deepseek-v4-pro)."
+            [[ "$SYNC_MODEL" == */* ]] || die "[sync].model requis pour le runner opencode, au format fournisseur/modèle (ex. openrouter/deepseek/deepseek-v4.1-flash)."
             # Pas de slash-command projet garanti en mode headless (# À VÉRIFIER) :
             # on passe le corps du skill. Config locale (permissions, MCP) par
             # OPENCODE_CONFIG ; --format json pour lire coût et erreurs.

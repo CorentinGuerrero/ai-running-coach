@@ -66,20 +66,74 @@ Le tableau de bord reste **en lecture seule** et ne voit jamais la clé API : c'
 | | Claude (API Anthropic) | OpenRouter (ou API compatible OpenAI) |
 |---|---|---|
 | Harnais | Claude Agent SDK — le moteur de Claude Code | serveur OpenCode |
-| Modèle par défaut | `claude-sonnet-5-5` | `openrouter/deepseek/deepseek-v4-pro` |
-| Fidélité aux agents/skills | identique à Claude Code | bonne ; dépend du modèle |
+| Modèle par défaut | `claude-sonnet-5-5` | `openrouter/deepseek/deepseek-v4.1-flash` |
+| Fidélité aux agents/skills | identique à Claude Code | bonne ; dépend beaucoup du modèle |
 | Prérequis | `pip install claude-agent-sdk` (Python ≥ 3.10) | binaire `opencode` |
-| Coût indicatif | quelques centimes par échange | moins, selon le modèle |
+| Coût indicatif (mois type, ci-dessous) | ~30 € (Sonnet, estimation) | **< 1 €** (DeepSeek v4.1 Flash, mesuré) |
 
-Pourquoi Sonnet et pas Haiku pour le chat : c'est là que se prennent les décisions délicates
-(garde-fous médicaux, modification du plan, écriture Garmin). Haiku coûte la moitié ; une
-mauvaise décision coûte plus. Haiku 4.5 reste le défaut de la
-[synchronisation automatique](../mobile.md#modeles-par-defaut), tâche répétitive et très cadrée.
+Pourquoi Sonnet et pas Haiku côté Claude : c'est dans le chat que se prennent les décisions
+délicates (garde-fous médicaux, modification du plan, écriture Garmin). Haiku 4.5 reste le
+défaut de la [synchronisation automatique](../mobile.md#modeles-par-defaut), tâche
+répétitive et très cadrée.
 
-!!! note "Modèles bon marché"
+### Quel modèle sur OpenRouter ?
+
+Huit modèles ont été essayés en conditions réelles (workspace d'un athlète, Garmin en lecture
+seule, octobre 2026) sur trois demandes, avec des vérifications automatiques :
+
+- **`/log`** « 2 gels Aptonia + 500 ml au km 15, genou 2/10, RPE 6 » — `arc_log.py` appelé,
+  deux fichiers écrits et valides au contrat, 46 g de glucides tirés du catalogue, incohérence
+  « km 15 » sur une sortie de 11,3 km relevée ;
+- **bilan** « je me sens fatigué, je garde la séance ? » — HRV, FC de repos et readiness
+  consultées, verdict ;
+- **`/week`** — garde-fous lancés, tableau de la semaine.
+
+Plus un critère commun : réponse propre (pas de raisonnement en anglais mêlé à la réponse) et
+tour terminé.
+
+| Modèle | Score | Coût des 3 demandes | Durée moyenne | Verdict |
+|---|---|---|---|---|
+| `deepseek/deepseek-v4.1-flash` | **14/17** | **0,013 €** | 54 s | **défaut** : le plus fiable et le moins cher ; commente parfois son travail en anglais (rangé dans la trace) |
+| `deepseek/deepseek-v4-pro` | 12/17 | 0,10 € | 77 s | solide, plus lent, ~8× plus cher |
+| `minimax/minimax-m2.7` | 12/17 | 0,04 € | 69 s | bon bilan matinal, fichiers `/log` hors contrat |
+| `qwen/qwen3.8-flash` | 12/17 | 0,05 € | 253 s | `/log` bloqué jusqu'au délai maximal |
+| `z-ai/glm-5.3-flash` | 11/17 | 0,04 € | 207 s | idem |
+| `anthropic/claude-haiku-4.5` | 10/17 | 0,21 € | 28 s | français impeccable, mais demande la séance à l'athlète au lieu de la lire dans Garmin |
+| `google/gemini-3.1-flash-lite` | 9/17 | 0,04 € | 15 s | très rapide, même défaut que Haiku, garde-fous de `/week` sautés |
+| `deepseek/deepseek-v4-flash` | 6/17 | — | 364 s | à éviter : délais dépassés, bilan matinal sauté |
+
+Un seul passage par modèle : les écarts de un ou deux points ne sont pas significatifs (le même
+modèle a varié de 3/7 à 5/7 sur `/log` d'un essai à l'autre). Coûts tels que rapportés par
+OpenCode.
+
+!!! warning "Pas `deepseek/deepseek-chat`"
+    C'est l'ancien DeepSeek V3. Essayé avec le chat, il annonçait avoir enregistré un `/log`
+    sans rien écrire, s'arrêtait sur « je reviens avec le bilan » et mélangeait les langues.
+
+!!! note "Changer de modèle"
     Un modèle peu fiable en appel d'outils peut casser le contrat ```` ```arc ````, sauter le
-    bilan matinal ou adoucir un garde-fou. Validez un modèle sur quelques échanges réels avant
-    de lui confier votre plan, et gardez un œil sur la trace des étapes.
+    bilan matinal ou adoucir un garde-fou. Essayez-le d'abord dans le
+    [bac à sable](#essayer-sans-risque), et gardez un œil sur la trace des étapes.
+
+### Ce que coûte le coach
+
+Un mois type pour un athlète : 60 questions (bilan du jour, « je garde ma séance ? »), 12
+`/log`, 4 `/week`, 4 plans de semaine (comptés comme 5 questions chacun) et 60
+synchronisations automatiques (2 par jour, comptées comme un `/log` — le mode `watch` en lance
+moins).
+
+| Modèle | Mois type | Dont synchronisation |
+|---|---|---|
+| `deepseek/deepseek-v4.1-flash` | **≈ 0,80 €** | ≈ 0,45 € |
+| `deepseek/deepseek-v4-pro` | ≈ 6 € | ≈ 1,60 € |
+| `anthropic/claude-haiku-4.5` (via OpenRouter) | ≈ 15 € | ≈ 4,80 € |
+| `claude-sonnet-5-5` (API Anthropic) | ≈ 30 € — estimation | sync sur Haiku 4.5 conseillée |
+
+Estimations à partir des coûts mesurés, à ± 50 % selon la longueur des échanges ; Sonnet n'a
+pas été mesuré (environ deux fois le prix de Haiku par jeton). Les plafonds par défaut — 2 €/jour
+pour le chat, 0,50 €/jour pour la synchronisation, 1 € par tour — laissent une large marge avec
+DeepSeek v4.1 Flash. Fixez aussi une limite de crédit chez OpenRouter : quand elle est atteinte,
+le chat le dit (« Crédit du fournisseur insuffisant (402) ») et s'arrête proprement.
 
 ## Installer
 
@@ -168,7 +222,7 @@ Puis, dans la copie :
    [chat]
    enabled = true
    backend = "opencode"
-   model = "openrouter/deepseek/deepseek-v4-pro"
+   model = "openrouter/deepseek/deepseek-v4.1-flash"
    api_key_env = "OPENROUTER_API_KEY"
    port = 8866
    ```

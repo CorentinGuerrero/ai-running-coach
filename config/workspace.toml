@@ -48,7 +48,7 @@ token_alert_days = [14, 3]
 # | "opencode" (OpenCode, `opencode run` — OpenRouter ou toute API compatible OpenAI).
 runner = "claude"
 # Modèle du runner : requis pour "opencode" (format fournisseur/modèle, ex.
-# "openrouter/deepseek/deepseek-v4-pro"), optionnel en mode API pour "claude"
+# "openrouter/deepseek/deepseek-v4.1-flash"), optionnel en mode API pour "claude"
 # (passé à `--model`). Vide = le modèle par défaut de l'abonnement.
 model = ""
 # Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner "opencode").
@@ -227,7 +227,7 @@ enabled = false
 # Moteur : "claude" (Claude Agent SDK) | "opencode" (OpenRouter, OpenAI, Mistral, Ollama…)
 # | "mock" (tests). `./install.sh --llm …` écrit backend, model et api_key_env.
 backend = "claude"
-# Modèle. Backend opencode : identifiant fournisseur/modèle, ex. "openrouter/deepseek/deepseek-v4-pro".
+# Modèle. Backend opencode : identifiant fournisseur/modèle, ex. "openrouter/deepseek/deepseek-v4.1-flash".
 model = "claude-sonnet-5-5"
 # Backend opencode + API compatible OpenAI autre qu'OpenRouter.
 base_url = ""

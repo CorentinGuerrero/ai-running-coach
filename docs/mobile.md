@@ -395,8 +395,8 @@ et ne la donne **qu'au process du runner** ; le service du chat la reçoit par
 
 | | OpenRouter | API Anthropic |
 |---|---|---|
-| Chat | `openrouter/deepseek/deepseek-v4-pro` | `claude-sonnet-5-5` |
-| Synchronisation | `openrouter/deepseek/deepseek-v4-pro` | `claude-haiku-4-5` |
+| Chat | `openrouter/deepseek/deepseek-v4.1-flash` | `claude-sonnet-5-5` |
+| Synchronisation | `openrouter/deepseek/deepseek-v4.1-flash` | `claude-haiku-4-5` |
 
 La synchronisation est répétitive et très cadrée (récupérer les dates manquantes, écrire
 les fichiers au contrat, produire le bloc `resume`) : un modèle léger suffit, et
@@ -406,12 +406,11 @@ modèle qui casserait le contrat toutes les nuits doit se voir. Le chat, lui, de
 modèle plus solide ; si un modèle DeepSeek vous déçoit dans la durée (appels d'outils
 longs), passez à `--model` ou à `--llm anthropic`.
 
-!!! warning "Pas `deepseek/deepseek-chat`"
-    C'est l'ancien DeepSeek V3. Essayé avec le chat, il annonçait avoir enregistré un
-    `/log` sans rien écrire, s'arrêtait sur « je reviens avec le bilan » et mélangeait
-    anglais et français. `deepseek/deepseek-v4-pro` a fait le même travail correctement
-    (catalogue produits, fichiers au contrat, question sur le produit ambigu).
-    `deepseek/deepseek-v4-flash`, bien moins cher, n'a pas été essayé.
+!!! note "Pourquoi DeepSeek v4.1 Flash"
+    Huit modèles OpenRouter ont été comparés en conditions réelles : comparatif, coûts
+    mesurés et estimation mensuelle dans
+    [Le chat avec le coach](dashboard/chat.md#quel-modele-sur-openrouter). L'ancien
+    `deepseek/deepseek-chat` (V3) est à éviter : il annonçait des écritures jamais faites.
 
 ### Budget
 

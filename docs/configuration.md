@@ -319,7 +319,7 @@ pour les changer, sauf `mode`/`times`, voir [Le coach dans la poche](mobile.md))
 | Clé | Effet |
 |---|---|
 | `runner` | `"claude"` (Claude Code, `claude -p`, défaut) \| `"codex"` (`codex exec`) \| `"opencode"` (`opencode run`, OpenRouter ou API compatible OpenAI). |
-| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-v4-pro`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
+| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-v4.1-flash`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
 | `base_url` | Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner `opencode`). |
 | `api_key_env` | **Nom** de la variable qui porte la clé, lue dans `~/.config/ai-running-coach/llm.env` (mode 600). Non vide = mode API, facturé au token ; vide (défaut) = abonnement. Jamais la clé elle-même. |
 | `daily_budget_eur` | Plafond de dépense quotidien (défaut `0.5`), appliqué seulement quand le runner rapporte son coût (`opencode`, `claude` en mode API). Atteint : run sauté, une notification par jour. |

@@ -76,13 +76,13 @@ LEANPROXY_SERVERS="$HOME/.config/leanproxy_servers.yaml"
 GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
 
 # Chat avec le coach et sync sur une API (--llm) : modèles par défaut, UNE constante
-# chacun. Identifiant OpenRouter « deepseek/deepseek-v4-pro » vérifié dans le catalogue
-# https://openrouter.ai/api/v1/models (2026-09-30) et essayé en conditions réelles : l'ancien
-# « deepseek/deepseek-chat » (V3) annonçait des écritures jamais faites et s'arrêtait en
-# cours de tâche. Forme OpenCode « fournisseur/modèle »
+# chacun. Identifiant OpenRouter « deepseek/deepseek-v4.1-flash » vérifié dans le catalogue
+# https://openrouter.ai/api/v1/models et comparé à 7 autres modèles en conditions réelles
+# (docs/dashboard/chat.md, « Quel modèle sur OpenRouter ? ») : le plus fiable et le moins cher.
+# L'ancien « deepseek/deepseek-chat » (V3) annonçait des écritures jamais faites. Forme OpenCode « fournisseur/modèle »
 # (https://opencode.ai/docs/providers). Haiku 4.5 pour le cron (répétitif, contrat
 # vérifié par arc_index.py --validate), Sonnet 5.5 pour le chat.
-LLM_OPENROUTER_MODEL="openrouter/deepseek/deepseek-v4-pro"
+LLM_OPENROUTER_MODEL="openrouter/deepseek/deepseek-v4.1-flash"
 LLM_ANTHROPIC_CHAT_MODEL="claude-sonnet-5-5"
 LLM_ANTHROPIC_SYNC_MODEL="claude-haiku-4-5"
 # Clés API : dans ce fichier (mode 600), jamais dans le TOML ni dans le shell.
