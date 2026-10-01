@@ -197,7 +197,11 @@ class TestDashboardAnalysisView(InstallAsserts):
         self.assertEqual(status, 200)
         text = body.decode("utf-8")
         self.assertIn('analyse: viewAnalyse', text)
-        self.assertIn('["analyse", "Analyse"]', text)
+        # L'entrée de nav vit dans `nav.js` (liste partagée avec la page Coach), importé par app.js.
+        self.assertIn('from "./nav.js"', text)
+        status, nav, _ = self.server.get("/js/nav.js")
+        self.assertEqual(status, 200)
+        self.assertIn('["analyse", "Analyse"]', nav.decode("utf-8"))
 
     def test_analyse_view_endpoints_respond(self):
         """Chaque endpoint consommé par `viewAnalyse` (`web/js/app.js`) répond 200 sur
