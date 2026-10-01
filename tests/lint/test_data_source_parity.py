@@ -173,6 +173,17 @@ class TestDataSourceDocumented(unittest.TestCase):
         self.assertIn("INTERVALS_MCP_REF=", INSTALL_SH)
         self.assertIn("@cb91d4a", INSTALL_SH)
 
+    def test_install_sh_ships_fitparse_with_the_intervals_server(self):
+        """`download_fit.py --source intervals --json` se relance dans
+        l'environnement `intervals-icu-mcp` pour lire le FIT : `fitparse` doit y être
+        installé à neuf (`--with fitparse`) ET ajouté à une installation antérieure
+        sans jamais réinstaller le serveur (`uv pip install`, jamais `--reinstall`,
+        qui écraserait un correctif local de l'athlète)."""
+        self.assertIn('uv tool install --python 3.12 --with fitparse "$INTERVALS_MCP_REF"', INSTALL_SH)
+        self.assertIn('uv pip install --python "$tool_py" fitparse', INSTALL_SH)
+        commands = [line for line in INSTALL_SH.splitlines() if line.strip().startswith("run uv ")]
+        self.assertFalse([c for c in commands if "--reinstall" in c], "aucune commande uv --reinstall")
+
     def test_not_yet_synced_marker_is_source_aware(self):
         """#67 (\"/log\", merged after #68) introduced a "not yet synced"
         marker keyed on `garmin_activity_id`. #68's source-awareness pass must

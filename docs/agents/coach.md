@@ -191,9 +191,9 @@ reste **toujours** la référence, le modèle indépendant (RE3 + Minetti) n'est
 qu'un contrôle. Un écart de plus de 15 % ajoute une ligne d'alerte avec des
 causes plausibles (capteur FC optique, chaleur, dérive cardiaque, marche mal
 détectée, poids périmé), jamais présentées comme certaines. Sans FIT
-exploitable pour la séance (aucune donnée, sport hors course à pied, ou
-`[data].source = "intervals"`, #68 — aucun FIT disponible depuis cette
-source), le coach ne l'invente pas : au mieux une demi-ligne expliquant
+exploitable pour la séance (FIT pas encore téléchargé, sport hors course à
+pied, ou activité importée dans intervals.icu depuis Strava — aucun FIT n'existe
+alors), le coach ne l'invente pas : au mieux une demi-ligne expliquant
 pourquoi, ou rien du tout en réponse brève.
 
 ### Planification météo
@@ -227,6 +227,7 @@ pourquoi, ou rien du tout en réponse brève.
 | `fit-download` | quand une analyse fine (FIT) est nécessaire et que le MCP a échoué |
 | `gpx-analysis` | pour analyser un GPX soi-même quand `course-strategist` n'est pas installé |
 | `gear-inspection` | pour proposer ou mener une inspection photo des chaussures, ou résumer la carrière d'une paire retirée |
+| `inspection` | quand l'athlète tape `/inspection [paire]` : désigner la paire, protocole et envoi des photos, puis `gear-inspection` |
 | `log` | pour traiter une saisie libre `/log` (ravitaillement, douleur, RPE) |
 | `coach-doctor` | en cas de sync échouée ou d'erreur MCP qui sent l'installation cassée |
 

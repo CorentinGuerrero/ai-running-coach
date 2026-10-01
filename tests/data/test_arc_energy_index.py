@@ -20,8 +20,8 @@ Le moteur pur lui-même (`arc_energy.py`) est couvert par
   `--assumptions`, incompatibilités mutuelles — y compris `--limit` avec un
   sélecteur et positionnel+`--activity` — JSON, stdout capturé) ;
 - `delta_reason`/`net_reason` (`calories_kcal`/`calories_bmr_kcal` absents),
-  arrondi à 1 décimale des kcal/pourcentages, séance sans `garmin_activity_id`
-  (`reason_code="no_garmin_id"`) dans le listing par défaut ;
+  arrondi à 1 décimale des kcal/pourcentages, séance Intervals.icu sans FIT
+  téléchargé (`reason_code="no_samples"`) dans le listing par défaut ;
 - contrat `calories_bmr_kcal` (valide, négatif, > calories_kcal).
 - `activity_energy_report_by_id` (id interne inconnu, séance sans
   `garmin_activity_id`) et `energy_trend` (regroupement route/trail, marche/
@@ -129,9 +129,8 @@ class Workspace(unittest.TestCase):
     def write_activity_no_garmin_id(self, intervals_id, day="2026-09-20", duration_s=1800,
                                      distance_m=5400, sport="trail", calories_kcal=None):
         """Séance synchronisée depuis Intervals.icu (#68) : `intervals_activity_id`
-        (chaîne) à la place de `garmin_activity_id` — ne peut jamais avoir de FIT
-        ingéré (`fit-download` dépend de `garminconnect`), voir
-        `_energy_reason_for_missing_row`."""
+        (chaîne) à la place de `garmin_activity_id`, SANS FIT téléchargé
+        (`fit-download --source intervals`), voir `_energy_reason_for_missing_row`."""
         fields = (f'"arc": 1, "kind": "activity", "date": "{day}", "sport": "{sport}", '
                   f'"duration_s": {duration_s}, "distance_m": {distance_m}, '
                   f'"intervals_activity_id": "{intervals_id}"')
@@ -492,8 +491,9 @@ class TestEnergyCli(Workspace):
         """Revue de code : une séance synchronisée depuis Intervals.icu (#68, pas
         de `garmin_activity_id`) doit apparaître dans le listing par défaut (même
         famille de sport), pas disparaître silencieusement — avec
-        `reason_code="no_garmin_id"`, distinct de `"no_samples"` (elle n'a jamais
-        PU avoir de FIT, ce n'est pas un oubli de synchronisation)."""
+        `reason_code="no_samples"` tant que son FIT n'est pas téléchargé
+        (`fit-download --source intervals`). Une séance sans AUCUN identifiant
+        externe est `"no_activity_id"`, voir `tests/data/test_intervals_samples.py`."""
         self.write_profile_weight(70)
         self.write_activity_no_garmin_id("i123456", day="2026-09-20", calories_kcal=400)
         self.index()
@@ -501,7 +501,7 @@ class TestEnergyCli(Workspace):
         self.assertEqual(len(out["sessions"]), 1)
         session = out["sessions"][0]
         self.assertIsNone(session["garmin_activity_id"])
-        self.assertEqual(session["reason_code"], "no_garmin_id")
+        self.assertEqual(session["reason_code"], "no_samples")
         self.assertIsNone(session["model_kcal"])
 
     def test_unknown_activity_has_an_explicit_reason(self):
@@ -790,18 +790,18 @@ class TestActivityEnergyReportById(Workspace):
         self.assertEqual(report["reason_code"], "unknown_activity")
         self.assertEqual(report["reason"], "activité introuvable")
 
-    def test_activity_without_garmin_id_reports_no_garmin_id(self):
+    def test_intervals_activity_without_fit_reports_no_samples(self):
         """Séance synchronisée depuis Intervals.icu (#68, `intervals_activity_id`
-        au lieu de `garmin_activity_id`) : aucun FIT n'a jamais pu être ingéré —
-        `reason_code="no_garmin_id"`, jamais confondu avec `"no_samples"` (même
-        distinction que `_energy_reason_for_missing_row`)."""
+        au lieu de `garmin_activity_id`) dont le FIT n'est pas encore téléchargé —
+        `reason_code="no_samples"`, comme une séance Garmin dans le même cas (même
+        règle que `_energy_reason_for_missing_row`)."""
         self.write_activity_no_garmin_id("i12345678", calories_kcal=500)
         self.index()
         row = self.conn.execute(
             "SELECT id FROM activity WHERE date = '2026-09-20'").fetchone()
         report = I.activity_energy_report_by_id(self.conn, row["id"])
         self.assertIsNone(report["model_kcal"])
-        self.assertEqual(report["reason_code"], "no_garmin_id")
+        self.assertEqual(report["reason_code"], "no_samples")
         self.assertEqual(report["garmin_kcal"], 500)
 
     def test_matches_activity_energy_report_by_garmin_id(self):

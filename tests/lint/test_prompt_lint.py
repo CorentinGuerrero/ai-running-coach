@@ -576,9 +576,13 @@ class TestGearInspectionWiring(unittest.TestCase):
         })
 
     def test_no_ground_contact_claim(self):
-        """Le temps de contact au sol n'est extrait nulle part : le skill doit le dire, pas l'utiliser."""
+        """Le temps de contact au sol est extrait depuis #151 (`gait-summary`), mais le sens de la balance
+        n'est pas établi et les règles d'usage par les agents viennent plus tard : le skill dit les deux,
+        et ne l'invente jamais quand la mesure manque."""
         text = self.text(self.SKILL)
         self.assertIn("temps de contact au sol", text)
+        self.assertIn("gait-summary", text)
+        self.assertIn("pas établi", text)
         self.assertIn("ne jamais l'inventer", text)
 
     def test_coach_wires_the_skill_command_and_guardrails(self):
@@ -586,7 +590,7 @@ class TestGearInspectionWiring(unittest.TestCase):
         for needle in ("GEAR INSPECTION MANDATE", "scripts/arc_index.py inspections",
                        "scripts/arc_index.py gear-career", "a proposal, never an imposition",
                        "NEVER recommend changing foot strike", "ONLY IF `medical` is in `[agents].enabled`",
-                       "Never in headless mode", "not extracted anywhere",
+                       "Never in headless mode", "is NOT established",
                        "worded by `due_reason`", "`threshold_alert` →", "`never_inspected` →",
                        "belongs to the chat reply ONLY"):
             self.assertIn(needle, text, f"coach.md : {needle}")

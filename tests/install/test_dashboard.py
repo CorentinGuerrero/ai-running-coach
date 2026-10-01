@@ -127,6 +127,28 @@ class TestDashboardServer(InstallAsserts):
         self.assertEqual(self.server.get("/media/gear-photo?path=x", host="evil.example")[0], 403)
         self.assertEqual(self.server.get("/media/gear-photo?path=x", method="POST")[0], 405)
 
+    def test_gear_detail_route(self):
+        """#147 : `/api/gear/<id>` — paire (bilan, mois, séances), paire retirée, objet d'équipement ;
+        inconnu / identifiant invalide → 404 ; même contrôle d'hôte et lecture seule que les autres routes."""
+        status, body, _ = self.server.get("/api/gear/adizero-sl")
+        self.assertEqual(status, 200)
+        shoe = json.loads(body)
+        self.assertEqual((shoe["kind"], shoe["gear_id"]), ("shoe", "adizero-sl"))
+        self.assertTrue(shoe["sessions"] and shoe["monthly"])
+        self.assertEqual(shoe["career"]["distance_m"], shoe["shoe"]["distance_m"])
+        summary = json.loads(self.server.get("/api/summary")[1])
+        listed = next(s for s in summary["gear"]["shoes"] if s["gear_id"] == "adizero-sl")
+        self.assertEqual(listed["distance_m"], shoe["shoe"]["distance_m"])
+        retired = json.loads(self.server.get("/api/gear/nike-pegasus")[1])
+        self.assertTrue(retired["retired"])
+        item = json.loads(self.server.get("/api/gear/poche-eau")[1])
+        self.assertEqual(item["kind"], "equipment")
+        self.assertIn("trail-long", item["kits"])
+        for bad in ("absent", "Adizero-SL", "..", "a%2Fb", "%2e%2e%2fsummary"):
+            self.assertEqual(self.server.get("/api/gear/" + bad)[0], 404, bad)
+        self.assertEqual(self.server.get("/api/gear/adizero-sl", host="evil.example")[0], 403)
+        self.assertEqual(self.server.get("/api/gear/adizero-sl", method="POST")[0], 405)
+
     def test_new_file_appears_without_restart(self):
         """Un fichier écrit par un agent apparaît sans relancer le serveur."""
         self.server.stop()
@@ -220,6 +242,75 @@ class TestDashboardAnalysisView(InstallAsserts):
         for s in measured:
             self.assertIn("delta_pct", s)
             self.assertIn("flag", s)
+
+
+class TestDashboardGaitApi(InstallAsserts):
+    """#151 — `/api/gait` (carte « Foulée » de la vue Santé) sur un workspace à échantillons FIT
+    (dynamique de course synthétique, `tests.lib.synthetic.add_running_dynamics`) ET deux inspections
+    de paires différentes (indices d'attaque opposés) : mesures, confiance, désaccords, forme JSON."""
+
+    def setUp(self):
+        self.sb = Sandbox().__enter__()
+        self.ws = build(self.sb.root / "ws", days=120, today=__import__("datetime").date.fromisoformat(TODAY),
+                        with_samples=True)
+        self.server = Server(self.sb, ["python3", str(self.sb.repo / "scripts/arc_serve.py"),
+                                       "--workspace", str(self.ws), "--port", "0", "--today", TODAY])
+        self.assertIsNotNone(self.server.url, self.server.proc.stderr.read() if self.server.proc.poll() is not None else "pas d'URL")
+
+    def tearDown(self):
+        self.server.stop()
+        self.sb.__exit__(None, None, None)
+
+    def get(self, path):
+        status, body, _ = self.server.get(path)
+        self.assertEqual(status, 200, path)
+        return json.loads(body)
+
+    def test_gait_shape_and_measured_dynamics(self):
+        g = self.get("/api/gait")
+        for key in ("window", "sport_scope", "dynamics", "inspections", "contradictions", "confidence",
+                    "balance_side_verified", "caveat"):
+            self.assertIn(key, g)
+        self.assertEqual(g["window"]["weeks"], 26)
+        self.assertFalse(g["balance_side_verified"])
+        for metric in ("ground_contact_s", "stance_balance_pct", "vertical_oscillation_m",
+                       "vertical_ratio_pct", "step_length_m", "cadence_spm"):
+            self.assertGreater(g["dynamics"][metric]["n"], 5, metric)
+        balance = g["dynamics"]["stance_balance_pct"]
+        self.assertLess(balance["n"], g["dynamics"]["ground_contact_s"]["n"],
+                        "une séance sur quatre n'a pas de balance : jamais comblée par 50 %")
+        self.assertFalse(balance["side_named"])
+        gct = g["dynamics"]["ground_contact_s"]["mean"]
+        self.assertTrue(0.2 < gct < 0.3, gct)
+
+    def test_confidence_and_contradictions(self):
+        g = self.get("/api/gait")
+        conf = g["confidence"]
+        self.assertEqual(conf["inspections"], 3)
+        self.assertEqual(conf["pairs_inspected"], 2)
+        self.assertEqual((conf["dynamics_level"], conf["inspections_level"]), ("ok", "ok"))
+        self.assertLessEqual(conf["sessions_with_balance"], conf["sessions_with_dynamics"])
+        codes = {c["code"] for c in g["contradictions"]}
+        self.assertIn("strike_hint_differs_across_pairs", codes)
+        for c in g["contradictions"]:
+            self.assertIn(c["resolution"], ("measure_wins", "unresolved"))
+
+    def test_weeks_parameter_is_clamped(self):
+        self.assertEqual(self.get("/api/gait?weeks=4")["window"]["weeks"], 4)
+        self.assertEqual(self.get("/api/gait?weeks=9999")["window"]["weeks"], 104)
+        self.assertEqual(self.get("/api/gait?weeks=abc")["window"]["weeks"], 26)
+
+    def test_no_gps_and_no_health_data_leak(self):
+        text = json.dumps(self.get("/api/gait"))
+        for leaked in ("lat_deg", "lon_deg", "latitude", "hrv", "readiness", "resting_hr"):
+            self.assertNotIn(leaked, text)
+
+    def test_app_js_wires_the_card_in_the_health_view(self):
+        status, body, _ = self.server.get("/js/app.js")
+        text = body.decode("utf-8")
+        self.assertIn('api("gait")', text)
+        self.assertIn("function gaitCard", text)
+        self.assertIn("gait.mount()", text)
 
 
 class TestDashboardAnalysisViewEmptyState(InstallAsserts):

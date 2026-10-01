@@ -236,19 +236,22 @@ function injuryRiskTile(risk) {
 
 // Kilométrage chaussures et alerte d'usure (#40) : tuile « Aujourd'hui » — n'apparaît
 // que si au moins une chaussure (non retirée) a atteint son seuil. Le détail complet
-// (toutes les paires, retirées comprises) vit dans la vue Performance (`gearSection`).
-function gearTile(gear) {
+// (toutes les paires, retirées comprises) vit dans la vue Matériel (`gearSection`, #147).
+const gearHref = (id) => `#/materiel/${encodeURIComponent(id)}`;
+const gearLink = (id, name) => `<a href="${F.esc(gearHref(id))}">${F.esc(name)}</a>`;
+
+function gearTile(gear, withLink = true) {
   const alerts = (gear?.shoes || []).filter((s) => s.alert);
   if (!alerts.length) return "";
-  const names = alerts.map((s) => `${F.esc(s.name)} (${F.distance(s.distance_m, 0)})`).join(", ");
-  return `<p class="weather">${chip("gear", "orange", "Chaussures à surveiller")} <span>${names}</span></p>`;
+  const names = alerts.map((s) => `${gearLink(s.gear_id, s.name)} (${F.distance(s.distance_m, 0)})`).join(", ");
+  return `<p class="weather">${chip("gear", "orange", "Chaussures à surveiller")} <span>${names}</span>${withLink ? ` <a href="#/materiel">Voir le matériel</a>` : ""}</p>`;
 }
 
 // Tuile « Aujourd'hui » : objets hors chaussures sous alerte (#134), même règle que `gearTile`.
 function equipmentTile(eq) {
   const alerts = (eq?.items || []).filter((i) => i.alert);
   if (!alerts.length) return "";
-  return `<p class="weather">${chip("gear", "orange", "Matériel à contrôler")} <span>${alerts.map((i) => F.esc(i.name)).join(", ")}</span></p>`;
+  return `<p class="weather">${chip("gear", "orange", "Matériel à contrôler")} <span>${alerts.map((i) => gearLink(i.gear_id, i.name)).join(", ")}</span> <a href="#/materiel">Voir le matériel</a></p>`;
 }
 
 // Prévision de retraite (#132) : « ≈ 6 sem. » (clé omise côté API = pas de prévision, on
@@ -295,13 +298,44 @@ function inspectionPhotos(insp) {
     return `<a href="${F.esc(src)}" target="_blank" rel="noopener"><img class="gear-photo" loading="lazy" width="72" height="72" src="${F.esc(src)}" alt="${F.esc(alt)} (${i + 1}/${photos.length})"></a>`;
   }).join("")}</span>`;
 }
+// Zones d'usure en petit tableau zone × pied gauche / pied droit (#151) : une cellule vide = zone non
+// notée sur ce pied (jamais « sans usure »). Sévérité en toutes lettres, pas seulement une teinte.
+function wearTable(zones) {
+  if (!zones?.length) return "";
+  const byZone = new Map();
+  for (const z of zones) {
+    const row = byZone.get(z.zone) || {};
+    row[z.side] = z.severity || "seen";
+    byZone.set(z.zone, row);
+  }
+  const order = Object.keys(GEAR_ZONE);
+  const rank = (z) => (order.includes(z) ? order.indexOf(z) : order.length);
+  const cell = (sev) => (sev
+    ? `<span class="wear__sev wear__sev--${F.esc(sev)}">${F.esc(sev === "seen" ? "constatée" : GEAR_SEVERITY[sev] || sev)}</span>`
+    : `<span class="muted" aria-label="non notée">—</span>`);
+  const rows = [...byZone.keys()].sort((a, b) => rank(a) - rank(b)).map((zone) => {
+    const row = byZone.get(zone);
+    return `<tr><th scope="row">${F.esc(GEAR_ZONE[zone] || zone)}</th><td>${cell(row.left)}</td><td>${cell(row.right)}</td></tr>`;
+  }).join("");
+  return `<table class="wear"><thead><tr><th scope="col">Zone d'usure</th><th scope="col">Pied gauche</th><th scope="col">Pied droit</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+// Asymétrie : neutre quand « aucune », mise en avant (avec le côté le plus usé) sinon.
+function asymmetryBadge(asym) {
+  if (!asym?.level) return "";
+  const label = GEAR_ASYMMETRY[asym.level] || asym.level;
+  if (asym.level === "none") return `<span class="tag">${F.esc(label)}</span>`;
+  const side = asym.side ? ` — ${GEAR_SIDE[asym.side] || asym.side} plus usé` : "";
+  return chip("gearcond", asym.level === "marked" ? "orange" : "yellow", `${label}${side}`);
+}
+const hintBadges = (hints) => (hints || []).map((h) => `<span class="tag tag--hint">indice : ${F.esc(GEAR_HINT[h] || h)}</span>`).join("");
+// Rappel « indice, pas diagnostic » : UNE fois par carte (jamais par inspection), avec le lien vers la
+// synthèse mesurée de la vue Santé.
+const INSPECTION_CAVEAT = `Indices d'attaque et d'asymétrie : tirés de photos de semelle, à prendre comme des indices, pas un diagnostic. La foulée mesurée par la montre est dans <a href="#/sante?section=foulee">la carte « Foulée » de la vue Santé</a>.`;
 function inspectionItem(insp) {
-  const zones = (insp.wear_zones || []).map((z) => `${F.esc(GEAR_ZONE[z.zone] || z.zone)} (${F.esc(GEAR_SIDE[z.side] || z.side)})${z.severity ? ` (${F.esc(GEAR_SEVERITY[z.severity] || z.severity)})` : ""}`).join(", ");
-  const asym = insp.asymmetry ? `${F.esc(GEAR_ASYMMETRY[insp.asymmetry.level] || insp.asymmetry.level)}${insp.asymmetry.side ? ` — ${F.esc(GEAR_SIDE[insp.asymmetry.side] || insp.asymmetry.side)} plus usé` : ""}` : "";
-  const hints = (insp.gait_hints || []).map((h) => F.esc(GEAR_HINT[h] || h)).join(", ");
-  const facts = [zones && `usure : ${zones}`, asym, hints && `indices de foulée (à prendre comme un indice, pas un diagnostic) : ${hints}`].filter(Boolean).join(" · ");
-  return `<li><strong>${F.esc(F.dayLong(insp.date))}</strong> ${gearConditionChip(insp.condition)}${insp.distance_m != null ? ` <span class="muted">à ${F.distance(insp.distance_m, 0)}</span>` : ""}
-    ${facts ? `<br><small class="muted">${facts}</small>` : ""}${inspectionPhotos(insp) ? `<br>${inspectionPhotos(insp)}` : ""}</li>`;
+  const badges = [asymmetryBadge(insp.asymmetry), hintBadges(insp.gait_hints)].filter(Boolean).join(" ");
+  return `<li class="insp">
+    <div class="insp__head"><strong>${F.esc(F.dayLong(insp.date))}</strong> ${gearConditionChip(insp.condition)}${insp.distance_m != null ? ` <span class="muted">à ${F.distance(insp.distance_m, 0)}</span>` : ""}</div>
+    ${badges ? `<div class="insp__badges">${badges}</div>` : ""}${wearTable(insp.wear_zones)}${inspectionPhotos(insp) ? `<div>${inspectionPhotos(insp)}</div>` : ""}</li>`;
 }
 function gearInspectionSection(inspections) {
   const entries = (inspections?.gear || []).filter((e) => e.inspections.length || e.due);
@@ -310,13 +344,14 @@ function gearInspectionSection(inspections) {
     const change = e.condition_change === "worse" ? ` <span class="tag">plus dégradée que la précédente</span>` : e.condition_change === "better" ? ` <span class="tag">mieux que la précédente</span>` : e.condition_change === "same" ? ` <span class="tag">état stable</span>` : "";
     const due = e.due ? ` ${chip("gear", "orange", "Inspection conseillée")} <small class="muted">${e.due_reason === "threshold_alert" ? "seuil d'alerte franchi" : e.due_reason === "never_inspected" ? "jamais inspectée" : `${F.distance(e.km_since_inspection_m, 0)} depuis la dernière`}</small>` : "";
     const list = e.inspections.length ? `<ol class="gear-inspections">${e.inspections.map(inspectionItem).join("")}</ol>` : `<p class="muted">Aucune inspection enregistrée.</p>`;
-    return `<div class="gear-inspection-block"><h3>${F.esc(e.name)}${e.retired ? ` <span class="tag">retirée</span>` : ""}${e.unknown ? ` <span class="tag">inconnue</span>` : ""}${e.ignored ? ` <span class="tag">ignorée</span>` : ""}${change}${due}</h3>${list}</div>`;
+    return `<div class="gear-inspection-block"><h3>${gearLink(e.gear_id, e.name)}${e.retired ? ` <span class="tag">retirée</span>` : ""}${e.unknown ? ` <span class="tag">inconnue</span>` : ""}${e.ignored ? ` <span class="tag">ignorée</span>` : ""}${change}${due}</h3>${list}</div>`;
   }).join("");
   return `<section class="band"><h2>Inspections photo</h2>${blocks}
-    ${note("L'usure d'une semelle est un signal faible (les chaussures modernes la déforment) : la comparaison avec l'inspection précédente compte plus que le verdict isolé. Demandez une inspection au coach — il la propose environ tous les 200 km.")}</section>`;
+    ${note("L'usure d'une semelle est un signal faible (les chaussures modernes la déforment) : la comparaison avec l'inspection précédente compte plus que le verdict isolé. Demandez une inspection au coach — il la propose environ tous les 200 km.")}
+    ${note(INSPECTION_CAVEAT)}</section>`;
 }
 
-// Détail complet du kilométrage chaussures (vue Performance) : toutes les paires
+// Détail complet du kilométrage chaussures (vue Matériel, #147) : toutes les paires
 // déclarées (retirées comprises, en fin de tableau), plus une ligne « inconnue »
 // par `gear_id` vu sur une activité mais absent du profil (#40 — ne jamais
 // masquer silencieusement un `gear_id` mal orthographié).
@@ -328,12 +363,12 @@ function gearSection(gear, inspections) {
   if (!shoes.length && !unknown.length) return "";
   const sorted = [...shoes].sort((a, b) => (a.retired === b.retired ? 0 : a.retired ? 1 : -1));
   const rows = sorted.map((s) => `<tr${s.retired ? ` class="muted"` : ""}>
-      <th scope="row">${F.esc(s.name)}${s.default ? ` <span class="tag">défaut</span>` : ""}${s.retired ? ` <span class="tag">retirée</span>` : ""}${s.usage ? ` <span class="tag">${F.esc(s.usage)}</span>` : ""}</th>
+      <th scope="row">${gearLink(s.gear_id, s.name)}${s.default ? ` <span class="tag">défaut</span>` : ""}${s.retired ? ` <span class="tag">retirée</span>` : ""}${s.usage ? ` <span class="tag">${F.esc(s.usage)}</span>` : ""}</th>
       <td class="num">${F.distance(s.distance_m, 0)}${s.start_m ? `<br><small class="muted">dont ${F.distance(s.start_m, 0)} de départ</small>` : ""}</td>
       <td class="num">${F.distance(s.threshold_m, 0)}</td>
       <td>${s.alert ? chip("gear", "orange", "À surveiller") : ""} ${gearForecast(s)} ${inspectionBadge(inspectionByGear[s.gear_id])}</td></tr>`).join("");
-  const unknownRows = unknown.map((u) => `<tr><th scope="row">${F.esc(u.gear_id)} <span class="tag">inconnue</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td class="num">—</td><td></td></tr>`).join("");
-  return `<section class="band"><h2>Matériel</h2><div class="table-wrap"><table class="data data--compact">
+  const unknownRows = unknown.map((u) => `<tr><th scope="row">${gearLink(u.gear_id, u.gear_id)} <span class="tag">inconnue</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td class="num">—</td><td></td></tr>`).join("");
+  return `<section class="band"><h2>Chaussures</h2><div class="table-wrap"><table class="data data--compact">
       <thead><tr><th scope="col">Chaussure</th><th scope="col" class="num">Kilométrage</th><th scope="col" class="num">Seuil</th><th scope="col">Statut</th></tr></thead>
       <tbody>${rows}${unknownRows}</tbody></table></div>
       ${unknown.length ? note("« inconnue » : gear_id vu sur une séance mais absent de la section « Chaussures » du profil (faute de frappe, paire jamais déclarée).") : ""}
@@ -366,11 +401,11 @@ function equipmentSection(eq) {
   if (!items.length && !unknown.length) return "";
   const sorted = [...items].sort((a, b) => (a.retired === b.retired ? 0 : a.retired ? 1 : -1));
   const rows = sorted.map((it) => `<tr${it.retired ? ` class="muted"` : ""}>
-      <th scope="row">${F.esc(it.name)}${it.category ? ` <span class="tag">${F.esc(EQUIP_CATEGORY_LABEL[it.category] || it.category)}</span>` : ""}${it.retired ? ` <span class="tag">retiré</span>` : ""}${(it.kits || []).map((k) => ` <span class="tag">kit ${F.esc(k)}</span>`).join("")}</th>
+      <th scope="row">${gearLink(it.gear_id, it.name)}${it.category ? ` <span class="tag">${F.esc(EQUIP_CATEGORY_LABEL[it.category] || it.category)}</span>` : ""}${it.retired ? ` <span class="tag">retiré</span>` : ""}${(it.kits || []).map((k) => ` <span class="tag">kit ${F.esc(k)}</span>`).join("")}</th>
       <td class="num">${F.distance(it.usage.distance_m, 0)}<br><small class="muted">${F.hours(it.usage.duration_s)} · ${F.num(it.usage.sessions, 0)} séance${it.usage.sessions > 1 ? "s" : ""}${it.usage.days != null ? ` · ${F.num(it.usage.days, 0)} j` : ""}</small></td>
       <td>${equipmentTriggers(it)}</td>
       <td>${it.alert ? chip("gear", "orange", "À surveiller") : it.near_threshold ? chip("gear", "orange", "Proche du seuil") : ""}</td></tr>`).join("");
-  const unknownRows = unknown.map((u) => `<tr><th scope="row">${F.esc(u.gear_id)} <span class="tag">inconnu</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td></td><td></td></tr>`).join("");
+  const unknownRows = unknown.map((u) => `<tr><th scope="row">${gearLink(u.gear_id, u.gear_id)} <span class="tag">inconnu</span></th><td class="num">${F.distance(u.distance_m, 0)}</td><td></td><td></td></tr>`).join("");
   return `<section class="band"><h2>Équipement</h2><div class="table-wrap"><table class="data data--compact">
       <thead><tr><th scope="col">Objet</th><th scope="col" class="num">Usage</th><th scope="col">Déclencheurs</th><th scope="col">Statut</th></tr></thead>
       <tbody>${rows}${unknownRows}</tbody></table></div>
@@ -490,7 +525,7 @@ function renderNav(s) {
   const nutrition = s.settings.agents?.includes("nutritionist");
   const items = [
     ["", "Aujourd'hui"], ["forme", "Forme & charge"], ["analyse", "Analyse"], ["sante", "Santé"], ["semaine", "Semaine"],
-    ["seances", "Séances"], ["performance", "Performance"], ["trail-shape", "Trail Shape"], ["calendrier", "Calendrier"],
+    ["seances", "Séances"], ["performance", "Performance"], ["materiel", "Matériel"], ["trail-shape", "Trail Shape"], ["calendrier", "Calendrier"],
     ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
   ];
   $("#nav").innerHTML = items.map(([h, l]) => `<a href="#/${h}" data-route="${h}">${l}</a>`).join("")
@@ -514,7 +549,11 @@ function markNav(route) {
       // ci-dessus, sous-page de « Décisions » sans onglet dédié.
       || (route === "decision" && a.dataset.route === "decisions");
     a.toggleAttribute("aria-current", on);
-    if (on) a.setAttribute("aria-current", "page");
+    if (on) {
+      a.setAttribute("aria-current", "page");
+      // Nav défilante sur mobile (#147, une entrée de plus) : l'onglet actif reste visible.
+      if (a.scrollIntoView) a.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }
 }
 
@@ -669,7 +708,9 @@ async function viewToday() {
     ? `<p class="weather">${weatherChip(weather.category)} <span>${F.esc(weather.location)} · ${F.num(weather.temp_max_c)} °C max · vent ${F.num(weather.wind_kmh)} km/h</span>${weather.best_slot ? ` <span class="slot">Créneau : <strong>${F.SLOT[weather.best_slot]}</strong></span>` : ""}</p>${weather.slot_reason ? `<p class="muted">${F.esc(weather.slot_reason)}</p>` : ""}`
     : "";
   const heatHtml = heatTile(s.heat_acclimation);
-  const gearHtml = gearTile(s.gear) + equipmentTile(s.equipment);
+  // Un seul lien « Voir le matériel » quand les deux tuiles s'affichent (#147) : celle d'équipement le porte.
+  const equipmentHtml = equipmentTile(s.equipment);
+  const gearHtml = gearTile(s.gear, !equipmentHtml) + equipmentHtml;
   const injuryRiskHtml = injuryRiskTile(injuryRisk);
 
   const f = form.series[form.series.length - 1];
@@ -993,21 +1034,144 @@ function wirePolarisationChart(weeks) {
 }
 
 // ---------------------------------------------------------------------------
+// Carte « Foulée » de la vue Santé (#151) : dynamique de course MESURÉE par la montre + indices des
+// inspections photo, avec confiance et contradictions. Jamais un diagnostic, aucune modification de charge.
+// ---------------------------------------------------------------------------
+
+const NB = " ";
+// Sens d'une variation : décidé CÔTÉ SERVEUR (`direction` : up / down / flat, `arc_gait.change_direction`,
+// testé en palier D) — jamais déduit ici d'un nombre arrondi. Flèche neutre (ni bon ni mauvais) + valeur signée ;
+// « stable » sans signe quand la variation s'arrondit à zéro à l'affichage.
+const GAIT_ARROW = { up: "↑", down: "↓", flat: "→" };
+function gaitTrend(direction, magnitudeText) {
+  if (!direction) return "";
+  if (direction === "flat") return `<span class="nowrap"><span aria-label="stable">${GAIT_ARROW.flat}</span> stable</span>`;
+  const sign = direction === "up" ? "+" : "\u2212";
+  return `<span class="nowrap"><span aria-label="${direction === "up" ? "en hausse" : "en baisse"}">${GAIT_ARROW[direction]}</span> ${sign}${magnitudeText}</span>`;
+}
+const GAIT_ROWS = [
+  ["ground_contact_s", "Temps de contact au sol", (v) => `${F.num(v * 1000, 0)}${NB}ms`, (d) => `${F.num(Math.abs(d) * 1000, 0)}${NB}ms`],
+  ["stance_balance_pct", "Balance du temps de contact", (v) => `${F.num(v, 1)}${NB}%`, (d) => `${F.num(Math.abs(d), 2)}${NB}pt`],
+  ["vertical_oscillation_m", "Oscillation verticale", (v) => F.oscillation(v), (d) => F.oscillation(Math.abs(d))],
+  ["vertical_ratio_pct", "Ratio vertical", (v) => `${F.num(v, 1)}${NB}%`, (d) => `${F.num(Math.abs(d), 2)}${NB}pt`],
+  ["step_length_m", "Longueur de pas", (v) => F.stepLength(v), (d) => F.stepLength(Math.abs(d))],
+  ["cadence_spm", "Cadence (pas/min, deux pieds)", (v) => `${F.num(v, 0)}${NB}pas/min`, (d) => `${F.num(Math.abs(d), 0)}${NB}pas/min`],
+];
+
+/** Une valeur par date (plusieurs séances le même jour : moyenne) pour l'axe du graphique. */
+function gaitDaily(series) {
+  const byDate = new Map();
+  for (const p of series) {
+    const cur = byDate.get(p.date) || [];
+    cur.push(p.value);
+    byDate.set(p.date, cur);
+  }
+  const dates = [...byDate.keys()].sort();
+  return { dates, values: dates.map((d) => byDate.get(d).reduce((a, b) => a + b, 0) / byDate.get(d).length) };
+}
+
+function gaitInspectionFacts(insp) {
+  if (!insp?.pairs?.length) return `<p class="muted">Aucune inspection photo enregistrée : demandez-en une au coach (environ tous les 200${NB}km) pour obtenir un indice d'attaque et d'asymétrie d'usure.</p>`;
+  const rows = insp.pairs.map((p) => {
+    const strike = Object.entries(p.strike_hints || {}).filter(([h]) => GEAR_HINT[h]).map(([h, n]) => `${F.esc(GEAR_HINT[h])} (${n}/${p.n})`).join(", ") || "—";
+    const asym = p.asymmetry?.length ? p.asymmetry.map((a) => `${F.esc(F.dayShort(a.date))} : ${F.esc(a.level === "none" ? "aucune" : `${GEAR_ASYMMETRY[a.level] || a.level}${a.side ? ` (${GEAR_SIDE[a.side] || a.side})` : ""}`)}`).join(" · ") : "—";
+    const rep = p.asymmetry_repeats ? ` <span class="tag">même côté ${p.asymmetry_repeats.count}/${p.asymmetry_repeats.of} fois : ${F.esc(GEAR_SIDE[p.asymmetry_repeats.side] || p.asymmetry_repeats.side)}</span>` : "";
+    return `<tr><th scope="row">${gearLink(p.gear_id, p.name)}<br><small class="muted">${p.n} inspection${p.n > 1 ? "s" : ""}</small></th><td>${strike}</td><td>${asym}${rep}</td></tr>`;
+  }).join("");
+  return `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Paire</th><th scope="col">Indices</th><th scope="col">Asymétrie d'usure</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+/** `{html, mount}` : `html` à poser dans la page, `mount()` à appeler ensuite (curseurs des graphiques). */
+function gaitCard(g) {
+  const link = `<p class="note">Indice, jamais un diagnostic : cette synthèse ne modifie ni la charge ni le plan d'entraînement. Inspections photo : <a href="#/materiel">vue Matériel</a>.</p>`;
+  if (!g) return { html: "", mount() {} };
+  const conf = g.confidence || {};
+  const head = `<h2>Comment évolue ma foulée ?</h2>`;
+  if (!conf.sessions_with_dynamics && !conf.inspections) {
+    return { html: `<section class="band" id="foulee">${head}${empty("Pas encore de données de foulée", `Ni dynamique de course (temps de contact, balance, oscillation…) dans l'index, ni inspection photo de chaussures. Les séances de course doivent avoir leurs échantillons FIT (<code>skills/fit-download</code>) ; pour ceux déjà téléchargés : <code>download_fit.py --refresh-dynamics</code>.`)}</section>`, mount() {} };
+  }
+  const dyn = g.dynamics || {};
+  const rowsHtml = GAIT_ROWS.filter(([k]) => dyn[k]).map(([k, label, fmt, fmtDelta]) => {
+    const d = dyn[k];
+    const change = d.change != null ? `${gaitTrend(d.direction, fmtDelta(d.change))} <small class="muted gait-counts">(${d.recent_n} récentes / ${d.prior_n} avant)</small>` : `<span class="muted">pas assez de séances de chaque côté</span>`;
+    const extra = k === "stance_balance_pct" ? `<br><small class="muted">écart moyen à 50${NB}% : ${F.num(d.mean_gap_pts, 1)}${NB}pt</small>` : "";
+    return `<tr><th scope="row">${F.esc(label)}<small class="muted gait-n-inline">${d.n} séance${d.n > 1 ? "s" : ""}</small></th><td class="num">${fmt(d.mean)}${extra}</td><td class="gait-trend">${change}</td><td class="num gait-col-n">${d.n}</td></tr>`;
+  }).join("");
+  const bal = dyn.stance_balance_pct;
+  const balanceNote = bal
+    ? `<p class="note">Balance : ${F.num(bal.beyond_band_share * 100, 0)}${NB}% des séances mesurées (${bal.beyond_band_n}/${bal.n}) s'écartent de plus de ${F.num(bal.band_pts, 0)}${NB}point de 50${NB}% (bande = ${F.esc(bal.band_label)}, pas un seuil publié). Le côté que porte ce pourcentage (gauche ou droite) n'est pas établi par le format FIT : on parle d'écart, jamais de pied gauche ou droit.</p>`
+    : (conf.sessions_with_dynamics ? `<p class="note">Aucune séance n'a de balance du temps de contact (selon le capteur) : elle n'est jamais remplacée par 50${NB}%.</p>` : "");
+  const noDynamics = !conf.sessions_with_dynamics;      // la cadence seule remplit une ligne : elle ne dit rien de la dynamique
+  const refreshHint = `<p class="muted">Aucune séance de course de la fenêtre ne porte de dynamique de course (temps de contact, balance, oscillation…) : les échantillons FIT sont absents, ou l'index a été reconstruit avant l'extraction. Pour les FIT déjà téléchargés : <code>python3 skills/fit-download/scripts/download_fit.py --refresh-dynamics</code>, puis rechargez.</p>`;
+  const table = rowsHtml
+    ? `${noDynamics ? refreshHint : ""}<div class="table-wrap"><table class="data data--compact gait-table"><thead><tr><th scope="col">Grandeur</th><th scope="col" class="num">Moyenne</th><th scope="col"><span class="gait-long">4 dernières semaines vs avant</span><span class="gait-short">4 sem. vs avant</span></th><th scope="col" class="num gait-col-n">Séances</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+    : refreshHint;
+
+  const charts = [];
+  const gct = dyn.ground_contact_s;
+  if (gct?.series?.length) {
+    const { dates, values } = gaitDaily(gct.series);
+    const c = timeChart(dates, [{ type: "line", values: values.map((v) => v * 1000), cls: "line line--gait" }, { type: "dots", values: values.map((v) => v * 1000), cls: "dot dot--gait" }], [],
+      { height: 190, label: "Temps de contact au sol en millisecondes", yFormat: (v) => `${F.num(v, 0)}` });
+    charts.push({ id: "gct", title: "Temps de contact au sol (ms)", c, show: (i) => `<strong>${F.dayLong(dates[i])}</strong> · ${F.num(values[i] * 1000, 0)}${NB}ms` });
+  }
+  if (bal?.series?.length) {
+    const { dates, values } = gaitDaily(bal.series);
+    const lo = 50 - bal.band_pts;
+    const hi = 50 + bal.band_pts;
+    const c = timeChart(dates, [
+      { type: "band", lo: dates.map(() => lo), hi: dates.map(() => hi), cls: "band-fill" },
+      { type: "line", values, cls: "line line--gait" }, { type: "dots", values, cls: "dot dot--gait" },
+    ], [{ type: "hline", value: 50, cls: "mark mark--zero", label: "50 %" }],
+    { height: 250, y: { min: Math.floor(Math.min(lo, ...values) - 0.5), max: Math.ceil(Math.max(hi, ...values) + 0.5) }, label: "Balance du temps de contact en pourcentage", yFormat: (v) => `${F.num(v, 0)}` });
+    charts.push({ id: "bal", title: "Balance du temps de contact (%), bande grisée = bande du projet", c, show: (i) => `<strong>${F.dayLong(dates[i])}</strong> · ${F.num(values[i], 2)}${NB}% (écart ${F.num(Math.abs(values[i] - 50), 2)}${NB}pt)` });
+  }
+  const chartsHtml = charts.map((x) => `<h3>${F.esc(x.title)}</h3><div class="chart-host" id="c-gait-${x.id}">${x.c.svg}</div><p class="readout" id="r-gait-${x.id}"></p>`).join("");
+
+  const contradictions = (g.contradictions || []).length
+    ? `<h3>Désaccords entre les sources</h3><ul class="gait-contradictions">${g.contradictions.map((c) => `<li>${F.esc(c.message)} ${c.resolution === "measure_wins" ? `<span class="tag">la mesure prime</span>` : ""}</li>`).join("")}</ul>`
+    : (conf.inspections && conf.sessions_with_dynamics ? `<p class="muted">Aucun désaccord relevé entre les inspections et la dynamique mesurée.</p>` : "");
+
+  const levelTag = (lvl) => (lvl === "ok" ? "" : ` <span class="tag tag--alert">${lvl === "none" ? "aucune donnée" : "confiance faible"}</span>`);
+  const confidence = `<p class="muted">${conf.sessions_with_dynamics} séance${conf.sessions_with_dynamics > 1 ? "s" : ""} de course avec dynamique sur ${conf.running_sessions} (dont ${conf.sessions_with_balance} avec balance)${levelTag(conf.dynamics_level)} · ${conf.inspections} inspection${conf.inspections > 1 ? "s" : ""} sur ${conf.pairs_inspected} paire${conf.pairs_inspected > 1 ? "s" : ""}${levelTag(conf.inspections_level)} — ${g.window.weeks} dernières semaines pour les séances.</p>`;
+
+  const html = `<section class="band gait" id="foulee">${head}
+    <p class="muted">Ce que la montre mesure de votre foulée sur les séances de course (route et trail), et ce que les photos de semelles suggèrent — en séparant le mesuré du deviné.</p>
+    ${confidence}${table}${balanceNote}${chartsHtml}
+    <h3>Indices tirés des inspections photo</h3>${gaitInspectionFacts(g.inspections)}
+    ${contradictions}${link}</section>`;
+  return {
+    html,
+    mount() {
+      for (const x of charts) attachCursor($(`#c-gait-${x.id}`), x.c, (i) => readout($(`#r-gait-${x.id}`), x.show(i)));
+      if (new URLSearchParams(location.hash.split("?")[1] || "").get("section") === "foulee") {
+        setTimeout(() => $("#foulee")?.scrollIntoView(), 0);   // `route()` remonte en haut APRÈS la vue
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Vue : Santé
 // ---------------------------------------------------------------------------
 
 async function viewHealth(params) {
   const days = Number(params.get("jours")) || 90;
-  const data = await api(`health?days=${days}`);
+  // La carte « Foulée » (#151) ne dépend pas du bilan matinal : elle est montrée même quand celui-ci est
+  // désactivé ou vide. Son échec ne doit jamais masquer la vue Santé.
+  const [data, gaitData] = await Promise.all([api(`health?days=${days}`), api("gait").catch(() => null)]);
+  const gait = gaitCard(gaitData);
   const mode = data.morning_check;
   if (mode === "off") {
-    main.innerHTML = header("Santé") + empty("Bilan matinal désactivé", "Avec <code>[health].morning_check = \"off\"</code>, le coach ne récupère ni HRV, ni FC de repos, ni readiness : leur absence ici n'est pas un manque. Passez à <code>minimal</code> ou <code>full</code> pour suivre ces courbes.");
+    main.innerHTML = header("Santé") + empty("Bilan matinal désactivé", "Avec <code>[health].morning_check = \"off\"</code>, le coach ne récupère ni HRV, ni FC de repos, ni readiness : leur absence ici n'est pas un manque. Passez à <code>minimal</code> ou <code>full</code> pour suivre ces courbes.") + gait.html;
+    gait.mount();
     return;
   }
   const s = data.series;
   const dates = s.map((p) => p.date);
   if (!s.some((p) => p.readiness_score != null || p.hrv_overnight_ms != null || p.resting_hr_bpm != null)) {
-    main.innerHTML = header("Santé") + empty("Pas encore de données de santé", "Les fichiers <code>medical/AAAA-MM-JJ_health.md</code> écrits par la synchronisation alimentent ces courbes.");
+    main.innerHTML = header("Santé") + empty("Pas encore de données de santé", "Les fichiers <code>medical/AAAA-MM-JJ_health.md</code> écrits par la synchronisation alimentent ces courbes.") + gait.html;
+    gait.mount();
     return;
   }
   const charts = [];
@@ -1061,7 +1225,7 @@ async function viewHealth(params) {
   main.innerHTML = `${header("Santé", mode === "minimal" ? "Bilan minimal : readiness seule." : "Triade du matin : HRV, FC de repos, readiness — et le verdict du coach, jour par jour.")}
     <div class="toolbar">${periods}</div>
     <p class="readout readout--sticky" id="r-health"></p>
-    ${charts.map(([id, title, sub, c, strip]) => `<section class="band"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="chart-host" id="c-${id}">${c.svg}</div>${strip ? `<div class="strip-host">${verdictStrip(dates, s.map((p) => p.verdict))}<p class="legend legend--small"><span class="legend__item"><span class="key key--green"></span>Maintenir</span> <span class="legend__item"><span class="key key--amber"></span>Alléger</span> <span class="legend__item"><span class="key key--red"></span>Repos</span> — verdicts du coach</p></div>` : ""}</section>`).join("")}`;
+    ${charts.map(([id, title, sub, c, strip]) => `<section class="band"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="chart-host" id="c-${id}">${c.svg}</div>${strip ? `<div class="strip-host">${verdictStrip(dates, s.map((p) => p.verdict))}<p class="legend legend--small"><span class="legend__item"><span class="key key--green"></span>Maintenir</span> <span class="legend__item"><span class="key key--amber"></span>Alléger</span> <span class="legend__item"><span class="key key--red"></span>Repos</span> — verdicts du coach</p></div>` : ""}</section>`).join("")}${gait.html}`;
   const show = (i) => {
     const p = s[i];
     const bits = [`<strong>${F.dayLong(p.date)}</strong>`];
@@ -1079,6 +1243,7 @@ async function viewHealth(params) {
     readout($("#r-health"), bits.join(" · ") + (p.verdict ? `<br>${verdictChip(p.verdict)} ${F.esc(p.verdict_reason || "")}` : ""));
   };
   for (const [id, , , c] of charts) attachCursor($(`#c-${id}`), c, show);
+  gait.mount();
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,6 +1344,10 @@ async function viewSession(id) {
     ["FC moy / max", a.avg_hr_bpm ? `${F.num(a.avg_hr_bpm)} / ${F.num(a.max_hr_bpm)} bpm` : (missing.avg_hr_bpm ? "non mesurée" : "—")],
     ["HRR", a.recovery_hr_bpm != null ? `${F.num(a.recovery_hr_bpm)} bpm` : `non mesuré${missing.recovery_hr_bpm ? ` — ${F.esc(missing.recovery_hr_bpm)}` : ""}`],
     ["Effet d'entraînement", a.te_aerobic != null ? `${F.num(a.te_aerobic, 1)}${a.te_anaerobic != null ? ` / ${F.num(a.te_anaerobic, 1)} anaérobie` : ""}` : "—"],
+    // Matériel (#147) : chaussure attribuée par la règle unique (`arc_metrics.attribute_gear`, côté
+    // serveur) et objets portés (`gear_ids`) — chaque nom renvoie vers sa fiche ; rien si absent.
+    ...(d.gear?.shoe ? [["Chaussure", `${gearLink(d.gear.shoe.gear_id, d.gear.shoe.name)}${d.gear.shoe.source === "default" ? ` <small class="muted">paire par défaut</small>` : ""}`]] : []),
+    ...(d.gear?.equipment?.length ? [["Équipement porté", d.gear.equipment.map((g) => gearLink(g.gear_id, g.name)).join(", ")]] : []),
     ["Charge", `${F.num(a.load)} <small class="muted">${a.load_source === "trimp" ? "TRIMP" : a.load_source === "srpe" ? "effort perçu" : "estimée"}</small>`],
     ...(a.vo2max_est ? [["VO2max estimée", F.num(a.vo2max_est, 1)]] : []),
   ];
@@ -1487,12 +1656,12 @@ function energySection(energy, noFitSamples) {
 
 // Libellés français, indexés sur `reason_code` — jamais une raison technique
 // (nom de module, de table, de story) affichée telle quelle à l'athlète (revue
-// de code : `no_garmin_id`/`no_row` mentionnaient `garminconnect`/
+// de code : `no_activity_id`/`no_row` mentionnaient `garminconnect`/
 // `activity_energy` dans le texte serveur, du jargon interne). `reason` (texte
 // serveur, `arc_index._energy_reason_for_missing_row`) reste le repli si un
 // `reason_code` futur n'a pas encore son libellé ici.
 const ENERGY_REASON_LABEL = {
-  no_garmin_id: "séance sans donnée Garmin (par exemple synchronisée depuis une autre source) : le modèle a besoin "
+  no_activity_id: "séance sans identifiant de montre (saisie manuelle ?) : le modèle a besoin "
     + "des mesures fines de la montre, indisponibles ici.",
   no_samples: "aucun échantillon FIT ingéré pour cette séance.",
   no_row: "dépense énergétique modèle indisponible pour cette séance.",
@@ -1748,9 +1917,7 @@ async function viewPerformance(params) {
       ${trail ? note("En trail, la distance « effort » ajoute le dénivelé (1000 m D+ ≈ 1,75 km de plat, <code>config/sports/trail.md</code>). Sable, vent et barrières ne sont pas modélisés.") : ""}</div>
       <div><h2>Records</h2>${rec}</div></section>
     ${slopeHtml}
-    ${gearSection(SUMMARY.gear, SUMMARY.gear_inspections)}
-    ${equipmentSection(SUMMARY.equipment)}
-    ${gearInspectionSection(SUMMARY.gear_inspections)}
+    <p class="note">Kilométrage des chaussures, équipement et inspections : <a href="#/materiel">vue Matériel</a>.</p>
     ${indexHtml}
     <section class="band"><h2>Hypothèses</h2><dl class="assumptions">${Object.values(assumptions).map((t) => `<dd>${F.esc(t)}</dd>`).join("")}</dl></section>`;
   if (c) attachCursor($("#c-vo2"), c, (i) => readout($("#r-vo2"), `<strong>${F.dayLong(p.vo2max[i].date)}</strong> · ${p.vo2max[i].vo2max != null ? F.num(p.vo2max[i].vo2max, 1) : "pas d'estimation (aucune séance de course qualifiante sur 30 j)"}`));
@@ -1764,6 +1931,176 @@ async function viewPerformance(params) {
     attachCursor($(`#${c2.id}`), c2.chart, (i) => readout($(`#${c2.readoutId}`),
       `<strong>${F.dateLong(c2.entries[i].date)}</strong> · ${F.num(c2.entries[i].value, 0)}`));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Vue : Matériel (#147) — chaussures, équipement (kits compris), inspections, et fiche par paire
+// ---------------------------------------------------------------------------
+
+// Synthèse « à traiter » : une entrée par paire/objet (jamais deux lignes pour le même), avec TOUTES
+// ses raisons — seuil franchi, inspection conseillée. Mêmes drapeaux que les cartes détaillées
+// (`alert`, `due`), jamais une seconde règle côté navigateur.
+const dayYear = (iso) => `${F.dayShort(iso)} ${iso.slice(0, 4)}`;
+const MONTH_FMT = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "numeric" });
+const monthLabel = (m) => MONTH_FMT.format(F.parseDate(`${m}-01`));
+const HYPOTHESES_LINK = `<a href="#/performance">Hypothèses des modèles</a>`;
+
+function gearAlertEntries(summary) {
+  const byId = new Map();
+  const add = (id, name, kind, reason) => {
+    if (!byId.has(id)) byId.set(id, { id, name, kind, reasons: [] });
+    byId.get(id).reasons.push(reason);
+  };
+  const fmtTrigger = (type, v) => (EQUIP_TRIGGER[type] || ((x) => F.num(x, 0)))(v);
+  for (const sh of summary.gear?.shoes || []) {
+    if (sh.alert) add(sh.gear_id, sh.name, "shoe", `seuil dépassé (${F.distance(sh.distance_m, 0)} / ${F.distance(sh.threshold_m, 0)})`);
+  }
+  for (const it of summary.equipment?.items || []) {
+    if (!it.alert) continue;
+    const reached = (it.triggers || []).filter((t) => t.reached).map((t) => `${fmtTrigger(t.type, t.value)} / ${fmtTrigger(t.type, t.threshold)}`);
+    add(it.gear_id, it.name, "equipment", `seuil atteint${reached.length ? ` (${reached.join(", ")})` : ""}`);
+  }
+  for (const e of summary.gear_inspections?.gear || []) {
+    if (e.due && !e.retired) add(e.gear_id, e.name, "shoe", "inspection conseillée");
+  }
+  return [...byId.values()];
+}
+
+function gearAlertsSection(summary) {
+  const entries = gearAlertEntries(summary);
+  if (!entries.length) return `<section class="band"><h2>À traiter</h2>${note("Rien à signaler : aucune paire ni aucun objet n'a atteint son seuil, aucune inspection n'est conseillée.")}</section>`;
+  return `<section class="band"><h2>À traiter</h2><ul class="facts-list">${entries.map((e) => `<li><span class="tag">${e.kind === "shoe" ? "Chaussure" : "Équipement"}</span> ${gearLink(e.id, e.name)} — ${e.reasons.map(F.esc).join(" · ")}</li>`).join("")}</ul></section>`;
+}
+
+function gearEmptyState() {
+  return `<div class="empty">
+    <h3>Aucun matériel déclaré</h3>
+    <p>Déclarez vos paires et votre équipement dans <code>planning/Runner_Profile.md</code>, section « Matériel & lieux » :</p>
+    <pre class="empty__code"><code>### Chaussures
+
+- Hoka Speedgoat 5 — depuis 2026-01-01 — alerte 700 km — id: speedgoat-5 (par défaut)
+
+### Matériel
+
+- Gilet 10 L — catégorie: gilet — alerte 1000 km — id: gilet-10l — kit: trail-long</code></pre>
+    <p>Vous avez déjà des séances dans Garmin Connect ? Simulez le rattrapage du matériel de l'historique avec
+    <code>python3 scripts/garmin_gear_backfill.py</code> (simulation par défaut, rien n'est écrit sans <code>--apply</code>).</p>
+    <p>Détails : <a href="https://mmornati.github.io/ai-running-coach/workspace/#declarer-vos-chaussures-40" target="_blank" rel="noopener">syntaxe du profil</a>,
+    <a href="https://mmornati.github.io/ai-running-coach/garmin-setup/#rattraper-le-materiel-de-lhistorique" target="_blank" rel="noopener">rattrapage Garmin</a>.</p></div>`;
+}
+
+function gearIgnoredSection(ignored) {
+  if (!ignored?.length) return "";
+  return `<section class="band"><h2>Paires ignorées</h2><ul class="facts-list">${ignored.map((g) => `<li>${gearLink(g.gear_id, g.name)} <span class="tag">ignorée</span></li>`).join("")}</ul>
+    ${note("Matériel Garmin volontairement non suivi : ses séances ne sont attribuées à aucune paire et n'entrent dans aucun kilométrage.")}</section>`;
+}
+
+async function viewMateriel() {
+  const s = SUMMARY;
+  const has = (s.gear?.shoes?.length || s.gear?.unknown?.length || s.equipment?.items?.length || s.equipment?.unknown?.length || s.gear_ignored?.length);
+  main.innerHTML = `${header("Matériel", `Mon matériel est-il en état ? Que dois-je remplacer ? ${HYPOTHESES_LINK}`)}
+    ${has ? `${gearAlertsSection(s)}
+    ${gearSection(s.gear, s.gear_inspections)}
+    ${equipmentSection(s.equipment)}
+    ${gearInspectionSection(s.gear_inspections)}
+    ${gearIgnoredSection(s.gear_ignored)}` : gearEmptyState()}`;
+}
+
+function gearSessionsTable(sessions) {
+  if (!sessions.length) return note("Aucune séance attribuée pour l'instant.");
+  return `<div class="table-wrap"><table class="data data--compact">
+    <thead><tr><th scope="col">Date</th><th scope="col">Séance</th><th scope="col" class="num">Distance</th></tr></thead>
+    <tbody>${sessions.map((x) => `<tr${x.counted === false ? ` class="muted" title="Avant le dernier entretien : non comptée dans les déclencheurs"` : ""}><td class="nowrap">${F.dayShort(x.date)} <span class="muted">${x.date.slice(0, 4)}</span></td>
+      <td><a href="#/seance/${x.id}">${F.esc(x.name || F.SPORT[x.sport] || x.sport)}</a> <span class="muted">${F.esc(F.SPORT[x.sport] || x.sport)}</span>${x.is_race ? ` <span class="tag">course</span>` : ""}</td>
+      <td class="num">${x.distance_m ? F.distance(x.distance_m, 1) : "—"}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function gearCareerFacts(d) {
+  const c = d.career;
+  const sh = d.shoe;
+  const facts = [
+    ["Kilométrage", `${F.distance(c.distance_m, 0)}${c.start_m ? `<small class="muted"> · dont ${F.distance(c.start_m, 0)} de départ</small>` : ""}`],
+    ["Séances", `${F.num(c.sessions, 0)}${c.first_date ? `<small class="muted"> · du ${F.dayShort(c.first_date)} ${c.first_date.slice(0, 4)} au ${F.dayShort(c.last_date)} ${c.last_date.slice(0, 4)}</small>` : ""}`],
+    ["Courses", c.races.length ? c.races.map((r) => `${F.esc(r.name || F.SPORT[r.sport] || "Course")} <small class="muted">${F.dayShort(r.date)} ${r.date.slice(0, 4)}${r.distance_m ? ` · ${F.distance(r.distance_m, 1)}` : ""}</small>`).join("<br>") : `<span class="muted">aucune</span>`],
+    ...(c.longest ? [["Sortie la plus longue", `${F.distance(c.longest.distance_m, 1)} <small class="muted">${F.esc(c.longest.name || "")} · ${F.dayShort(c.longest.date)} ${c.longest.date.slice(0, 4)}</small>`]] : []),
+    ...(c.best_efforts ? [["Meilleurs efforts", c.best_efforts.map((b) => `${b.km} km : ${F.clock(b.time_s)}`).join("<br>")]] : []),
+  ];
+  if (sh) {
+    facts.push(["Seuil d'alerte", `${F.distance(sh.threshold_m, 0)}${sh.alert ? ` ${chip("gear", "orange", "À surveiller")}` : ""} ${gearForecast(sh)}`]);
+    if (sh.usage) facts.push(["Usage", F.esc(sh.usage)]);
+    if (sh.start_date) facts.push(["En service depuis", dayYear(sh.start_date)]);
+  }
+  facts.push(["Lien Garmin", d.garmin_linked ? "rattachée à Garmin Connect" : `<span class="muted">non rattachée</span>`]);
+  return facts;
+}
+
+function gearShoeDetail(d) {
+  const tags = `${d.retired ? ` <span class="tag">retirée</span>` : ""}${d.unknown ? ` <span class="tag">inconnue</span>` : ""}${d.shoe?.default ? ` <span class="tag">défaut</span>` : ""}`;
+  if (d.ignored) {
+    const ins = d.inspections?.inspections?.length ? `<section class="band"><h2>Inspections</h2><ol class="gear-inspections">${d.inspections.inspections.map(inspectionItem).join("")}</ol>${note(INSPECTION_CAVEAT)}</section>` : "";
+    return { html: `${header(d.name, `Paire ignorée · ${HYPOTHESES_LINK}`)}<p><a href="#/materiel">← Matériel</a></p>
+      ${note(`Cette paire est marquée <em>ignorée</em> dans le profil : ses séances ne sont attribuées à aucune paire et n'entrent dans aucun kilométrage.${d.garmin_linked ? " Elle est rattachée à Garmin Connect." : ""}`)}${ins}` };
+  }
+  const facts = d.unknown ? [["Kilométrage", F.distance(d.career.distance_m, 0)]] : gearCareerFacts(d);
+  let chartHtml = "";
+  let chart = null;
+  if (d.monthly.length) {
+    chart = timeChart(d.monthly.map((m) => `${m.month}-01`), [{ type: "bars", values: d.monthly.map((m) => m.distance_m / 1000), cls: "bar" }], [],
+      { height: 180, y: { zero: true }, label: `Kilomètres par mois — ${d.name}`, yFormat: (v) => `${F.num(v)} km`,
+        xLabels: d.monthly.map((m, i) => (i % Math.max(1, Math.ceil(d.monthly.length / 6)) === 0 ? monthLabel(m.month) : "")) });
+    chartHtml = `<section class="band"><h2>Kilomètres par mois</h2><div class="chart-host" id="c-gear">${chart.svg}</div><p class="readout" id="r-gear"></p>
+      ${d.career.start_m ? note("Le départ déclaré n'est pas daté : il compte dans le kilométrage total, pas dans ce graphique.") : ""}</section>`;
+  }
+  const insp = d.inspections;
+  const inspHtml = insp && (insp.inspections.length || insp.due)
+    ? `<section class="band"><h2>Inspections</h2>${insp.due ? `<p>${chip("gear", "orange", "Inspection conseillée")} <small class="muted">${insp.due_reason === "threshold_alert" ? "seuil d'alerte franchi" : insp.due_reason === "never_inspected" ? "jamais inspectée" : `${F.distance(insp.km_since_inspection_m, 0)} depuis la dernière`}</small></p>` : ""}
+      ${insp.inspections.length ? `<ol class="gear-inspections">${insp.inspections.map(inspectionItem).join("")}</ol>${note(INSPECTION_CAVEAT)}` : ""}</section>` : "";
+  const html = `${header(d.name, `Fiche de la paire${tags ? ` ·${tags}` : ""} · ${HYPOTHESES_LINK}`)}<p><a href="#/materiel">← Matériel</a></p>
+    <dl class="facts facts--grid">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
+    ${chartHtml}
+    <section class="band"><h2>Séances</h2>${gearSessionsTable(d.sessions)}</section>
+    ${inspHtml}`;
+  return { html, chart, monthly: d.monthly };
+}
+
+function gearEquipmentDetail(d) {
+  if (d.unknown) {
+    const u = d.unknown_usage;
+    return { html: `${header(d.gear_id, "Objet inconnu du profil")}<p><a href="#/materiel">← Matériel</a></p>
+      ${note("Cet identifiant est cité dans <code>gear_ids</code> de séances mais absent de la section « Matériel » du profil (faute de frappe, objet jamais déclaré).")}
+      <dl class="facts facts--grid"><div><dt>Distance</dt><dd>${F.distance(u.distance_m, 0)}</dd></div><div><dt>Durée</dt><dd>${F.hours(u.duration_s)}</dd></div><div><dt>Séances</dt><dd>${F.num(u.sessions, 0)}</dd></div></dl>
+      <section class="band"><h2>Séances</h2>${gearSessionsTable(d.sessions)}</section>` };
+  }
+  const it = d.item;
+  const tags = `${it.category ? ` <span class="tag">${F.esc(EQUIP_CATEGORY_LABEL[it.category] || it.category)}</span>` : ""}${d.retired ? ` <span class="tag">retiré</span>` : ""}`;
+  const facts = [
+    [it.maintenance_date ? "Usage depuis l'entretien" : "Usage", `${F.distance(it.usage.distance_m, 0)}<small class="muted"> · ${F.hours(it.usage.duration_s)} · ${F.num(it.usage.sessions, 0)} séance${it.usage.sessions > 1 ? "s" : ""}${it.usage.days != null ? ` · ${F.num(it.usage.days, 0)} j` : ""}</small>`],
+    ...(it.maintenance_date ? [["Total à vie", `${F.distance(it.lifetime.distance_m, 0)}<small class="muted"> · ${F.hours(it.lifetime.duration_s)} · ${F.num(it.lifetime.sessions, 0)} séance${it.lifetime.sessions > 1 ? "s" : ""}</small>`]] : []),
+    ...(it.reference_date ? [[it.maintenance_date ? "Dernier entretien" : "En service depuis", dayYear(it.reference_date)]] : []),
+    ["Statut", it.alert ? chip("gear", "orange", "À surveiller") : it.near_threshold ? chip("gear", "orange", "Proche du seuil") : "en état"],
+  ];
+  const kits = Object.entries(d.kits || {}).map(([k, members]) => `<li>kit <strong>${F.esc(k)}</strong> : ${members.map((m) => (m.gear_id === d.gear_id ? F.esc(m.name) : gearLink(m.gear_id, m.name))).join(", ")}</li>`).join("");
+  return { html: `${header(it.name, `Fiche de l'objet${tags ? ` ·${tags}` : ""} · ${HYPOTHESES_LINK}`)}<p><a href="#/materiel">← Matériel</a></p>
+    <dl class="facts facts--grid">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
+    <section class="band"><h2>Déclencheurs</h2><p>${equipmentTriggers(it)}</p>${it.pre_session_check ? note(`Avant la séance : ${F.esc(it.pre_session_check)}`) : ""}</section>
+    ${kits ? `<section class="band"><h2>Kits</h2><ul class="facts-list">${kits}</ul></section>` : ""}
+    <section class="band"><h2>Séances</h2>${gearSessionsTable(d.sessions)}${d.sessions.some((x) => x.counted === false) ? note("Les séances grisées datent d'avant le dernier entretien : non comptées dans les déclencheurs.") : ""}</section>` };
+}
+
+async function viewGearDetail(id) {
+  let d;
+  try {
+    d = await api(`gear/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (/^404/.test(err.message)) {
+      main.innerHTML = `${header("Matériel introuvable")}<p><a href="#/materiel">← Matériel</a></p>${empty("Aucune paire ni aucun objet avec cet identifiant", `« ${F.esc(id)} » n'est ni déclaré dans le profil, ni cité par une séance.`)}`;
+      return;
+    }
+    throw err;
+  }
+  const r = d.kind === "equipment" ? gearEquipmentDetail(d) : gearShoeDetail(d);
+  main.innerHTML = r.html;
+  if (r.chart) attachCursor($("#c-gear"), r.chart, (i) => readout($("#r-gear"), `<strong>${F.esc(monthLabel(r.monthly[i].month))}</strong> · ${F.distance(r.monthly[i].distance_m, 0)}`));
 }
 
 // ---------------------------------------------------------------------------
@@ -2508,9 +2845,14 @@ function daysToWeeksPeriod(days) {
 
 const ROUTES = {
   "": viewToday, forme: viewForm, analyse: viewAnalyse, sante: viewHealth, semaine: viewWeek, seances: viewSessions,
-  performance: viewPerformance, "trail-shape": viewTrailShape, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
+  performance: viewPerformance, materiel: viewMateriel, "trail-shape": viewTrailShape, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
   nutrition: viewNutrition, fichiers: viewFiles, decisions: viewDecisions, decision: viewDecision,
 };
+
+// `decodeURIComponent` lève sur `%E0` (#/materiel/%E0) : repli sur l'identifiant brut → « introuvable ».
+function safeDecode(v) {
+  try { return decodeURIComponent(v); } catch { return v; }
+}
 
 async function route() {
   const hash = location.hash.replace(/^#\/?/, "");
@@ -2535,6 +2877,7 @@ async function route() {
   main.setAttribute("aria-busy", "true");
   try {
     if (name === "seance" && arg) await viewSession(Number(arg));
+    else if (name === "materiel" && arg) await viewGearDetail(safeDecode(arg));
     else if (name === "montee" && arg) await viewClimbSegment(Number(arg));
     else if (ROUTES[name]) await ROUTES[name](params);
     else main.innerHTML = header("Page introuvable") + `<p><a href="#/">Retour à aujourd'hui</a></p>`;

@@ -33,6 +33,9 @@ inspection n'ayant pas de `distance_m`), `due_reason` (`never_inspected`, `inter
 (`worse`/`same`/`better` entre les deux dernières inspections) et l'historique
 (`inspections`, plus récente d'abord). Le tableau de bord affiche le même rappel.
 
+L'athlète peut aussi la lancer lui-même avec la commande courte **`/inspection [paire]`** (skill `inspection`),
+qui désigne la paire et reçoit les photos avant de revenir ici.
+
 Ne **jamais** proposer une inspection en mode headless (`/garmin-daily-sync`) : c'est
 une conversation, avec des photos. Une proposition par conversation suffit.
 
@@ -110,10 +113,14 @@ de blessures… ou simplement d'un terrain camboré (route, chemin en dévers) �
 - **Historique de blessures et douleurs** : `medical/` (fichiers `*_health.md`, champ
   `pain`), section blessures du profil. Une usure asymétrique côté gauche et une douleur
   déclarée au genou gauche sont un **rapprochement**, pas une cause établie.
-- **Dynamiques de course du FIT (temps de contact au sol, équilibre G/D)** : **indisponible**
-  dans ce dépôt. Le pipeline FIT (`skills/fit-download`, `scripts/arc_samples.py`) n'extrait
-  pas ce champ et aucun KPI du projet ne l'exploite. Le dire honnêtement s'il est demandé ;
-  **ne jamais l'inventer ni le déduire**. La cadence, elle, existe mais ne dit rien de l'appui.
+- **Dynamiques de course du FIT (temps de contact au sol, balance du temps de contact,
+  oscillation…)** : extraites depuis #151 et consolidées par `python3 scripts/arc_index.py
+  gait-summary` (carte « Foulée » de la vue Santé). Le sens gauche/droite de la balance n'est
+  **pas établi** : parler d'écart à 50 %, jamais d'un pied ; ne jamais déduire une mesure d'une
+  photo. Sans mesure (source intervals.icu, capteur sans balance), la dire **indisponible** — ne jamais l'inventer.
+  Les règles d'usage détaillées de ces mesures par le coach viennent avec une story
+  ultérieure ; en attendant, ne pas présenter une mesure comme confirmant ou infirmant un
+  indice de semelle.
 - **Source de données (`[data].source`)** : rien de spécifique à Garmin ici ; le kilométrage
   de la paire vient de `arc_index.py gear`, qui lit les fichiers `activities/`, quelle que soit la source.
 
@@ -157,14 +164,33 @@ avec la précédente, indices de foulée, ce qui n'a pas pu être évalué. Puis
 python3 scripts/arc_index.py --validate gear/AAAA-MM-JJ_<gear_id>_inspection.md
 ```
 
+**Boîte de dépôt `gear/photos/` (#149).** L'athlète peut y copier ses photos, sous n'importe quel nom,
+avant ou pendant l'inspection (chemin fiable quel que soit le client — voir le skill `inspection`).
+Les images **non citées** par une inspection (indexée ou non) sont des candidates :
+
+```bash
+python3 scripts/arc_index.py inspections --unreferenced-photos   # clés `unreferenced_photos` et `ignored_files`
+```
+
+Formats : **JPEG, PNG, WebP uniquement** ; les autres fichiers (HEIC d'iPhone, TIFF…) sont listés dans
+`ignored_files` — le dire à l'athlète (HEIC : exporter en JPEG), ne jamais les renommer ni les citer.
+Si la paire n'est pas évidente, **demander à laquelle elles appartiennent** ; puis les **renommer**
+(simple déplacement dans `gear/photos/`) en `AAAA-MM-JJ_<gear_id>_<vue>.<ext>` — extension d'origine
+conservée — et les citer dans `photos`. **Jamais d'écrasement** : vérifier que la cible n'existe pas
+(`mv -n` ou test d'existence) ; en cas de collision (deux vues du même type, seconde inspection le
+même jour, nom déjà pris), suffixer — `_profil-gauche` / `_profil-droite` si le côté est connu, sinon
+`_profil-2`, `-3`… Ne jamais renommer une photo qu'un `gear/*.md` cite déjà. **Ne jamais supprimer**
+une photo, **ne jamais déplacer** un fichier hors de `gear/photos/`.
+
 **Photos.** Si l'image est disponible comme fichier, la copier dans
-`gear/photos/AAAA-MM-JJ_<gear_id>_<vue>.jpg` (`semelles`, `profil`, `arriere`, `tige`) et la
+`gear/photos/AAAA-MM-JJ_<gear_id>_<vue>.<ext>` (extension d'origine ; `semelles`, `profil`,
+`arriere`, `tige`), sans jamais écraser un fichier existant (mêmes suffixes), et la
 citer dans `photos`. Si elle n'est qu'affichée dans la conversation et ne peut pas être
 enregistrée, **laisser `photos` absent et le dire** — ne jamais citer un chemin qui n'existe pas.
 Le dossier `gear/` est gitignoré, mais un workspace privé versionné (`git_autocommit`) embarque
 son contenu : des photos redimensionnées (~1 Mo) suffisent.
 
-Après l'écriture, `python3 scripts/arc_index.py` met à jour le tableau de bord (vue Performance,
+Après l'écriture, `python3 scripts/arc_index.py` met à jour le tableau de bord (vue Matériel,
 carte « Inspections photo »).
 
 ## 10. Bilan de carrière d'une paire retirée

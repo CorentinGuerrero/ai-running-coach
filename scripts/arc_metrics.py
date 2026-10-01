@@ -1938,6 +1938,18 @@ def equipment_sports(category: Optional[str]) -> Optional[Tuple[str, ...]]:
     return EQUIPMENT_CATEGORY_SPORTS.get(category) if category else None
 
 
+def equipment_session_counts(act: dict, gear_id: str, category: Optional[str], today_iso: Optional[str]) -> bool:
+    """Une séance compte-t-elle pour l'objet `gear_id` ? MÊME filtre que la boucle d'`equipment_usage`
+    (`gear_ids` cite l'objet, pas postérieure à `today`, sport de sa catégorie) — utilisé par la
+    fiche `/api/gear/<id>` (#147) pour lister EXACTEMENT les séances comptées, jamais une variante."""
+    if gear_id not in (act.get("gear_ids") or []):
+        return False
+    if today_iso and act.get("date") and act["date"] > today_iso:
+        return False
+    sports = equipment_sports(category)
+    return sports is None or act.get("sport") in sports
+
+
 def equipment_usage(activities: List[dict], equipment_defs: List[dict], today: Optional[date] = None,
                     run_refs: Optional[Iterable[str]] = None, last_pass: Optional[date] = None,
                     known_ids: Iterable[str] = ()) -> dict:
@@ -2683,6 +2695,26 @@ ASSUMPTIONS["gear_inspection"] = (
     "(pire/identique/meilleur) : c'est le signal le plus fiable, plus qu'un verdict isolé. "
     "L'usure d'une semelle est un signal faible — les chaussures modernes (pile haute, rocker, mousses) "
     "la déforment — et un indice de foulée n'est jamais un diagnostic."
+)
+
+
+# ---------------------------------------------------------------------------
+# Foulée (#151) : dynamique de course mesurée + indices d'inspection — `scripts/arc_gait.py`
+# ---------------------------------------------------------------------------
+
+ASSUMPTIONS["gait"] = (
+    "Synthèse « Foulée » (#151, `arc_index.py gait-summary`, `/api/gait`) : pour chaque séance de COURSE (route "
+    "+ trail), moyenne pondérée par le temps couvert des échantillons FIT de la dynamique de course Garmin — "
+    "temps de contact au sol, balance du temps de contact, oscillation verticale, ratio vertical, longueur de "
+    "pas — et cadence en pas/min (piège documenté : le champ FIT est par pied, doublé à l'extraction). Une "
+    "grandeur non mesurée reste absente (jamais 0, jamais 50 % de balance). La balance est lue comme un ÉCART à "
+    "50 % : le côté du pourcentage n'est pas établi par le profil FIT de `fitparse`, donc jamais « gauche/droite » "
+    "pour la mesure. « Hors bande » = écart > 1 point : approximation du projet, pas un seuil publié. Les "
+    "inspections photo apportent un indice d'attaque et une asymétrie d'usure — des indices déduits de semelles, "
+    "à faible confiance ; en cas de désaccord avec la balance mesurée, la MESURE prime et l'usure est dite peu "
+    "fiable. `confidence` donne les effectifs ; `contradictions` liste les désaccords sans les arbitrer en "
+    "silence. Jamais un diagnostic, aucune modification de charge ni de plan ; méthode détaillée : "
+    "`arc_gait.ASSUMPTIONS`."
 )
 
 

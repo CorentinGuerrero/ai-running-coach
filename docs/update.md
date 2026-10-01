@@ -27,6 +27,7 @@ pour eux. Relancer `install.sh` reste nécessaire pour tout ce qui est **génér
 | Bloc `.gitignore` du workspace | De nouveaux fichiers générés peuvent y être ajoutés. |
 | Crontab / launchd du daily-sync | Relus depuis `[sync].mode` (`schedule` : heures de `[sync].times` ; `watch` : sondage `scripts/garmin_watch.py`, voir [Le coach dans la poche](mobile.md#mode-watch-ne-payer-le-llm-que-quand-garmin-a-du-neuf)) ; les lignes marquées sont remplacées, le reste de la crontab est conservé (sauvegarde dans `~/.config/ai-running-coach/`). |
 | Unité Remote Control | Réécrite si son modèle a changé. |
+| Lecteur FIT (`fitparse`) de l'environnement `intervals-icu-mcp` | Source intervals.icu : `fitparse` y est ajouté (sans réinstaller le serveur) pour que `fit-download` lise les FIT — sans lui, zones, GAP, VAM… restent vides. `coach_doctor.py` le signale (`fit_reader`). |
 
 Les tokens Garmin sont **vérifiés**, pas redemandés : l'authentification interactive ne
 se relance que s'ils sont absents ou expirés.

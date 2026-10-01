@@ -192,6 +192,21 @@ Le script nécessite `garminconnect` et `fitparse`. Ces dépendances sont dispon
 uv tool run --from garminconnect --from fitparse python3 skills/fit-download/scripts/download_fit.py
 ```
 
+**Source Intervals.icu** (`[data].source = "intervals"`) : seul `fitparse` est
+requis, et seulement avec `--json`. Le script se relance dans l'environnement
+`intervals-icu-mcp`. Sur une installation antérieure à cette fonctionnalité, cet
+environnement n'a pas encore `fitparse` : relancez `./install.sh --source
+intervals`, qui l'ajoute sans réinstaller le serveur.
+
+### `download_fit.py` affiche `INDISPONIBLE` (Intervals.icu)
+
+L'activité a été importée dans Intervals.icu **depuis Strava** : l'API Strava
+interdit sa redistribution, il n'existe aucun FIT à télécharger. Ce n'est pas
+une panne : la séance reste valide, sans les KPI fins (zones, GAP, VAM…).
+Connectez la montre, ou l'app qui l'exporte, directement à Intervals.icu pour
+les séances suivantes. `HTTP 401/403` signale en revanche une clé API refusée :
+régénérez-la sur https://intervals.icu/settings (section *Developer*).
+
 ### Les autres scripts échouent
 
 Les scripts `analyze_gpx.py`, `compare_course.py` et `analyze_session_parts.py` utilisent **uniquement la stdlib Python** — aucune dépendance externe n'est nécessaire.

@@ -556,6 +556,41 @@ def _calibrate_base_speed(duration_s: int, target_distance_m: float, segments: t
     return mid
 
 
+def add_running_dynamics(records: list, activity_id: int) -> dict:
+    """Ajoute la dynamique de course (#151) aux échantillons NORMALISÉS d'une séance, sans aucun
+    tirage sur le flux aléatoire partagé (un `random.Random` dédié, graine = `activity_id`) —
+    `sample_session` et ses goldens ne bougent pas. Déterministe. Clés SI de
+    `arc_samples.DYNAMICS_KEYS` : temps de contact (s), balance (%), oscillation (m), ratio vertical
+    (%), longueur de pas (m).
+
+    - Une séance sur quatre (`activity_id % 4 == 0`) n'a PAS de balance : clé `None` partout, comme
+      un capteur qui ne la fournit pas (jamais 50 %).
+    - La balance moyenne d'une séance flotte autour de 50 % (de −0,6 à +1,4 point) : la majorité dans la
+      bande du projet, quelques séances au-delà.
+    Rend un résumé `{"sessions_mean": {clé: moyenne}}` (utile aux tests)."""
+    rng = random.Random(activity_id)
+    gct0 = 0.235 + rng.uniform(-0.012, 0.012)          # s
+    balance0 = 50.0 + rng.uniform(-0.6, 1.4)           # %, écart à 50 (sens non établi)
+    osc0 = 0.092 + rng.uniform(-0.006, 0.006)          # m
+    ratio0 = 8.4 + rng.uniform(-0.5, 0.5)              # %
+    has_balance = activity_id % 4 != 0
+    sums: dict = {}
+    for rec in records:
+        speed = rec.get("speed_ms") or 0.0
+        cad = rec.get("cadence_spm") or 170.0
+        jitter = rng.uniform(-1.0, 1.0)
+        rec["ground_contact_s"] = round(gct0 - 0.012 * (speed - 2.8) + 0.002 * jitter, 4)
+        rec["stance_balance_pct"] = round(balance0 + 0.25 * jitter, 2) if has_balance else None
+        rec["vertical_oscillation_m"] = round(osc0 + 0.002 * jitter, 4)
+        rec["vertical_ratio_pct"] = round(ratio0 + 0.15 * jitter, 2)
+        rec["step_length_m"] = round(speed * 60.0 / max(cad, 1.0), 3) if speed > 0.3 else None
+        for k in ("ground_contact_s", "stance_balance_pct", "vertical_oscillation_m",
+                  "vertical_ratio_pct", "step_length_m"):
+            if rec[k] is not None:
+                sums.setdefault(k, []).append(rec[k])
+    return {"sessions_mean": {k: sum(v) / len(v) for k, v in sums.items()}}
+
+
 def _write_samples(root: Path, activity_id: int, *, seed: int, duration_s: int,
                     target_distance_m: float, target_gain_m: float, target_loss_m: float,
                     target_avg_hr_bpm: float, cadence_spm: float) -> None:
@@ -577,6 +612,7 @@ def _write_samples(root: Path, activity_id: int, *, seed: int, duration_s: int,
         seed=seed, duration_s=duration_s, base_speed_ms=base_speed_ms, segments=segments,
         hr_base_bpm=target_avg_hr_bpm, cadence_spm=cadence_spm, noise=True,
     )
+    add_running_dynamics(records, activity_id)   # #151 : dynamique de course (aucun tirage partagé)
     path = root / "activities/fit" / f"{activity_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"activity_id": activity_id, "records": records, "truth": truth},
@@ -880,6 +916,19 @@ Semaine **conforme au plan** : charge en hausse contrôlée, HRV stable.
     }, "Plus usée que la précédente sur le talon gauche. Indice seulement, pas un diagnostic.")
     (root / photo).parent.mkdir(parents=True, exist_ok=True)
     (root / photo).write_bytes(PNG_1X1)
+
+    # #151 — avec `--with-samples` seulement (les goldens n'en sont pas affectés) : une inspection de
+    # la paire trail avec l'indice inverse (médio/avant-pied) et une asymétrie légère, pour que la
+    # carte « Foulée » montre un désaccord entre paires ET un désaccord usure/balance mesurée.
+    if with_samples:
+        third = today - timedelta(days=12)
+        _write(root, f"gear/{third.isoformat()}_hoka-speedgoat-5-bleue_inspection.md", "Inspection Speedgoat 5", {
+            "arc": 1, "kind": "gear_inspection", "date": third.isoformat(), "gear_id": "hoka-speedgoat-5-bleue",
+            "condition": "yellow", "distance_m": 380000,
+            "wear_zones": [{"side": "right", "zone": "forefoot_lateral", "severity": "moderate"},
+                           {"side": "left", "zone": "forefoot_lateral", "severity": "light"}],
+            "asymmetry": {"level": "mild", "side": "right"}, "gait_hints": ["midfoot_forefoot_strike"],
+        }, "Usure sur l'avant-pied latéral, plus marquée à droite. Indice seulement, pas un diagnostic.")
 
     # --- nutrition (quelques jours) --------------------------------------------
     # `weight_kg` est délibérément différent de `medical/<date>_health.md` le même jour

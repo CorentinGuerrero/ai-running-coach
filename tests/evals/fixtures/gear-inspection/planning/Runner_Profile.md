@@ -25,7 +25,7 @@
 
 ### Chaussures
 
-- Nike Pegasus — id: pegasus — départ 210 km (par défaut)
+- Nike Pegasus — alerte 240 km — id: pegasus — départ 210 km (par défaut)
 
 ## Préférences de coaching
 

@@ -9,11 +9,14 @@ vit dans `skills/fit-download/scripts/download_fit.py`, qui l'importe aussi.
 
 ## Où vivent les données brutes
 
-Chemin canonique : `activities/fit/<garmin_activity_id>.json`, un objet JSON
-`{"activity_id": <int>, "records": [...]}` (le générateur synthétique,
-`tests/lib/synthetic.py::_write_samples`, y ajoute une clé `truth` ignorée ici).
-Ce dossier est une donnée **brute et jetable** — reconstruisible à tout moment
-depuis les fichiers FIT réels de Garmin — au même titre que `.arc/` : il n'est
+Chemin canonique : `activities/fit/<id>.json`, un objet JSON
+`{"activity_id": <id>, "records": [...]}` — `<id>` est le `garmin_activity_id`
+(entier) d'une séance Garmin, ou l'`intervals_activity_id` (chaîne `i<chiffres>`,
+#68) d'une séance synchronisée depuis Intervals.icu (voir `parse_activity_ref`).
+Le générateur synthétique (`tests/lib/synthetic.py::_write_samples`) y ajoute une
+clé `truth`, ignorée ici. Ce dossier est une donnée **brute et jetable** —
+reconstruisible à tout moment depuis les fichiers FIT réels (Garmin Connect ou
+Intervals.icu, `skills/fit-download`) — au même titre que `.arc/` : il n'est
 **jamais versionné**. Le dépôt moteur l'exclut déjà via le motif racine
 `/activities/` de `.gitignore` ; pour un workspace privé versionné séparément
 (`docs/workspace.md`), `activities/fit/` reçoit son propre marqueur
@@ -31,8 +34,9 @@ FIT ne sont qu'une donnée dérivée qui permet des KPI plus fins (zones #43, GA
 KPI. Symétriquement, un FIT ingéré avant que le Markdown de la séance n'existe
 encore (téléchargement puis synchronisation, ou ordre inverse d'un run
 `daily-sync`) n'est PAS perdu : voir `arc_index.py` — les échantillons sont
-stockés sous leur `garmin_activity_id`, indépendamment de l'existence d'une
-ligne `activity`, et se rattachent d'eux-mêmes dès qu'elle apparaît.
+stockés sous leur identifiant externe (`garmin_activity_id` ou
+`intervals_activity_id`), indépendamment de l'existence d'une ligne `activity`, et
+se rattachent d'eux-mêmes dès qu'elle apparaît.
 
 ## Deux formats d'entrée acceptés par `normalise_records`
 
@@ -172,10 +176,15 @@ l'affaire exclusive de `download_fit.py`, jamais une dépendance de l'index.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Union
 
 DEFAULT_RESOLUTION_S = 5
+
+# Identifiant Intervals.icu d'une activité importée depuis un fichier (#68) : « i » +
+# chiffres, ex. `i123456789` — voir `parse_activity_ref`.
+INTERVALS_ID_RE = re.compile(r"^i\d+$")
 
 # Saut minimal (m) entre une plage d'altitude à 0,0 m et la mesure valide voisine pour
 # la traiter en valeur sentinelle — voir ASSUMPTIONS["zero_altitude"].
@@ -187,6 +196,23 @@ NORMALISED_KEYS = ("t_s", "distance_m", "altitude_m", "hr_bpm", "speed_ms", "cad
 # position reste valide, `lat_deg`/`lon_deg` valent alors `None`. Séparées de
 # `NORMALISED_KEYS` (toujours requises pour un `t_s` exploitable) à dessein.
 GPS_KEYS = ("lat_deg", "lon_deg")
+
+# Dynamique de course Garmin (#151) — clés OPTIONNELLES comme le GPS : une séance sans
+# capteur de dynamique (montre seule sans ceinture/pod compatible, vélo, marche…) les garde à
+# `None`, JAMAIS à 0 ni (pour la balance) à 50 %. Unités SI ; conversions FIT documentées par
+# `ASSUMPTIONS["running_dynamics"]`. Noms = colonnes `activity_sample`.
+DYNAMICS_KEYS = ("ground_contact_s", "stance_balance_pct", "vertical_oscillation_m",
+                 "vertical_ratio_pct", "step_length_m")
+
+# Plages physiologiquement plausibles : hors plage → mesure absente (`None`), jamais clampée.
+# Un capteur qui renvoie 0 (pas de mesure) ou une valeur aberrante ne doit pas tirer une moyenne.
+DYNAMICS_PLAUSIBLE = {
+    "ground_contact_s": (0.05, 1.0),          # 50 ms – 1 s
+    "stance_balance_pct": (30.0, 70.0),       # jamais 0 ni 100 ; 50 = symétrique
+    "vertical_oscillation_m": (0.01, 0.30),   # 1 – 30 cm
+    "vertical_ratio_pct": (1.0, 30.0),
+    "step_length_m": (0.2, 3.0),
+}
 
 # FIT/ANT+ code les positions en "semi-cercles" (entier signé 32 bits, plage complète du
 # type = 360°) : conversion vers des degrés décimaux usuels. `fitparse` NE convertit PAS
@@ -213,7 +239,7 @@ _TIMESTAMP_FORMATS = (
 )
 
 ASSUMPTIONS = {
-    "canonical_path": "Échantillons bruts : activities/fit/<garmin_activity_id>.json, "
+    "canonical_path": "Échantillons bruts : activities/fit/<garmin_activity_id | intervals_activity_id>.json, "
                        "{'activity_id', 'records'} — jetable, jamais versionné (voir docstring du module).",
     "cadence_doubling": "Le champ FIT `cadence` d'une séance à pied (course, marche, randonnée — "
                          "CADENCE_DOUBLING_SPORTS) compte les foulées d'UN pied/min ; cadence_spm = "
@@ -223,6 +249,18 @@ ASSUMPTIONS = {
                          "`sport=None` (non résolu) applique le doublement par défaut — l'immense majorité des "
                          "FIT ingérés par ce moteur trail-running sont des séances à pied ; `download_fit.py` "
                          "lit le sport réel dans le message FIT `session` dès que possible pour éviter ce défaut.",
+    "running_dynamics": "Dynamique de course Garmin (#151), champs `record` FIT lus par `fitparse` (l'échelle du "
+                         "profil FIT est DÉJÀ appliquée par `fitparse`) : `stance_time` (ms) → ground_contact_s "
+                         "= ms / 1000 ; `vertical_oscillation` (mm) → vertical_oscillation_m = mm / 1000 ; "
+                         "`step_length` (mm) → step_length_m = mm / 1000 ; `vertical_ratio` (%) → "
+                         "vertical_ratio_pct (inchangé) ; `stance_time_balance` (%) → stance_balance_pct "
+                         "(inchangé). `stance_time_percent` (% de la foulée, autre champ) n'est PAS repris. Une "
+                         "valeur absente, nulle ou hors DYNAMICS_PLAUSIBLE reste `None` — en particulier une "
+                         "balance absente (capteur qui ne la fournit pas : 15 séances de course sur 80 dans "
+                         "l'installation observée) n'est JAMAIS remplacée par 50 %. Sous-échantillonnage : "
+                         "moyenne des valeurs présentes du bucket (comme cadence_spm). Le SENS de la balance "
+                         "(quel pied porte le pourcentage) n'est pas établi par le profil FIT de `fitparse` : "
+                         "voir arc_gait.ASSUMPTIONS[\"balance_side\"].",
     "downsampling": f"Bucket de resolution_s secondes (défaut {DEFAULT_RESOLUTION_S} s), horodaté à sa borne "
                      "inférieure. hr_bpm/speed_ms/cadence_spm : moyenne du bucket. distance_m/altitude_m/"
                      "lat_deg/lon_deg : dernière valeur (temporellement) du bucket (cumuls monotones ou "
@@ -357,6 +395,31 @@ def _cadence_spm(record: dict, sport: Optional[str]) -> Optional[float]:
     return value
 
 
+def _dynamics(record: dict) -> dict:
+    """Dynamique de course d'un enregistrement fitparse brut → clés SI de `DYNAMICS_KEYS`
+    (`None` si absente/hors plage plausible) — voir `ASSUMPTIONS["running_dynamics"]`."""
+    raw = {
+        "ground_contact_s": _scaled(record.get("stance_time"), 1 / 1000.0),
+        "stance_balance_pct": _num(record.get("stance_time_balance")),
+        "vertical_oscillation_m": _scaled(record.get("vertical_oscillation"), 1 / 1000.0),
+        "vertical_ratio_pct": _num(record.get("vertical_ratio")),
+        "step_length_m": _scaled(record.get("step_length"), 1 / 1000.0),
+    }
+    return {k: _plausible(k, v) for k, v in raw.items()}
+
+
+def _scaled(value, factor: float) -> Optional[float]:
+    number = _num(value)
+    return None if number is None else number * factor
+
+
+def _plausible(key: str, value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    lo, hi = DYNAMICS_PLAUSIBLE[key]
+    return round(value, 6) if lo <= value <= hi else None
+
+
 def _position_deg(record: dict) -> tuple:
     """`(lat_deg, lon_deg)` d'un enregistrement fitparse brut — voir `_semicircle_to_deg`
     pour la conversion/le plafond par axe. « Île nulle » (`lat == lon == 0.0` EXACTEMENT,
@@ -392,6 +455,7 @@ def _normalise_fitparse(records: Sequence[dict], sport: Optional[str]) -> List[d
             "cadence_spm": _cadence_spm(record, sport),
             "lat_deg": lat_deg,
             "lon_deg": lon_deg,
+            **_dynamics(record),
         })
     out.sort(key=lambda r: r["t_s"])
     return out
@@ -407,6 +471,10 @@ def _clean_normalised(record: dict) -> Optional[dict]:
     # dict stable, comme le reste de ce module).
     for key in GPS_KEYS:
         cleaned[key] = _num(record.get(key))
+    # Dynamique de course (#151) : déjà en SI au format normalisé, repassée (plausibilité
+    # rejouée) — `None` si absente, jamais une clé manquante.
+    for key in DYNAMICS_KEYS:
+        cleaned[key] = _plausible(key, _num(record.get(key)))
     return cleaned
 
 
@@ -521,14 +589,40 @@ def downsample(records: Sequence[dict], resolution_s: int = DEFAULT_RESOLUTION_S
             # connue du bucket reste la plus proche de la borne du bucket suivant.
             "lat_deg": last.get("lat_deg"),
             "lon_deg": last.get("lon_deg"),
+            # Dynamique de course (#151) : moyenne des valeurs PRÉSENTES du bucket (une mesure
+            # absente reste absente — jamais 0, jamais 50 % de balance).
+            **{key: _mean(r.get(key) for r in group) for key in DYNAMICS_KEYS},
         })
     return out
 
 
-def sample_file_activity_id(path) -> Optional[int]:
-    """`garmin_activity_id` porté par un chemin canonique `<id>.json` (nom de fichier).
+def parse_activity_ref(value) -> Optional[Union[int, str]]:
+    """Identifiant externe d'une séance : un entier (`garmin_activity_id`) ou une
+    chaîne `i<chiffres>` (`intervals_activity_id`, #68). Accepte un entier, ou une
+    chaîne de chiffres (→ `int`) ou de la forme `i123` (→ `str`, inchangée). `None`
+    pour tout le reste (booléen, vide, forme inconnue) — jamais deviné.
 
-    `None` si le nom de fichier n'est pas un entier — appelant alors replié sur la
-    clé `activity_id` du contenu JSON (voir `arc_index.ingest_samples`)."""
+    Les deux espaces ne se chevauchent pas : le préfixe `i` distingue sans ambiguïté
+    un identifiant Intervals.icu d'un identifiant Garmin, dans un nom de fichier
+    (`activities/fit/i123456789.json`) comme en argument de CLI."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+    return value if INTERVALS_ID_RE.match(value) else None
+
+
+def sample_file_activity_id(path) -> Optional[Union[int, str]]:
+    """Identifiant de séance porté par un chemin canonique `<id>.json` (nom de fichier) :
+    entier Garmin (`24070286912.json`) ou chaîne Intervals.icu (`i123456789.json`),
+    voir `parse_activity_ref`.
+
+    `None` si le nom de fichier n'a aucune de ces deux formes — appelant alors replié
+    sur la clé `activity_id` du contenu JSON (voir `arc_index.ingest_samples`)."""
     stem = path.stem if hasattr(path, "stem") else path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    return int(stem) if stem.isdigit() else None
+    return parse_activity_ref(stem)

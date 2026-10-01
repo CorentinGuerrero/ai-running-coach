@@ -1,0 +1,31 @@
+# #149 — `/inspection pegasus` avec DEUX paires Pegasus : le coach demande laquelle, en listant
+# les candidats ; il ne devine jamais et n'écrit aucune inspection.
+#
+# Fixture `inspection-two-pegasus/` : Nike Pegasus 40 (`id: pegasus-40`) et Nike Pegasus 41
+# (`id: pegasus-41`, par défaut — la paire par défaut n'est PAS un motif pour choisir).
+#
+# `must_match` : les deux candidats sont nommés (le second peut l'être par « la 41 ») et la réponse pose une question.
+# `must_not_match` : jamais `/coach-setup` ; jamais un engagement hors question (« Je lance
+# l'inspection pour la Pegasus 41. », « Inspection de ta Pegasus 41 : envoie… », « C'est parti
+# pour… »). Ces motifs ne visent que les lignes SANS point d'interrogation : « Tu veux lancer
+# l'inspection de la Pegasus 40 ou de la Pegasus 41 ? » reste permis.
+# `files_absent` : aucun fichier `gear/*.md`.
+id = "inspection-ambiguous-pair"
+prompt = "/inspection pegasus"
+fixture = "inspection-two-pegasus"
+
+[config.language]
+responses = "fr"
+
+[expect]
+must_match = [
+  "pegasus[ -]?40",
+  "(pegasus[ -]?41|\\b41\\b)",
+  "(\\?|laquelle|quelle paire|pr[ée]cis)",
+]
+must_not_match = [
+  "coach-setup",
+  "(?m)^(?![^\\n]*\\?)[^\\n]*(je lance|on lance|je d[ée]marre|on d[ée]marre|on commence|je commence|c['’]est parti|c['’]est not[ée])[^\\n]*pegasus[ -]?4[01]",
+  "(?m)^[#>*_\\s]*(?![^\\n]*\\?)inspection\\s+(de|des|d['’]|pour)\\s*(la |ta |ton |tes |l['’])?[*_]*(nike\\s+)?pegasus[ -]?4[01]\\b",
+]
+files_absent = ["gear/*.md"]

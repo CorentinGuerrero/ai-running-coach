@@ -12,6 +12,10 @@ Le rappel se calcule : `python3 scripts/arc_index.py inspections` (voir plus bas
 [tableau de bord](../dashboard/views.md) affiche « Inspection conseillée ». Rien n'est proposé
 pendant la synchronisation automatique (`garmin-daily-sync`) : c'est une conversation.
 
+!!! tip "Lancer une inspection"
+    La commande courte `/inspection [paire]` désigne la paire et indique comment envoyer les
+    photos : voir [Faire inspecter une paire](inspection.md).
+
 ## Protocole photo
 
 1. Les **deux semelles à plat** (dessous)
@@ -46,17 +50,22 @@ jamais un diagnostic.
   une analyse de foulée en laboratoire
 
 Dans le tableau de bord, chaque inspection rejoint l'historique de sa paire (vue
-Performance) :
+[Matériel](../dashboard/views.md#materiel)) :
 
 ![Inspections photo dans le tableau de bord](../assets/dashboard/inspections.webp)
+
+Chaque inspection s'affiche en lignes distinctes : état et kilométrage, badge d'asymétrie (neutre
+si « aucune »), badge d'indice de foulée, puis les zones d'usure en petit tableau
+gauche/droite. Les indices de toutes les inspections sont consolidés — et confrontés à la
+dynamique de course mesurée par la montre — dans la carte [Foulée](../dashboard/views.md#foulee) de la vue Santé.
 
 ## Garde-fous
 
 - **L'usure est un signal faible** : les chaussures modernes (pile haute, rocker, mousses) la déforment. Un indice n'est **jamais un diagnostic**.
 - **Aucune mesure en mm sans référence d'échelle** dans la photo (le contrat refuse `lug_depth_mm` sans `scale_reference: true`).
 - **Jamais de changement de technique de foulée recommandé sur une photo seule.**
-- **Temps de contact au sol (équilibre gauche/droite du FIT)** : indisponible dans ce dépôt (le pipeline FIT ne l'extrait pas) — le coach le dit, ne l'invente pas.
-- Les photos restent dans votre workspace (`gear/photos/`, gitignoré), jamais dans le dépôt public.
+- **Dynamique de course mesurée (temps de contact, balance, oscillation…)** : extraite du FIT depuis #151 et consolidée dans la carte [Foulée](../dashboard/views.md#foulee) du tableau de bord (`python3 scripts/arc_index.py gait-summary`). Le sens gauche/droite de la balance n'est pas établi : on parle d'écart à 50 %, jamais d'un pied. Les règles d'usage par le coach viennent avec une story ultérieure ; sans mesure (source intervals.icu, capteur sans balance), le coach le dit, ne l'invente pas.
+- Les photos restent dans votre workspace (`gear/photos/`, gitignoré), jamais dans le dépôt public. Ce dossier sert aussi de **boîte de dépôt** : copiez-y vos photos sous n'importe quel nom, le coach rattache à une paire celles qu'aucune inspection ne cite et les renomme `AAAA-MM-JJ_<gear_id>_<vue>.<ext>` — sans jamais en supprimer.
 - Envoyer des photos depuis le téléphone (Remote Control) n'est **pas validé** : voir [Le coach dans la poche](../mobile.md).
 
 ## Persistance
@@ -71,6 +80,7 @@ Performance) :
 
 ```bash
 python3 scripts/arc_index.py inspections [--gear ID]   # historique, rappel « due », comparaison
+python3 scripts/arc_index.py inspections --unreferenced-photos   # + images de gear/photos/ citées par aucune inspection
 python3 scripts/arc_index.py gear-career --gear ID     # bilan de carrière (paire retirée)
 ```
 

@@ -169,7 +169,7 @@ confirmation explicite dans la conversation, jamais en synchronisation automatiq
 ## Rattraper le matériel de l'historique
 
 Le matériel attaché par la montre n'est attribué qu'aux séances **nouvelles** (`get_activity_gear` à la
-synchronisation). Un historique déjà dans `activities/` reste sans `gear_id` : la carte « Matériel » est vide
+synchronisation). Un historique déjà dans `activities/` reste sans `gear_id` : la vue « Matériel » du tableau de bord est vide
 alors que Garmin Connect connaît la paire de chaque séance. Le script `scripts/garmin_gear_backfill.py` (#145)
 les rattrape avec **un appel Garmin par paire** de chaussures (`get_gear_activities`), jamais un par séance.
 
@@ -179,6 +179,41 @@ python3 scripts/garmin_gear_backfill.py
 # 2. Après relecture du rapport : écriture
 python3 scripts/garmin_gear_backfill.py --apply
 ```
+
+Extrait d'un rapport de simulation (noms et identifiants fictifs, format réel) :
+
+```text
+RATTRAPAGE DU MATÉRIEL GARMIN — simulation (rien n'est écrit)
+Workspace : 190 fichier(s) d'activité, 187 avec garmin_activity_id, période 2024-08-15 → 2026-09-29
+
+PAIRES (4 retenue(s), 12 hors période masquée(s) — --all-shoes pour les proposer)
+- Hoka Speedgoat 5 [puce à ajouter]
+    puce proposée : - Hoka Speedgoat 5 — depuis 2025-08-11 — alerte 800 km — id: hoka-speedgoat-5 — garmin: 3f9c2a7e…
+    séances rattachées : 49 (à écrire 49, déjà attribuées 0, conflits 0, ambiguës 0)
+    km : 919.8 dans le workspace · 948.2 au total chez Garmin (51 séance(s))
+    départ : aucun kilométrage antérieur au premier fichier du workspace ; non comptée(s) : 2 dans la période
+             du workspace (trous, à importer par la synchronisation)
+- Nike Pegasus 40 [puce à ajouter] (retirée)
+    puce proposée : - Nike Pegasus 40 — depuis 2024-04-25 — alerte 644 km — départ 239 km — id: nike-pegasus-40 — garmin: 7a1e4c9b… (retirée)
+    séances rattachées : 10 (à écrire 10, déjà attribuées 0, conflits 0, ambiguës 0)
+    départ : 239 km = 20 séance(s) Garmin de la paire antérieures au premier fichier du workspace (2024-08-15)
+…
+PAIRES PAR DÉFAUT CHEZ GARMIN (non reprises : `(par défaut)` n'est jamais posé automatiquement) : Hoka Speedgoat 5
+AMBIGUËS — revendiquées par deux paires chez Garmin, jamais attribuées (4)
+SÉANCES GARMIN ABSENTES DU WORKSPACE (185, 2314 km)
+  - 58 (685 km) antérieures au premier fichier du workspace — comptées dans « départ » des puces nouvelles
+  - 127 (1629 km) dans la période du workspace (trous) — non comptées, jamais réimportées ici
+FICHIERS SANS garmin_activity_id : 3 — non rattachables automatiquement (déclarer la paire dans le chat)
+
+BILAN : 4 puce(s) à ajouter, 0 segment(s) garmin: à ajouter à une puce existante, 108 séance(s) à renseigner, 0 conflit(s), 4 ambiguë(s).
+Simulation seulement. Pour écrire : relancer avec --apply.
+```
+
+Après `--apply`, la dernière ligne résume ce qui a été écrit (`Appliqué : profil mis à jour, N séance(s)
+écrite(s), 0 échec(s)…`) et l'index est reconstruit : la vue [Matériel](dashboard/views.md#materiel)
+affiche aussitôt le kilométrage de chaque paire. Sur un serveur avec le tableau de bord en conteneur,
+reconstruisez l'image après la mise à jour du moteur (`docker compose up -d --build`, voir
+[Docker](dashboard/docker.md#mettre-a-jour)).
 
 Options : `--since AAAA-MM-JJ` (séances du workspace à partir de cette date), `--gear <uuid>` (une seule paire),
 `--all-shoes` (propose aussi les paires sans séance dans la période du workspace — les anciennes paires

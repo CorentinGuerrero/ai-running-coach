@@ -701,6 +701,56 @@ class TestNtfyConfigured(InstallAsserts):
             self.assertEqual(check["status"], "ok")
 
 
+class TestFitReader(InstallAsserts):
+    """`fitparse` dans l'environnement MCP de la source : sans lui, les FIT
+    téléchargés ne sont jamais lus (KPI fins vides). Cas typique : installation
+    intervals.icu mise à jour par `git pull` sans relancer `install.sh`.
+    L'interpréteur de l'outil est simulé par un script qui réussit ou échoue
+    l'`import fitparse` — aucune dépendance au vrai paquet."""
+
+    def _fake_tool_python(self, sb, tool, *, has_fitparse):
+        py = sb.home / f".local/share/uv/tools/{tool}/bin/python3"
+        py.parent.mkdir(parents=True)
+        py.write_text(f"#!/bin/sh\nexit {0 if has_fitparse else 1}\n")
+        py.chmod(0o755)
+
+    def _check(self, sb, source=None):
+        if source:
+            (sb.repo / "config").mkdir(exist_ok=True)
+            (sb.repo / "config/workspace.user.toml").write_text(f'[data]\nsource = "{source}"\n')
+        proc = sb.script("coach_doctor.py", "--json", "--workspace", str(sb.repo),
+                         "--tokens-dir", str(_fresh_tokens_dir(sb)), "--check", "fit_reader")
+        return proc, _find(json.loads(proc.stdout), "fit_reader")
+
+    def test_intervals_env_without_fitparse_is_a_warning_with_the_install_fix(self):
+        with Sandbox() as sb:
+            self._fake_tool_python(sb, "intervals-icu-mcp", has_fitparse=False)
+            proc, check = self._check(sb, "intervals")
+            self.assertSucceeded(proc)   # warning : jamais un code de sortie en échec
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("fitparse", check["message"])
+            self.assertEqual(check["fix"], "./install.sh --source intervals")
+
+    def test_intervals_env_with_fitparse_is_ok(self):
+        with Sandbox() as sb:
+            self._fake_tool_python(sb, "intervals-icu-mcp", has_fitparse=True)
+            _, check = self._check(sb, "intervals")
+            self.assertEqual(check["status"], "ok")
+
+    def test_missing_environment_is_a_warning(self):
+        with Sandbox() as sb:
+            _, check = self._check(sb, "intervals")
+            self.assertEqual(check["status"], "warning")
+            self.assertIn("intervals-icu-mcp", check["message"])
+
+    def test_default_source_checks_the_garmin_environment(self):
+        with Sandbox() as sb:
+            self._fake_tool_python(sb, "garmin-mcp", has_fitparse=True)
+            _, check = self._check(sb)
+            self.assertEqual(check["status"], "ok")
+            self.assertIn("garmin-mcp", check["message"])
+
+
 class TestDataSourceAware(InstallAsserts):
     """`[data].source = "intervals"` (#68) : ni `garmin_token` ni `garmin_mcp`
     ne doivent rapporter une panne — l'athlète n'a jamais eu de compte
@@ -915,7 +965,7 @@ class TestJsonSchema(InstallAsserts):
             expected_ids = {
                 "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
                 "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
-                "gear_sync", "gear_history", "llm_config", "chat_service", "opencode_cli",
+                "gear_sync", "gear_history", "fit_reader", "llm_config", "chat_service", "opencode_cli",
             }
             self.assertEqual({c["id"] for c in payload["checks"]}, expected_ids)
             for check in payload["checks"]:

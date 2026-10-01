@@ -178,3 +178,16 @@ export const DECISION_OUTCOME = {
 export function esc(text) {
   return String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+// Dynamique de course (#151) : oscillation verticale et longueur de pas, SI en base (mètres).
+export function oscillation(m, digits = 1) {
+  if (m === null || m === undefined) return "—";
+  if (UNITS === "imperial") return `${num(m * 39.3701, digits)}${NBSP}in`;
+  return `${num(m * 100, digits)}${NBSP}cm`;
+}
+
+export function stepLength(m, digits = 2) {
+  if (m === null || m === undefined) return "—";
+  if (UNITS === "imperial") return `${num(m * 3.28084, digits)}${NBSP}ft`;
+  return `${num(m, digits)}${NBSP}m`;
+}

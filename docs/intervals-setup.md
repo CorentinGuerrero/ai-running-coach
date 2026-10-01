@@ -133,12 +133,39 @@ qu'elles ne sont pas disponibles :
   des activités renvoyées par ce serveur. `course-comparison` (qui exige des
   `splits`) n'est donc pas utilisable sur des activités synchronisées depuis
   Intervals.icu.
-- **Téléchargement FIT** et tout ce qui en dépend (`fit-download`,
-  `session-parts-analyzer`, KPI GAP/VAM/décrochage cardiaque/durabilité) — le
-  script du projet est câblé sur `garminconnect`, pas sur l'API Intervals.icu.
-  **Non porté dans cette story (#68)**, pas une limite définitive du serveur.
+- **FIT des activités importées depuis Strava** — l'API Strava interdit à
+  Intervals.icu de les redistribuer : ni FIT, ni courbes. Connectez la montre
+  (ou l'app qui l'exporte : Garmin Connect, COROS, Suunto, Polar, HealthFit
+  pour l'Apple Watch…) **directement** à Intervals.icu pour que vos séances
+  aient leur FIT. Les autres activités l'ont — voir « Fichiers FIT » ci-dessous.
 - **Upload de parcours** (`course-strategist`) — reste limité à l'analyse GPX
   locale (skill `gpx-analysis`).
+
+## Fichiers FIT
+
+Intervals.icu garde le fichier d'origine de chaque activité importée depuis une
+montre. `skills/fit-download/scripts/download_fit.py` le télécharge par l'API
+REST, avec la même clé API que le serveur MCP (pas de nouvelle configuration),
+et en tire les échantillons seconde par seconde qui débloquent les KPI fins —
+zones FC, allure ajustée à la pente, découplage cardiaque, VAM des montées,
+descente, durabilité, dépense énergétique modèle — et `session-parts-analyzer` :
+
+```bash
+python3 skills/fit-download/scripts/download_fit.py i123456789 --json   # une séance
+python3 skills/fit-download/scripts/download_fit.py --from-dir activities/ --json   # tout l'historique
+python3 scripts/arc_index.py                                            # réindexe
+```
+
+La source est lue dans `[data].source` (forcer avec `--source intervals`).
+`--from-dir` relit l'`intervals_activity_id` du bloc ```` ```arc ```` de chaque
+séance et saute celles déjà téléchargées. Une activité importée depuis Strava
+est signalée `INDISPONIBLE` avec sa raison, puis ignorée.
+
+Le téléchargement n'utilise que la bibliothèque standard ; la lecture du FIT
+(`--json`) a besoin de `fitparse`, que `./install.sh --source intervals`
+installe dans l'environnement `intervals-icu-mcp` — sur une installation
+antérieure, relancez simplement cette commande (elle ajoute `fitparse` sans
+réinstaller le serveur).
 
 ## Matériel et attribution par séance
 
