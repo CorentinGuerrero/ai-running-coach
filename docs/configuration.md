@@ -311,6 +311,54 @@ Les instructions des agents/skills restent en anglais ou en français selon le
 fichier — seule la langue de *sortie* (documents persistés, réponses) est
 réglée ici.
 
+## La synchronisation — `[sync]`
+
+`scripts/daily-sync.sh` lit ces clés à **chaque** exécution (pas de réinstallation du cron
+pour les changer, sauf `mode`/`times`, voir [Le coach dans la poche](mobile.md)).
+
+| Clé | Effet |
+|---|---|
+| `runner` | `"claude"` (Claude Code, `claude -p`, défaut) \| `"codex"` (`codex exec`) \| `"opencode"` (`opencode run`, OpenRouter ou API compatible OpenAI). |
+| `model` | Requis pour `opencode`, au format `fournisseur/modèle` (ex. `openrouter/deepseek/deepseek-v4.1-flash`). Optionnel pour `claude` en mode API (passé à `--model`, ex. `claude-haiku-4-5`). |
+| `base_url` | Point d'accès d'une API compatible OpenAI autre qu'OpenRouter (runner `opencode`). |
+| `api_key_env` | **Nom** de la variable qui porte la clé, lue dans `~/.config/ai-running-coach/llm.env` (mode 600). Non vide = mode API, facturé au token ; vide (défaut) = abonnement. Jamais la clé elle-même. |
+| `daily_budget_eur` | Plafond de dépense quotidien (défaut `0.5`), appliqué seulement quand le runner rapporte son coût (`opencode`, `claude` en mode API). Atteint : run sauté, une notification par jour. |
+
+`./install.sh --llm openrouter|anthropic|openai` écrit ces clés (et `[chat]`) ;
+`./install.sh --sync-budget EUR` écrit `daily_budget_eur`. Détails, budget et données de
+santé : [Synchronisation sur OpenRouter](mobile.md#synchronisation-sur-openrouter-ou-toute-api-compatible-openai).
+
+## Le chat avec le coach — `[chat]`
+
+Service optionnel du tableau de bord ([page dédiée](dashboard/chat.md)), désactivé par
+défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
+
+| Clé | Effet |
+|---|---|
+| `enabled` | `false` (défaut) \| `true`. |
+| `backend` | `"claude"` (Claude Agent SDK, `pip install claude-agent-sdk`) \| `"opencode"` (OpenRouter, OpenAI, Mistral, Ollama…). |
+| `model` | Défaut `claude-sonnet-5-5`. Backend `opencode` : `fournisseur/modèle`. |
+| `base_url` | Backend `opencode` + API compatible OpenAI autre qu'OpenRouter. |
+| `api_key_env` | Nom de la variable de `llm.env` (défaut `ANTHROPIC_API_KEY`). |
+| `port`, `listen` | Port (8766) et interface d'écoute (`127.0.0.1`). |
+| `auth` | `"local"` (boucle locale seulement) \| `"proxy"` (identité transmise par le SSO du reverse proxy). |
+| `auth_header`, `allowed_users`, `trusted_proxies`, `allowed_hosts` | Mode `proxy` : en-tête d'identité (`X-authentik-username`, Authelia : `Remote-User`), utilisateurs admis (vide = tous), IP source de Traefik, hôtes acceptés. Voir `deploy/chat/traefik/README.md`. |
+| `public_url` | URL publique du tableau de bord, requise pour les boutons ntfy. |
+| `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). Le reste du jour est réservé par tour en cours (une conversation simultanée est refusée tant qu'il est réservé). |
+| `turn_budget_max_eur` | Plafond de dépense d'un tour (défaut `1.0` €) ; le reste du budget du jour reste disponible pour une autre conversation ou une approbation tardive. `0` = un tour peut réserver tout le reste du jour. |
+| `max_turns`, `rate_limit_per_min` | Tours d'agent par message (30) ; tours par minute et par utilisateur (6). |
+| `approval_wait_s`, `approval_ttl_s` | Attente en cours de tour d'une approbation (600 s) ; durée de vie d'une proposition en attente (86400 s). |
+| `ntfy_approvals`, `ntfy_quick_approve`, `ntfy_token_ttl_s` | Notification d'approbation (bouton « Ouvrir »), boutons « Appliquer / Refuser » à jetons à usage unique, durée de vie des jetons (1800 s). **Les boutons rapides ne sont envoyés que si `[notifications].ntfy_token_file` est renseigné** (sujet ntfy à accès contrôlé) : le jeton voyage dans la notification, donc tout abonné d'un sujet public pourrait approuver. Sans ce fichier, seul « Ouvrir » part, avec un avertissement dans le journal. **Le fichier ne garantit pas que le sujet est protégé en lecture** : il faut des ACL de lecture côté ntfy (`auth-default-access: deny-all` + un utilisateur avec droits de lecture/écriture), sinon mettre `ntfy_quick_approve = false`. |
+| `ntfy_delay_s` | Délai (60 s) avant le push ntfy quand une page est ouverte ; sans page, le push part tout de suite. |
+
+La clé API n'est jamais dans ce fichier : `~/.config/ai-running-coach/llm.env`.
+Variables d'environnement (dépannage, jamais nécessaires en usage courant) : `ARC_LLM_ENV` (autre chemin que
+`llm.env`, lu par le service, `daily-sync.sh` et `install.sh`), `ARC_CHAT_PING_S` (intervalle des
+commentaires `: ping` du flux SSE, 15 s), `ARC_OPENCODE_TRACE` (fichier où recopier chaque évènement brut
+d'OpenCode — contenu des échanges compris : diagnostic seulement, fichier à supprimer ensuite).
+`./install.sh --chat-budget EUR` écrit `daily_budget_eur`. Le diagnostic :
+`python3 scripts/coach_doctor.py --check llm_config` (et `chat_service`, `opencode_cli`).
+
 ## Notifications et synchronisation
 
 `[notifications]` et `[sync]` sont décrits dans

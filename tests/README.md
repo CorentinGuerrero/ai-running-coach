@@ -63,6 +63,16 @@ de trace Python, crontab/LaunchAgent absents (jamais qu'une `info`, jamais une
 panne), schéma `--json` (dont `--check <id>`), et l'absence de toute valeur de
 token dans la sortie (table et JSON).
 
+`tests/install/test_llm_chat_ops.py` verrouille l'exploitation du chat et de la sync sur
+API : runner `opencode` de `daily-sync.sh` (commande, config locale, clé réservée au
+process du runner, budget, échecs fournisseur distincts d'un 401 Garmin, validation du
+contrat), `install.sh --llm/--chat/--*-budget`, `coach-chat.sh` et les vérifications
+`llm_config`/`chat_service`/`opencode_cli` du doctor. Le stub `tests/lib/stubs/opencode`
+journalise son argv et la *présence* (jamais la valeur) de la clé ; leviers
+`ARC_STUB_OPENCODE_OUT|RC|COST|WRITE`. Un faux exécutable qui doit primer sur le vrai
+`opencode`/`claude` de la machine se place dans `$HOME/.local/bin` du bac à sable
+(`daily-sync.sh` y préfixe son `PATH`).
+
 **Tests ignorés.** `TestCoachRemote` s'ignore là où `screen` ou `tmux` existe
 dans `/opt/homebrew/bin` ou `/usr/local/bin` : `coach-remote.sh` rajoute ces
 dossiers au `PATH`, donc « aucun gestionnaire de services » n'y est pas une

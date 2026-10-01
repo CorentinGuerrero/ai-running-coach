@@ -2,19 +2,22 @@
 # =============================================================================
 # ai-running-coach — synchronisation Garmin automatique (headless)
 #
-# Lance le skill /garmin-daily-sync avec l'exécuteur configuré (Claude Code ou
-# Codex CLI, abonnement — pas de clé API), journalise, extrait le bloc ```resume```
-# et l'envoie en notification push via scripts/notify.sh.
+# Lance le skill /garmin-daily-sync avec l'exécuteur configuré (Claude Code,
+# Codex CLI ou OpenCode), journalise, extrait le bloc ```resume``` et l'envoie
+# en notification push via scripts/notify.sh. Par défaut : abonnement (pas de
+# clé API). Avec [sync].api_key_env : mode API (OpenRouter, Anthropic…), clé lue
+# dans ~/.config/ai-running-coach/llm.env et injectée dans le seul process du
+# runner (jamais dans votre shell : ANTHROPIC_API_KEY casse Remote Control).
 #
 # Usage :
 #   scripts/daily-sync.sh              # exécution (appelée par cron/launchd)
 #   scripts/daily-sync.sh --dry-run    # affiche la commande sans l'exécuter
-#   scripts/daily-sync.sh --runner codex
+#   scripts/daily-sync.sh --runner codex     # ou opencode
 #   scripts/daily-sync.sh --trigger activity:123,morning   # passé par garmin_watch.py
 #
-# Configuration : section [sync] de config/workspace.toml (runner, lookback_days)
-# et [notifications] (voir scripts/setup-ntfy.sh). S'exécute dans le workspace
-# (ARC_WORKSPACE / ~/.config/ai-running-coach/workspace, sinon ce dépôt).
+# Configuration : section [sync] de config/workspace.toml (runner, model, base_url,
+# api_key_env, daily_budget_eur, lookback_days) et [notifications] (voir
+# scripts/setup-ntfy.sh). S'exécute dans le workspace (ARC_WORKSPACE / ~/.config/ai-running-coach/workspace, sinon ce dépôt).
 # Journaux : <workspace>/logs/sync-YYYY-MM-DD.log (gitignoré). Verrou : logs/.sync.lock.
 # =============================================================================
 set -euo pipefail
@@ -28,7 +31,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) DRY_RUN=1; shift ;;
         --runner) RUNNER="$2"; shift 2 ;;
         --trigger) TRIGGER="$2"; shift 2 ;;
-        --help|-h) sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h) sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Option inconnue : $1 (voir --help)" ;;
     esac
 done
@@ -45,6 +48,21 @@ LOG_DIR="$ARC_WORKSPACE/logs"
 LOG_FILE="$LOG_DIR/sync-$(date +%F).log"
 LOCK_FILE="$LOG_DIR/.sync.lock"
 NOTIFY="$ARC_ENGINE_ROOT/scripts/notify.sh"
+
+# Mode API / modèle (#chat) : [sync].api_key_env non vide = clé lue dans llm.env
+# (jamais dans le TOML). model : requis pour opencode, optionnel pour claude API.
+SYNC_MODEL="$(toml_get sync model "")"
+SYNC_BASE_URL="$(toml_get sync base_url "")"
+API_KEY_ENV="$(toml_get sync api_key_env "")"
+DAILY_BUDGET_EUR="$(toml_get sync daily_budget_eur 0.5)"
+USD_EUR_RATE="$(toml_get chat usd_eur_rate 0.92)"
+LLM_ENV_FILE="${ARC_LLM_ENV:-$HOME/.config/ai-running-coach/llm.env}"
+SPEND_FILE="$LOG_DIR/.sync-spend-$(date +%F)"
+# Variables « NOM=valeur » réservées au process du runner (voir load_llm_env).
+RUNNER_ENV=()
+# Format de sortie du runner : text | claude-json | opencode-json (voir build_command).
+OUTPUT_KIND="text"
+OC_CONFIG_FILE="$ARC_WORKSPACE/.arc/sync/opencode.json"
 
 # Déclencheurs détectés par scripts/garmin_watch.py (#watch) : un indice pour
 # l'agent (quoi récupérer en priorité), jamais une restriction — les dates
@@ -104,16 +122,280 @@ fi
 # que s'il a été approuvé interactivement ; on le passe explicitement.
 MCP_CONFIG="$ARC_WORKSPACE/.mcp.json"
 
+# ---------------------------------------------------------------------------
+# Mode API : clé du fournisseur (OpenRouter, Anthropic…)
+# ---------------------------------------------------------------------------
+# Lit ~/.config/ai-running-coach/llm.env (lignes NOM=valeur, mode 600) et ne
+# retient QUE la variable nommée par [sync].api_key_env, dans RUNNER_ENV : elle
+# n'est passée qu'au process du runner (`env NOM=valeur runner…`), jamais
+# exportée dans ce shell ni dans celui de l'utilisateur. Une variable déjà
+# présente dans l'environnement n'est pas écrasée. La valeur n'est JAMAIS
+# affichée ni journalisée (dry-run compris). Statut 1 : clé introuvable.
+load_llm_env() {
+    RUNNER_ENV=()
+    [[ -n "$API_KEY_ENV" ]] || return 0
+    [[ "$API_KEY_ENV" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+        || die "[sync].api_key_env : nom de variable invalide (« $API_KEY_ENV »)."
+    if [[ -n "${!API_KEY_ENV:-}" ]]; then
+        RUNNER_ENV+=("$API_KEY_ENV=${!API_KEY_ENV}")
+        return 0
+    fi
+    [[ -f "$LLM_ENV_FILE" ]] || return 1
+    if [[ -n "$(find "$LLM_ENV_FILE" -maxdepth 0 -perm -077 2>/dev/null)" ]]; then
+        warn "$LLM_ENV_FILE est lisible par d'autres utilisateurs — chmod 600 \"$LLM_ENV_FILE\""
+    fi
+    local line name value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        name="${BASH_REMATCH[2]}"
+        value="${BASH_REMATCH[3]}"
+        [[ "$name" == "$API_KEY_ENV" ]] || continue
+        # Guillemets simples ou doubles autour de la valeur.
+        if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then value="${BASH_REMATCH[1]}"; fi
+        [[ -n "$value" ]] || continue
+        RUNNER_ENV+=("$name=$value")
+    done < "$LLM_ENV_FILE"
+    [[ "${#RUNNER_ENV[@]}" -gt 0 ]]
+}
+
+# ---------------------------------------------------------------------------
+# Runner opencode : configuration locale au projet
+# ---------------------------------------------------------------------------
+# Générée à chaque run dans <workspace>/.arc/sync/opencode.json (jetable, .arc/
+# s'ignore lui-même) et passée par OPENCODE_CONFIG — elle est fusionnée AU-DESSUS
+# de ~/.config/opencode/opencode.json. La clé n'y figure jamais : « {env:NOM} ».
+# Permissions : écriture limitée aux dossiers de données, bash refusé, web
+# refusé, et tous les outils MCP d'ÉCRITURE refusés (la synchronisation ne pousse
+# jamais de séance : c'est le coach, sur demande). Nommage OpenCode d'un outil
+# MCP : <serveur>_<outil> (# À VÉRIFIER sur un run réel avec un serveur MCP).
+OC_CONFIG_PY='
+import json, sys
+
+model, base_url, api_key_env, mcp_path = sys.argv[1:5]
+provider_id, _, model_id = model.partition("/")
+provider = {}
+if base_url:
+    options = {"baseURL": base_url}
+    if api_key_env:
+        options["apiKey"] = "{env:%s}" % api_key_env
+    provider[provider_id] = {"npm": "@ai-sdk/openai-compatible", "options": options,
+                             "models": {model_id: {}}}
+elif api_key_env:
+    provider[provider_id] = {"options": {"apiKey": "{env:%s}" % api_key_env}}
+
+WRITE_PREFIXES = ("schedule_", "upload_", "delete_", "unschedule_", "create_", "add_",
+                  "set_", "log_", "update_", "upsert_", "bulk_", "request_reload")
+mcp, permission = {}, {}
+try:
+    servers = json.load(open(mcp_path, encoding="utf-8")).get("mcpServers") or {}
+except (OSError, ValueError):
+    servers = {}
+for name, spec in servers.items():
+    if not isinstance(spec, dict) or not spec.get("command"):
+        continue
+    env = {k: str(v) for k, v in (spec.get("env") or {}).items()}
+    # Liste blanche Garmin : on retire les outils d ecriture de la liste passee au serveur.
+    tools = env.get("GARMIN_ENABLED_TOOLS")
+    if tools:
+        env["GARMIN_ENABLED_TOOLS"] = ",".join(
+            t for t in tools.split(",") if not t.startswith(WRITE_PREFIXES))
+    entry = {"type": "local", "command": [spec["command"]] + [str(a) for a in spec.get("args") or []],
+             "enabled": True}
+    if env:
+        entry["environment"] = env
+    mcp[name] = entry
+    for prefix in WRITE_PREFIXES:
+        permission["%s_%s*" % (name, prefix)] = "deny"
+    if name == "leanproxy":
+        # Passerelle : les outils appeles a travers elle echappent aux motifs ci-dessus.
+        permission["leanproxy_*"] = "deny"
+
+permission.update({
+    "edit": {"*": "deny", "activities/**": "allow", "medical/**": "allow",
+             "nutrition/**": "allow", "planning/**": "allow", "rapports/**": "allow", "gear/**": "allow"},
+    "bash": "deny", "webfetch": "deny", "websearch": "deny",
+    "external_directory": "deny", "task": "allow", "skill": "allow",
+})
+config = {"$schema": "https://opencode.ai/config.json", "model": model, "permission": permission}
+if provider:
+    config["provider"] = provider
+if mcp:
+    config["mcp"] = mcp
+print(json.dumps(config, ensure_ascii=False, indent=2))
+'
+
+opencode_config_json() {
+    python3 -c "$OC_CONFIG_PY" "$SYNC_MODEL" "$SYNC_BASE_URL" "$API_KEY_ENV" "$MCP_CONFIG"
+}
+
+# ---------------------------------------------------------------------------
+# Lecture de la sortie d'un runner qui rapporte son coût (opencode / claude API)
+# ---------------------------------------------------------------------------
+# Usage : runner_output <mode>   (stdin = sortie brute du runner)
+#   text  : texte de l'agent (celui d'où l'on extrait le bloc ```resume)
+#   cost  : coût en USD (vide si non rapporté)
+#   error : texte d'erreur du FOURNISSEUR (vide si aucune erreur)
+# Sortie non JSON : `text` la rend telle quelle, les autres ne rendent rien.
+# Formats — opencode : `opencode run --format json`, un événement JSON par ligne
+# (« text », « step_finish » avec part.cost, « error » avec error.data.message),
+# vérifié sur OpenCode 1.18 ; claude : `--output-format json`, objet unique
+# (« result », « total_cost_usd », « is_error », « api_error_status »).
+RUNNER_OUTPUT_PY='
+import json, sys
+
+mode, kind = sys.argv[1:3]
+raw = sys.stdin.read()
+texts, errors = [], []
+cost = None
+
+def add_cost(value):
+    global cost
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        cost = (cost or 0.0) + float(value)
+
+if kind == "claude-json":
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict):
+        result = obj.get("result")
+        if isinstance(result, str):
+            texts.append(result)
+        add_cost(obj.get("total_cost_usd"))
+        if obj.get("is_error"):
+            errors.append("%s (HTTP %s)" % (result or "", obj.get("api_error_status") or "?"))
+    else:
+        texts.append(raw)
+else:
+    parsed = 0
+    for line in raw.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        parsed += 1
+        part = ev.get("part") or {}
+        if ev.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+        elif ev.get("type") == "step_finish":
+            add_cost(part.get("cost"))
+        elif ev.get("type") == "error":
+            err = ev.get("error") or {}
+            data = err.get("data") or {}
+            errors.append(" ".join(str(x) for x in (
+                err.get("name"), data.get("statusCode"), data.get("message")) if x))
+    if not parsed:
+        texts.append(raw)
+
+if mode == "text":
+    print("\n".join(texts))
+elif mode == "cost":
+    print("" if cost is None else "%.6f" % cost)
+elif mode == "error":
+    print("\n".join(errors))
+'
+
+runner_output() { python3 -c "$RUNNER_OUTPUT_PY" "$1" "$OUTPUT_KIND"; }
+
+# ---------------------------------------------------------------------------
+# Budget quotidien — uniquement si le runner rapporte son coût
+# ---------------------------------------------------------------------------
+# Cumul du jour (en EUR) dans <workspace>/logs/.sync-spend-YYYY-MM-DD. Runner
+# sans coût rapporté (claude/codex par abonnement) : jamais de plafond.
+budget_enforced() {
+    [[ "$OUTPUT_KIND" != "text" ]] || return 1
+    awk -v b="$DAILY_BUDGET_EUR" 'BEGIN { exit !(b + 0 > 0) }'
+}
+
+spent_today_eur() {
+    local v=""
+    [[ -f "$SPEND_FILE" ]] && v="$(head -n1 "$SPEND_FILE" 2>/dev/null)"
+    [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || v=0
+    printf '%s' "$v"
+}
+
+over_budget() {
+    awk -v s="$(spent_today_eur)" -v b="$DAILY_BUDGET_EUR" 'BEGIN { exit !(s + 0 >= b + 0) }'
+}
+
+record_spend() {
+    local cost_usd="$1"
+    [[ "$cost_usd" =~ ^[0-9]+(\.[0-9]+)?$ ]] || return 0
+    awk -v s="$(spent_today_eur)" -v c="$cost_usd" -v r="$USD_EUR_RATE" \
+        'BEGIN { printf "%.4f\n", s + c * r }' > "$SPEND_FILE"
+    log "Coût du run : ${cost_usd} USD — cumul du jour : $(spent_today_eur) EUR (plafond $DAILY_BUDGET_EUR EUR)"
+}
+
+# ---------------------------------------------------------------------------
+# Échec du FOURNISSEUR LLM (clé refusée, crédits épuisés) — jamais un 401 Garmin
+# ---------------------------------------------------------------------------
+# On ne regarde QUE le texte d'erreur rapporté par le runner (runner_output
+# error) — événements « error » d'opencode, is_error de claude — jamais tout
+# le journal : un 401 Garmin y a un contexte Garmin explicite et reste traité
+# par detect_auth_failure. Un texte d'erreur qui nomme Garmin/Intervals est
+# écarté ici. Motifs à VÉRIFIER contre des échecs réels (# À VÉRIFIER) : 401,
+# « invalid api key », « user not found » (clé) ; 402, « credits », « payment
+# required », « credit balance » (solde). PROVIDER_FAILURE : auth | credits | "".
+PROVIDER_FAILURE=""
+detect_provider_failure() {
+    local err="$1"
+    PROVIDER_FAILURE=""
+    [[ -n "$err" ]] || return 1
+    if printf '%s' "$err" | grep -qiE 'garmin|intervals'; then
+        return 1
+    fi
+    if printf '%s' "$err" | grep -qiE '(^|[^0-9])402([^0-9]|$)|insufficient (credits|funds)|payment required|credit balance|requires more credits|out of credits'; then
+        PROVIDER_FAILURE="credits"
+        return 0
+    fi
+    if printf '%s' "$err" | grep -qiE '(^|[^0-9])401([^0-9]|$)|invalid (x-)?api[ _-]?key|incorrect api key|user not found|authentication[_ ]error|unauthorized|no auth'; then
+        PROVIDER_FAILURE="auth"
+        return 0
+    fi
+    return 1
+}
+
+provider_label() {
+    if [[ "$RUNNER" == "opencode" ]]; then
+        local p="${SYNC_MODEL%%/*}"
+        printf '%s' "${p:-fournisseur LLM}"
+    else
+        printf 'Anthropic'
+    fi
+}
+
+# Corps du skill sans son front matter, pour les exécuteurs qui n'ont pas de
+# slash-command projet (codex, opencode) : passé en prompt.
+skill_prompt() {
+    local body
+    body="$(awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$SKILL_FILE")"
+    printf '%s. Follow these instructions exactly:\n%s' "$SYNC_ARGS" "$body"
+}
+
 build_command() {
+    OUTPUT_KIND="text"
     case "$RUNNER" in
         claude)
             have claude || [[ "$DRY_RUN" -eq 1 ]] || die "claude introuvable — installez Claude Code : curl -fsSL https://claude.ai/install.sh | bash"
             CMD=(claude -p "/garmin-daily-sync ($SYNC_ARGS)"
                  --permission-mode acceptEdits
-                 --allowedTools "$CLAUDE_TOOLS"
-                 --output-format text)
+                 --allowedTools "$CLAUDE_TOOLS")
             if [[ -n "$CLAUDE_DISALLOWED" ]]; then
                 CMD+=(--disallowedTools "$CLAUDE_DISALLOWED")
+            fi
+            if [[ -n "$API_KEY_ENV" ]]; then
+                # Mode API : sortie JSON pour lire le coût (budget) et l'erreur du
+                # fournisseur ; le texte de l'agent en est extrait avant tout
+                # traitement, donc bloc ```resume et détection 401 Garmin inchangés.
+                OUTPUT_KIND="claude-json"
+                CMD+=(--output-format json)
+                [[ -z "$SYNC_MODEL" ]] || CMD+=(--model "$SYNC_MODEL")
+            else
+                CMD+=(--output-format text)
             fi
             if [[ -f "$MCP_CONFIG" ]]; then
                 CMD+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
@@ -123,12 +405,16 @@ build_command() {
         codex)
             have codex || [[ "$DRY_RUN" -eq 1 ]] || die "codex introuvable — installez Codex CLI : npm i -g @openai/codex"
             # Codex n'a pas de slash-command projet : on passe le corps du skill en prompt.
-            local prompt
-            prompt="$(awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$SKILL_FILE")"
-            prompt="$SYNC_ARGS. Follow these instructions exactly:
-$prompt"
-            CMD=(codex exec --full-auto --cd "$ARC_WORKSPACE" "$prompt") ;;
-        *) die "Exécuteur inconnu : $RUNNER (claude|codex)" ;;
+            CMD=(codex exec --full-auto --cd "$ARC_WORKSPACE" "$(skill_prompt)") ;;
+        opencode)
+            have opencode || [[ "$DRY_RUN" -eq 1 ]] || die "opencode introuvable — installez OpenCode : curl -fsSL https://opencode.ai/install | bash"
+            [[ "$SYNC_MODEL" == */* ]] || die "[sync].model requis pour le runner opencode, au format fournisseur/modèle (ex. openrouter/deepseek/deepseek-v4.1-flash)."
+            # Pas de slash-command projet garanti en mode headless (# À VÉRIFIER) :
+            # on passe le corps du skill. Config locale (permissions, MCP) par
+            # OPENCODE_CONFIG ; --format json pour lire coût et erreurs.
+            OUTPUT_KIND="opencode-json"
+            CMD=(opencode run --format json --model "$SYNC_MODEL" --dir "$ARC_WORKSPACE" "$(skill_prompt)") ;;
+        *) die "Exécuteur inconnu : $RUNNER (claude|codex|opencode)" ;;
     esac
 }
 
@@ -462,13 +748,67 @@ detect_auth_failure() {
     return 1
 }
 
+# Passerelle leanproxy SEULE dans .mcp.json (aucun serveur direct garmin/intervals) ?
+# Sous opencode, les outils appelés à travers la passerelle (leanproxy_invoke_tool)
+# échappent aux permissions par outil : la config générée refuse donc leanproxy_*
+# entièrement, ce qui empêcherait toute lecture Garmin. On échoue vite plutôt que de
+# synchroniser « à vide ».
+mcp_gateway_only() {
+    [[ -f "$MCP_CONFIG" ]] || return 1
+    python3 -c '
+import json, sys
+try:
+    servers = json.load(open(sys.argv[1], encoding="utf-8")).get("mcpServers") or {}
+except (OSError, ValueError, AttributeError):
+    sys.exit(1)
+# Serveur direct : « garmin » ou tout nom commençant par « intervals » (Intervals_icu, intervals-icu…), sans tenir compte de la casse.
+direct = [n for n in servers if n.lower() == "garmin" or n.lower().startswith("intervals")]
+sys.exit(0 if "leanproxy" in servers and not direct else 1)
+' "$MCP_CONFIG"
+}
+
 main() {
     build_command
     log "Synchronisation $SOURCE_LABEL — exécuteur : $RUNNER, fenêtre : $LOOKBACK jour(s)${TRIGGER:+, déclencheurs : $TRIGGER}"
     log "Workspace : $ARC_WORKSPACE (moteur : $ARC_ENGINE_ROOT)"
 
+    if [[ "$RUNNER" == "opencode" ]] && mcp_gateway_only; then
+        local gateway_msg="opencode + leanproxy non pris en charge pour la synchronisation — utilisez le mode direct (./install.sh sans --use-leanproxy) ou le runner claude."
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            warn "$gateway_msg"
+        else
+            err "$gateway_msg"
+            notify "🚫 Sync $SOURCE_LABEL — opencode + leanproxy non pris en charge" 4 "no_entry,warning" "$gateway_msg"
+            exit 1
+        fi
+    fi
+
+    local key_missing=0
+    load_llm_env || key_missing=1
+
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${CMD[*]}" | head -c 2000; echo
+        # Le prompt inline du skill (codex, opencode), multi-ligne, n'est montré que par sa
+        # taille ; les listes d'outils autorisés/interdits restent affichées en entier.
+        local shown=() arg
+        for arg in "${CMD[@]}"; do
+            if [[ "$arg" == *$'\n'* ]]; then shown+=("<prompt : ${#arg} caractères>"); else shown+=("$arg"); fi
+        done
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} cd $ARC_WORKSPACE && ${shown[*]}" | head -c 4000; echo
+        if [[ -n "$API_KEY_ENV" ]]; then
+            # Le NOM de la variable seulement — jamais sa valeur.
+            if [[ "$key_missing" -eq 0 ]]; then
+                printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} variable réservée au process du runner : $API_KEY_ENV (lue dans $LLM_ENV_FILE ou l'environnement)"
+            else
+                warn "$API_KEY_ENV introuvable dans $LLM_ENV_FILE ni dans l'environnement — la synchronisation échouerait."
+            fi
+        fi
+        if [[ "$RUNNER" == "opencode" ]]; then
+            printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} OPENCODE_CONFIG=$OC_CONFIG_FILE, contenu :"
+            opencode_config_json
+        fi
+        if budget_enforced; then
+            printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} budget : $(spent_today_eur)/$DAILY_BUDGET_EUR EUR (cumul : $SPEND_FILE)"
+        fi
         printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} journal : $LOG_FILE"
         return 0
     fi
@@ -481,6 +821,28 @@ main() {
     echo $$ > "$LOCK_FILE"
     trap 'rm -f "$LOCK_FILE"' EXIT
     check_token_alert || warn "Alerte d'expiration des tokens Garmin interrompue (voir $LOG_FILE)."
+
+    if [[ "$key_missing" -eq 1 ]]; then
+        err "$API_KEY_ENV introuvable ($LLM_ENV_FILE) — synchronisation abandonnée."
+        notify "🔑 Sync $SOURCE_LABEL — clé API absente" 4 "key,warning" \
+            "Mode API activé ([sync].api_key_env = $API_KEY_ENV) mais la clé est introuvable dans $LLM_ENV_FILE. Ajoutez la ligne $API_KEY_ENV=... (chmod 600)."
+        exit 1
+    fi
+
+    # Plafond quotidien : seulement pour un runner qui rapporte son coût. Dépassé,
+    # on ne lance rien (exit 0 : ce n'est pas une panne) et on prévient UNE fois
+    # par jour, pour qu'un mode watch ne spamme pas.
+    if budget_enforced && over_budget; then
+        warn "Budget quotidien atteint ($(spent_today_eur)/$DAILY_BUDGET_EUR EUR) — synchronisation sautée."
+        local budget_marker
+        budget_marker="$LOG_DIR/.sync-budget-notified-$(date +%F)"
+        if [[ ! -e "$budget_marker" ]]; then
+            notify "💸 Sync $SOURCE_LABEL suspendue — budget atteint" 3 "moneybag,warning" \
+                "Budget quotidien de la synchronisation atteint ($(spent_today_eur) € sur $DAILY_BUDGET_EUR €) : run sauté. Ajustez [sync].daily_budget_eur ou relancez demain."
+            : > "$budget_marker"
+        fi
+        exit 0
+    fi
     git_pull_before_run
 
     local output rc=0
@@ -488,12 +850,47 @@ main() {
         echo "===== $(date '+%F %T') — runner=$RUNNER lookback=$LOOKBACK trigger=${TRIGGER:-planifié} ====="
     } >> "$LOG_FILE"
     cd "$ARC_WORKSPACE"
-    output="$("${CMD[@]}" 2>>"$LOG_FILE")" || rc=$?
-    printf '%s\n' "$output" >> "$LOG_FILE"
+    local exec_cmd=("${CMD[@]}") raw_output provider_error="" run_marker="$LOG_DIR/.sync-run-start"
+    if [[ "$RUNNER" == "opencode" ]]; then
+        mkdir -p "$(dirname "$OC_CONFIG_FILE")"
+        opencode_config_json > "$OC_CONFIG_FILE"
+        exec_cmd=(env "OPENCODE_CONFIG=$OC_CONFIG_FILE" "${exec_cmd[@]}")
+    fi
+    # La clé n'est passée qu'à CE process (env), jamais exportée ici.
+    if [[ "${#RUNNER_ENV[@]}" -gt 0 ]]; then
+        exec_cmd=(env "${RUNNER_ENV[@]}" "${exec_cmd[@]}")
+    fi
+    : > "$run_marker"
+    raw_output="$("${exec_cmd[@]}" 2>>"$LOG_FILE")" || rc=$?
+    if [[ "$OUTPUT_KIND" == "text" ]]; then
+        output="$raw_output"
+        printf '%s\n' "$output" >> "$LOG_FILE"
+    else
+        # Sortie JSON : le texte de l'agent d'abord (c'est lui que lisent
+        # extract_resume et detect_auth_failure), puis la sortie brute.
+        output="$(printf '%s\n' "$raw_output" | runner_output text)"
+        provider_error="$(printf '%s\n' "$raw_output" | runner_output error)"
+        printf '%s\n' "$output" >> "$LOG_FILE"
+        [[ -z "$provider_error" ]] || printf 'PROVIDER-ERREUR (%s) : %s\n' "$(provider_label)" "$provider_error" >> "$LOG_FILE"
+        printf '%s\n' "$raw_output" >> "$LOG_FILE"
+        record_spend "$(printf '%s\n' "$raw_output" | runner_output cost)"
+    fi
 
     if [[ "$rc" -ne 0 ]]; then
         err "La synchronisation a échoué (code $rc) — voir $LOG_FILE"
-        if detect_auth_failure; then
+        if detect_provider_failure "$provider_error"; then
+            # Clé refusée ou crédits épuisés côté fournisseur LLM : jamais présenté
+            # comme un problème Garmin, et sans lecture du journal pour un 401.
+            local plabel
+            plabel="$(provider_label)"
+            if [[ "$PROVIDER_FAILURE" == "credits" ]]; then
+                notify "💳 Sync $SOURCE_LABEL — crédits $plabel épuisés" 5 "moneybag,warning" \
+                    "Synchronisation interrompue : le fournisseur LLM ($plabel) refuse la requête faute de crédits (402). Rechargez le compte. Ce n'est pas un problème $SOURCE_LABEL. Voir logs/sync-$(date +%F).log."
+            else
+                notify "🔑 Sync $SOURCE_LABEL — clé $plabel refusée" 5 "key,warning" \
+                    "Synchronisation interrompue : la clé API du fournisseur LLM ($plabel, variable $API_KEY_ENV) est refusée (401). Vérifiez ~/.config/ai-running-coach/llm.env. Ce n'est pas un problème $SOURCE_LABEL. Voir logs/sync-$(date +%F).log."
+            fi
+        elif detect_auth_failure; then
             if [[ "$TOKEN_ALERT_SENT_THIS_RUN" -eq 1 ]]; then
                 # L'alerte d'expiration envoyée juste avant la synchronisation couvre
                 # déjà ce même problème (tokens expirés) — pas de doublon. Garmin
@@ -548,6 +945,25 @@ main() {
     if printf '%s' "$resume" | grep -qE '^Pourquoi[^:]{0,4}:' && [[ "$priority" -lt 4 ]]; then
         priority=4
         tags="running,warning"
+    fi
+    # Un modèle faible qui casse le contrat `arc` chaque nuit est pire qu'un run
+    # échoué : les fichiers écrits pendant CE run sont validés et l'écart figure
+    # dans la notification (runner opencode).
+    if [[ "$RUNNER" == "opencode" ]]; then
+        local invalid="" f
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            python3 "$ARC_ENGINE_ROOT/scripts/arc_index.py" --validate "$f" >>"$LOG_FILE" 2>&1 \
+                || invalid="$invalid ${f#"$ARC_WORKSPACE"/}"
+        done < <(find "$ARC_WORKSPACE/activities" "$ARC_WORKSPACE/medical" "$ARC_WORKSPACE/nutrition" \
+                      "$ARC_WORKSPACE/planning" "$ARC_WORKSPACE/rapports" "$ARC_WORKSPACE/gear" -name '*.md' -newer "$run_marker" 2>/dev/null)
+        if [[ -n "$invalid" ]]; then
+            warn "Fichiers hors contrat après le run :$invalid"
+            resume="$resume
+⚠ hors contrat arc :$invalid (validate)"
+            [[ "$priority" -ge 4 ]] || priority=4
+            tags="$tags,warning"
+        fi
     fi
     # Index du tableau de bord : dérivé, jetable, et ignoré par git (.arc/ s'ignore
     # lui-même). Un tableau de bord ouvert voit ainsi la synchronisation sans attendre.

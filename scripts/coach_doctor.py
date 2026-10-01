@@ -7,7 +7,9 @@ Vérifie l'installation SANS RIEN ÉCRIRE ni appeler le réseau *par défaut* :
 `config/workspace*.toml`, complétude du profil athlète (FC max / FC de repos),
 fraîcheur de l'index dérivé `.arc/coach.db`, nombre de fichiers hors contrat,
 planification du daily-sync (cron/launchd), configuration ntfy, lecteur FIT
-(`fitparse` dans l'environnement MCP de `[data].source`).
+(`fitparse` dans l'environnement MCP de `[data].source`), et — chat avec
+le coach / sync sur une API — cohérence runner/backend/modèle/clé (`llm_config`),
+service du chat (`chat_service`), présence d'OpenCode (`opencode_cli`).
 
 Usage :
     scripts/coach_doctor.py                 # tableau ✅/⚠️/❌ en français
@@ -40,7 +42,7 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
                 | "daily_sync_scheduled" | "ntfy_configured" | "gear_sync"
-                | "gear_history" | "fit_reader",
+                | "gear_history" | "fit_reader" | "llm_config" | "chat_service" | "opencode_cli",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -126,6 +128,8 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -162,9 +166,14 @@ GARMIN_MCP_INSTALL_FIX = "uv tool install --python 3.12 git+https://github.com/T
 CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
-    "gear_sync", "gear_history",
-    "fit_reader",
+    "gear_sync", "gear_history", "fit_reader", "llm_config", "chat_service", "opencode_cli",
 )
+
+CHAT_SYSTEMD_UNIT_REL = ".config/systemd/user/ai-running-coach-chat.service"
+CHAT_LAUNCHD_PLIST_REL = "Library/LaunchAgents/com.ai-running-coach.chat.plist"
+# Borne dure du sondage de santé du service du chat (boucle locale).
+CHAT_HEALTH_TIMEOUT_S = 2.0
+OPENCODE_INSTALL_FIX = "curl -fsSL https://opencode.ai/install | bash"
 
 
 def build_check(check_id: str, status: str, message: str, fix: Optional[str], **extra: Any) -> dict:
@@ -838,6 +847,217 @@ def check_fit_reader(config: dict, home: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# llm_config / chat_service / opencode_cli — chat et sync sur une API
+# ---------------------------------------------------------------------------
+
+
+def llm_env_path() -> Path:
+    override = os.environ.get("ARC_LLM_ENV")
+    return Path(override).expanduser() if override else Path.home() / ".config/ai-running-coach/llm.env"
+
+
+def _llm_env_defines(path: Path, variable: str) -> bool:
+    """Vrai si `variable=<non vide>` figure dans llm.env — sans jamais lire la valeur
+    ailleurs que pour tester qu'elle n'est pas vide, et sans la conserver."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        match = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
+        if match and match.group(1) == variable and match.group(2).strip().strip("\"'"):
+            return True
+    return False
+
+
+def _uses_opencode(config: dict) -> bool:
+    sync, chat = config.get("sync") or {}, config.get("chat") or {}
+    return sync.get("runner") == "opencode" or (
+        bool(chat.get("enabled")) and chat.get("backend") == "opencode"
+    )
+
+
+def _mcp_gateway_only(workspace: Path) -> bool:
+    """`.mcp.json` ne déclare que la passerelle leanproxy (aucun serveur direct garmin/intervals) ?"""
+    try:
+        data = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        return False
+    # Serveur direct : « garmin » ou tout nom commençant par « intervals » (Intervals_icu…), sans tenir compte de la casse.
+    direct = [n for n in servers if str(n).lower() == "garmin" or str(n).lower().startswith("intervals")]
+    return "leanproxy" in servers and not direct
+
+
+def check_llm_config(config: dict, workspace: Optional[Path] = None) -> dict:
+    """Jamais plus sévère qu'un `warning` : une configuration LLM incohérente prive
+    du chat ou de la sync API, mais n'empêche pas le reste du coach de fonctionner.
+    Ne lit ni n'affiche jamais une clé — seulement son NOM, et sa présence."""
+    check_id = "llm_config"
+    sync, chat = config.get("sync") or {}, config.get("chat") or {}
+    chat_on = bool(chat.get("enabled"))
+    runner = sync.get("runner", "claude")
+    sync_key = str(sync.get("api_key_env") or "")
+    chat_key = str(chat.get("api_key_env") or "") if chat_on else ""
+    api_mode = bool(sync_key) or chat_on or runner == "opencode"
+    if not api_mode:
+        return build_check(
+            check_id, "info",
+            "Aucune API LLM configurée (sync sur abonnement, chat désactivé).",
+            fix="./install.sh --llm openrouter|anthropic|openai",
+        )
+
+    problems: list = []
+    if runner not in ("claude", "codex", "opencode"):
+        problems.append(f"[sync].runner inconnu (« {runner} »)")
+    if runner == "opencode" and "/" not in str(sync.get("model") or ""):
+        problems.append("[sync].model doit être au format fournisseur/modèle pour le runner opencode")
+    if sync_key and runner == "codex":
+        problems.append("[sync].api_key_env est ignoré par le runner codex")
+    if runner == "opencode" and workspace is not None and _mcp_gateway_only(workspace):
+        problems.append("opencode + leanproxy non pris en charge pour la synchronisation — utilisez le mode direct")
+    if chat_on:
+        backend = chat.get("backend", "claude")
+        model = str(chat.get("model") or "")
+        if backend not in ("claude", "opencode", "mock"):
+            problems.append(f"[chat].backend inconnu (« {backend} »)")
+        if backend == "opencode" and "/" not in model:
+            problems.append("[chat].model doit être au format fournisseur/modèle pour le backend opencode")
+        if backend == "claude" and "/" in model:
+            problems.append("[chat].model ressemble à un identifiant OpenCode alors que le backend est claude")
+
+    keys = sorted({k for k in (sync_key, chat_key) if k})
+    env_path = llm_env_path()
+    if keys:
+        if not env_path.is_file():
+            problems.append(f"{env_path} absent (clés attendues : {', '.join(keys)})")
+        else:
+            try:
+                mode = env_path.stat().st_mode & 0o777
+            except OSError:
+                mode = 0o600
+            if mode & 0o077:
+                problems.append(f"{env_path} est lisible par d'autres utilisateurs (mode {oct(mode)[2:]}, attendu 600)")
+            for key in keys:
+                if not _llm_env_defines(env_path, key) and not os.environ.get(key):
+                    problems.append(f"variable {key} non définie dans {env_path}")
+    if os.environ.get("ANTHROPIC_API_KEY") and "ANTHROPIC_API_KEY" in keys:
+        problems.append(
+            "ANTHROPIC_API_KEY est exporté dans l'environnement : Remote Control refuse la clé API "
+            "(à garder dans llm.env uniquement)"
+        )
+    if problems:
+        return build_check(
+            check_id, "warning", "Configuration LLM à revoir : " + " ; ".join(problems) + ".",
+            fix="./install.sh --llm openrouter|anthropic|openai (crée llm.env en mode 600)",
+        )
+    parts = [f"sync : {runner}" + (f" ({sync.get('model')})" if sync.get("model") else "")]
+    if chat_on:
+        parts.append(f"chat : {chat.get('backend', 'claude')} ({chat.get('model')})")
+    return build_check(
+        check_id, "ok",
+        "Configuration LLM cohérente — " + ", ".join(parts)
+        + (f" ; clé(s) {', '.join(keys)} présente(s) (valeurs non lues)." if keys else "."),
+        fix=None,
+    )
+
+
+def _chat_health_url(chat: dict) -> str:
+    listen = str(chat.get("listen") or "127.0.0.1")
+    host = "127.0.0.1" if listen in ("0.0.0.0", "::", "") else listen
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{chat.get('port', 8766)}/api/chat/healthz"
+
+
+def check_chat_service(home: Path, config: dict) -> dict:
+    """`info`/`warning` uniquement — jamais `error` : un chat arrêté est une
+    dégradation de confort, pas une panne du coach."""
+    check_id = "chat_service"
+    chat = config.get("chat") or {}
+    if not chat.get("enabled"):
+        return build_check(
+            check_id, "info", "Chat avec le coach désactivé ([chat].enabled = false).",
+            fix="./install.sh --chat",
+        )
+    darwin = _uname() == "Darwin"
+    unit = home / (CHAT_LAUNCHD_PLIST_REL if darwin else CHAT_SYSTEMD_UNIT_REL)
+    installed = unit.is_file()
+    url = _chat_health_url(chat)
+    reachable, detail = False, ""
+    payload = None
+    try:
+        with urllib.request.urlopen(url, timeout=CHAT_HEALTH_TIMEOUT_S) as response:  # noqa: S310 - boucle locale
+            payload = json.loads(response.read(65536).decode("utf-8", errors="replace") or "{}")
+        reachable = True
+    except urllib.error.HTTPError as exc:
+        # `/healthz` répond 503 quand le backend n'est pas sain : le service TOURNE, c'est son
+        # corps qui dit pourquoi (HTTPError hérite d'URLError : à traiter avant).
+        try:
+            payload = json.loads(exc.read(65536).decode("utf-8", errors="replace") or "{}")
+        except (OSError, ValueError):
+            payload = {"ok": False}
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            payload = {**(payload if isinstance(payload, dict) else {}), "ok": False}   # erreur HTTP = jamais « sain »
+        reachable = True
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        reachable = False
+    if reachable:
+        if isinstance(payload, dict) and payload.get("ok") is False:
+            check = payload.get("backend_check")
+            detail = f" — backend : {check}" if isinstance(check, str) and len(check) <= 120 else ""
+            return build_check(
+                check_id, "warning", f"Service du chat joignable ({url}) mais non sain{detail}.",
+                fix="scripts/coach-chat.sh logs",
+            )
+    if reachable:
+        where = "service installé" if installed else "lancé à la main (aucun service installé)"
+        return build_check(check_id, "ok", f"Service du chat joignable ({where}).", fix=None)
+    if not installed:
+        return build_check(
+            check_id, "warning", f"Chat activé mais aucun service installé et {url} injoignable.",
+            fix="./install.sh --chat",
+        )
+    return build_check(
+        check_id, "warning", f"Service du chat installé mais {url} injoignable.",
+        fix="scripts/coach-chat.sh restart && scripts/coach-chat.sh logs",
+    )
+
+
+def _find_opencode() -> Optional[str]:
+    extra = [str(Path.home() / ".local/bin"), str(Path.home() / ".opencode/bin"),
+             "/opt/homebrew/bin", "/usr/local/bin"]
+    return shutil.which("opencode", path=os.pathsep.join([os.environ.get("PATH", ""), *extra]))
+
+
+def check_opencode_cli(config: dict) -> dict:
+    check_id = "opencode_cli"
+    if not _uses_opencode(config):
+        return build_check(
+            check_id, "info", "OpenCode non utilisé (ni runner de sync, ni backend du chat).", fix=None,
+        )
+    binary = _find_opencode()
+    if not binary:
+        return build_check(
+            check_id, "warning", "OpenCode introuvable alors qu'un runner ou un backend l'utilise.",
+            fix=OPENCODE_INSTALL_FIX,
+        )
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
+        version = (out.stdout or out.stderr).strip().splitlines()[0] if out.returncode == 0 and (out.stdout or out.stderr).strip() else ""
+    except (OSError, subprocess.TimeoutExpired):
+        version = ""
+    if not version:
+        return build_check(
+            check_id, "warning", f"OpenCode présent ({binary}) mais « --version » ne répond pas.",
+            fix=OPENCODE_INSTALL_FIX,
+        )
+    return build_check(check_id, "ok", f"OpenCode {version} ({binary}).", fix=None)
+
+
+# ---------------------------------------------------------------------------
 # Orchestration + CLI
 # ---------------------------------------------------------------------------
 
@@ -1051,6 +1271,12 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_gear_history(workspace, config)
     if check_id == "fit_reader":
         return check_fit_reader(config, Path.home())
+    if check_id == "llm_config":
+        return check_llm_config(config, workspace)
+    if check_id == "chat_service":
+        return check_chat_service(Path.home(), config)
+    if check_id == "opencode_cli":
+        return check_opencode_cli(config)
     raise ValueError(f"vérification inconnue : {check_id!r}")
 
 

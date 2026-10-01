@@ -78,7 +78,7 @@ def _ignore_personal(ignored: set):
 # (tests qui doivent faire *disparaître* un binaire, p. ex. screen/tmux).
 ESSENTIAL_BINARIES = [
     "awk", "basename", "bash", "cat", "chmod", "cp", "cut", "date", "dirname",
-    "env", "find", "grep", "head", "id", "ln", "ls", "mkdir", "mktemp", "mv",
+    "env", "find", "git", "grep", "head", "id", "ln", "ls", "mkdir", "mktemp", "mv",
     "python3", "readlink", "rm", "sed", "sh", "sleep", "sort", "tail", "touch",
     "tr", "wc", "xargs",
 ]

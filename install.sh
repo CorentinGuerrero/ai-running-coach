@@ -31,6 +31,8 @@
 #   ./install.sh --use-leanproxy    # mode passerelle leanproxy (power user)
 #   ./install.sh --daily-sync       # cron/launchd : sync Garmin aux heures de [sync].times
 #   ./install.sh --remote-control   # service Remote Control (le coach dans la poche)
+#   ./install.sh --llm openrouter   # chat + sync sur une API (openrouter|anthropic|openai)
+#   ./install.sh --chat             # service du chat avec le coach (dashboard)
 #   ./install.sh --dry-run          # affiche les actions sans rien exécuter
 #   ./install.sh --help
 #
@@ -73,6 +75,19 @@ LEANPROXY_SERVERS="$HOME/.config/leanproxy_servers.yaml"
 # Noms réels des outils garmin-mcp (sans préfixe garmin_).
 GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
 
+# Chat avec le coach et sync sur une API (--llm) : modèles par défaut, UNE constante
+# chacun. Identifiant OpenRouter « deepseek/deepseek-v4.1-flash » vérifié dans le catalogue
+# https://openrouter.ai/api/v1/models et comparé à 7 autres modèles en conditions réelles
+# (docs/dashboard/chat.md, « Quel modèle sur OpenRouter ? ») : le plus fiable et le moins cher.
+# L'ancien « deepseek/deepseek-chat » (V3) annonçait des écritures jamais faites. Forme OpenCode « fournisseur/modèle »
+# (https://opencode.ai/docs/providers). Haiku 4.5 pour le cron (répétitif, contrat
+# vérifié par arc_index.py --validate), Sonnet 5.5 pour le chat.
+LLM_OPENROUTER_MODEL="openrouter/deepseek/deepseek-v4.1-flash"
+LLM_ANTHROPIC_CHAT_MODEL="claude-sonnet-5-5"
+LLM_ANTHROPIC_SYNC_MODEL="claude-haiku-4-5"
+# Clés API : dans ce fichier (mode 600), jamais dans le TOML ni dans le shell.
+LLM_ENV_FILE="${ARC_LLM_ENV:-$HOME/.config/ai-running-coach/llm.env}"
+
 # Détection du répertoire du projet (racine du dépôt) = le « moteur »
 # (agents, skills, scripts). Le workspace (données personnelles + config IDE)
 # est le même dossier par défaut, ou celui passé à --workspace.
@@ -112,6 +127,12 @@ AGENTS_ARG=""      # --agents coach,medical,… (défaut : la config, sinon tous
 ENABLED_AGENTS=""  # résolu par resolve_agents()
 PRESET=""          # --preset laptop|coach-server|docker (défaut : aucun)
 SOURCE="garmin"    # --source garmin|intervals (#68) — source de données primaire
+LLM_PROVIDER=""    # --llm openrouter|anthropic|openai — chat + sync sur une API
+LLM_MODEL_ARG=""   # --model ID (avec --llm)
+LLM_BASE_URL_ARG="" # --base-url URL (avec --llm openai : API compatible OpenAI)
+DO_CHAT=0          # --chat : service du chat avec le coach
+CHAT_BUDGET=""     # --chat-budget EUR
+SYNC_BUDGET=""     # --sync-budget EUR
 
 # Options qu'un préréglage peut fixer ; « explicite » gagne toujours, quel que
 # soit l'ordre des arguments (voir apply_preset() et la note plus bas).
@@ -156,8 +177,23 @@ Usage :
   ./install.sh --no-daily-sync    # désactive la sync (annule --daily-sync d'un préréglage)
   ./install.sh --remote-control   # service Remote Control (le coach dans la poche)
   ./install.sh --no-remote-control # désactive Remote Control (annule --remote-control d'un préréglage)
+  ./install.sh --llm FOURNISSEUR  # openrouter | anthropic | openai — chat ET sync sur une API (voir ci-dessous)
+  ./install.sh --model ID         # avec --llm : modèle (openrouter : ID OpenRouter ; anthropic : modèle du chat)
+  ./install.sh --base-url URL     # avec --llm openai : API compatible OpenAI autre que api.openai.com
+  ./install.sh --chat             # active [chat] et installe le service (scripts/coach-chat.sh)
+  ./install.sh --chat-budget EUR  # plafond quotidien du chat ([chat].daily_budget_eur)
+  ./install.sh --sync-budget EUR  # plafond quotidien de la sync ([sync].daily_budget_eur)
   ./install.sh --dry-run          # affiche les actions sans rien exécuter
   ./install.sh --help
+
+--llm écrit à la fois [chat] et [sync] de config/workspace.user.toml. Une valeur
+DÉJÀ posée qui diffère est REMPLACÉE, avec un avertissement « ancien → nouveau »
+et la façon de revenir ; un rerun sans --llm ne touche jamais à ces clés. La clé
+API n'est jamais écrite dans la config : ~/.config/ai-running-coach/llm.env
+(mode 600, créé avec une ligne d'exemple commentée) — à remplir vous-même.
+ATTENTION : n'exportez PAS ANTHROPIC_API_KEY dans votre shell ou votre profil :
+cela empêche Remote Control de fonctionner (docs/mobile.md). Le chat et la sync
+la lisent dans llm.env et ne la passent qu'à leur propre process.
 
 Préréglages (--preset), chacun ne fait que composer les options ci-dessus —
 toute option passée explicitement l'emporte toujours, quel que soit l'ordre
@@ -303,11 +339,38 @@ while [[ $# -gt 0 ]]; do
         --no-daily-sync) DAILY_SYNC=0; EXPLICIT_DAILY_SYNC=1; shift ;;  # annule --daily-sync composé par un préréglage
         --remote-control) REMOTE_CONTROL=1; EXPLICIT_REMOTE_CONTROL=1; shift ;;
         --no-remote-control) REMOTE_CONTROL=0; EXPLICIT_REMOTE_CONTROL=1; shift ;;  # annule --remote-control composé par un préréglage
+        --llm) need_value "$@"; LLM_PROVIDER="$2"; shift 2 ;;
+        --model) need_value "$@"; LLM_MODEL_ARG="$2"; shift 2 ;;
+        --base-url) need_value "$@"; LLM_BASE_URL_ARG="$2"; shift 2 ;;
+        --chat) DO_CHAT=1; shift ;;
+        --chat-budget) need_value "$@"; CHAT_BUDGET="$2"; shift 2 ;;
+        --sync-budget) need_value "$@"; SYNC_BUDGET="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --help|-h) usage ;;
         *) die "Option inconnue : $1 (voir --help)" ;;
     esac
 done
+
+# Validation des options chat/llm : échec immédiat, avant tout travail.
+validate_budget() {
+    local flag="$1" value="$2"
+    [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v v="$value" 'BEGIN { exit !(v + 0 > 0) }' \
+        || die "$flag : nombre strictement positif attendu en EUR (reçu « $value »)."
+}
+[[ -z "$CHAT_BUDGET" ]] || validate_budget --chat-budget "$CHAT_BUDGET"
+[[ -z "$SYNC_BUDGET" ]] || validate_budget --sync-budget "$SYNC_BUDGET"
+if [[ -n "$LLM_PROVIDER" ]]; then
+    case "$LLM_PROVIDER" in
+        openrouter|anthropic) ;;
+        openai) [[ -n "$LLM_MODEL_ARG" ]] || die "--llm openai exige --model (ex. --model gpt-4.1-mini ; ajoutez --base-url pour une autre API compatible OpenAI)." ;;
+        *) die "Fournisseur LLM inconnu : « $LLM_PROVIDER ». Valides : openrouter, anthropic, openai (voir --help)." ;;
+    esac
+    if [[ -n "$LLM_BASE_URL_ARG" && "$LLM_PROVIDER" == "anthropic" ]]; then
+        die "--base-url n'a pas de sens avec --llm anthropic (utilisez --llm openai pour une API compatible OpenAI)."
+    fi
+elif [[ -n "$LLM_MODEL_ARG" || -n "$LLM_BASE_URL_ARG" ]]; then
+    die "--model et --base-url s'utilisent avec --llm (voir --help)."
+fi
 
 # Valide $SOURCE (défini ici pour être appelable dès l'analyse des arguments
 # ET depuis resolve_source() dans main(), qui peut réécrire $SOURCE depuis la
@@ -1580,6 +1643,170 @@ install_remote_control() {
 }
 
 # ---------------------------------------------------------------------------
+# 6f. Chat avec le coach et sync sur une API (--llm, --chat, budgets)
+# ---------------------------------------------------------------------------
+# Valeur d'une clé dans workspace.user.toml UNIQUEMENT (rien si absente), pour
+# distinguer « déjà posée par l'utilisateur » d'un défaut de config/workspace.toml.
+user_toml_value() {
+    have python3 || return 1
+    python3 - "$WORKSPACE_ROOT/config/workspace.user.toml" "$1" "$2" "$PROJECT_ROOT/scripts" <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[4])
+from pathlib import Path
+from coach_config import read_toml
+path = Path(sys.argv[1])
+section = read_toml(path).get(sys.argv[2], {}) if path.exists() else {}
+if sys.argv[3] not in section:
+    sys.exit(1)
+print(section[sys.argv[3]])
+PYEOF
+}
+
+# Valeur effective (user > défaut versionné) d'une clé, vide si absente.
+effective_value() {
+    have python3 || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
+        --workspace "$WORKSPACE_ROOT" --section "$1" --key "$2" --default "" 2>/dev/null || true
+}
+
+# Pose [section].key dans workspace.user.toml. Remplace sans demander, mais jamais
+# en silence : une valeur posée par l'utilisateur qui diffère, ou un changement de
+# runner/backend (bascule abonnement → API, facturation différente), est signalé
+# « ancien → nouveau » avec la façon de revenir. Sans effet si la valeur est déjà celle-là.
+# Usage : llm_set <section> <clé> <valeur> [string|float]
+llm_set() {
+    local section="$1" key="$2" value="$3" type="${4:-string}" old_user="" old_eff="" had_user=0
+    if old_user="$(user_toml_value "$section" "$key" 2>/dev/null)"; then had_user=1; fi
+    old_eff="$(effective_value "$section" "$key")"
+    if [[ "$old_eff" != "$value" && -n "$old_eff" ]] \
+        && { [[ "$had_user" -eq 1 && -n "$old_user" ]] || [[ "$key" == "runner" || "$key" == "backend" ]]; }; then
+        warn "[$section].$key : $old_eff → $value. Pour revenir : ./install.sh --llm <fournisseur> (ou éditez config/workspace.user.toml, ancienne valeur : $old_eff)."
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [$section].$key = $value"
+        return 0
+    fi
+    have python3 || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+        --workspace "$WORKSPACE_ROOT" --section "$section" --key "$key" --value "$value" --type "$type" >/dev/null \
+        || warn "Impossible d'écrire [$section].$key — vérifiez config/workspace.user.toml."
+}
+
+# Fichier des clés API : créé (mode 600) avec une ligne d'exemple COMMENTÉE si
+# absent ; on n'y écrit jamais de clé, on n'en affiche jamais. Dit comment
+# l'ajouter quand la variable est absente.
+ensure_llm_env() {
+    local var="$1"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} $LLM_ENV_FILE (mode 600, variable $var)"
+        return 0
+    fi
+    if [[ ! -f "$LLM_ENV_FILE" ]]; then
+        mkdir -p "$(dirname "$LLM_ENV_FILE")"
+        ( umask 077; cat > "$LLM_ENV_FILE" <<EOF
+# Clés API du fournisseur LLM — mode 600, jamais versionné, jamais dans votre shell.
+# Lignes NOM=valeur sans espace autour du « = » ; lu par le chat et la synchronisation.
+# Décommentez et complétez :
+# $var=
+EOF
+        )
+        ok "Fichier de clés créé : $LLM_ENV_FILE (mode 600)"
+    else
+        chmod 600 "$LLM_ENV_FILE" 2>/dev/null || true
+        if ! grep -qE "^[[:space:]]*(export[[:space:]]+)?#?[[:space:]]*$var=" "$LLM_ENV_FILE"; then
+            printf '# %s=\n' "$var" >> "$LLM_ENV_FILE"
+        fi
+    fi
+    if grep -qE "^[[:space:]]*(export[[:space:]]+)?$var=.+" "$LLM_ENV_FILE" || [[ -n "${!var:-}" ]]; then
+        ok "Clé $var présente (valeur non affichée)"
+    else
+        warn "Clé $var absente : ouvrez $LLM_ENV_FILE et ajoutez la ligne $var=<votre clé> (mode 600, jamais dans le TOML)."
+    fi
+}
+
+persist_llm() {
+    [[ -n "$LLM_PROVIDER" ]] || return 0
+    local chat_backend chat_model sync_runner sync_model key_var base_url="$LLM_BASE_URL_ARG"
+    case "$LLM_PROVIDER" in
+        openrouter)
+            chat_backend="opencode"; sync_runner="opencode"
+            chat_model="${LLM_MODEL_ARG:-$LLM_OPENROUTER_MODEL}"
+            [[ "$chat_model" == openrouter/* ]] || chat_model="openrouter/$chat_model"
+            sync_model="$chat_model"; key_var="OPENROUTER_API_KEY" ;;
+        openai)
+            chat_backend="opencode"; sync_runner="opencode"
+            chat_model="$LLM_MODEL_ARG"
+            [[ "$chat_model" == openai/* ]] || chat_model="openai/$chat_model"
+            sync_model="$chat_model"; key_var="OPENAI_API_KEY" ;;
+        anthropic)
+            chat_backend="claude"; sync_runner="claude"
+            chat_model="${LLM_MODEL_ARG:-$LLM_ANTHROPIC_CHAT_MODEL}"
+            sync_model="$LLM_ANTHROPIC_SYNC_MODEL"; key_var="ANTHROPIC_API_KEY" ;;
+    esac
+    log "Chat et synchronisation sur $LLM_PROVIDER (clé : $key_var dans $LLM_ENV_FILE)"
+    llm_set chat backend "$chat_backend"
+    llm_set chat model "$chat_model"
+    llm_set chat base_url "$base_url"
+    llm_set chat api_key_env "$key_var"
+    llm_set sync runner "$sync_runner"
+    llm_set sync model "$sync_model"
+    llm_set sync base_url "$base_url"
+    # Runner claude déjà en place : la seule différence est la facturation. `llm_set` ne signale
+    # pas un passage de « vide » à « rempli » ; ici, si : abonnement → clé API facturée au token.
+    if [[ "$sync_runner" == "claude" && -z "$(effective_value sync api_key_env)" ]]; then
+        warn "[sync].api_key_env : (vide) → $key_var — la synchronisation quitte l'abonnement : abonnement → clé API facturée au token ([sync].daily_budget_eur la plafonne). Pour revenir : videz [sync].api_key_env dans config/workspace.user.toml (ancienne valeur : vide)."
+    fi
+    llm_set sync api_key_env "$key_var"
+    ensure_llm_env "$key_var"
+    if [[ "$key_var" == "ANTHROPIC_API_KEY" ]]; then
+        warn "N'exportez PAS ANTHROPIC_API_KEY dans votre shell ou votre profil : cela casse Remote Control (docs/mobile.md). Le chat et la sync la lisent dans llm.env."
+    else
+        warn "N'exportez pas $key_var dans votre shell ou votre profil : le chat et la sync le lisent dans llm.env."
+    fi
+    if [[ "$key_var" == "ANTHROPIC_API_KEY" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        warn "ANTHROPIC_API_KEY est DÉJÀ exporté dans cet environnement : retirez-le de votre profil (Remote Control refuse l'authentification par clé API)."
+    fi
+    if [[ "$LLM_PROVIDER" == "anthropic" ]]; then
+        if [[ "$DO_CHAT" -eq 1 || "$(effective_value chat enabled)" == "true" ]]; then
+            warn "Le chat avec le backend claude a besoin du SDK Python : pip install claude-agent-sdk (Python 3.10+)."
+        fi
+    elif have opencode; then
+        ok "opencode : présent ($(opencode --version 2>/dev/null | head -1))"
+    else
+        warn "opencode absent — requis par le runner de sync et le chat sur $LLM_PROVIDER :"
+        warn "  curl -fsSL https://opencode.ai/install | bash   (ou : npm i -g opencode-ai ; brew install anomalyco/tap/opencode)"
+    fi
+    if [[ "$LLM_PROVIDER" == "openrouter" ]]; then
+        warn "Santé : limitez les fournisseurs OpenRouter à ceux qui ne conservent ni n'entraînent sur vos données (docs/mobile.md)."
+    fi
+}
+
+persist_budgets() {
+    [[ -z "$CHAT_BUDGET" ]] || llm_set chat daily_budget_eur "$CHAT_BUDGET" float
+    [[ -z "$SYNC_BUDGET" ]] || llm_set sync daily_budget_eur "$SYNC_BUDGET" float
+}
+
+install_chat() {
+    [[ "$DO_CHAT" -eq 1 ]] || return 0
+    log "Service du chat avec le coach (scripts/coach-chat.sh install)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [chat].enabled = true"
+    else
+        have python3 && python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+            --workspace "$WORKSPACE_ROOT" --section chat --key enabled --value true --type bool >/dev/null \
+            || warn "Impossible d'écrire [chat].enabled — vérifiez config/workspace.user.toml."
+    fi
+    if [[ -z "$LLM_PROVIDER" ]]; then
+        log "Modèle et clé du chat : voir [chat] (ou relancez avec --llm openrouter|anthropic|openai)."
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        ARC_WORKSPACE="$WORKSPACE_ROOT" ARC_DRY_RUN=1 "$PROJECT_ROOT/scripts/coach-chat.sh" install --dry-run
+    else
+        ARC_WORKSPACE="$WORKSPACE_ROOT" "$PROJECT_ROOT/scripts/coach-chat.sh" install
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # 7. Vérification finale
 # ---------------------------------------------------------------------------
 verify() {
@@ -1680,6 +1907,8 @@ print_config_recap() {
         "$([[ "$DAILY_SYNC" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_DAILY_SYNC")"
     recap_line "Remote Control" \
         "$([[ "$REMOTE_CONTROL" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_REMOTE_CONTROL")"
+    [[ -z "$LLM_PROVIDER" ]] || recap_line "Chat + sync sur API" "$LLM_PROVIDER" "explicite"
+    [[ "$DO_CHAT" -eq 0 ]] || recap_line "Service du chat" "oui" "explicite"
     recap_line "Workspace" "$WORKSPACE_ROOT" "$([[ -n "$WORKSPACE_ARG" ]] && echo "explicite" || echo "défaut")"
     recap_line "Dry-run" \
         "$([[ "$DRY_RUN" -eq 1 ]] && echo "oui" || echo "non")" "$([[ "$DRY_RUN" -eq 1 ]] && echo "explicite" || echo "défaut")"
@@ -1717,11 +1946,14 @@ main() {
     create_workspace_config
     persist_agents
     persist_source
+    persist_llm
+    persist_budgets
     if [[ "$DAILY_SYNC" -eq 1 || "$REMOTE_CONTROL" -eq 1 ]]; then
         check_runners
     fi
     install_daily_sync
     install_remote_control
+    install_chat
     verify
 }
 

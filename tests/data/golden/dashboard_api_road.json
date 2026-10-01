@@ -7927,6 +7927,7 @@
             "nutritionist",
             "course-strategist"
           ],
+          "chat_enabled": false,
           "climb_min_gain_m": 50.0,
           "climb_min_grade": 0.05,
           "heat_threshold_c": 25.0,

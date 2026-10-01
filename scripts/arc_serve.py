@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import http.client
 import html
 import json
 import os
@@ -1439,10 +1440,38 @@ ROUTES = {
 # ---------------------------------------------------------------------------
 
 
+# Proxy local du chat (`/api/chat/*`) : un simple tuyau vers le service `arc_chat.py`.
+# Actif seulement si `[chat].enabled` ET que le tableau de bord écoute en boucle locale ;
+# en conteneur / derrière un proxy, c'est Traefik qui route `/api/chat` directement.
+CHAT_PREFIX = "/api/chat/"
+CHAT_DEFAULT_PORT = 8766
+CHAT_CONNECT_TIMEOUT_S = 5.0
+CHAT_READ_TIMEOUT_S = float(os.environ.get("ARC_DASHBOARD_CHAT_READ_TIMEOUT_S", "120"))  # > ping SSE (15 s)
+CHAT_UNREACHABLE = {"error": "Service de chat injoignable — lancez scripts/coach-chat.sh start"}
+# En-têtes de requête relayés (liste blanche : ni Cookie, ni Authorization).
+CHAT_FORWARD_REQUEST = ("Content-Type", "X-ARC-Chat", "Origin", "Sec-Fetch-Site", "Accept", "Host")
+# En-têtes de réponse relayés (jamais de CORS).
+CHAT_FORWARD_RESPONSE = ("Content-Type", "Cache-Control", "X-Accel-Buffering", "Retry-After")
+LOOPBACK_LISTEN = (LOOPBACK, "localhost", "::1")
+
+
+def chat_proxy_port(config: dict, listen: str) -> Optional[int]:
+    """Port du service de chat à relayer, ou `None` si le proxy doit rester inactif."""
+    chat = config.get("chat", {}) or {}
+    if not chat.get("enabled", False) or listen not in LOOPBACK_LISTEN:
+        return None
+    try:
+        port = int(chat.get("port", CHAT_DEFAULT_PORT))
+    except (TypeError, ValueError):
+        return None
+    return port if 0 < port <= 65535 else None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "arc-dashboard"
     store: Store = None           # posé par serve()
     allowed_hosts: set = set()
+    chat_port: Optional[int] = None   # posé par serve() ; None = pas de proxy
 
     def log_message(self, fmt, *args):         # silencieux : c'est un outil local
         pass
@@ -1500,6 +1529,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/healthz":              # sonde du conteneur : ne réindexe pas
             self._json(HTTPStatus.OK, {"status": "ok"})
+        elif url.path.startswith(CHAT_PREFIX) and self.chat_port:
+            self._chat_proxy()
         elif url.path == "/media/gear-photo":
             self._gear_photo(url)
         elif url.path.startswith("/api/"):
@@ -1507,10 +1538,57 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._static(url.path)
 
-    def do_POST(self):          # lecture seule
+    def do_POST(self):          # lecture seule (sauf le tuyau vers le service de chat)
+        if self.path.startswith(CHAT_PREFIX) and self.chat_port:
+            if not self._host_ok():
+                self._json(HTTPStatus.FORBIDDEN, {"error": "hôte non autorisé"})
+                return
+            self._chat_proxy()
+            return
         self._json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "lecture seule"})
 
     do_PUT = do_DELETE = do_PATCH = do_POST
+
+    def _chat_proxy(self) -> None:
+        """Relaie la requête telle quelle au service de chat et renvoie sa réponse au fil
+        de l'eau (SSE : un `flush` par bloc reçu). Aucune écriture dans le workspace."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if length > 0 else None
+        headers = {h: self.headers[h] for h in CHAT_FORWARD_REQUEST if self.headers.get(h)}
+        conn = http.client.HTTPConnection("127.0.0.1", self.chat_port, timeout=CHAT_CONNECT_TIMEOUT_S)
+        try:
+            conn.request(self.command, self.path, body=body, headers=headers, encode_chunked=False)
+            conn.sock.settimeout(CHAT_READ_TIMEOUT_S)
+            resp = conn.getresponse()
+        except (OSError, http.client.HTTPException):
+            conn.close()
+            self._json(HTTPStatus.BAD_GATEWAY, CHAT_UNREACHABLE)
+            return
+        try:
+            self.close_connection = True            # corps délimité par la fermeture
+            self.send_response(resp.status)
+            for name in CHAT_FORWARD_RESPONSE:
+                if resp.getheader(name):
+                    self.send_header(name, resp.getheader(name))
+            if not resp.getheader("Cache-Control"):
+                self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            while True:
+                chunk = resp.read1(8192)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (OSError, http.client.HTTPException):
+            pass                                    # client parti ou service coupé en cours de flux
+        finally:
+            conn.close()
 
     def _api(self, url) -> None:
         q = parse_qs(url.query)
@@ -1659,6 +1737,7 @@ def serve(workspace: Path, port: int, db=None, memory=False, today=None,
     httpd = bind(port, listen=listen)
     actual = httpd.server_address[1]
     Handler.allowed_hosts = host_allowlist(actual, extra_hosts)
+    Handler.chat_port = chat_proxy_port(I.load_config(workspace), listen)
     Handler.store.start_background()
     print(f"URL: http://127.0.0.1:{actual}/", flush=True)
     try:
