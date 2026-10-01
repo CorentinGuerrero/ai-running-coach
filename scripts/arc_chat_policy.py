@@ -34,6 +34,8 @@ POLICY_FILE = "config/chat-policy.toml"
 # substitutions, échappement (`\` ferait diverger shlex et le vrai shell), `~` (expansion
 # du répertoire personnel), jokers et accolades (un joker contournerait la liste des secrets).
 SHELL_META = set(";|&$`><()\n\r\\~*?[]{}!")
+# `echo "---"` entre deux commandes chaînées : littéral sans expansion possible.
+ECHO_LITERAL_RE = re.compile(r"""^echo(?:[ \t]+(?:"[^"$`\\!]*"|'[^']*'|[A-Za-z0-9_.:=+,/-]+))*$""")
 # `#` ne commence un commentaire qu'en début de mot : refusé là seulement (`fichier.md#mardi` passe).
 COMMENT_RE = re.compile(r"(^|\s)#")
 # Entrée standard des scripts qui lisent du JSON (`[shell].stdin_scripts`, ex. arc_log.py) : deux
@@ -421,7 +423,7 @@ class Policy:
         - chemin absolu d'un script du workspace (`python3 /…/ws/scripts/arc_log.py`) : même
           script que `python3 scripts/arc_log.py` (le chemin doit rester DANS le workspace).
         """
-        command = re.sub(r"[ \t]+2>&1[ \t]*$", "", command)
+        command = re.sub(r"[ \t]+2>(?:&1|/dev/null)[ \t]*$", "", command)
         match = re.match(r"^(python3[ \t]+)(/\S+)(.*)$", command, re.S)
         if match:
             root = str(self.workspace) + os.sep
@@ -430,8 +432,29 @@ class Policy:
                 command = match.group(1) + script[len(root):] + match.group(3)
         return command
 
+    def _chain(self, command: str) -> Optional[list]:
+        """`a && b`, `a; echo "---"; b` → [a, echo, b] ; None si ce n'est pas une chaîne simple.
+
+        Coupé seulement si aucun guillemet n'apparaît hors de segments `echo "<littéral>"` :
+        les séparateurs ne peuvent donc pas être cachés dans une chaîne.
+        """
+        if "&&" not in command and ";" not in command:
+            return None
+        parts = [p.strip() for p in re.split(r"\s*(?:&&|;)\s*", command)]
+        if len(parts) < 2 or any(not p for p in parts):
+            return None
+        for part in parts:
+            if ("'" in part or '"' in part) and not ECHO_LITERAL_RE.match(part):
+                return None
+        return parts
+
     def _shell(self, command: str) -> str:
         command = self._normalize_command(command.strip())
+        chain = self._chain(command)
+        if chain is not None:
+            # Chaque maillon doit passer seul ; le plus prudent l'emporte (deny > ask > allow).
+            verdicts = ["allow" if ECHO_LITERAL_RE.match(p) else self._shell(p) for p in chain]
+            return "deny" if "deny" in verdicts else "ask" if "ask" in verdicts else "allow"
         inner = self._stdin_command(command)
         if inner is not None:
             if any(ch in SHELL_META for ch in inner) or COMMENT_RE.search(inner):
@@ -515,6 +538,13 @@ class Policy:
         """Argument acceptable ? Les chemins restent dans le workspace, hors secrets et `.arc/`."""
         if value == "" and kind == "plain":
             return True
+        if value.startswith("/"):
+            # Chemin absolu DANS le workspace (OpenCode donne des chemins absolus au modèle) :
+            # ramené au chemin relatif, puis contrôlé comme les autres. Ailleurs : refusé.
+            normed, root = os.path.normpath(value), str(self.workspace) + os.sep
+            if not normed.startswith(root):
+                return False
+            value = normed[len(root):]
         for piece in [value] + ([value.partition("=")[2]] if "=" in value else []):
             if piece.startswith(("/", "~")) or Path(piece).is_absolute():
                 return False

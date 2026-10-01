@@ -510,3 +510,30 @@ class ShellNormalizationTest(PolicyBase):
                         "python3 /etc/scripts/arc_log.py",
                         f"python3 {self.ws}/../x/scripts/arc_log.py"):
             self.assertEqual(self.sh(command), "deny", command)
+
+
+class ShellChainAndAbsoluteArgsTest(PolicyBase):
+    """Chaînes `&&` / `;` de commandes autorisées et chemins absolus DANS le workspace (essai réel)."""
+
+    def sh(self, command):
+        return self.d("shell", {"command": command})
+
+    def test_chaines_de_commandes_autorisees(self):
+        self.assertEqual(self.sh("python3 scripts/arc_index.py gear 2>&1 && python3 scripts/arc_index.py equipment"), "allow")
+        self.assertEqual(self.sh('python3 scripts/arc_index.py gear; echo "---"; python3 scripts/arc_index.py equipment'), "allow")
+        self.assertEqual(self.sh("python3 scripts/garmin_gear_backfill.py && python3 scripts/garmin_gear_backfill.py --apply"), "ask")
+
+    def test_chaines_dangereuses_refusees(self):
+        for command in ("python3 scripts/arc_index.py gear && rm -rf x",
+                        "python3 scripts/arc_index.py gear; cat config/workspace.toml",
+                        'python3 scripts/arc_index.py gear; echo "$(id)"',
+                        "python3 scripts/arc_index.py gear && echo ok | sh",
+                        "python3 scripts/arc_index.py gear || rm x",
+                        'python3 scripts/arc_index.py --validate "a;b"',
+                        "echo hi"):
+            self.assertEqual(self.sh(command), "deny", command)
+
+    def test_chemin_absolu_dans_le_workspace(self):
+        self.assertEqual(self.sh(f"python3 scripts/arc_guardrails.py check --week {self.ws}/planning/S.md --memory"), "allow")
+        self.assertEqual(self.sh("python3 scripts/arc_guardrails.py check --week /etc/passwd"), "deny")
+        self.assertEqual(self.sh(f"python3 scripts/arc_log.py --output {self.ws}/config/x.json"), "deny")
