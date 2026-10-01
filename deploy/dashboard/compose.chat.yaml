@@ -1,0 +1,73 @@
+# Complément : le chat avec le coach, en conteneur à côté du tableau de bord.
+# Activé en ajoutant compose.chat.yaml à COMPOSE_FILE dans .env (voir .env.example).
+#
+# Même hôte public que le tableau de bord : Traefik envoie /api/chat/* ici, derrière le
+# même middleware d'authentification. Le service ne fait confiance qu'à Traefik
+# ([chat].trusted_proxies, un nom de conteneur est accepté) et exige l'en-tête
+# d'identité du SSO. Documentation : docs/dashboard/chat.md.
+#
+# Contrairement au tableau de bord, le chat ÉCRIT dans le workspace (activities/,
+# planning/…) et appelle Garmin : workspace en lecture-écriture, jetons Garmin montés.
+services:
+  chat:
+    build:
+      context: ../chat
+      args:
+        ARC_HOME: "${ARC_HOME:?ARC_HOME manquant dans .env (le dossier personnel sur l hôte)}"
+        ARC_UID: "${ARC_UID:-1000}"
+        ARC_GID: "${ARC_GID:-1000}"
+    image: ai-running-coach-chat:local
+    container_name: ai-running-coach-chat
+    restart: unless-stopped
+    user: "${ARC_UID:-1000}:${ARC_GID:-1000}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # La clé du fournisseur (OPENROUTER_API_KEY=…), jamais dans .env ni dans le TOML.
+    env_file:
+      - "${ARC_LLM_ENV_FILE:?ARC_LLM_ENV_FILE manquant dans .env (~/.config/ai-running-coach/llm.env)}"
+    environment:
+      ARC_WORKSPACE: "${ARC_WORKSPACE_HOST}"
+      TZ: ${TZ:-Europe/Paris}
+    working_dir: "${ARC_WORKSPACE_HOST}"
+    command:
+      - python3
+      - "${ARC_ENGINE_HOST:?ARC_ENGINE_HOST manquant dans .env (chemin du dépôt ai-running-coach)}/scripts/arc_chat.py"
+      - --workspace
+      - "${ARC_WORKSPACE_HOST}"
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8766"
+    volumes:
+      # Mêmes chemins que sur l'hôte : le workspace pointe vers le moteur par liens absolus.
+      - "${ARC_ENGINE_HOST}:${ARC_ENGINE_HOST}:ro"
+      - "${ARC_WORKSPACE_HOST}:${ARC_WORKSPACE_HOST}"
+      # Jetons Garmin (garmin-mcp les rafraîchit) et jeton ntfy ([notifications].ntfy_token_file).
+      - "${ARC_HOME}/.garminconnect:${ARC_HOME}/.garminconnect"
+      - "${ARC_HOME}/.config/ai-running-coach:${ARC_HOME}/.config/ai-running-coach:ro"
+      # Conversations OpenCode : survivent à la recréation du conteneur.
+      - "chat-opencode:${ARC_HOME}/.local/share/opencode"
+    networks: [proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik}"
+      # Tout /api/chat : SSO obligatoire. Priorité au-dessus du routeur du tableau de bord.
+      - "traefik.http.routers.arc-chat.rule=Host(`${ARC_DASHBOARD_HOST}`) && PathPrefix(`/api/chat`)"
+      - "traefik.http.routers.arc-chat.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.arc-chat.priority=200"
+      - "traefik.http.routers.arc-chat.middlewares=${TRAEFIK_AUTH_MIDDLEWARE:?TRAEFIK_AUTH_MIDDLEWARE manquant, le chat ne s'expose pas sans authentification}"
+      - "traefik.http.routers.arc-chat.service=arc-chat"
+      # Boutons Appliquer/Refuser des notifications ntfy : SANS SSO (jeton signé à usage
+      # unique, lié à la proposition), POST seulement, débit limité. Voir deploy/chat/traefik/README.md.
+      - 'traefik.http.routers.arc-chat-approve.rule=Host(`${ARC_DASHBOARD_HOST}`) && PathRegexp(`^/api/chat/approve/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/(allow|deny)$$`) && Method(`POST`)'
+      - "traefik.http.routers.arc-chat-approve.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.arc-chat-approve.priority=300"
+      - "traefik.http.routers.arc-chat-approve.middlewares=arc-chat-approve-ratelimit"
+      - "traefik.http.routers.arc-chat-approve.service=arc-chat"
+      - "traefik.http.middlewares.arc-chat-approve-ratelimit.ratelimit.average=10"
+      - "traefik.http.middlewares.arc-chat-approve-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.arc-chat-approve-ratelimit.ratelimit.burst=5"
+      - "traefik.http.services.arc-chat.loadbalancer.server.port=8766"
+
+volumes:
+  chat-opencode:

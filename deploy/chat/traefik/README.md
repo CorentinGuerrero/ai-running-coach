@@ -6,7 +6,9 @@ tourne sur la **machine coach**. Le tableau de bord, lui, est servi par son cont
 `/api/chat/*` à la machine coach et tout le reste au conteneur. Le navigateur n'a donc
 qu'une origine (pas de CORS, cookie de session SSO unique).
 
-`dynamic.yml` est un exemple pour le **fournisseur `file`** de Traefik v3.
+`dynamic.yml` est un exemple pour le **fournisseur `file`** de Traefik v3, quand le chat
+tourne sur l'hôte. Chat en conteneur : les mêmes routeurs sont déclarés par labels dans
+`deploy/dashboard/compose.chat.yaml` (voir `docs/dashboard/chat.md`).
 
 ## Les deux routeurs
 
@@ -57,7 +59,7 @@ enabled = true
 auth = "proxy"                       # l'identité vient du SSO, pas de la boucle locale
 listen = "192.168.1.20"              # l'IP LAN/Tailscale de la machine coach (jamais 0.0.0.0 si évitable)
 port = 8766
-trusted_proxies = ["192.168.1.10"]   # l'IP SOURCE de Traefik — le service refuse toute autre
+trusted_proxies = ["192.168.1.10"]   # l'IP SOURCE de Traefik (ou son nom d'hôte) — le service refuse toute autre
 public_url = "https://coach.example.com"   # requis pour les boutons ntfy
 auth_header = "X-authentik-username"       # Authelia : "Remote-User"
 allowed_users = ["moi"]                    # vide = tout utilisateur authentifié

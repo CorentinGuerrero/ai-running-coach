@@ -8,6 +8,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import date
 from pathlib import Path
 
@@ -288,6 +289,20 @@ class TestHttpGuards(unittest.TestCase):
         self.assertEqual(C.authenticate(cfg, "192.168.1.1", {}, exempt_identity=True)[1], 403)
         self.assertEqual(C.authenticate(cfg, "127.0.0.1", {}, health_from_loopback=True)[1], 0)
         self.assertEqual(C.authenticate(cfg, "10.0.0.7", {}, health_from_loopback=True)[1], 401)
+
+    def test_trusted_proxies_nom_d_hote(self):
+        # Conteneur « traefik » sur un réseau Docker : son adresse change à chaque recréation,
+        # le nom est résolu par le DNS (cache court).
+        C._host_cache.clear()
+        with mock.patch.object(C.socket, "getaddrinfo",
+                               return_value=[(2, 1, 6, "", ("172.18.0.27", 0))]) as gai:
+            self.assertTrue(C.ip_in("172.18.0.27", ["traefik"]))
+            self.assertFalse(C.ip_in("172.18.0.5", ["traefik"]))
+            self.assertEqual(gai.call_count, 1)                               # cache
+        C._host_cache.clear()
+        with mock.patch.object(C.socket, "getaddrinfo", side_effect=OSError("inconnu")):
+            self.assertFalse(C.ip_in("172.18.0.27", ["traefik"]))             # nom introuvable : refus
+        C._host_cache.clear()
 
     def test_auth_proxy_sans_liste_d_utilisateurs(self):
         cfg = self.cfg(auth="proxy", auth_header="Remote-User")
