@@ -284,7 +284,18 @@ class Policy:
         return "deny" if self._locate(str(raw)) is None else "allow"
 
     def _fs_write(self, tool_input: dict) -> str:
-        rel = resolve_workspace_path(self.workspace, str(tool_input.get("path") or ""))
+        # Patch multi-fichiers : CHAQUE cible doit passer (un seul refus refuse tout l'appel).
+        extra = tool_input.get("paths")
+        if extra is not None:
+            if not isinstance(extra, list) or not extra:
+                return "deny"
+            for target in extra:
+                if self._fs_write_one(str(target or "")) != "allow":
+                    return "deny"
+        return self._fs_write_one(str(tool_input.get("path") or ""))
+
+    def _fs_write_one(self, raw: str) -> str:
+        rel = resolve_workspace_path(self.workspace, raw)
         if rel is None or self._secret(rel) or "/" not in rel:
             return "deny"
         return "allow" if rel.split("/", 1)[0] in self.write_dirs else "deny"

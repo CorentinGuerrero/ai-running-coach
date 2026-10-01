@@ -414,10 +414,13 @@ function renderCost() {
   const u = state.lastUsage;
   if (state.sessionCost > 0) parts.push(`≈ ${fmtEur(state.sessionCost)} cette conversation`);
   if (u) {
-    const input = (u.input || 0) + (u.cache_read || 0);
-    if (input + (u.output || 0) > 0) {
-      const cache = input ? ` (${Math.round(((u.cache_read || 0) / input) * 100)} % en cache)` : "";
-      parts.push(`${kTokens(input + (u.output || 0))} jetons dernier tour${cache}`);
+    // Noms du contrat (arc_chat_backend.py) : input_tokens, output_tokens, cache_read_tokens.
+    const cached = u.cache_read_tokens || 0;
+    const output = u.output_tokens || 0;
+    const input = (u.input_tokens || 0) + cached;
+    if (input + output > 0) {
+      const cache = input ? ` (${Math.round((cached / input) * 100)} % en cache)` : "";
+      parts.push(`${kTokens(input + output)} jetons dernier tour${cache}`);
     }
   }
   const b = state.status && state.status.budget;

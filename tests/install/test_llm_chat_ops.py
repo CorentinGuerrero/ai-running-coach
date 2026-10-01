@@ -681,6 +681,38 @@ class TestDoctorLlmChecks(InstallAsserts):
             server.shutdown()
             server.server_close()
 
+    def test_chat_service_unhealthy_503_is_reported_as_running_but_unhealthy(self):
+        # Revue : /healthz répond 503 quand le backend n'est pas sain ; HTTPError hérite
+        # d'URLError et faisait passer le service pour « injoignable ».
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                body = b'{"ok": false, "backend_check": "opencode absent"}'
+                self.send_response(503)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with Sandbox() as sb:
+                _write_config(sb, f"[chat]\nenabled = true\nport = {server.server_address[1]}\n")
+                check = _doctor(sb, "chat_service", ARC_FAKE_UNAME="Linux")
+                self.assertEqual(check["status"], "warning", check)
+                self.assertIn("non sain", check["message"])
+                self.assertIn("opencode absent", check["message"])
+                self.assertNotIn("injoignable", check["message"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_opencode_cli_states(self):
         with Sandbox() as sb:
             self.assertEqual(_doctor(sb, "opencode_cli")["status"], "info")

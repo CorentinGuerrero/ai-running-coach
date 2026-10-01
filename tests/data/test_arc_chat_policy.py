@@ -537,3 +537,32 @@ class ShellChainAndAbsoluteArgsTest(PolicyBase):
         self.assertEqual(self.sh(f"python3 scripts/arc_guardrails.py check --week {self.ws}/planning/S.md --memory"), "allow")
         self.assertEqual(self.sh("python3 scripts/arc_guardrails.py check --week /etc/passwd"), "deny")
         self.assertEqual(self.sh(f"python3 scripts/arc_log.py --output {self.ws}/config/x.json"), "deny")
+
+
+class MultiFilePatchTest(PolicyBase):
+    """Revue : un patch OpenCode peut toucher plusieurs fichiers — chacun doit passer."""
+
+    def patch(self, *lines):
+        sys.path.insert(0, str(REPO / "scripts"))
+        from arc_chat_opencode import canonical_tool
+        text = "*** Begin Patch\n" + "\n".join(lines) + "\n*** End Patch"
+        return canonical_tool("apply_patch", {"patchText": text})
+
+    def test_toutes_les_cibles_doivent_passer(self):
+        tool, inp = self.patch("*** Add File: planning/x.md", "+a", "*** Update File: .arc/chat/approvals.json", "+b")
+        self.assertEqual(inp["paths"], ["planning/x.md", ".arc/chat/approvals.json"])
+        self.assertEqual(self.d(tool, inp), "deny")
+        tool, inp = self.patch("*** Add File: planning/x.md", "+a", "*** Update File: config/workspace.user.toml", "+b")
+        self.assertEqual(self.d(tool, inp), "deny")
+
+    def test_renommage_vers_l_exterieur_refuse(self):
+        tool, inp = self.patch("*** Update File: planning/x.md", "*** Move to: config/x.md", "+a")
+        self.assertEqual(self.d(tool, inp), "deny")
+
+    def test_patch_entierement_dans_les_dossiers_de_donnees_autorise(self):
+        tool, inp = self.patch("*** Add File: planning/x.md", "+a", "*** Update File: activities/y.md", "+b")
+        self.assertEqual(self.d(tool, inp), "allow")
+
+    def test_patch_sans_cible_refuse(self):
+        tool, inp = self.patch("rien")
+        self.assertEqual(self.d(tool, inp), "deny")

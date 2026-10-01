@@ -987,10 +987,24 @@ def check_chat_service(home: Path, config: dict) -> dict:
     installed = unit.is_file()
     url = _chat_health_url(chat)
     reachable, detail = False, ""
+    payload = None
     try:
         with urllib.request.urlopen(url, timeout=CHAT_HEALTH_TIMEOUT_S) as response:  # noqa: S310 - boucle locale
             payload = json.loads(response.read(65536).decode("utf-8", errors="replace") or "{}")
         reachable = True
+    except urllib.error.HTTPError as exc:
+        # `/healthz` répond 503 quand le backend n'est pas sain : le service TOURNE, c'est son
+        # corps qui dit pourquoi (HTTPError hérite d'URLError : à traiter avant).
+        try:
+            payload = json.loads(exc.read(65536).decode("utf-8", errors="replace") or "{}")
+        except (OSError, ValueError):
+            payload = {"ok": False}
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            payload = {**(payload if isinstance(payload, dict) else {}), "ok": False}   # erreur HTTP = jamais « sain »
+        reachable = True
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        reachable = False
+    if reachable:
         if isinstance(payload, dict) and payload.get("ok") is False:
             check = payload.get("backend_check")
             detail = f" — backend : {check}" if isinstance(check, str) and len(check) <= 120 else ""
@@ -998,8 +1012,6 @@ def check_chat_service(home: Path, config: dict) -> dict:
                 check_id, "warning", f"Service du chat joignable ({url}) mais non sain{detail}.",
                 fix="scripts/coach-chat.sh logs",
             )
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-        reachable = False
     if reachable:
         where = "service installé" if installed else "lancé à la main (aucun service installé)"
         return build_check(check_id, "ok", f"Service du chat joignable ({where}).", fix=None)

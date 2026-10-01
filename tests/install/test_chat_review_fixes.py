@@ -169,6 +169,27 @@ class TestReviewFixes(ChatCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("approuvée mais non exécutée", errors[0])
 
+    def test_une_approbation_autorise_une_seule_execution(self):
+        # Revue : le hash pré-approuvé n'était jamais retiré ; un second appel identique dans la
+        # reprise passait sans nouvelle carte (double planification Garmin).
+        verdicts = []
+
+        def behaviour(ctx, message):
+            if message.startswith("[approbation]"):
+                verdicts.append(ctx.decide(MOCK_TOOL, MOCK_INPUT))
+                verdicts.append(ctx.decide(MOCK_TOOL, MOCK_INPUT))   # répétition du même appel
+                ctx.emit("done", {"reason": "end_turn"})
+                return
+            propose_then_pending(ctx, message)
+
+        self.start(approval_wait_s=0.2, backend_factory=scripted(behaviour))
+        sid = self.new_session()
+        _, _, events = self.stream(sid, "planifie")
+        aid = next(d["approval_id"] for t, d in events if t == "approval_request")
+        self.post(f"/api/chat/approvals/{aid}", {"decision": "allow"})
+        self.assertTrue(wait_for(lambda: len(verdicts) == 2))
+        self.assertEqual(verdicts, ["allow", "ask"])
+
     def test_approbation_acceptee_non_executee_reprend_au_demarrage(self):
         sid, aid = self.pending_session()
         path = self.ws / ".arc/chat/approvals.json"

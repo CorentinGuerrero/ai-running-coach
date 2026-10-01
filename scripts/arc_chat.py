@@ -874,10 +874,21 @@ class ChatService:
             state = meta.get("backend_state")
             state = state if isinstance(state, dict) else {}
 
+            preapproved_lock = threading.Lock()
+
             def decide(tool, tool_input):
-                verdict = self.policy.decide(tool, tool_input, preapproved)
-                if preapproved and verdict == "allow" and self.policy.decide(tool, tool_input) == "ask":
-                    consumed.append(payload_hash(tool, tool_input))
+                # Une approbation = UNE exécution : le hash est retiré dès qu'il a servi (sous
+                # verrou, les backends décident depuis plusieurs fils). Un second appel identique
+                # dans la reprise repasse par « ask », donc par une nouvelle carte.
+                verdict = self.policy.decide(tool, tool_input)
+                if verdict != "ask" or not preapproved:
+                    return verdict
+                digest = payload_hash(tool, tool_input)
+                with preapproved_lock:
+                    if digest in preapproved:
+                        preapproved.discard(digest)
+                        consumed.append(digest)
+                        return "allow"
                 return verdict
 
             # Copie : le budget restant est propre au tour (les backends l'appliquent en cours de tour).

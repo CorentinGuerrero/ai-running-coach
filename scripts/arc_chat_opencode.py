@@ -92,7 +92,9 @@ BUDGET_NOTICE = "\n\nLe budget du jour est atteint : je m'arrête ici."
 # Traduction des noms d'outils
 # ---------------------------------------------------------------------------
 
-_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+# Toutes les cibles d'un patch : fichiers ajoutés / modifiés / supprimés ET destinations de
+# renommage — un patch peut en toucher plusieurs, la politique doit les voir toutes.
+_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE)
 
 
 def canonical_tool(name: str, tool_input: Optional[dict], mcp_servers: Any = ()) -> tuple:
@@ -103,9 +105,11 @@ def canonical_tool(name: str, tool_input: Optional[dict], mcp_servers: Any = ())
     if name in ("write", "edit", "multiedit", "patch", "apply_patch"):
         out = {k: v for k, v in inp.items() if k not in ("filePath", "path")}
         path = inp.get("filePath") or inp.get("path") or ""
-        if not path and isinstance(inp.get("patchText"), str):
-            m = _PATCH_FILE_RE.search(inp["patchText"])
-            path = m.group(1).strip() if m else ""
+        if isinstance(inp.get("patchText"), str):
+            targets = [t.strip() for t in _PATCH_FILE_RE.findall(inp["patchText"])]
+            # Patch sans aucune cible lisible : chemin vide → refus par la politique.
+            out["paths"] = targets if targets else [""]
+            path = path or (targets[0] if targets else "")
         out["path"] = path
         return "fs.write", out
     if name in ("glob", "grep", "list", "ls"):
@@ -814,9 +818,11 @@ class OpenCodeBackend(ChatBackend):
                 summary = "Échec : " + short(state.get("error"), 60) if state.get("error") else "Échec"
             turn.ctx.emit("tool_end", {"id": call_id, "ok": ok, "summary": summary})
             if ok and rec.get("tool") == "fs.write":
-                rel = resolve_workspace_path(self.workspace, (rec.get("cinput") or {}).get("path"))
-                if rel:
-                    turn.ctx.emit("file_written", {"path": rel})
+                cinput = rec.get("cinput") or {}
+                targets = cinput.get("paths") or [cinput.get("path")]
+                for rel in dict.fromkeys(resolve_workspace_path(self.workspace, t) for t in targets):
+                    if rel:
+                        turn.ctx.emit("file_written", {"path": rel})
 
     def _ensure_started(self, turn: _Turn, call_id: str, name: str = "", inp: Optional[dict] = None,
                         child: bool = False) -> None:
