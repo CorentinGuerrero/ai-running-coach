@@ -41,6 +41,7 @@ import queue
 import re
 import secrets
 import signal
+import socket
 import sys
 import threading
 import time
@@ -232,18 +233,52 @@ def is_loopback(ip: str) -> bool:
         return False
 
 
+# Noms d'hôte de `trusted_proxies` (ex. le conteneur « traefik » sur un réseau Docker, dont
+# l'adresse change à chaque recréation) : résolus par le DNS, gardés quelques secondes.
+HOST_CACHE_TTL_S = 30.0
+_host_cache: dict = {}
+_host_cache_lock = threading.Lock()
+
+
+def resolve_host(name: str) -> frozenset:
+    """Adresses IP de `name` (cache court) ; ensemble vide si le nom ne se résout pas."""
+    now = time.monotonic()
+    with _host_cache_lock:
+        hit = _host_cache.get(name)
+        if hit and now - hit[0] < HOST_CACHE_TTL_S:
+            return hit[1]
+    try:
+        found = frozenset(info[4][0] for info in socket.getaddrinfo(name, None, proto=socket.IPPROTO_TCP))
+    except (OSError, UnicodeError):
+        found = frozenset()
+    with _host_cache_lock:
+        _host_cache[name] = (now, found)
+    return found
+
+
 def ip_in(ip: str, entries) -> bool:
-    """Vrai si `ip` est l'une des adresses ou l'un des réseaux (CIDR) de `entries`."""
+    """Vrai si `ip` est l'une des adresses, l'un des réseaux (CIDR) ou l'un des noms d'hôte
+    (résolus par le DNS, voir `resolve_host`) de `entries`."""
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
     for entry in entries:
-        try:
-            if addr in ipaddress.ip_network(str(entry).strip(), strict=False):
-                return True
-        except ValueError:
+        entry = str(entry).strip()
+        if not entry:
             continue
+        try:
+            if addr in ipaddress.ip_network(entry, strict=False):
+                return True
+            continue
+        except ValueError:
+            pass
+        for resolved in resolve_host(entry):
+            try:
+                if addr == ipaddress.ip_address(resolved.split("%", 1)[0]):
+                    return True
+            except ValueError:
+                continue
     return False
 
 

@@ -242,7 +242,7 @@ auth = "local"
 # Mode proxy : en-tête d'identité posé par le SSO (Authelia : "Remote-User").
 auth_header = "X-authentik-username"
 # Mode proxy : utilisateurs autorisés (vide = tout utilisateur authentifié) et IP sources
-# admises (celles de Traefik).
+# admises (Traefik : IP, réseau CIDR ou nom d'hôte — ex. "traefik" pour un conteneur).
 allowed_users = []
 trusted_proxies = ["127.0.0.1"]
 # En-têtes Host acceptés (vide = dérivés de public_url + boucle locale).

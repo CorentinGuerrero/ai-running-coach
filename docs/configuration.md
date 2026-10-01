@@ -342,7 +342,7 @@ défaut. Installé par `./install.sh --chat` (`scripts/coach-chat.sh`).
 | `api_key_env` | Nom de la variable de `llm.env` (défaut `ANTHROPIC_API_KEY`). |
 | `port`, `listen` | Port (8766) et interface d'écoute (`127.0.0.1`). |
 | `auth` | `"local"` (boucle locale seulement) \| `"proxy"` (identité transmise par le SSO du reverse proxy). |
-| `auth_header`, `allowed_users`, `trusted_proxies`, `allowed_hosts` | Mode `proxy` : en-tête d'identité (`X-authentik-username`, Authelia : `Remote-User`), utilisateurs admis (vide = tous), IP source de Traefik, hôtes acceptés. Voir `deploy/chat/traefik/README.md`. |
+| `auth_header`, `allowed_users`, `trusted_proxies`, `allowed_hosts` | Mode `proxy` : en-tête d'identité (`X-authentik-username`, Authelia : `Remote-User`), utilisateurs admis (vide = tous), adresses source de Traefik (IP, réseau CIDR ou nom d'hôte résolu par le DNS — ex. le conteneur `traefik`), hôtes acceptés. Voir `deploy/chat/traefik/README.md`. |
 | `public_url` | URL publique du tableau de bord, requise pour les boutons ntfy. |
 | `daily_budget_eur`, `usd_eur_rate` | Plafond de dépense quotidien (défaut `2.0`) ; conversion USD → EUR (`0.92`). Le reste du jour est réservé par tour en cours (une conversation simultanée est refusée tant qu'il est réservé). |
 | `turn_budget_max_eur` | Plafond de dépense d'un tour (défaut `1.0` €) ; le reste du budget du jour reste disponible pour une autre conversation ou une approbation tardive. `0` = un tour peut réserver tout le reste du jour. |

@@ -271,6 +271,53 @@ Ce que le service vérifie à chaque requête, en plus du SSO :
   origine : un autre site ne peut pas agir à votre place avec votre cookie de session ;
 - un nombre de tours limité par minute (`rate_limit_per_min`) et le budget du jour.
 
+### En conteneur, à côté du tableau de bord
+
+Si le tableau de bord tourne déjà en conteneur derrière Traefik
+([Derrière un reverse proxy](docker.md)), le chat peut l'y rejoindre : même projet compose,
+même réseau Traefik, routes déclarées par **labels** — plus de service systemd sur l'hôte ni
+de fichier de configuration dynamique. Backend `opencode` uniquement (OpenRouter ou API
+compatible OpenAI) ; l'image embarque OpenCode et garmin-mcp.
+
+Dans `deploy/dashboard/.env`, en plus des variables du tableau de bord :
+
+```bash
+COMPOSE_FILE=compose.yaml:compose.authentik.yaml:compose.chat.yaml
+ARC_ENGINE_HOST=/home/vous/ai-running-coach          # ce dépôt
+ARC_HOME=/home/vous                                  # votre dossier personnel
+ARC_LLM_ENV_FILE=/home/vous/.config/ai-running-coach/llm.env
+```
+
+Le dépôt, le workspace, `~/.garminconnect` et `~/.config/ai-running-coach` sont montés **aux
+mêmes chemins que sur l'hôte** : le workspace pointe vers le moteur par liens symboliques
+absolus. Contrairement au tableau de bord, le workspace est monté en **écriture**.
+
+Côté `config/workspace.user.toml`, Traefik est désigné par son **nom de conteneur** — son
+adresse change à chaque recréation, le nom est résolu par le DNS de Docker :
+
+```toml
+[chat]
+enabled = true
+backend = "opencode"
+model = "openrouter/deepseek/deepseek-v4.1-flash"
+api_key_env = "OPENROUTER_API_KEY"
+auth = "proxy"
+trusted_proxies = ["traefik"]        # nom du conteneur Traefik sur le réseau partagé
+auth_header = "X-authentik-username"
+public_url = "https://coach.example.org"
+```
+
+`listen` et `port` sont fixés par le compose (`0.0.0.0:8766`, dans le réseau Docker
+seulement : aucun port publié). Puis :
+
+```bash
+cd deploy/dashboard && docker compose up -d --build
+```
+
+Si le service systemd du chat était installé, retirez-le (`scripts/coach-chat.sh uninstall`)
+et supprimez une éventuelle copie de `deploy/chat/traefik/dynamic.yml` : les labels la
+remplacent. Journal : `docker logs ai-running-coach-chat`.
+
 ## Approuver depuis le téléphone
 
 Quand une carte d'approbation reste sans réponse (`ntfy_delay_s`, 60 s par défaut — ou tout de
