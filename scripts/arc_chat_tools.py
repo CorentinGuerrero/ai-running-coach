@@ -122,7 +122,13 @@ def summarize_tool(tool: str, tool_input: dict) -> str:
             extra = ", ".join(str(g) for g in extra)
         return f"Recherche dans {short(inp.get('path') or '.')}" + (f" ({short(extra, 40)})" if extra else "")
     if tool == "shell":
-        return f"Commande : {short(inp.get('command'), 60)}"
+        command = str(inp.get("command") or "")
+        # `echo '<json>' | script` / `script << 'EOF' …` : montrer le script, pas le JSON.
+        piped = re.match(r"^echo\s+'[^']*'\s*\|\s*(.+)$", command, re.S) or \
+            re.match(r"^([^\n<]+?)\s*<<\s*'?\w+'?\s*\n", command)
+        if piped:
+            return f"Commande : {short(piped.group(1).strip(), 60)} (données en entrée)"
+        return f"Commande : {short(command, 60)}"
     if tool == "web.fetch":
         return f"Consultation de {short(inp.get('url'), 60)}"
     if tool == "web.search":

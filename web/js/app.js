@@ -1,5 +1,6 @@
 // Tableau de bord ai-running-coach — lecture seule, servi par scripts/arc_serve.py.
 import * as F from "./format.js";
+import { navItems } from "./nav.js";
 import { timeChart, attachCursor, verdictStrip, yearCalendar } from "./chart.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -522,12 +523,7 @@ function renderObjective(s) {
 }
 
 function renderNav(s) {
-  const nutrition = s.settings.agents?.includes("nutritionist");
-  const items = [
-    ["", "Aujourd'hui"], ["forme", "Forme & charge"], ["analyse", "Analyse"], ["sante", "Santé"], ["semaine", "Semaine"],
-    ["seances", "Séances"], ["performance", "Performance"], ["materiel", "Matériel"], ["trail-shape", "Trail Shape"], ["calendrier", "Calendrier"],
-    ["decisions", "Décisions"], ["rapports", "Rapports"], ...(nutrition ? [["nutrition", "Nutrition"]] : []),
-  ];
+  const items = navItems(s.settings);
   $("#nav").innerHTML = items.map(([h, l]) => `<a href="#/${h}" data-route="${h}">${l}</a>`).join("")
     // Page séparée (chat.html), pas une route à hash : visible seulement si `[chat].enabled`.
     + (s.settings.chat_enabled ? `<a href="chat.html" data-route="coach-chat">Coach</a>` : "")

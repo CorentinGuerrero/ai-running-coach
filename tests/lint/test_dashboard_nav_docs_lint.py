@@ -15,6 +15,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 APP_JS = REPO / "web/js/app.js"
+NAV_JS = REPO / "web/js/nav.js"      # liste des sections, partagée par app.js et chat.js
 VIEWS_MD = REPO / "docs/dashboard/views.md"
 
 # Routes de `ROUTES` (`web/js/app.js`) qui ne sont volontairement PAS des entrées
@@ -33,12 +34,12 @@ NAV_LABEL_OVERRIDES = {"fichiers": "Fichiers hors contrat"}
 
 
 def _nav_items() -> list[tuple[str, str]]:
-    """Extrait `[route, libellé]` du tableau `items` de `renderNav` (`web/js/app.js`)
-    — jamais une liste recopiée à la main, qui divergerait silencieusement du vrai
-    tableau de nav à la première entrée ajoutée sans mettre ce test à jour."""
-    source = APP_JS.read_text(encoding="utf-8")
-    match = re.search(r"const items = \[(.*?)\];", source, re.DOTALL)
-    assert match, "tableau `items` de renderNav introuvable dans web/js/app.js"
+    """Extrait `[route, libellé]` de la liste de `navItems` (`web/js/nav.js`, utilisée par
+    `renderNav` d'app.js et par la page Coach) — jamais une liste recopiée à la main, qui
+    divergerait silencieusement du vrai tableau de nav à la première entrée ajoutée."""
+    source = NAV_JS.read_text(encoding="utf-8")
+    match = re.search(r"return \[(.*?)\];", source, re.DOTALL)
+    assert match, "liste de navItems introuvable dans web/js/nav.js"
     return re.findall(r'\["([a-z]*)", "([^"]+)"\]', match.group(1))
 
 
@@ -54,6 +55,13 @@ def _doc_headings() -> set[str]:
 
 
 class TestDashboardNavDocsParity(unittest.TestCase):
+    def test_dashboard_and_coach_page_share_the_same_nav(self):
+        # La page Coach recopiait sa nav à la main et ratait chaque nouvelle section.
+        for page in ("web/js/app.js", "web/js/chat.js"):
+            source = (REPO / page).read_text(encoding="utf-8")
+            self.assertIn('from "./nav.js"', source, page)
+            self.assertIn("navItems(", source, page)
+
     def test_every_nav_label_has_a_matching_heading_in_views_md(self):
         headings = _doc_headings()
         for route, label in _nav_items():

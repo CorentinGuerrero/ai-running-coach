@@ -14,6 +14,30 @@ qu'en session dans votre IDE : le chat n'invente aucune source de vérité.
   l'avant/après, vous appliquez ou refusez — depuis la page ou depuis la notification ;
 - un compteur affiche le coût de la conversation et le budget du jour.
 
+![Coach : question de l'athlète, trace repliée, bilan du matin en tableau, proposition de séance avec carte d'approbation, et à droite ce que voit le coach](../assets/dashboard/coach.webp)
+
+*Workspace de démonstration (générateur des tests, `tests/lib/synthetic.py`) et réponse
+scriptée du backend `mock` : aucune donnée personnelle. L'athlète se dit fatigué avant ses
+côtes ; le coach fait le bilan du matin, propose de décaler la séance et attend son accord
+avant de toucher au calendrier Garmin. À droite, ce que voit le coach : la séance du jour,
+la semaine, le staff actif et ses permissions.*
+
+La trace se déplie d'un clic : chaque appel d'outil, numéroté, avec ce que le coach en dit
+en travaillant (chez certains modèles, tout leur raisonnement — rangé là plutôt que dans la
+réponse).
+
+![Trace dépliée : les commentaires du coach entre les étapes numérotées (compétence, lecture du plan, HRV, FC de repos, readiness, météo)](../assets/dashboard/coach-trace.webp)
+
+<div class="grid" markdown>
+
+![Coach sur téléphone : la carte d'approbation et sa proposition, prête à appliquer](../assets/dashboard/mobile-coach.webp){ width="260" }
+
+Sur téléphone, la page se réduit à la conversation : la carte d'approbation reste au premier
+plan, les boutons à portée de pouce. Le panneau « Ce que voit le coach » disparaît sous
+1120 px de large.
+
+</div>
+
 !!! warning "Une clé API, pas votre abonnement"
     Un front maison **ne peut pas** utiliser un abonnement Claude Pro/Max ou ChatGPT
     (voir [Le coach dans la poche](../mobile.md#ce-qui-nest-pas-possible-et-pourquoi)). Le chat
@@ -108,6 +132,56 @@ Journal : `logs/chat.log` dans le workspace. Diagnostic :
 ```bash
 python3 scripts/coach_doctor.py --check chat_service
 ```
+
+## Essayer sans risque
+
+### Sans clé : le backend `mock`
+
+```toml
+[chat]
+enabled = true
+backend = "mock"
+```
+
+Réponses scriptées, aucun modèle, aucun coût : de quoi voir la page, la trace et la carte
+d'approbation. Un message contenant « fatigué » joue la démonstration des captures ci-dessus.
+
+### Avec une clé, sur une copie : le bac à sable
+
+Avant de brancher le chat sur votre vrai workspace, essayez-le sur une **copie** : ce que le
+coach écrit reste dans la copie, et Garmin peut y être en **lecture seule**. C'est ainsi que
+ce chat a été mis au point.
+
+```bash
+rsync -a --exclude .git --exclude .arc ~/mon-workspace/ ~/coach-bac-a-sable/
+```
+
+Puis, dans la copie :
+
+1. `config/workspace.user.toml` — d'autres ports que le vrai tableau de bord, et pas de
+   notification :
+   ```toml
+   [notifications]
+   provider = "none"
+   [dashboard]
+   port = 8865
+   [chat]
+   enabled = true
+   backend = "opencode"
+   model = "openrouter/deepseek/deepseek-v4-pro"
+   api_key_env = "OPENROUTER_API_KEY"
+   port = 8866
+   ```
+2. `.mcp.json` — Garmin en lecture seule : retirez de `GARMIN_ENABLED_TOOLS` les outils
+   d'écriture (`schedule_*`, `unschedule_*`, `upload_*`, `delete_*`, `create_*`, `add_*`).
+3. Une clé à part, dans un fichier privé (`chmod 600`), lu grâce à `ARC_LLM_ENV` :
+   ```bash
+   ARC_LLM_ENV=~/coach-bac-a-sable.env python3 scripts/arc_chat.py --workspace ~/coach-bac-a-sable &
+   python3 scripts/arc_serve.py --workspace ~/coach-bac-a-sable
+   ```
+
+Ouvrez `http://127.0.0.1:8865/chat.html`. Pour tout effacer : arrêtez les deux processus et
+supprimez la copie **et** le fichier de clé (ils contiennent vos données de santé et la clé).
 
 ## En local
 

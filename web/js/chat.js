@@ -1,6 +1,7 @@
 // Page « Coach » : conversation en streaming (SSE) avec le service de chat.
 // Aucun innerHTML sur du texte venu du modèle : tout passe par textContent / createElement.
 import * as F from "./format.js";
+import { navItems } from "./nav.js";
 
 const $ = (s, root = document) => root.querySelector(s);
 const API = "api/chat";
@@ -237,9 +238,11 @@ function clearStatus() {
 // réponse ; les précédents (« le fichier est validé, je résume… ») rejoignent la trace.
 function foldTrailingNarration(t) {
   if (!t.trace) return;
+  // Seulement les blocs CONSÉCUTIFS en fin de tour : un texte séparé de la fin par une carte
+  // d'approbation (ou des fichiers) fait partie de la réponse, il reste visible.
   const blocks = [];
-  for (let n = t.trace.details.nextElementSibling; n; n = n.nextElementSibling) {
-    if (n.classList.contains("msg__text")) blocks.push(n);
+  for (let n = t.body.lastElementChild; n && n.classList.contains("msg__text"); n = n.previousElementSibling) {
+    blocks.unshift(n);
   }
   if (t.text) flushText(t);
   for (const node of blocks.slice(0, -1)) {
@@ -967,8 +970,24 @@ function renderWeek(week) {
   }
 }
 
+// Même liste que le tableau de bord (nav.js) ; la page Coach reste marquée comme courante.
+function renderNav(settings) {
+  const nav = $("#nav");
+  if (!nav) return;
+  const links = navItems(settings || {}).map(([h, l]) => {
+    const a = el("a", null, l);
+    a.href = `index.html#/${h}`;
+    return a;
+  });
+  const coach = el("a", null, "Coach");
+  coach.href = "chat.html";
+  coach.setAttribute("aria-current", "page");
+  nav.replaceChildren(...links, coach);
+}
+
 async function loadContext() {
   const [summary, week] = await Promise.allSettled([getJson("api/summary"), getJson("api/week")]);
+  renderNav(summary.status === "fulfilled" ? summary.value.settings : null);
   if (summary.status === "fulfilled") {
     F.setUnits(summary.value.settings && summary.value.settings.units);
     renderObjective(summary.value);

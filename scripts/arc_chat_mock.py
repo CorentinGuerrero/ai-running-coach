@@ -12,7 +12,8 @@ Sert aux tests du service et au développement de l'interface (`[chat].backend =
      avec réaction à allow / deny / pending ;
   5. `usage` (coût faible) puis `done`.
 
-Un message contenant « lent » fait attendre le tour (annulable) : c'est ce qui permet de
+Un message contenant « fatigu » joue la démonstration des captures de la doc (bilan matinal,
+trace, carte d'approbation). Un message contenant « lent » fait attendre le tour (annulable) : c'est ce qui permet de
 tester le 409 (tour déjà en cours) et l'interruption. Un message `[approbation] …` (reprise
 après approbation tardive) exécute directement l'appel pré-approuvé.
 
@@ -38,6 +39,18 @@ DIFF = [
 ]
 DECISION_PATH = "planning/2026-10-01_decision_mock.md"
 
+# Démonstration (captures de la doc, workspace `tests/lib/synthetic.py` au 2026-09-29 : côtes
+# prévues ce jour-là). Charge distincte du scénario des tests.
+DEMO_INPUT = {"workouts": [{"date": "2026-09-29", "name": "EF 45 min", "duration_min": 45},
+                           {"date": "2026-10-01", "name": "Côtes 8 × 90 s", "duration_min": 60}]}
+DEMO_SUMMARY = "Mardi 29 septembre : footing EF 45 min, côtes jeudi"
+DEMO_DIFF = [
+    {"op": "-", "text": "Mardi : côtes 8 × 90 s"},
+    {"op": "+", "text": "Mardi : EF 45 min"},
+    {"op": " ", "text": "Mercredi : repos"},
+    {"op": "+", "text": "Jeudi : côtes 8 × 90 s (si le bilan du matin remonte)"},
+]
+
 
 class MockBackend(ChatBackend):
     name = "mock"
@@ -53,9 +66,14 @@ class MockBackend(ChatBackend):
 
         if user_message.startswith("[approbation]"):
             emit("text_delta", {"text": "Reprise après approbation. "})
-            if self._call_schedule(ctx) != "allow":
+            demo = DEMO_SUMMARY in user_message
+            if self._call_schedule(ctx, *((DEMO_INPUT, DEMO_SUMMARY, DEMO_DIFF) if demo else ())) != "allow":
                 emit("text_delta", {"text": "Appel non autorisé par la politique."})
             finish("end_turn")
+            return
+
+        if "fatigu" in text:
+            self._demo_morning_check(ctx, finish)
             return
 
         emit("text_delta", {"text": "Je regarde ton plan de la semaine. "})
@@ -96,11 +114,56 @@ class MockBackend(ChatBackend):
             emit("text_delta", {"text": "Rien à modifier pour l'instant."})
         finish("end_turn")
 
-    def _call_schedule(self, ctx: TurnContext) -> str:
+    def _demo_morning_check(self, ctx: TurnContext, finish) -> None:
+        """Scénario de démonstration (captures de la doc) : bilan matinal, trace, proposition.
+
+        Valeurs fictives, cohérentes entre elles ; aucune donnée lue sur disque.
+        """
+        emit = ctx.emit
+        steps = (
+            ("d1", "skill", "Chargement de la compétence today", "Terminé"),
+            ("d2", "fs.read", "Lecture de planning/Semaine_2026-09-28.md", "Séance du jour : côtes 8 × 90 s"),
+            ("d3", "mcp:garmin.get_hrv_data", "Garmin : get_hrv_data", "HRV 52 ms (base 7 j : 63 ms)"),
+            ("d4", "mcp:garmin.get_rhr_day", "Garmin : get_rhr_day", "FC de repos 54 bpm (+5)"),
+            ("d5", "mcp:garmin.get_training_readiness", "Garmin : get_training_readiness", "Readiness 38 (faible)"),
+            ("d6", "web.fetch", "Consultation de wttr.in (météo du lieu d'entraînement)", "16 °C, averses en soirée"),
+        )
+        emit("text_delta", {"text": "Je fais ton bilan du matin avant de décider.", "part": "n1"})
+        for sid, name, summary, result in steps[:2]:
+            emit("tool_start", {"id": sid, "name": name, "summary": summary})
+            emit("tool_end", {"id": sid, "ok": True, "summary": result})
+        emit("text_delta", {"text": "Séance exigeante prévue : je vérifie HRV, FC de repos et readiness.",
+                            "part": "n2"})
+        for sid, name, summary, result in steps[2:]:
+            emit("tool_start", {"id": sid, "name": name, "summary": summary})
+            emit("tool_end", {"id": sid, "ok": True, "summary": result})
+        emit("file_written", {"path": "planning/2026-09-29_decision_readiness-basse.md"})
+        for chunk in (
+            "**Bilan du matin** — les trois signaux vont dans le même sens que ton ressenti :\n\n",
+            "| Indicateur | Ce matin | Repère |\n|---|---|---|\n",
+            "| HRV | 52 ms | base 63 ms |\n| FC de repos | 54 bpm | +5 bpm |\n| Readiness | 38 | faible |\n\n",
+            "Des côtes sur cette fatigue apportent peu et coûtent cher en récupération. ",
+            "**Je te propose** une sortie en endurance fondamentale de 45 min aujourd'hui, ",
+            "et de décaler les côtes à jeudi si le bilan remonte.\n\n",
+            "Créneau conseillé : **12 h 15 – 13 h 00** (sec, 16 °C).",
+        ):
+            emit("text_delta", {"text": chunk, "part": "r1"})
+        outcome = self._call_schedule(ctx, DEMO_INPUT, DEMO_SUMMARY, DEMO_DIFF)
+        if outcome == "pending":
+            emit("text_delta", {"text": "La proposition attend ta confirmation (page ou notification).",
+                                "part": "r2"})
+            finish("pending_approval")
+            return
+        emit("text_delta", {"text": "C'est fait : la séance est au calendrier." if outcome == "allow"
+                            else "D'accord, je garde le plan tel quel.", "part": "r2"})
+        finish("end_turn")
+
+    def _call_schedule(self, ctx: TurnContext, tool_input: dict = TOOL_INPUT, summary: str = SUMMARY,
+                       diff: list = DIFF) -> str:
         """Passe l'appel par la politique puis l'approbation ; renvoie allow | deny | pending."""
-        verdict = ctx.decide(TOOL, TOOL_INPUT)
+        verdict = ctx.decide(TOOL, tool_input)
         if verdict == "ask":
-            verdict = ctx.request_approval(TOOL, TOOL_INPUT, SUMMARY, DIFF)
+            verdict = ctx.request_approval(TOOL, tool_input, summary, diff)
         if verdict == "allow":
             ctx.emit("tool_start", {"id": "t2", "name": TOOL, "summary": "Planification de la séance"})
             ctx.emit("tool_end", {"id": "t2", "ok": True, "summary": "Séance planifiée (simulation)"})

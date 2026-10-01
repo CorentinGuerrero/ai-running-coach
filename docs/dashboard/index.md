@@ -135,6 +135,13 @@ détaillée : comment la lire, d'où viennent ses données, que faire si elle es
     Bilans hebdomadaires, validations, comparaisons de parcours et analyses de
     course, lisibles sans ouvrir l'IDE.
 
+-   [![Coach](../assets/dashboard/vignette-coach.webp)](chat.md)
+
+    **[Coach](chat.md)** · *Je garde ma séance ?*
+
+    Le chat avec le coach, s'il est activé : mêmes agents et skills qu'en IDE, trace de
+    chaque étape, et votre accord avant toute écriture sur Garmin.
+
 </div>
 
 S'y ajoutent la vue [Nutrition](views.md#nutrition), si le nutritionniste fait partie
