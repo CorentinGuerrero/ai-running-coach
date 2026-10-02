@@ -1,0 +1,66 @@
+/* Lecteur commun de la série « Le Sentier » (docs/video/engine/engine.js).
+   Polices servies depuis le dépôt (SIL OFL, voir ../fonts/OFL-*.txt) : aucune requête tierce. */
+@font-face { font-family: "Inter"; src: url("../fonts/inter-latin.woff2") format("woff2"); font-weight: 100 900; font-display: block; }
+@font-face { font-family: "Sora"; src: url("../fonts/sora-latin.woff2") format("woff2"); font-weight: 100 800; font-display: block; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/jetbrains-mono-latin.woff2") format("woff2"); font-weight: 100 800; font-display: block; }
+
+:root {
+  --bg: #0d1410; --panel: #13201a; --panel2: #182a21; --line: #24362d;
+  --ink: #e7ede9; --soft: #b8c4bd; --faint: #7d8e85; --accent: #a3e635; --deep: #0f2a1f; --pine: #1e4d3b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 Inter, system-ui, sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+a { color: var(--accent); }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.ep-kicker { font: 600 0.78rem/1.2 "JetBrains Mono", monospace; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; margin: 0 0 4px; }
+h1 { font: 700 1.35rem/1.2 Sora, Inter, sans-serif; letter-spacing: -0.02em; margin: 0; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 0.88rem; }
+.nav a { color: var(--soft); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; }
+.nav a:hover { border-color: var(--accent); color: var(--ink); }
+.stage { position: relative; aspect-ratio: 16 / 9; width: 100%; background: #000; border-radius: 14px; overflow: hidden; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+
+/* barre de contrôle */
+.bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+button, select { font: 600 0.88rem Inter, sans-serif; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+button:hover, select:hover { border-color: var(--accent); }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+button:focus-visible, select:focus-visible, .profile:focus-visible, .chapters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.time { font: 0.84rem "JetBrains Mono", monospace; color: var(--soft); min-width: 96px; text-align: right; }
+.spacer { flex: 1 1 auto; }
+
+/* seek bar : profil altimétrique, ravitos = chapitres */
+.profile { display: block; width: 100%; height: 64px; margin-top: 12px; cursor: pointer; touch-action: none; border-radius: 10px; }
+.profile .base { fill: rgba(30,77,59,0.35); }
+.profile .done { fill: rgba(163,230,53,0.22); }
+.profile .ridge { fill: none; stroke: rgba(231,237,233,0.25); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.profile .ridge-done { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.profile .aid { stroke: rgba(231,237,233,0.35); stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.profile .aid-flag { fill: var(--faint); }
+.profile .aid-flag.passed { fill: var(--accent); }
+.profile .runner { fill: var(--accent); }
+.profile .runner-halo { fill: rgba(163,230,53,0.25); }
+.tip { position: absolute; transform: translate(-50%, -100%); pointer-events: none; background: var(--deep); border: 1px solid rgba(163,230,53,.5); border-radius: 8px; padding: 3px 9px; font: 600 0.78rem "JetBrains Mono", monospace; color: var(--ink); white-space: nowrap; opacity: 0; transition: opacity .12s; }
+.profile-wrap { position: relative; }
+
+/* chapitres */
+.chapters { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.chapters button { width: 100%; text-align: left; border-radius: 12px; padding: 9px 12px; display: flex; gap: 10px; align-items: baseline; font-weight: 500; }
+.chapters button .t { font: 0.78rem "JetBrains Mono", monospace; color: var(--faint); }
+.chapters button.on { border-color: var(--accent); background: rgba(163,230,53,0.08); }
+.chapters-title { font: 600 0.78rem "JetBrains Mono", monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); margin: 22px 0 0; }
+.note { margin-top: 18px; font-size: 0.85rem; color: var(--soft); max-width: 78ch; }
+.note code { font-family: "JetBrains Mono", monospace; color: var(--accent); font-size: 0.8rem; }
+
+/* capture image par image (scripts/render_video.py) */
+body.capture { background: #000; }
+body.capture main { max-width: none; padding: 0; }
+body.capture header, body.capture .bar, body.capture .profile-wrap, body.capture .chapters,
+body.capture .chapters-title, body.capture .note { display: none; }
+body.capture .stage { border-radius: 0; box-shadow: none; }
+
+@media (max-width: 640px) {
+  main { padding: 16px 16px 32px; }
+  .time { min-width: 0; }
+}

@@ -45,6 +45,25 @@ Ce que vous perdez en retirant un agent :
 
 ## Le bilan matinal — `[health]`
 
+<!-- arc-video:bilan-matinal -->
+<div class="arc-video-card" markdown>
+
+[![Le réveil du traileur](video/bilan-matinal/poster.jpg)](video/bilan-matinal/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 02 · 1 min 11</span>
+
+**[Le réveil du traileur](video/bilan-matinal/index.html)** — HRV, FC de repos et readiness lues ensemble chaque matin : le verdict, sa raison, et comment régler le bilan.
+
+[Regarder](video/bilan-matinal/index.html) · [English](video/bilan-matinal/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ```toml
 [health]
 morning_check = "full"   # full | minimal | off
@@ -106,6 +125,25 @@ COROS/Suunto/Polar/Apple synchronisées sur Intervals.icu.
     [Configuration Intervals.icu](intervals-setup.md).
 
 ## Le style de coaching — `[coaching]`
+
+<!-- arc-video:styles-coaching -->
+<div class="arc-video-card" markdown>
+
+[![Trois voix, une décision](video/styles-coaching/poster.jpg)](video/styles-coaching/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 11 · 1 min 31</span>
+
+**[Trois voix, une décision](video/styles-coaching/index.html)** — La même décision dite par trois styles de coaching : le ton, la fermeté et la longueur se règlent, jamais le verdict.
+
+[Regarder](video/styles-coaching/index.html) · [English](video/styles-coaching/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 
 ```toml
 [coaching]

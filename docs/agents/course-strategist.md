@@ -2,6 +2,25 @@
 
 > **Description** : Course Strategy Specialist — analyse les parcours GPX ou les URL de course, construit des plans de course détaillés avec allure, nutrition, météo, matériel, et téléverse le GPX enrichi dans Garmin avec les points d'eau.
 
+<!-- arc-video:jour-de-course -->
+<div class="arc-video-card" markdown>
+
+[![La course, segment par segment](../video/jour-de-course/poster.jpg)](../video/jour-de-course/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 06 · 1 min 33</span>
+
+**[La course, segment par segment](../video/jour-de-course/index.html)** — Du GPX au plan de course : allures par segment, énergie, matériel obligatoire, montre, puis débrief plan contre réalisé.
+
+[Regarder](../video/jour-de-course/index.html) · [English](../video/jour-de-course/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Rôle
 
 L'agent **course-strategist** transforme un fichier GPX ou une URL de course en un plan de course complet et actionnable.

@@ -1,0 +1,173 @@
+{
+  "title": {
+    "fr": "Usure",
+    "en": "Wear and tear"
+  },
+  "summary": {
+    "fr": "Du kilométrage à l'inspection photo : alerte de seuil, verdict en quatre couleurs, indices de foulée (jamais un diagnostic), foulée mesurée, kits et bilan de carrière."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape neuf : l'usure."
+      ],
+      "en": [
+        "Stage nine: wear and tear."
+      ]
+    },
+    {
+      "id": "odometer",
+      "min": 6,
+      "chapter": {
+        "fr": "Les kilomètres",
+        "en": "The kilometres"
+      },
+      "fr": [
+        "Chaque séance est attribuée à une paire : ici la Crête Pro bleue de Camille, six cent douze kilomètres sur sept cents.",
+        "Retraite prévue dans environ deux semaines."
+      ],
+      "en": [
+        "Each session is credited to a pair: the blue Crête Pro, six hundred and twelve kilometres of seven hundred.",
+        "Retirement: about two weeks away."
+      ]
+    },
+    {
+      "id": "alert",
+      "min": 6,
+      "chapter": {
+        "fr": "Le seuil franchi",
+        "en": "Threshold crossed"
+      },
+      "fr": [
+        "Une séance fait franchir les sept cents kilomètres.",
+        "La synchronisation l'écrit dans la notification.",
+        "Une seule fois."
+      ],
+      "en": [
+        "One run pushes the pair past seven hundred kilometres.",
+        "The sync adds it to the notification.",
+        "Once only."
+      ]
+    },
+    {
+      "id": "protocol",
+      "min": 6,
+      "chapter": {
+        "fr": "Cinq vues",
+        "en": "Five views"
+      },
+      "fr": [
+        "Tous les deux cents kilomètres, le coach propose une inspection.",
+        "Tapez /inspection : il demande cinq vues.",
+        "Les deux semelles, le profil, l'arrière, la tige, et une pièce pour l'échelle."
+      ],
+      "en": [
+        "Every two hundred kilometres, the coach suggests an inspection.",
+        "Type /inspection: it asks for five views.",
+        "Both soles, profile, heel, upper, and a coin for scale."
+      ]
+    },
+    {
+      "id": "reading",
+      "min": 6,
+      "chapter": {
+        "fr": "Quatre couleurs",
+        "en": "Four colours"
+      },
+      "fr": [
+        "Le verdict tient en quatre couleurs, justifiées par ce que le coach voit.",
+        "Surtout, il compare avec l'inspection précédente : le signal le plus fiable."
+      ],
+      "en": [
+        "The verdict comes in four colours, justified by what the coach sees.",
+        "Above all, it compares with the previous inspection: the surest signal."
+      ]
+    },
+    {
+      "id": "hints",
+      "min": 6,
+      "chapter": {
+        "fr": "Un indice, pas un diagnostic",
+        "en": "A hint, not a diagnosis"
+      },
+      "fr": [
+        "Usé côté extérieur du talon : indice d'une attaque talon.",
+        "Jamais un diagnostic.",
+        "Sans pièce, aucune mesure en millimètres.",
+        "Jamais de conseil de foulée sur une photo."
+      ],
+      "en": [
+        "Worn on the outer heel: a hint of heel strike.",
+        "Never a diagnosis.",
+        "No coin, no millimetres.",
+        "And no stride advice from a photo."
+      ]
+    },
+    {
+      "id": "measured",
+      "min": 6,
+      "chapter": {
+        "fr": "La mesure prime",
+        "en": "Measurement wins"
+      },
+      "fr": [
+        "Si la montre mesure la foulée, la mesure prime sur la semelle.",
+        "La balance se lit en écart à cinquante pour cent, jamais en pied.",
+        "Pas de mesure : le coach le dit."
+      ],
+      "en": [
+        "When the watch measures your stride, the measurement wins over the sole.",
+        "Balance is a gap from fifty percent, never a foot.",
+        "No measurement? The coach says so."
+      ]
+    },
+    {
+      "id": "kits",
+      "min": 6,
+      "chapter": {
+        "fr": "Hors chaussures",
+        "en": "Beyond shoes"
+      },
+      "fr": [
+        "Hors chaussures, le kit trail long a ses seuils : frontale, poche à eau, bâtons.",
+        "Alerte à la synchronisation, une seule fois.",
+        "Et avant une sortie de nuit : la batterie de la frontale."
+      ],
+      "en": [
+        "Beyond shoes, the trail kit has its own thresholds: head torch, bladder, poles.",
+        "Flagged once at sync.",
+        "And before a night run: the head torch battery."
+      ]
+    },
+    {
+      "id": "career",
+      "min": 6,
+      "chapter": {
+        "fr": "Fin de carrière",
+        "en": "End of the road"
+      },
+      "fr": [
+        "Une paire retirée ? Le coach écrit son bilan de carrière.",
+        "Kilomètres, séances, plus longue sortie, dernière inspection."
+      ],
+      "en": [
+        "A retired pair gets a career summary.",
+        "Distance, sessions, longest run, last inspection."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « Inspection des chaussures » de la documentation."
+      ],
+      "en": [
+        "To go further: the “Shoe inspection” documentation page."
+      ]
+    }
+  ]
+}

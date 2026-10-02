@@ -2,6 +2,25 @@
 
 Ce guide vous permet d'installer et de configurer `ai-running-coach` en quelques minutes.
 
+<!-- arc-video:ligne-de-depart -->
+<div class="arc-video-card" markdown>
+
+[![Ligne de départ](video/ligne-de-depart/poster.jpg)](video/ligne-de-depart/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 01 · 1 min 34</span>
+
+**[Ligne de départ](video/ligne-de-depart/index.html)** — Du git clone au premier /today : installation, authentification Garmin, /coach-setup et /coach-doctor en moins de deux minutes.
+
+[Regarder](video/ligne-de-depart/index.html) · [English](video/ligne-de-depart/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Prérequis
 
 - **macOS** ou **Linux**

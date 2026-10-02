@@ -5,6 +5,25 @@ le coach **toujours avec vous** — synchronisation Garmin automatique avec noti
 dialogue avec le coach depuis le téléphone — **sans renoncer à votre abonnement**
 Claude (Pro/Max) ou ChatGPT (Codex).
 
+<!-- arc-video:coach-poche -->
+<div class="arc-video-card" markdown>
+
+[![Le coach dans la poche](video/coach-poche/poster.jpg)](video/coach-poche/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 10 · 1 min 33</span>
+
+**[Le coach dans la poche](video/coach-poche/index.html)** — La machine coach, la synchronisation automatique (horaires ou veille), la notification push, Remote Control et les commandes courtes, le tableau de bord mobile, et ce qui n'est pas possible.
+
+[Regarder](video/coach-poche/index.html) · [English](video/coach-poche/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 !!! note "Écrite pour `[data].source = "garmin"` (défaut)"
     Cette page (et `/garmin-daily-sync`) suppose la source Garmin par défaut —
     rien n'y change avec `[data].source = "intervals"` (#68) sinon les outils

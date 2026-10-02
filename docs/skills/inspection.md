@@ -2,6 +2,25 @@
 
 > **Description** : Commande courte pour lancer l'inspection photo d'**une** paire de chaussures : désigner la paire, recevoir les photos, puis laisser [`gear-inspection`](gear-inspection.md) lire l'usure, comparer avec la précédente et tout ranger dans `gear/`.
 
+<!-- arc-video:materiel -->
+<div class="arc-video-card" markdown>
+
+[![Usure](../video/materiel/poster.jpg)](../video/materiel/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 09 · 1 min 32</span>
+
+**[Usure](../video/materiel/index.html)** — Du kilométrage à l'inspection photo : alerte de seuil, verdict en quatre couleurs, indices de foulée (jamais un diagnostic), foulée mesurée, kits et bilan de carrière.
+
+[Regarder](../video/materiel/index.html) · [English](../video/materiel/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Faire inspecter une paire, pas à pas
 
 ### 1. Quand le faire

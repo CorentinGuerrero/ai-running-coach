@@ -5,6 +5,25 @@ Le tableau de bord met ces fichiers **sous vos yeux** : courbe de forme, bilan d
 matin, semaine planifiée face au réalisé, séances avec leurs splits, prédictions,
 calendrier — et le texte du coach à côté des chiffres.
 
+<!-- arc-video:tableau-de-bord -->
+<div class="arc-video-card" markdown>
+
+[![Tour du propriétaire](../video/tableau-de-bord/poster.jpg)](../video/tableau-de-bord/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 05 · 1 min 22</span>
+
+**[Tour du propriétaire](../video/tableau-de-bord/index.html)** — Visite guidée du tableau de bord local, en lecture seule : une question par vue.
+
+[Regarder](../video/tableau-de-bord/index.html) · [English](../video/tableau-de-bord/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ![Vue « Aujourd'hui » : verdict du coach, bilan du matin, séance du jour et forme](../assets/dashboard/aujourdhui.webp)
 
 *Captures réalisées sur le workspace réel d'un athlète : la préparation et

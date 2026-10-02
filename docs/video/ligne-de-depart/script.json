@@ -1,0 +1,147 @@
+{
+  "title": {
+    "fr": "Ligne de départ",
+    "en": "Start line"
+  },
+  "summary": {
+    "fr": "Du git clone au premier /today : installation, authentification Garmin, /coach-setup et /coach-doctor en moins de deux minutes."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape un : la ligne de départ."
+      ],
+      "en": [
+        "Stage one: the start line."
+      ]
+    },
+    {
+      "id": "blocks",
+      "min": 8,
+      "chapter": {
+        "fr": "Trois lignes",
+        "en": "Three lines"
+      },
+      "fr": [
+        "Pour partir, trois lignes : un git clone, un cd, puis install point sh.",
+        "Sur macOS ou Linux, avec bash, curl et git. Le reste, le script s'en charge."
+      ],
+      "en": [
+        "To get going, three lines: a git clone, a cd, then install dot sh.",
+        "On macOS or Linux, with bash, curl and git. The script does the rest."
+      ]
+    },
+    {
+      "id": "installer",
+      "min": 8,
+      "chapter": {
+        "fr": "Ce que fait le script",
+        "en": "What the script does"
+      },
+      "fr": [
+        "Il installe uv, puis garmin-mcp, restreint à une liste blanche d'outils.",
+        "Il configure votre IDE : Claude Code, Copilot, OpenCode, Gemini CLI, Cursor ou Windsurf, et crée vos dossiers de travail, hors du dépôt."
+      ],
+      "en": [
+        "It installs uv, then garmin-mcp, limited to an allow-list of tools.",
+        "It sets up your IDE: Claude Code, Copilot, OpenCode, Gemini CLI, Cursor or Windsurf. Plus your working folders."
+      ]
+    },
+    {
+      "id": "options",
+      "min": 8,
+      "chapter": {
+        "fr": "À votre carte",
+        "en": "Your way"
+      },
+      "fr": [
+        "Choisissez le staff : coach et nutritionniste seulement, ou tous sauf le médecin.",
+        "Sans montre Garmin ? Source Intervals point i cé u. Et l'option workspace range vos données dans un dépôt privé."
+      ],
+      "en": [
+        "Choose your staff: coach and nutritionist only, or everyone but the doctor.",
+        "No Garmin watch? Use Intervals dot I C U. The workspace option keeps your data in a private repo."
+      ]
+    },
+    {
+      "id": "garmin",
+      "min": 8,
+      "chapter": {
+        "fr": "Garmin, une seule fois",
+        "en": "Garmin, just once"
+      },
+      "fr": [
+        "Une seule authentification Garmin Connect, code de double vérification compris.",
+        "Les jetons restent dans votre dossier personnel, valides environ six mois. Jamais dans le projet."
+      ],
+      "en": [
+        "One Garmin Connect sign-in, two-factor code included.",
+        "The tokens stay in your home folder, valid for about six months. Never in the project."
+      ]
+    },
+    {
+      "id": "setup",
+      "min": 8,
+      "chapter": {
+        "fr": "/coach-setup",
+        "en": "/coach-setup"
+      },
+      "fr": [
+        "Dans votre IDE, /coach-setup mène un court entretien : staff, discipline, style du coach.",
+        "Garmin pré-remplit votre profil, vous confirmez chaque valeur.",
+        "Résultat : un profil d'athlète et une fiche d'objectif."
+      ],
+      "en": [
+        "In your IDE, /coach-setup runs a short interview: staff, discipline, coaching style.",
+        "Garmin pre-fills your profile, and you confirm each value.",
+        "The result: an athlete profile and a goal sheet."
+      ]
+    },
+    {
+      "id": "doctor",
+      "min": 8,
+      "chapter": {
+        "fr": "/coach-doctor",
+        "en": "/coach-doctor"
+      },
+      "fr": [
+        "Un doute ? /coach-doctor vérifie l'installation sans rien écrire : jetons, serveur Garmin, configuration, profil, index.",
+        "Tout est vert."
+      ],
+      "en": [
+        "In doubt? /coach-doctor checks the install without writing anything: tokens, Garmin server, config, profile, index.",
+        "All green."
+      ]
+    },
+    {
+      "id": "today",
+      "min": 9,
+      "chapter": {
+        "fr": "Premier /today",
+        "en": "First /today"
+      },
+      "fr": [
+        "Première question : /today.",
+        "La séance du jour, le bilan matinal, et le créneau météo. En trois lignes."
+      ],
+      "en": [
+        "First question: /today.",
+        "Today's session, the morning check, and the weather window. In three lines."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : le guide de démarrage rapide."
+      ],
+      "en": [
+        "To go further: the quick start guide."
+      ]
+    }
+  ]
+}

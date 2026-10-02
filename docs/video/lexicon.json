@@ -1,0 +1,43 @@
+{
+  "_doc": "Prononciation pour la synthèse vocale seulement (les sous-titres gardent le texte d'origine). Clé = mot exact dans script.json ; valeur = texte lu, ou [[phonèmes IPA]] passés tels quels à la voix. Voir scripts/video_narration.py.",
+  "fr": {
+    "IDE": "i dé e",
+    "MCP": "èm cé pé",
+    "HRV": "ache èr vé",
+    "SQLite": "[[ɛs ky lˈajt]]",
+    "Intervals.icu": "intervals point i cé u",
+    "GPX": "gé pé ix",
+    "D+": "dénivelé positif",
+    "RPE": "èr pé e",
+    "Garmin": "[[ɡaʁmˈin]]",
+    "jour J": "jour ji",
+    "/coach-setup": "[[slˈaʃ kˈotʃ sɛtˈœp]]",
+    "ai-running-coach": "[[a i ʁˈœniŋ kˈotʃ]]",
+    "/why": "[[slˈaʃ wˈaj]]",
+    "/today": "[[slˈaʃ tudˈe]]",
+    "/week": "[[slˈaʃ wˈik]]",
+    "/race": "[[slˈaʃ ʁˈɛs]]",
+    "/log": "[[slˈaʃ lˈɔɡ]]",
+    "/inspection": "[[slˈaʃ ɛ̃spɛksjˈɔ̃]]",
+    "traileur": "[[tʁɛjlˈœʁ]]",
+    "traileurs": "[[tʁɛjlˈœʁ]]",
+    "trail": "[[tʁˈɛjl]]",
+    "coach": "[[kˈotʃ]]"
+  },
+  "en": {
+    "ai-running-coach": "A I running coach",
+    "Intervals.icu": "intervals dot I C U",
+    "SQLite": "S Q lite",
+    "D+": "elevation gain",
+    "/why": "slash why",
+    "/today": "slash today",
+    "/week": "slash week",
+    "/race": "slash race",
+    "/log": "slash log",
+    "/inspection": "slash inspection",
+    "/coach-setup": "slash coach setup",
+    "readiness": "readiness",
+    "HRV": "H R V",
+    "RPE": "R P E"
+  }
+}

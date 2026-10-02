@@ -3,6 +3,25 @@
 Chaque vue répond à une question précise. Pour chacune : ce qu'elle montre, comment
 la lire, **d'où viennent ses données** — et que faire quand elle reste vide.
 
+<!-- arc-video:tableau-de-bord -->
+<div class="arc-video-card" markdown>
+
+[![Tour du propriétaire](../video/tableau-de-bord/poster.jpg)](../video/tableau-de-bord/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 05 · 1 min 22</span>
+
+**[Tour du propriétaire](../video/tableau-de-bord/index.html)** — Visite guidée du tableau de bord local, en lecture seule : une question par vue.
+
+[Regarder](../video/tableau-de-bord/index.html) · [English](../video/tableau-de-bord/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 Les captures viennent d'un vrai workspace : deux ans de fichiers (août 2024 →
 septembre 2026), la préparation et le déroulé d'un ultra-trail de 110 km le
 13 septembre 2026, puis le premier bloc de reprise. Date de référence : mercredi

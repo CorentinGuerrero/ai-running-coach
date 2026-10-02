@@ -11,6 +11,25 @@ au calendrier Garmin — câblage effectif dans `agents/coach.md` et
 « Câblage agent » ci-dessous), ce moteur restant lui-même indépendant de ce
 câblage.
 
+<!-- arc-video:garde-fous -->
+<div class="arc-video-card" markdown>
+
+[![Le plan qui sait dire non](video/garde-fous/poster.jpg)](video/garde-fous/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 03 · 1 min 31</span>
+
+**[Le plan qui sait dire non](video/garde-fous/index.html)** — Sept garde-fous calculés relisent la semaine avant son écriture et son envoi au calendrier Garmin : un second avis déterministe et testé.
+
+[Regarder](video/garde-fous/index.html) · [English](video/garde-fous/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Les sept règles
 
 | id | vérifie | sévérité par défaut |

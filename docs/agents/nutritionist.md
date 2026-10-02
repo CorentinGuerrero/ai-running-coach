@@ -2,6 +2,25 @@
 
 > **Description** : Sports Nutritionist — adapte les macros, suit le poids de course, et équilibre les apports déclarés avec les calories brûlées Garmin.
 
+<!-- arc-video:ravito -->
+<div class="arc-video-card" markdown>
+
+[![Ravito](../video/ravito/poster.jpg)](../video/ravito/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 08 · 1 min 35</span>
+
+**[Ravito](../video/ravito/index.html)** — Une phrase libre devient des données : le modèle extrait, le script calcule, et ne devine jamais un produit.
+
+[Regarder](../video/ravito/index.html) · [English](../video/ravito/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Rôle
 
 L'agent **nutritionist** optimise la nutrition pour l'entraînement trail.

@@ -1,0 +1,33 @@
+{
+  "title": {"fr": "La course, segment par segment", "en": "Race day, segment by segment"},
+  "summary": {"fr": "Du GPX au plan de course : allures par segment, énergie, matériel obligatoire, montre, puis débrief plan contre réalisé."},
+  "scenes": [
+    {"id": "bib", "min": 4.6, "lead": 1.2,
+     "fr": ["Étape six : la course, segment par segment."],
+     "en": ["Stage six: race day, segment by segment."]},
+    {"id": "gpx", "min": 9, "chapter": {"fr": "Un fichier GPX", "en": "A GPX file"},
+     "fr": ["On dépose le fichier GPX du Trail des Crêtes.", "Le skill mesure la vraie distance et le dénivelé après lissage, repère les montées, et dit s'il s'agit d'une boucle."],
+     "en": ["Drop in the GPX file for the Trail des Crêtes.", "The skill measures real distance and smoothed elevation, finds the climbs, and tells loop from point-to-point."]},
+    {"id": "model", "min": 9, "chapter": {"fr": "Votre courbe", "en": "Your curve"},
+     "fr": ["Ensuite, la courbe personnelle de Camille : pour chaque pente, l'allure réellement tenue lors des séances passées.", "Là où l'historique manque, le modèle générique prend le relais. Et le plan le dit."],
+     "en": ["Next, Camille's personal curve: the pace actually held on each grade in past sessions.", "Where history is thin, the generic model steps in. And the plan says so."]},
+    {"id": "race", "min": 12, "chapter": {"fr": "Trois scénarios", "en": "Three scenarios"},
+     "fr": ["Le parcours est découpé en segments de pente similaire, chacun chronométré avec cette courbe.", "Trois scénarios : sécurité, six heures quarante. Réaliste, six heures cinq. Ambitieux, cinq heures trente-huit.", "Ravitos aux kilomètres douze, vingt-quatre et trente-quatre, plus les points d'eau OpenStreetMap."],
+     "en": ["The course is cut into segments of similar grade, each timed from that curve.", "Three scenarios: safe, six forty. Realistic, six oh five. Ambitious, five thirty-eight.", "Aid stations at kilometers twelve, twenty-four, thirty-four, plus OpenStreetMap water points."]},
+    {"id": "energy", "min": 9, "chapter": {"fr": "Énergie et ravito", "en": "Energy and fuel"},
+     "fr": ["Chaque section a aussi sa dépense prévue, en kilocalories par heure, sac compris.", "En regard, soixante grammes de glucides par heure : l'écart est signalé, jamais caché."],
+     "en": ["Each section gets a planned energy cost, in kilocalories per hour, pack included.", "Next to it, sixty grams of carbs per hour: the gap is flagged, never hidden."]},
+    {"id": "gear", "min": 9, "chapter": {"fr": "Matériel obligatoire", "en": "Mandatory gear"},
+     "fr": ["Le matériel obligatoire est croisé avec votre inventaire : manquant, jamais utilisé à l'entraînement, ou sous alerte d'usure.", "Rien de nouveau le jour de la course."],
+     "en": ["Mandatory gear is checked against your inventory: missing, never used in training, or flagged for wear.", "Nothing new on race day."]},
+    {"id": "watch", "min": 9, "chapter": {"fr": "Sur la montre", "en": "On the watch"},
+     "fr": ["Le parcours et les ravitos partent sur la montre.", "Et la commande /race donne le compte à rebours : J moins cinquante-quatre, avec le score Trail Shape."],
+     "en": ["The course and aid stations go to the watch.", "And the /race command gives the countdown: minus fifty-four days, with the Trail Shape score."]},
+    {"id": "debrief", "min": 9, "chapter": {"fr": "Après la course", "en": "After the race"},
+     "fr": ["Le lendemain, le débrief compare le plan et la course réelle, segment par segment.", "Écart d'allure, ralentissement de fin de course, glucides par heure réalisés."],
+     "en": ["The day after, the debrief compares plan and actual race, segment by segment.", "Pace gap, late-race fade, carbs per hour taken."]},
+    {"id": "finish", "min": 6, "lead": 2.2,
+     "fr": ["Pour aller plus loin : la page « Stratège de course » de la documentation."],
+     "en": ["To go further: the “Course strategist” page of the documentation."]}
+  ]
+}

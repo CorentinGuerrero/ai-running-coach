@@ -1,0 +1,18 @@
+{
+ "fr": {
+  "ntfy": "[[nɔtifˈaj]]",
+  "cron": "[[kʁˈɔn]]",
+  "readiness": "[[ʁɛdinˈɛs]]",
+  "Remote Control": "[[ʁimˈot kɔ̃tʁˈol]]",
+  "Markdown": "[[maʁkdˈaʊn]]",
+  "API": "a pé i",
+  "Claude": "[[klˈod]]",
+  "cloud": "[[klˈaʊd]]",
+  "token": "[[tɔkˈɛn]]"
+ },
+ "en": {
+  "ntfy": "notify",
+  "Markdown": "markdown",
+  "API": "[[ˌeɪpˌiːˈaɪ]]"
+ }
+}

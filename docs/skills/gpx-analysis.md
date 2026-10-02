@@ -2,6 +2,25 @@
 
 > **Description** : Analyse générique d'un fichier GPX (parcours de course, tracé Strava, GPX Garmin) et production d'un rapport Markdown structuré pour la planification.
 
+<!-- arc-video:jour-de-course -->
+<div class="arc-video-card" markdown>
+
+[![La course, segment par segment](../video/jour-de-course/poster.jpg)](../video/jour-de-course/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 06 · 1 min 33</span>
+
+**[La course, segment par segment](../video/jour-de-course/index.html)** — Du GPX au plan de course : allures par segment, énergie, matériel obligatoire, montre, puis débrief plan contre réalisé.
+
+[Regarder](../video/jour-de-course/index.html) · [English](../video/jour-de-course/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Quand l'utiliser
 
 - L'utilisateur fournit un **fichier GPX** (tracé de course, parcours d'entraînement, GPX Strava/Garmin) et demande une analyse du parcours

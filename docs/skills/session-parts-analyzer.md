@@ -2,6 +2,25 @@
 
 > **Description** : Analyse de portions spécifiques d'une séance Garmin (lignes droites, montées, sprints, intervalles, dernier km, récupérations, etc.) — détection des segments par vitesse/FC/élévation et rapport des métriques d'exécution par segment.
 
+<!-- arc-video:analyse-seance -->
+<div class="arc-video-card" markdown>
+
+[![Disséquer une sortie](../video/analyse-seance/poster.jpg)](../video/analyse-seance/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 07 · 1 min 32</span>
+
+**[Disséquer une sortie](../video/analyse-seance/index.html)** — Une sortie trail passée au scalpel : FIT, zones, allure ajustée, dérive, montées, durabilité, HRR, énergie, comparaison.
+
+[Regarder](../video/analyse-seance/index.html) · [English](../video/analyse-seance/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Quand l'utiliser
 
 - L'utilisateur ou le coach veut un **feedback détaillé** sur un exercice particulier

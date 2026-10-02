@@ -5,6 +5,25 @@ Shape (#63, un indicateur parmi d'autres) et le plan de course (#59) s'il en
 existe un. Il n'écrit ni ne modifie jamais un plan/plan de course, et ne
 pousse rien vers Garmin.
 
+<!-- arc-video:jour-de-course -->
+<div class="arc-video-card" markdown>
+
+[![La course, segment par segment](../video/jour-de-course/poster.jpg)](../video/jour-de-course/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 06 · 1 min 33</span>
+
+**[La course, segment par segment](../video/jour-de-course/index.html)** — Du GPX au plan de course : allures par segment, énergie, matériel obligatoire, montre, puis débrief plan contre réalisé.
+
+[Regarder](../video/jour-de-course/index.html) · [English](../video/jour-de-course/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Lancer
 
 ```

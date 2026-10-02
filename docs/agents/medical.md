@@ -2,6 +2,25 @@
 
 > **Description** : Recovery Specialist & Medical Consultant — surveille le sommeil, le HRV, les blessures, et coordonne avec le Coach et le Nutritionniste.
 
+<!-- arc-video:bilan-matinal -->
+<div class="arc-video-card" markdown>
+
+[![Le réveil du traileur](../video/bilan-matinal/poster.jpg)](../video/bilan-matinal/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 02 · 1 min 11</span>
+
+**[Le réveil du traileur](../video/bilan-matinal/index.html)** — HRV, FC de repos et readiness lues ensemble chaque matin : le verdict, sa raison, et comment régler le bilan.
+
+[Regarder](../video/bilan-matinal/index.html) · [English](../video/bilan-matinal/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Rôle
 
 L'agent **medical** est le spécialiste de la récupération et de la santé. Il agit comme **gatekeeper** de la disponibilité à l'entraînement.

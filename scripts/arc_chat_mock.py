@@ -18,15 +18,54 @@ tester le 409 (tour déjà en cours) et l'interruption. Un message `[approbation
 après approbation tardive) exécute directement l'appel pré-approuvé.
 
 Réglages optionnels dans `[chat]` : `mock_cost_eur` (défaut 0.01), `mock_slow_s` (défaut 5).
+
+## Scénario rejoué (`mock_scenario`) — vidéos et captures
+
+`[chat].mock_scenario = "<fichier JSON>"` (chemin absolu, ou relatif au workspace, ou relatif à la
+racine du dépôt) fait rejouer des tours scriptés par le backend `mock`. Le fichier est lu une seule
+fois au démarrage : une erreur (fichier absent, JSON invalide, regex invalide, étape inconnue) arrête
+le service avec un message qui nomme le fichier et l'étape fautive. Aucune donnée n'est lue sur disque
+pendant un tour : tout est dans le scénario, donc rejouable à l'identique.
+
+```json
+{"version": 1, "chunk_chars": 7, "chunk_delay_s": 0.03,
+ "turns": [{"match": "vid[ée].*seuil", "cost_eur": 0.02, "steps": [
+     {"text": "Je regarde ton bilan.", "part": "n1"},
+     {"tool": {"id": "d1", "name": "fs.read", "summary": "Lecture de …", "result": "…", "delay_s": 0.6}},
+     {"marker": "typing"},
+     {"file_written": "planning/….md"},
+     {"pause_s": 0.4},
+     {"approval": {"tool": "mcp:garmin.schedule_workouts", "input": {}, "summary": "…", "diff": [],
+                   "run": {"summary": "…", "result": "…"},
+                   "allow": [{"text": "Fait."}], "deny": [{"text": "Rien ne change."}],
+                   "pending": [{"text": "En attente de ta confirmation."}]}}]}]}
+```
+
+- `match` : expression régulière (`re.search`, casse ignorée) appliquée au message de l'athlète ; le
+  premier tour qui correspond est joué. Aucune correspondance : comportement habituel du mock.
+- `text` : émis par morceaux de `chunk_chars` caractères, `chunk_delay_s` secondes entre deux morceaux
+  (le texte « se tape » ; valeurs par défaut du fichier, surchargeables par étape). `part` ouvre un
+  nouveau bloc côté page (comme `text_delta.part`).
+- `tool` : `tool_start`, attente `delay_s`, puis `tool_end` (`ok`, `result`).
+- `file_written`, `pause_s`, `marker` (point d'arrêt nommé, sans effet par défaut).
+- `approval` : passe par la politique (`ctx.decide`) puis l'approbation de l'athlète — le même chemin
+  que `_call_schedule` — et joue `allow` / `deny` / `pending` selon la décision (`pending` termine le
+  tour en attente d'approbation).
+- `[chat].mock_scenario_speed` (défaut 1) divise tous les délais ; `[chat].mock_scenario_hold =
+  "<marqueur>"` suspend le tour au marqueur nommé (jusqu'à interruption) : c'est ce qui permet de
+  capturer une réponse « à mi-parcours » de façon déterministe.
 """
 
 from __future__ import annotations
 
+import json
+import re
 import sys
 from pathlib import Path
+from typing import Callable, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from arc_chat_backend import ChatBackend, TurnContext  # noqa: E402
+from arc_chat_backend import BackendError, ChatBackend, TurnContext  # noqa: E402
 
 TOOL = "mcp:garmin.schedule_workouts"
 # Contenu FIXE : l'approbation tardive ne vaut que pour cette charge exacte (payload_hash).
@@ -52,8 +91,128 @@ DEMO_DIFF = [
 ]
 
 
+ENGINE = Path(__file__).resolve().parent.parent
+HOLD_MAX_S = 3600.0
+STEP_KINDS = ("text", "tool", "file_written", "pause_s", "marker", "approval")
+
+
+def _fail(source: str, where: str, message: str) -> None:
+    raise BackendError(f"Scénario du chat ({source}) — {where} : {message}")
+
+
+def _number(source: str, where: str, value, default: Optional[float] = None) -> float:
+    if value is None:
+        return default if default is not None else 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        _fail(source, where, f"nombre positif attendu, {value!r} trouvé")
+    return float(value)
+
+
+def _check_steps(source: str, where: str, steps) -> None:
+    if not isinstance(steps, list):
+        _fail(source, where, "liste d'étapes attendue")
+    for i, step in enumerate(steps):
+        here = f"{where}[{i}]"
+        if not isinstance(step, dict):
+            _fail(source, here, "objet attendu")
+        kinds = [k for k in STEP_KINDS if k in step]
+        if len(kinds) != 1:
+            _fail(source, here, f"une seule clé parmi {', '.join(STEP_KINDS)} attendue (trouvé : {sorted(step)})")
+        kind = kinds[0]
+        if kind == "text":
+            if not isinstance(step["text"], str) or not step["text"]:
+                _fail(source, here, "`text` : chaîne non vide attendue")
+            _number(source, here + ".chunk_delay_s", step.get("chunk_delay_s"))
+            if "chunk_chars" in step and (not isinstance(step["chunk_chars"], int) or step["chunk_chars"] < 1):
+                _fail(source, here + ".chunk_chars", "entier ≥ 1 attendu")
+        elif kind == "tool":
+            tool = step["tool"]
+            if not isinstance(tool, dict) or not all(isinstance(tool.get(k), str) and tool.get(k)
+                                                       for k in ("id", "name", "summary")):
+                _fail(source, here, "`tool` : objet avec `id`, `name`, `summary` (textes) attendu")
+            _number(source, here + ".delay_s", tool.get("delay_s"))
+        elif kind == "file_written":
+            if not isinstance(step["file_written"], str) or not step["file_written"]:
+                _fail(source, here, "`file_written` : chemin attendu")
+        elif kind == "pause_s":
+            _number(source, here, step["pause_s"])
+        elif kind == "marker":
+            if not isinstance(step["marker"], str) or not step["marker"]:
+                _fail(source, here, "`marker` : nom attendu")
+        elif kind == "approval":
+            appr = step["approval"]
+            if not isinstance(appr, dict) or not isinstance(appr.get("tool"), str) \
+                    or not isinstance(appr.get("input"), dict) or not isinstance(appr.get("summary"), str):
+                _fail(source, here, "`approval` : `tool`, `input` (objet) et `summary` attendus")
+            diff = appr.get("diff", [])
+            if not isinstance(diff, list) or not all(
+                    isinstance(d, dict) and d.get("op") in ("-", "+", " ") and isinstance(d.get("text"), str)
+                    for d in diff):
+                _fail(source, here + ".diff", "liste de {\"op\": \"-\"|\"+\"|\" \", \"text\": …} attendue")
+            for branch in ("allow", "deny", "pending"):
+                _check_steps(source, f"{here}.{branch}", appr.get(branch, []))
+
+
+def load_scenario(raw: str, workspace: Path) -> dict:
+    """Charge et valide un scénario (voir l'en-tête du module). Lève `BackendError` (message français
+    qui nomme le fichier et l'étape) ; renvoie le scénario avec ses expressions régulières compilées."""
+    path = Path(raw).expanduser()
+    candidates = [path] if path.is_absolute() else [Path(workspace) / path, ENGINE / path]
+    found = next((c for c in candidates if c.is_file()), None)
+    if found is None:
+        raise BackendError(f"Scénario du chat introuvable : {raw!r} (cherché : "
+                           f"{', '.join(str(c) for c in candidates)}).")
+    source = found.name
+    try:
+        data = json.loads(found.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BackendError(f"Scénario du chat ({source}) illisible : {exc}")
+    if not isinstance(data, dict) or not isinstance(data.get("turns"), list) or not data["turns"]:
+        _fail(source, "racine", "objet avec une liste `turns` non vide attendu")
+    chunk_chars = data.get("chunk_chars", 7)
+    if not isinstance(chunk_chars, int) or isinstance(chunk_chars, bool) or chunk_chars < 1:
+        _fail(source, "chunk_chars", "entier ≥ 1 attendu")
+    delay = _number(source, "chunk_delay_s", data.get("chunk_delay_s"), 0.03)
+    turns = []
+    for i, turn in enumerate(data["turns"]):
+        where = f"turns[{i}]"
+        if not isinstance(turn, dict) or not isinstance(turn.get("match"), str):
+            _fail(source, where, "objet avec `match` (expression régulière) attendu")
+        try:
+            pattern = re.compile(turn["match"], re.IGNORECASE)
+        except re.error as exc:
+            _fail(source, where + ".match", f"expression régulière invalide ({exc})")
+        _check_steps(source, where + ".steps", turn.get("steps"))
+        if not turn["steps"]:
+            _fail(source, where + ".steps", "au moins une étape attendue")
+        if "cost_eur" in turn:
+            _number(source, where + ".cost_eur", turn["cost_eur"])
+        turns.append({"pattern": pattern, "steps": turn["steps"], "cost_eur": turn.get("cost_eur")})
+    return {"source": source, "chunk_chars": chunk_chars, "chunk_delay_s": delay, "turns": turns}
+
+
+def match_turn(scenario: dict, message: str) -> Optional[dict]:
+    """Premier tour du scénario dont l'expression régulière correspond au message, ou `None`."""
+    return next((t for t in scenario["turns"] if t["pattern"].search(message)), None)
+
+
 class MockBackend(ChatBackend):
     name = "mock"
+
+    def __init__(self, workspace: Path, config: dict):
+        super().__init__(workspace, config)
+        self.scenario: Optional[dict] = None
+        raw = str(config.get("mock_scenario") or "").strip()
+        if raw:
+            self.scenario = load_scenario(raw, workspace)
+        speed = config.get("mock_scenario_speed", 1)
+        try:
+            self.speed = float(speed)
+        except (TypeError, ValueError):
+            self.speed = 0.0
+        if self.speed <= 0:
+            raise BackendError(f"[chat].mock_scenario_speed : nombre > 0 attendu, {speed!r} trouvé.")
+        self.hold = str(config.get("mock_scenario_hold") or "")
 
     def run_turn(self, ctx: TurnContext, user_message: str) -> None:
         emit = ctx.emit
@@ -70,6 +229,13 @@ class MockBackend(ChatBackend):
             if self._call_schedule(ctx, *((DEMO_INPUT, DEMO_SUMMARY, DEMO_DIFF) if demo else ())) != "allow":
                 emit("text_delta", {"text": "Appel non autorisé par la politique."})
             finish("end_turn")
+            return
+
+        scripted = match_turn(self.scenario, user_message) if self.scenario else None
+        if scripted is not None:
+            if scripted["cost_eur"] is not None:
+                cost = float(scripted["cost_eur"])
+            self._play(ctx, scripted["steps"], finish)
             return
 
         if "fatigu" in text:
@@ -113,6 +279,65 @@ class MockBackend(ChatBackend):
         else:
             emit("text_delta", {"text": "Rien à modifier pour l'instant."})
         finish("end_turn")
+
+    # -- scénario rejoué -------------------------------------------------------------------
+
+    def _sleep(self, ctx: TurnContext, seconds: float) -> bool:
+        """Attend `seconds` (divisé par `mock_scenario_speed`) ; `True` si le tour est annulé."""
+        return ctx.cancelled.wait(seconds / self.speed) if seconds > 0 else ctx.cancelled.is_set()
+
+    def _play(self, ctx: TurnContext, steps: List[dict], finish: Callable[[str], None]) -> None:
+        reason = self._play_steps(ctx, steps)
+        if reason == "interrupted":
+            ctx.emit("done", {"reason": "interrupted"})
+        else:
+            finish(reason)
+
+    def _play_steps(self, ctx: TurnContext, steps: List[dict]) -> str:
+        """Joue les étapes ; renvoie la raison de fin (`end_turn`, `pending_approval`, `interrupted`)."""
+        emit = ctx.emit
+        sc = self.scenario
+        for step in steps:
+            if "text" in step:
+                size = step.get("chunk_chars", sc["chunk_chars"])
+                delay = step.get("chunk_delay_s", sc["chunk_delay_s"])
+                text = step["text"]
+                for start in range(0, len(text), size):
+                    payload = {"text": text[start:start + size]}
+                    if step.get("part"):
+                        payload["part"] = step["part"]
+                    emit("text_delta", payload)
+                    if self._sleep(ctx, delay):
+                        return "interrupted"
+            elif "tool" in step:
+                tool = step["tool"]
+                emit("tool_start", {"id": tool["id"], "name": tool["name"], "summary": tool["summary"]})
+                if self._sleep(ctx, tool.get("delay_s", 0)):
+                    return "interrupted"
+                emit("tool_end", {"id": tool["id"], "ok": bool(tool.get("ok", True)),
+                                  "summary": tool.get("result", "")})
+            elif "file_written" in step:
+                emit("file_written", {"path": step["file_written"]})
+            elif "pause_s" in step:
+                if self._sleep(ctx, step["pause_s"]):
+                    return "interrupted"
+            elif "marker" in step:
+                if self.hold and step["marker"] == self.hold:
+                    ctx.cancelled.wait(HOLD_MAX_S)
+                    return "interrupted"
+            elif "approval" in step:
+                appr = step["approval"]
+                run = appr.get("run") or {}
+                outcome = self._call_schedule(
+                    ctx, appr["input"], appr["summary"], appr.get("diff", []), tool=appr["tool"],
+                    run_summary=run.get("summary", "Planification de la séance"),
+                    run_result=run.get("result", "Séance planifiée (simulation)"))
+                reason = self._play_steps(ctx, appr.get(outcome, []))
+                if reason != "end_turn":
+                    return reason
+                if outcome == "pending":
+                    return "pending_approval"
+        return "end_turn"
 
     def _demo_morning_check(self, ctx: TurnContext, finish) -> None:
         """Scénario de démonstration (captures de la doc) : bilan matinal, trace, proposition.
@@ -159,13 +384,14 @@ class MockBackend(ChatBackend):
         finish("end_turn")
 
     def _call_schedule(self, ctx: TurnContext, tool_input: dict = TOOL_INPUT, summary: str = SUMMARY,
-                       diff: list = DIFF) -> str:
+                       diff: list = DIFF, tool: str = TOOL, run_summary: str = "Planification de la séance",
+                       run_result: str = "Séance planifiée (simulation)") -> str:
         """Passe l'appel par la politique puis l'approbation ; renvoie allow | deny | pending."""
-        verdict = ctx.decide(TOOL, tool_input)
+        verdict = ctx.decide(tool, tool_input)
         if verdict == "ask":
-            verdict = ctx.request_approval(TOOL, tool_input, summary, diff)
+            verdict = ctx.request_approval(tool, tool_input, summary, diff)
         if verdict == "allow":
-            ctx.emit("tool_start", {"id": "t2", "name": TOOL, "summary": "Planification de la séance"})
-            ctx.emit("tool_end", {"id": "t2", "ok": True, "summary": "Séance planifiée (simulation)"})
+            ctx.emit("tool_start", {"id": "t2", "name": tool, "summary": run_summary})
+            ctx.emit("tool_end", {"id": "t2", "ok": True, "summary": run_result})
             return "allow"
         return "pending" if verdict == "pending" else "deny"

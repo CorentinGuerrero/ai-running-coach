@@ -1,0 +1,65 @@
+WEBVTT
+
+1
+00:00:00.900 --> 00:00:05.950
+ai-running-coach : votre staff d'entraînement trail, directement dans votre éditeur.
+
+2
+00:00:06.800 --> 00:00:11.423
+Votre montre mesure tout : sommeil, variabilité cardiaque, allure, dénivelé.
+
+3
+00:00:11.523 --> 00:00:13.011
+Mais qui relie les points ?
+
+4
+00:00:14.200 --> 00:00:20.594
+Le coach lit vos données Garmin, ou Intervals.icu, et écrit tout en Markdown, dans votre IDE.
+
+5
+00:00:22.600 --> 00:00:28.973
+Quatre spécialistes travaillent ensemble : coach, stratège de course, médecin du sport et nutritionniste.
+
+6
+00:00:29.073 --> 00:00:31.115
+Gardez seulement ceux qu'il vous faut.
+
+7
+00:00:31.965 --> 00:00:38.871
+Chaque matin, trois signaux décident de la séance. Ce matin, ils sont au rouge : le seuil devient une endurance douce.
+
+8
+00:00:38.971 --> 00:00:42.506
+Et la commande /why donne la raison, sans rien inventer.
+
+9
+00:00:43.356 --> 00:00:46.657
+Le plan de la semaine passe par sept garde-fous calculés.
+
+10
+00:00:46.757 --> 00:00:51.615
+Deux séances dures d'affilée ? Les côtes glissent à jeudi, puis tout part sur votre montre.
+
+11
+00:00:53.356 --> 00:01:01.969
+Le jour J, votre course est découpée segment par segment : allures tirées de votre propre modèle, trois scénarios, et le ravitaillement qui va avec.
+
+12
+00:01:02.819 --> 00:01:04.776
+Tout reste chez vous, en Markdown.
+
+13
+00:01:04.876 --> 00:01:10.566
+Un index SQLite jetable alimente un tableau de bord local : condition, fatigue, forme.
+
+14
+00:01:11.416 --> 00:01:19.517
+Et le coach vous suit partout : synchronisation automatique, notification sur le téléphone, et des commandes courtes pour aller à l'essentiel.
+
+15
+00:01:20.367 --> 00:01:24.841
+Un clone, une installation, un court entretien avec /coach-setup…
+
+16
+00:01:25.467 --> 00:01:27.168
+Prêt à courir plus malin ?

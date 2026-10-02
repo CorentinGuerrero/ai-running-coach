@@ -1,0 +1,147 @@
+{
+  "title": {
+    "fr": "Le coach dans la poche",
+    "en": "Coach in your pocket"
+  },
+  "summary": {
+    "fr": "La machine coach, la synchronisation automatique (horaires ou veille), la notification push, Remote Control et les commandes courtes, le tableau de bord mobile, et ce qui n'est pas possible."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape dix : le coach dans la poche."
+      ],
+      "en": [
+        "Stage ten: coach in your pocket."
+      ]
+    },
+    {
+      "id": "night",
+      "min": 9,
+      "chapter": {
+        "fr": "La machine coach",
+        "en": "The coach machine"
+      },
+      "fr": [
+        "Chez Camille, une machine reste allumée toute la nuit : la machine coach.",
+        "Elle garde les fichiers et les accès Garmin, et un cron lance la synchronisation à sept heures quinze, puis à quatorze heures quinze."
+      ],
+      "en": [
+        "At Camille's place, one machine stays on all night: the coach machine.",
+        "It holds the files and the Garmin access, and a cron job runs the sync at seven fifteen, then at two fifteen."
+      ]
+    },
+    {
+      "id": "watch",
+      "min": 9,
+      "chapter": {
+        "fr": "Le mode veille",
+        "en": "Watch mode"
+      },
+      "fr": [
+        "Ou, en mode veille, un petit script interroge Garmin toutes les quinze minutes, sans aucun modèle.",
+        "Rien de neuf : zéro jeton dépensé.",
+        "Une séance ou un sommeil à récupérer : alors seulement, le coach se réveille."
+      ],
+      "en": [
+        "Or, in watch mode, a small script polls Garmin every fifteen minutes, with no model at all.",
+        "Nothing new: zero tokens spent.",
+        "A run or a night's sleep to fetch: only then does the coach wake up."
+      ]
+    },
+    {
+      "id": "sync",
+      "min": 8,
+      "chapter": {
+        "fr": "Seulement le manquant",
+        "en": "Only what's missing"
+      },
+      "fr": [
+        "Le coach ne récupère que les dates dont le fichier manque, et écrit le Markdown.",
+        "Il termine par un résumé de cinq lignes."
+      ],
+      "en": [
+        "The coach only fetches the dates whose file is missing, and writes the Markdown.",
+        "It ends with a five-line summary."
+      ]
+    },
+    {
+      "id": "push",
+      "min": 8,
+      "chapter": {
+        "fr": "La notification",
+        "en": "The notification"
+      },
+      "fr": [
+        "Ce résumé part en notification sur le téléphone, via ntfy.",
+        "Sommeil, variabilité cardiaque, readiness : tout est là avant le café."
+      ],
+      "en": [
+        "That summary lands on the phone as a push notification, through ntfy.",
+        "Sleep, heart rate variability, readiness: it's all there before the coffee."
+      ]
+    },
+    {
+      "id": "remote",
+      "min": 10,
+      "chapter": {
+        "fr": "Remote Control",
+        "en": "Remote Control"
+      },
+      "fr": [
+        "Besoin d'en savoir plus ? L'appli Claude se connecte à la machine coach, par Remote Control.",
+        "Camille tape /today, /why, /week ou /race : des réponses courtes, qui ne modifient jamais le plan."
+      ],
+      "en": [
+        "Want to know more? The Claude app connects to the coach machine through Remote Control.",
+        "Camille types /today, /why, /week or /race: short answers that never change the plan."
+      ]
+    },
+    {
+      "id": "views",
+      "min": 8,
+      "chapter": {
+        "fr": "Le tableau de bord",
+        "en": "The dashboard"
+      },
+      "fr": [
+        "Le tableau de bord se lit aussi sur le téléphone : le verdict du jour, la semaine, et la carte d'approbation du coach."
+      ],
+      "en": [
+        "The dashboard reads fine on a phone too: today's verdict, the week, and the coach's approval card."
+      ]
+    },
+    {
+      "id": "limits",
+      "min": 10,
+      "chapter": {
+        "fr": "Soyons honnêtes",
+        "en": "Being honest"
+      },
+      "fr": [
+        "Soyons honnêtes. Pas d'application maison qui utilise votre abonnement : seule une clé API, facturée au token, le permet.",
+        "Envoyer des photos de chaussures depuis le téléphone n'est pas validé.",
+        "Et si la machine s'éteint, il reste le plan B dans le cloud."
+      ],
+      "en": [
+        "Let's be honest. No home-made app can use your subscription: only an API key, billed per token, allows it.",
+        "Sending shoe photos from the phone is not validated.",
+        "And if the machine goes off, there is plan B in the cloud."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « Le coach dans la poche » de la documentation."
+      ],
+      "en": [
+        "To go further: the “Coach in your pocket” page of the documentation."
+      ]
+    }
+  ]
+}

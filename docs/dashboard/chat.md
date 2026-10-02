@@ -5,6 +5,25 @@ ou téléphone —, avec la même connexion que le reste du tableau de bord. Der
 mêmes agents, les mêmes skills, le même serveur MCP Garmin et les mêmes fichiers Markdown
 qu'en session dans votre IDE : le chat n'invente aucune source de vérité.
 
+<!-- arc-video:chat-coach -->
+<div class="arc-video-card" markdown>
+
+[![Parler à son coach](../video/chat-coach/poster.jpg)](../video/chat-coach/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 04 · 1 min 24</span>
+
+**[Parler à son coach](../video/chat-coach/index.html)** — Le chat du tableau de bord : trace des outils, carte d'approbation, politique de permissions, budget et fournisseurs.
+
+[Regarder](../video/chat-coach/index.html) · [English](../video/chat-coach/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 - chaque étape (fichier lu, outil appelé) apparaît dans une trace repliable, avec ce que le
   coach en dit en travaillant — seule la réponse finale reste affichée ;
 - les réponses arrivent au fil de l'eau ; si le fournisseur est saturé, une ligne l'indique
@@ -199,6 +218,16 @@ backend = "mock"
 
 Réponses scriptées, aucun modèle, aucun coût : de quoi voir la page, la trace et la carte
 d'approbation. Un message contenant « fatigué » joue la démonstration des captures ci-dessus.
+
+Pour rejouer **votre propre scénario** (démonstration, vidéo, captures reproductibles), ajoutez
+`mock_scenario = "chemin/scenario.json"` (absolu, relatif au workspace ou à la racine du dépôt) :
+chaque tour est un message reconnu par une expression régulière, suivi d'étapes — texte « tapé »
+morceau par morceau (`chunk_delay_s`), appels d'outils avec leur trace, fichiers écrits, pauses, et
+une carte d'approbation avec ses issues `allow` / `deny` / `pending`. Le fichier est validé au
+démarrage (erreur nommant le fichier et l'étape). `mock_scenario_speed` accélère les délais et
+`mock_scenario_hold = "<marqueur>"` fige le tour à un point nommé, pour capturer une réponse à
+mi-parcours. Le format complet est décrit en tête de `scripts/arc_chat_mock.py` ; un exemple est
+livré dans `docs/video/data/chat-scenario.fr.json`.
 
 ### Avec une clé, sur une copie : le bac à sable
 

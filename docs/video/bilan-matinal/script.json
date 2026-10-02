@@ -1,0 +1,129 @@
+{
+  "title": {
+    "fr": "Le réveil du traileur",
+    "en": "Morning check"
+  },
+  "summary": {
+    "fr": "HRV, FC de repos et readiness lues ensemble chaque matin : le verdict, sa raison, et comment régler le bilan."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape deux : le réveil du traileur."
+      ],
+      "en": [
+        "Stage two: the morning check."
+      ]
+    },
+    {
+      "id": "alarm",
+      "min": 7,
+      "chapter": {
+        "fr": "Mardi, 6 h 30",
+        "en": "Tuesday, 6:30 am"
+      },
+      "fr": [
+        "Mardi matin, six heures trente. Au programme de Camille : un seuil, cinq fois six minutes.",
+        "Mais la nuit a été courte."
+      ],
+      "en": [
+        "Tuesday, six thirty. On Camille's plan: a threshold session, five times six minutes.",
+        "But the night was short."
+      ]
+    },
+    {
+      "id": "triptych",
+      "min": 9,
+      "chapter": {
+        "fr": "Trois signaux",
+        "en": "Three signals"
+      },
+      "fr": [
+        "Avant toute décision, le coach lit trois signaux, toujours ensemble : la variabilité cardiaque de la nuit, la fréquence cardiaque de repos, et la readiness.",
+        "Trois nuits sous la bande personnelle, six battements de plus que d'habitude, une readiness à trente-quatre."
+      ],
+      "en": [
+        "Before any decision, the coach reads three signals, always together: overnight heart rate variability, resting heart rate, and readiness.",
+        "Three nights below the personal band, six beats above normal, readiness at thirty-four."
+      ]
+    },
+    {
+      "id": "verdict",
+      "min": 8,
+      "chapter": {
+        "fr": "Le verdict",
+        "en": "The verdict"
+      },
+      "fr": [
+        "Verdict : alléger.",
+        "Le seuil attendra le retour des signaux. Ce soir, quarante-cinq minutes d'endurance fondamentale, entre dix-huit et dix-neuf heures : le créneau le plus frais."
+      ],
+      "en": [
+        "Verdict: ease off.",
+        "Threshold waits for the signals to recover. Tonight, forty-five minutes of easy running, between six and seven: the coolest slot."
+      ]
+    },
+    {
+      "id": "trace",
+      "min": 8,
+      "chapter": {
+        "fr": "Écrit noir sur blanc",
+        "en": "Written down"
+      },
+      "fr": [
+        "La décision est écrite dans un fichier, avec ses sources.",
+        "On la retrouve dans le tableau de bord, sous « Pourquoi aujourd'hui ? »."
+      ],
+      "en": [
+        "The decision is written to a file, with its sources.",
+        "It shows up on the dashboard, under “Why today?”."
+      ]
+    },
+    {
+      "id": "why",
+      "min": 8,
+      "chapter": {
+        "fr": "/why",
+        "en": "/why"
+      },
+      "fr": [
+        "Et si Camille demande pourquoi, la commande /why répond en citant les mesures.",
+        "Jamais en inventant."
+      ],
+      "en": [
+        "And if Camille asks why, the /why command answers by quoting the measurements.",
+        "Never by making things up."
+      ]
+    },
+    {
+      "id": "levels",
+      "min": 8,
+      "chapter": {
+        "fr": "À votre mesure",
+        "en": "Your call"
+      },
+      "fr": [
+        "Trop de données ? Le bilan se règle : complet, minimal, ou désactivé.",
+        "Et le coach ne réactive jamais en douce un niveau plus strict."
+      ],
+      "en": [
+        "Too much data? The check is configurable: full, minimal, or off.",
+        "And the coach never quietly switches a stricter level back on."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « Aujourd'hui » de la documentation."
+      ],
+      "en": [
+        "To go further: the “Today” page of the documentation."
+      ]
+    }
+  ]
+}

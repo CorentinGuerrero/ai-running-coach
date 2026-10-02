@@ -1,0 +1,159 @@
+{
+  "title": {
+    "fr": "Parler à son coach",
+    "en": "Talk to your coach"
+  },
+  "summary": {
+    "fr": "Le chat du tableau de bord : trace des outils, carte d'approbation, politique de permissions, budget et fournisseurs."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape quatre : parler à son coach."
+      ],
+      "en": [
+        "Stage four: talk to your coach."
+      ]
+    },
+    {
+      "id": "ask",
+      "min": 7,
+      "chapter": {
+        "fr": "Une question",
+        "en": "One question"
+      },
+      "fr": [
+        "Camille se sent à plat. Dans l'onglet Coach, une phrase suffit.",
+        "On fait quand même le seuil ?"
+      ],
+      "en": [
+        "Camille feels drained. In the Coach tab, one sentence is enough.",
+        "Should the threshold still happen?"
+      ]
+    },
+    {
+      "id": "answer",
+      "min": 9,
+      "chapter": {
+        "fr": "À voir travailler",
+        "en": "Watch it work"
+      },
+      "fr": [
+        "Le coach répond à vue : chaque fichier lu, chaque outil appelé apparaît.",
+        "H R V trente-huit, repos cinquante-deux, readiness trente-quatre."
+      ],
+      "en": [
+        "The coach answers in the open: every file read, every tool called, shown.",
+        "H R V thirty-eight, resting heart rate fifty-two, readiness thirty-four."
+      ]
+    },
+    {
+      "id": "approval",
+      "min": 10,
+      "chapter": {
+        "fr": "Un accord, pas un fait accompli",
+        "en": "Your say first"
+      },
+      "fr": [
+        "Il propose d'alléger : quarante-cinq minutes faciles. Mais rien ne part chez Garmin sans votre accord.",
+        "Camille clique sur Appliquer : séance planifiée, décision écrite."
+      ],
+      "en": [
+        "It suggests easing off: forty-five easy minutes. But nothing reaches Garmin without your approval.",
+        "Camille clicks Apply: session scheduled, decision written."
+      ]
+    },
+    {
+      "id": "samedi",
+      "min": 6,
+      "chapter": {
+        "fr": "Et samedi ?",
+        "en": "And Saturday?"
+      },
+      "fr": [
+        "Et samedi ? Le coach garde la sortie longue, départ tôt le matin."
+      ],
+      "en": [
+        "And Saturday? The coach keeps the long run, with an early start."
+      ]
+    },
+    {
+      "id": "rules",
+      "min": 9,
+      "chapter": {
+        "fr": "Ce qu'il peut faire",
+        "en": "What it may do"
+      },
+      "fr": [
+        "Le coach lit le workspace et Garmin, et écrit vos fichiers Markdown.",
+        "Mais toute écriture vers Garmin ou Intervals.icu attend votre accord. Un shell libre ? Refusé."
+      ],
+      "en": [
+        "The coach reads the workspace and Garmin, and writes your Markdown files.",
+        "But any write to Garmin or Intervals.icu waits for your approval. A free shell? Refused."
+      ]
+    },
+    {
+      "id": "budget",
+      "min": 9,
+      "chapter": {
+        "fr": "Local, et plafonné",
+        "en": "Local and capped"
+      },
+      "fr": [
+        "Le chat reste local : le tableau de bord écoute sur cent vingt-sept point zéro point zéro point un.",
+        "Et la dépense est plafonnée : un euro par tour, deux euros par jour."
+      ],
+      "en": [
+        "The chat stays local: the dashboard listens on 127.0.0.1.",
+        "And spending is capped: one euro per turn, two per day."
+      ]
+    },
+    {
+      "id": "phone",
+      "min": 8,
+      "chapter": {
+        "fr": "Sur téléphone",
+        "en": "On your phone"
+      },
+      "fr": [
+        "Sur téléphone, la carte reste au premier plan.",
+        "Sans réponse, une notification résume le changement, sans données de santé."
+      ],
+      "en": [
+        "On a phone, the card stays front and centre.",
+        "Unanswered, a notification summarises the change, with no health data."
+      ]
+    },
+    {
+      "id": "backends",
+      "min": 9,
+      "chapter": {
+        "fr": "Quel modèle ?",
+        "en": "Which model?"
+      },
+      "fr": [
+        "Une clé API, pas votre abonnement : Claude, ou OpenRouter avec DeepSeek.",
+        "Ici, les réponses sont scriptées : un backend de démonstration, sans coût."
+      ],
+      "en": [
+        "An API key, not your subscription: Claude, or OpenRouter with DeepSeek.",
+        "Here, replies are scripted: a demo backend, no cost."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « Le chat avec le coach » de la documentation."
+      ],
+      "en": [
+        "To go further: the “Chat with the coach” page of the documentation."
+      ]
+    }
+  ]
+}

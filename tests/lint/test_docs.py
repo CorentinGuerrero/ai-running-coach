@@ -29,7 +29,7 @@ class TestInternalLinks(unittest.TestCase):
             for target in MARKDOWN_LINK.findall(path.read_text(encoding="utf-8")):
                 if target.startswith(("http://", "https://", "mailto:", "#")):
                     continue
-                file_part = target.split("#", 1)[0]
+                file_part = target.split("#", 1)[0].split("?", 1)[0]  # ?lang=en : paramètre, pas un fichier
                 if not file_part:
                     continue                       # ancre dans la même page
                 if not (path.parent / file_part).resolve().exists():
