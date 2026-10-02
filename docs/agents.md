@@ -132,7 +132,7 @@ flowchart TB
 - **Recherche de courses** sous contraintes (période, zone, distance, D+, sortie entre amis), par recherche web
 - **Chaque course sourcée** : date vérifiée sur le site officiel, sinon « à confirmer » ; jamais une course inventée
 - **Faisabilité d'abord** : dit clairement quand une distance est hors de portée, puis propose un format adapté (le même événement, une distance plus courte)
-- **Calendrier de saison** : rôles A (objectif), B (préparation), C (plaisir), écarts de récupération calculés
+- **Calendrier de saison** : rôles **Objectif principal**, **Préparation** et **Plaisir**, écarts de récupération calculés
 - Consulte le **médecin** ou le **coach** dans des cas précis, et ne modifie jamais `planning/active_objective.md` lui-même
 
 [→ Détails de l'agent directeur sportif](agents/sports-director.md)
