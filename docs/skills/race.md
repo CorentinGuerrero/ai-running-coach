@@ -12,7 +12,7 @@ pousse rien vers Garmin.
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 06 · 1 min 33</span>
+<span class="arc-video__meta">En vidéo · Étape 06 · 1 min 43</span>
 
 **[La course, segment par segment](../video/jour-de-course/index.html)** — Du GPX au plan de course : allures par segment, énergie, matériel obligatoire, montre, puis débrief plan contre réalisé.
 

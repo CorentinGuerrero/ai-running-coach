@@ -12,7 +12,7 @@ calendrier — et le texte du coach à côté des chiffres.
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 05 · 1 min 22</span>
+<span class="arc-video__meta">En vidéo · Étape 05 · 1 min 29</span>
 
 **[Tour du propriétaire](../video/tableau-de-bord/index.html)** — Visite guidée du tableau de bord local, en lecture seule : une question par vue.
 

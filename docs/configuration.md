@@ -52,7 +52,7 @@ Ce que vous perdez en retirant un agent :
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 02 · 1 min 11</span>
+<span class="arc-video__meta">En vidéo · Étape 02 · 1 min 19</span>
 
 **[Le réveil du traileur](video/bilan-matinal/index.html)** — HRV, FC de repos et readiness lues ensemble chaque matin : le verdict, sa raison, et comment régler le bilan.
 
@@ -133,7 +133,7 @@ COROS/Suunto/Polar/Apple synchronisées sur Intervals.icu.
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 11 · 1 min 31</span>
+<span class="arc-video__meta">En vidéo · Étape 11 · 1 min 46</span>
 
 **[Trois voix, une décision](video/styles-coaching/index.html)** — La même décision dite par trois styles de coaching : le ton, la fermeté et la longueur se règlent, jamais le verdict.
 
