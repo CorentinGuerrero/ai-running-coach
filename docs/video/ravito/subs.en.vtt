@@ -1,0 +1,73 @@
+WEBVTT
+
+1
+00:00:01.200 --> 00:00:03.391
+Stage eight: fuel stop.
+
+2
+00:00:05.100 --> 00:00:13.158
+Camille types /log, then one sentence: two gels and half a litre, left knee three out of ten, RPE seven.
+
+3
+00:00:13.258 --> 00:00:15.727
+The model spots five pieces.
+
+4
+00:00:16.577 --> 00:00:21.798
+But it computes nothing: it hands these entities to a small Python script.
+
+5
+00:00:21.898 --> 00:00:28.718
+The script finds each product in the catalogue: two gels, twenty-five grams each, fifty grams.
+
+6
+00:00:28.818 --> 00:00:32.887
+The model extracts, the script computes. Never the reverse.
+
+7
+00:00:33.737 --> 00:00:36.846
+An unknown product? Two similar bars?
+
+8
+00:00:36.946 --> 00:00:42.614
+The coach asks. It never invents a value, and the rest of the sentence doesn't wait.
+
+9
+00:00:43.464 --> 00:00:46.914
+Carbs, fluid and effort join the session file.
+
+10
+00:00:47.014 --> 00:00:49.781
+The pain goes to the health folder.
+
+11
+00:00:49.881 --> 00:00:53.054
+Nothing is overwritten or counted twice.
+
+12
+00:00:53.904 --> 00:00:57.055
+Three out of ten: logged, nothing more.
+
+13
+00:00:57.155 --> 00:01:05.341
+At seven out of ten, an adjustable threshold, it recommends seeing a professional. Not a substitute for medical advice.
+
+14
+00:01:06.191 --> 00:01:12.457
+On runs over ninety minutes, the script keeps your best real rate: fifty-six grams an hour.
+
+15
+00:01:12.557 --> 00:01:19.442
+Ten more for margin: a ceiling of sixty-six. Weigh-ins before and after also give the sweat rate.
+
+16
+00:01:20.292 --> 00:01:24.531
+Race day: sixty grams of carbs an hour, under the ceiling.
+
+17
+00:01:24.631 --> 00:01:33.628
+After each run, one line sets Garmin's energy figure against the model's: flagged beyond fifteen percent. Garmin stays the reference.
+
+18
+00:01:36.178 --> 00:01:40.012
+To go further: the “log” page of the documentation.

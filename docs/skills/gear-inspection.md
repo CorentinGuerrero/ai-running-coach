@@ -2,6 +2,25 @@
 
 > **Description** : Analyse photo de l'usure d'une paire — état 🟢🟡🟠🔴, comparaison avec l'inspection précédente, indices de foulée — toujours formulés comme des indices, jamais comme un diagnostic.
 
+<!-- arc-video:materiel -->
+<div class="arc-video-card" markdown>
+
+[![Usure](../video/materiel/poster.jpg)](../video/materiel/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 09 · 1 min 32</span>
+
+**[Usure](../video/materiel/index.html)** — Du kilométrage à l'inspection photo : alerte de seuil, verdict en quatre couleurs, indices de foulée (jamais un diagnostic), foulée mesurée, kits et bilan de carrière.
+
+[Regarder](../video/materiel/index.html) · [English](../video/materiel/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Quand l'utiliser
 
 - Le coach **propose** une inspection (jamais imposée) environ **tous les 200 km** d'une paire, à l'**alerte de seuil**, ou vous la demandez

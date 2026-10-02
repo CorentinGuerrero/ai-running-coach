@@ -6,7 +6,7 @@
 
 Le projet est **en français par défaut** (la langue des documents générés est configurable via `config/workspace.toml`). Il est connecté par défaut à **Garmin Connect**, installé et configuré automatiquement par `./install.sh`. **Intervals.icu** peut aussi être la source primaire — pour les athlètes sans montre Garmin (COROS, Suunto, Polar, Apple) — avec `./install.sh --source intervals` (voir [Configuration Intervals.icu](docs/intervals-setup.md)) ; sans cette option, il reste disponible en destination secondaire, uniquement sur demande explicite (configuration manuelle, voir [la FAQ](docs/faq.md#comment-configurer-intervalsicu-sans-passer-par-installsh)).
 
-🎬 **[Le projet en 80 secondes](https://mmornati.github.io/ai-running-coach/video/)** — une présentation animée dont chaque image est dessinée en JavaScript ([source](docs/video/index.html), rendu MP4 : `uv run --with playwright scripts/render_video.py`).
+🎬 **[La bande-annonce](https://mmornati.github.io/ai-running-coach/video/)** et **[Le Sentier](https://mmornati.github.io/ai-running-coach/videos/)**, une série de courtes vidéos narrées en français et en anglais, une par fonctionnalité — chaque image est dessinée en JavaScript ([source](docs/video/), rendu MP4 : `uv run --with playwright scripts/render_video.py --episode all`).
 
 ## ✨ Ce que le projet apporte
 

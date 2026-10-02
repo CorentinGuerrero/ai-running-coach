@@ -1,0 +1,151 @@
+{
+  "title": {
+    "fr": "Le plan qui sait dire non",
+    "en": "The plan that says no"
+  },
+  "summary": {
+    "fr": "Sept garde-fous calculés relisent la semaine avant son écriture et son envoi au calendrier Garmin : un second avis déterministe et testé."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape trois : le plan qui sait dire non."
+      ],
+      "en": [
+        "Stage three: the plan that says no."
+      ]
+    },
+    {
+      "id": "week",
+      "min": 7,
+      "chapter": {
+        "fr": "Le brouillon",
+        "en": "The draft"
+      },
+      "fr": [
+        "Lundi vingt-huit septembre : le coach rédige la semaine de Camille.",
+        "Seuil mardi, côtes mercredi, sortie longue samedi.",
+        "D'abord, un second avis. Calculé, pas deviné."
+      ],
+      "en": [
+        "Monday, September twenty-eighth: the coach drafts Camille's week.",
+        "Threshold Tuesday, hills Wednesday, long run Saturday.",
+        "First, a second opinion. Computed, not guessed."
+      ]
+    },
+    {
+      "id": "load",
+      "min": 8,
+      "chapter": {
+        "fr": "Charge et progression",
+        "en": "Load and progression"
+      },
+      "fr": [
+        "Quatre garde-fous mesurent la charge. Ratio de charge projeté : un virgule dix-huit, sous un virgule trois.",
+        "Volume plus six pour cent, dénivelé sous cinq : tous deux sous dix.",
+        "Monotonie : un virgule six, sous deux."
+      ],
+      "en": [
+        "Four guardrails measure load. Projected load ratio: one point one eight, under one point three.",
+        "Volume up six percent, elevation under five: both below ten.",
+        "Monotony: one point six, under two."
+      ]
+    },
+    {
+      "id": "health",
+      "min": 8,
+      "chapter": {
+        "fr": "Santé et sortie longue",
+        "en": "Health and long run"
+      },
+      "fr": [
+        "Pas de séance de qualité après un verdict rouge : aucune ici. C'est le seul garde-fou qui bloque.",
+        "La sortie longue pèse trente-neuf pour cent du volume, au-dessus de trente-cinq : un avertissement, pas un blocage."
+      ],
+      "en": [
+        "No quality session after a red health verdict: none here. It's the only guardrail that blocks.",
+        "The long run is thirty-nine percent of volume, above thirty-five: a warning, not a block."
+      ]
+    },
+    {
+      "id": "back2back",
+      "min": 8,
+      "chapter": {
+        "fr": "Deux séances dures de suite",
+        "en": "Back-to-back quality"
+      },
+      "fr": [
+        "Septième garde-fou : qualité deux jours de suite.",
+        "Seuil mardi, côtes mercredi : alerte.",
+        "Les côtes passent à jeudi, l'endurance fondamentale à mercredi."
+      ],
+      "en": [
+        "Seventh guardrail: quality on consecutive days.",
+        "Threshold Tuesday, hills Wednesday: warning.",
+        "Hills move to Thursday, the easy run to Wednesday."
+      ]
+    },
+    {
+      "id": "trace",
+      "min": 9,
+      "chapter": {
+        "fr": "Tracé",
+        "en": "On the record"
+      },
+      "fr": [
+        "Le changement est écrit dans un fichier de décision : la règle déclenchée, l'avant, l'après."
+      ],
+      "en": [
+        "The change is written to a decision file: the rule that fired, the before, the after."
+      ]
+    },
+    {
+      "id": "targets",
+      "min": 8,
+      "chapter": {
+        "fr": "Cibles personnelles",
+        "en": "Personal targets"
+      },
+      "fr": [
+        "Chaque séance reçoit des cibles calculées pour Camille, jamais génériques.",
+        "Zone cardiaque, allure à plat corrigée de la pente, dénivelé attendu par côte."
+      ],
+      "en": [
+        "Every session gets targets computed for Camille.",
+        "Heart rate zone, slope-adjusted pace, and expected climb per hill repeat."
+      ]
+    },
+    {
+      "id": "push",
+      "min": 8,
+      "chapter": {
+        "fr": "Au calendrier Garmin",
+        "en": "To the Garmin calendar"
+      },
+      "fr": [
+        "Contrôle relancé : l'alerte de qualité a disparu. Envoi au calendrier Garmin, sans doublon.",
+        "Puis on relit le calendrier pour vérifier chaque séance.",
+        "Un second avis calculé, testé. Pas une intuition de modèle."
+      ],
+      "en": [
+        "Check rerun: the quality alert is gone. Push to the Garmin calendar, without duplicates.",
+        "Then it reads the calendar back to verify.",
+        "A computed, tested second opinion. Not a model's hunch."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « Les garde-fous » de la documentation."
+      ],
+      "en": [
+        "To go further: the “Guardrails” page of the documentation."
+      ]
+    }
+  ]
+}

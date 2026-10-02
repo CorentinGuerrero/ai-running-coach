@@ -1,0 +1,15 @@
+{
+  "fr": {
+    "SI": "[[ˈɛs ˈi]]",
+    "/arc-backfill": "[[slˈaʃ ˈaʁk bˈak fˈil]]",
+    "Markdown": "[[maʁkdˈaʊn]]",
+    "SQLite": "[[ɛs ky lˈajt]]",
+    "IDE": "i dé e"
+  },
+  "en": {
+    "SI": "S I",
+    "/arc-backfill": "slash ark backfill",
+    "Markdown": "markdown",
+    "IDE": "I D E"
+  }
+}

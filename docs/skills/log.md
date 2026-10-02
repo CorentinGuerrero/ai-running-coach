@@ -2,6 +2,25 @@
 
 > **Description** : Journal en une phrase — ravitaillement, hydratation, douleur, RPE — converti en blocs `arc` structurés, sans jamais inventer une valeur nutritionnelle.
 
+<!-- arc-video:ravito -->
+<div class="arc-video-card" markdown>
+
+[![Ravito](../video/ravito/poster.jpg)](../video/ravito/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 08 · 1 min 35</span>
+
+**[Ravito](../video/ravito/index.html)** — Une phrase libre devient des données : le modèle extrait, le script calcule, et ne devine jamais un produit.
+
+[Regarder](../video/ravito/index.html) · [English](../video/ravito/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Quand l'utiliser
 
 - L'athlète tape `/log` ou décrit en une phrase ce qu'il a mangé/bu pendant une séance, une douleur ressentie, ou son ressenti d'effort (RPE)

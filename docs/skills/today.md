@@ -10,6 +10,25 @@ décision ou plan de course**, et ne pousse jamais rien vers Garmin — mais il
 l'exigent : cette donnée n'existe pas autrement, et la re-récupérer à chaque
 appel irait à l'encontre de ces mêmes règles.
 
+<!-- arc-video:bilan-matinal -->
+<div class="arc-video-card" markdown>
+
+[![Le réveil du traileur](../video/bilan-matinal/poster.jpg)](../video/bilan-matinal/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 02 · 1 min 11</span>
+
+**[Le réveil du traileur](../video/bilan-matinal/index.html)** — HRV, FC de repos et readiness lues ensemble chaque matin : le verdict, sa raison, et comment régler le bilan.
+
+[Regarder](../video/bilan-matinal/index.html) · [English](../video/bilan-matinal/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Lancer
 
 ```

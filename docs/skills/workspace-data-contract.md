@@ -5,6 +5,25 @@ Mais chaque fichier écrit par un agent commence désormais par un **petit bloc 
 données** : c'est lui que lisent le [tableau de bord](../dashboard/index.md) et la
 comparaison de parcours, jamais la prose.
 
+<!-- arc-video:donnees -->
+<div class="arc-video-card" markdown>
+
+[![Vos données, votre sentier](../video/donnees/poster.jpg)](../video/donnees/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 12 · 1 min 32</span>
+
+**[Vos données, votre sentier](../video/donnees/index.html)** — Vos données restent des fichiers Markdown chez vous : un bloc validé, un index jetable, un tableau de bord local, et ce qui quitte la machine.
+
+[Regarder](../video/donnees/index.html) · [English](../video/donnees/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## À quoi ça ressemble
 
 ````markdown

@@ -2,6 +2,25 @@
 
 > **Description** : Expert Trail Running Coach — valide les plans d'entraînement, analyse les données Garmin (ou Intervals.icu, `[data].source`, #68) et ajuste les séances.
 
+<!-- arc-video:garde-fous -->
+<div class="arc-video-card" markdown>
+
+[![Le plan qui sait dire non](../video/garde-fous/poster.jpg)](../video/garde-fous/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 03 · 1 min 31</span>
+
+**[Le plan qui sait dire non](../video/garde-fous/index.html)** — Sept garde-fous calculés relisent la semaine avant son écriture et son envoi au calendrier Garmin : un second avis déterministe et testé.
+
+[Regarder](../video/garde-fous/index.html) · [English](../video/garde-fous/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 !!! info "`[data].source` (#68)"
     Tout ce qui suit est écrit pour `[data].source = "garmin"` (défaut) — rien
     ne change tant que cette clé vaut `garmin` ou est absente. Avec

@@ -3,6 +3,25 @@
 Au premier lancement, aucun agent ne sait qui vous êtes. `/coach-setup` mène un
 entretien court et écrit le résultat au bon endroit.
 
+<!-- arc-video:ligne-de-depart -->
+<div class="arc-video-card" markdown>
+
+[![Ligne de départ](../video/ligne-de-depart/poster.jpg)](../video/ligne-de-depart/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 01 · 1 min 34</span>
+
+**[Ligne de départ](../video/ligne-de-depart/index.html)** — Du git clone au premier /today : installation, authentification Garmin, /coach-setup et /coach-doctor en moins de deux minutes.
+
+[Regarder](../video/ligne-de-depart/index.html) · [English](../video/ligne-de-depart/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Lancer
 
 ```bash

@@ -1,0 +1,149 @@
+{
+  "title": {
+    "fr": "Ravito",
+    "en": "Fuel stop"
+  },
+  "summary": {
+    "fr": "Une phrase libre devient des données : le modèle extrait, le script calcule, et ne devine jamais un produit."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape huit : ravito."
+      ],
+      "en": [
+        "Stage eight: fuel stop."
+      ]
+    },
+    {
+      "id": "sentence",
+      "min": 9,
+      "chapter": {
+        "fr": "Une phrase",
+        "en": "One sentence"
+      },
+      "fr": [
+        "Camille tape /log, puis une phrase : deux gels et cinq cents millilitres au kilomètre quinze, genou gauche trois sur dix, RPE sept.",
+        "Le modèle y repère cinq morceaux."
+      ],
+      "en": [
+        "Camille types /log, then one sentence: two gels and half a litre, left knee three out of ten, RPE seven.",
+        "The model spots five pieces."
+      ]
+    },
+    {
+      "id": "compute",
+      "min": 9,
+      "chapter": {
+        "fr": "Le modèle extrait, le script calcule",
+        "en": "The model extracts, the script computes"
+      },
+      "fr": [
+        "Mais il ne calcule rien : il passe ces entités à un petit script Python.",
+        "Le script cherche chaque produit dans le catalogue de Camille : deux gels, vingt-cinq grammes pièce, cinquante grammes.",
+        "Le modèle extrait, le script calcule. Jamais l'inverse."
+      ],
+      "en": [
+        "But it computes nothing: it hands these entities to a small Python script.",
+        "The script finds each product in the catalogue: two gels, twenty-five grams each, fifty grams.",
+        "The model extracts, the script computes. Never the reverse."
+      ]
+    },
+    {
+      "id": "ask",
+      "min": 9,
+      "chapter": {
+        "fr": "Jamais d'invention",
+        "en": "Never guessed"
+      },
+      "fr": [
+        "Un produit inconnu ? Deux barres qui se ressemblent ?",
+        "Le coach demande. Il n'invente jamais une valeur, et le reste de la phrase n'attend pas."
+      ],
+      "en": [
+        "An unknown product? Two similar bars?",
+        "The coach asks. It never invents a value, and the rest of the sentence doesn't wait."
+      ]
+    },
+    {
+      "id": "files",
+      "min": 9,
+      "chapter": {
+        "fr": "Chaque donnée à sa place",
+        "en": "Everything in its place"
+      },
+      "fr": [
+        "Glucides, liquide et effort rejoignent le fichier de la séance.",
+        "La douleur va dans le dossier santé.",
+        "Rien n'est écrasé ni compté deux fois."
+      ],
+      "en": [
+        "Carbs, fluid and effort join the session file.",
+        "The pain goes to the health folder.",
+        "Nothing is overwritten or counted twice."
+      ]
+    },
+    {
+      "id": "pain",
+      "min": 8,
+      "chapter": {
+        "fr": "Le seuil de douleur",
+        "en": "The pain threshold"
+      },
+      "fr": [
+        "Trois sur dix : le coach note, c'est tout.",
+        "À sept sur dix, seuil réglable, il recommande de consulter. L'outil ne remplace pas un avis médical."
+      ],
+      "en": [
+        "Three out of ten: logged, nothing more.",
+        "At seven out of ten, an adjustable threshold, it recommends seeing a professional. Not a substitute for medical advice."
+      ]
+    },
+    {
+      "id": "ceiling",
+      "min": 9,
+      "chapter": {
+        "fr": "Votre plafond",
+        "en": "Your own ceiling"
+      },
+      "fr": [
+        "Sur les sorties de plus de quatre-vingt-dix minutes, le script retient le meilleur débit réellement avalé : cinquante-six grammes par heure.",
+        "Plus dix de marge : un plafond à soixante-six. Avec les pesées avant et après, il en tire aussi le taux de sudation."
+      ],
+      "en": [
+        "On runs over ninety minutes, the script keeps your best real rate: fifty-six grams an hour.",
+        "Ten more for margin: a ceiling of sixty-six. Weigh-ins before and after also give the sweat rate."
+      ]
+    },
+    {
+      "id": "race",
+      "min": 9,
+      "chapter": {
+        "fr": "Le jour J",
+        "en": "Race day"
+      },
+      "fr": [
+        "Le jour J : soixante grammes de glucides par heure, sous le plafond de Camille.",
+        "Après chaque sortie, une ligne compare la dépense Garmin et celle du modèle : alerte au-delà de quinze pour cent. Garmin reste la référence."
+      ],
+      "en": [
+        "Race day: sixty grams of carbs an hour, under the ceiling.",
+        "After each run, one line sets Garmin's energy figure against the model's: flagged beyond fifteen percent. Garmin stays the reference."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page « log » de la documentation."
+      ],
+      "en": [
+        "To go further: the “log” page of the documentation."
+      ]
+    }
+  ]
+}

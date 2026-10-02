@@ -1,0 +1,189 @@
+{
+ "version": 1,
+ "_comment": "Scénario du chat pour les vidéos (backend mock, [chat].mock_scenario) — fictif : Camille, mardi 29 septembre 2026. Voir scripts/arc_chat_mock.py.",
+ "chunk_chars": 7,
+ "chunk_delay_s": 0.02,
+ "turns": [
+  {
+   "match": "vid[ée].*seuil",
+   "cost_eur": 0.03,
+   "steps": [
+    {
+     "text": "Je regarde ton bilan du matin avant de répondre.",
+     "part": "n1"
+    },
+    {
+     "tool": {
+      "id": "d1",
+      "name": "skill",
+      "summary": "Chargement de la compétence today",
+      "result": "Terminé",
+      "delay_s": 0.5
+     }
+    },
+    {
+     "tool": {
+      "id": "d2",
+      "name": "fs.read",
+      "summary": "Lecture de planning/Semaine_2026-09-28.md",
+      "result": "Séance du jour : seuil 5 × 6 min",
+      "delay_s": 0.6
+     }
+    },
+    {
+     "text": "Séance exigeante prévue : je vérifie HRV, FC de repos et readiness.",
+     "part": "n2"
+    },
+    {
+     "tool": {
+      "id": "d3",
+      "name": "mcp:garmin.get_hrv_data",
+      "summary": "Garmin : get_hrv_data",
+      "result": "HRV 38 ms (bande 52–70 ms, sous la bande depuis 3 nuits)",
+      "delay_s": 0.8
+     }
+    },
+    {
+     "tool": {
+      "id": "d4",
+      "name": "mcp:garmin.get_rhr_day",
+      "summary": "Garmin : get_rhr_day",
+      "result": "FC de repos 52 bpm (+6 vs médiane 7 j : 46)",
+      "delay_s": 0.6
+     }
+    },
+    {
+     "tool": {
+      "id": "d5",
+      "name": "mcp:garmin.get_training_readiness",
+      "summary": "Garmin : get_training_readiness",
+      "result": "Readiness 34/100 (faible)",
+      "delay_s": 0.6
+     }
+    },
+    {
+     "tool": {
+      "id": "d6",
+      "name": "web.fetch",
+      "summary": "Consultation de wttr.in (météo de Val-d'Orée)",
+      "result": "19 °C, vent 10 km/h, créneau 18 h – 19 h",
+      "delay_s": 0.6
+     }
+    },
+    {
+     "text": "**Bilan du matin** — les trois signaux confirment ton ressenti :\n\n| Indicateur | Ce matin | Repère |\n|---|---|---|\n| HRV | 38 ms | bande 52–70 ms, sous la bande depuis 3 nuits |\n| FC de repos | 52 bpm | +6 vs médiane 7 j (46) |\n| Readiness | 34/100 | faible |\n| Sommeil | 6 h 12 | 3 nuits courtes avant |\n\n",
+     "part": "r1"
+    },
+    {
+     "marker": "typing"
+    },
+    {
+     "text": "Un seuil 5 × 6 min sur cette fatigue coûterait cher en récupération pour un bénéfice faible. **Je te propose** 45 min d'endurance fondamentale (EF 45') ce soir, et de garder les côtes pour jeudi.\n\nCréneau conseillé : **18 h – 19 h** (19 °C, vent 10 km/h). Ce bilan ne remplace pas un avis médical : si la fatigue dure, parles-en à un professionnel de santé.",
+     "part": "r1"
+    },
+    {
+     "pause_s": 0.4
+    },
+    {
+     "approval": {
+      "tool": "mcp:garmin.schedule_workouts",
+      "input": {
+       "workouts": [
+        {
+         "date": "2026-09-29",
+         "name": "EF 45 min",
+         "duration_min": 45
+        }
+       ]
+      },
+      "summary": "Mardi 29 septembre : seuil 5 × 6 min remplacé par EF 45 min",
+      "diff": [
+       {
+        "op": "-",
+        "text": "Mardi : seuil 5 × 6 min"
+       },
+       {
+        "op": "+",
+        "text": "Mardi : EF 45 min (18 h – 19 h)"
+       },
+       {
+        "op": " ",
+        "text": "Mercredi : EF 45 min"
+       },
+       {
+        "op": " ",
+        "text": "Jeudi : côtes 8 × 1 min"
+       }
+      ],
+      "run": {
+       "summary": "Planification de l'EF 45 min au calendrier Garmin",
+       "result": "EF 45 min planifiée mardi 29 septembre (simulation)"
+      },
+      "allow": [
+       {
+        "tool": {
+         "id": "d7",
+         "name": "fs.write",
+         "summary": "Écriture de planning/2026-09-29_decision_bilan-matinal.md",
+         "result": "Décision enregistrée",
+         "delay_s": 0.4
+        }
+       },
+       {
+        "file_written": "planning/2026-09-29_decision_bilan-matinal.md"
+       },
+       {
+        "text": "C'est fait : l'EF 45 min est au calendrier Garmin pour ce soir, et la décision du jour est tracée dans le journal. Bonne récupération.",
+        "part": "r2"
+       }
+      ],
+      "deny": [
+       {
+        "text": "D'accord, je garde le plan tel quel : ton seuil 5 × 6 min reste prévu. Écoute tes jambes dès l'échauffement.",
+        "part": "r2"
+       }
+      ],
+      "pending": [
+       {
+        "text": "La proposition attend ta confirmation (page ou notification).",
+        "part": "r2"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "match": "samedi",
+   "cost_eur": 0.01,
+   "steps": [
+    {
+     "text": "Je regarde la fin de ta semaine.",
+     "part": "n1"
+    },
+    {
+     "tool": {
+      "id": "e1",
+      "name": "fs.read",
+      "summary": "Lecture de planning/Semaine_2026-09-28.md",
+      "result": "Samedi : sortie longue 2 h 30, 900 m D+",
+      "delay_s": 0.5
+     }
+    },
+    {
+     "tool": {
+      "id": "e2",
+      "name": "web.fetch",
+      "summary": "Consultation de wttr.in (météo de Val-d'Orée)",
+      "result": "Samedi : 17 °C, vent 14 km/h, sec",
+      "delay_s": 0.6
+     }
+    },
+    {
+     "text": "Samedi, **je garde la sortie longue** : 2 h 30, 900 m D+. La semaine est déjà allégée (EF 45 min aujourd'hui, côtes décalées à jeudi), la charge reste sous contrôle.\n\nMétéo : sec, 17 °C. **Créneau conseillé : tôt le matin**, départ avant 9 h. Prépare le kit trail-long : poche à eau 2 L, frontale, bâtons.\n\nJe refais le bilan du matin vendredi : si la HRV n'est pas remontée dans sa bande, on raccourcira.",
+     "part": "r1"
+    }
+   ]
+  }
+ ]
+}

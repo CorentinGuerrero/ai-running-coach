@@ -1,0 +1,57 @@
+WEBVTT
+
+1
+00:00:01.200 --> 00:00:03.626
+Stage two: the morning check.
+
+2
+00:00:05.100 --> 00:00:11.430
+Tuesday, six thirty. On Camille's plan: a threshold session, five times six minutes.
+
+3
+00:00:11.530 --> 00:00:13.444
+But the night was short.
+
+4
+00:00:14.294 --> 00:00:23.483
+Before any decision, the coach reads three signals, always together: overnight heart rate variability, resting heart rate, and readiness.
+
+5
+00:00:23.583 --> 00:00:29.550
+Three nights below the personal band, six beats above normal, readiness at thirty-four.
+
+6
+00:00:30.400 --> 00:00:32.229
+Verdict: ease off.
+
+7
+00:00:32.329 --> 00:00:40.813
+Threshold waits for the signals to recover. Tonight, forty-five minutes of easy running, between six and seven: the coolest slot.
+
+8
+00:00:41.663 --> 00:00:45.390
+The decision is written to a file, with its sources.
+
+9
+00:00:45.490 --> 00:00:48.855
+It shows up on the dashboard, under “Why today?”.
+
+10
+00:00:49.705 --> 00:00:55.267
+And if Camille asks why, the /why command answers by quoting the measurements.
+
+11
+00:00:55.367 --> 00:00:57.644
+Never by making things up.
+
+12
+00:00:58.494 --> 00:01:03.224
+Too much data? The check is configurable: full, minimal, or off.
+
+13
+00:01:03.324 --> 00:01:07.585
+And the coach never quietly switches a stricter level back on.
+
+14
+00:01:10.135 --> 00:01:14.140
+To go further: the “Today” page of the documentation.

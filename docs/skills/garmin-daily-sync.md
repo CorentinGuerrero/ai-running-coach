@@ -2,6 +2,25 @@
 
 > **Description** : prompt d'orchestration versionné pour la synchronisation Garmin **sans surveillance** — lancé par le cron (`scripts/daily-sync.sh`), depuis le téléphone (`/garmin-daily-sync` dans une session Remote Control) ou depuis l'IDE.
 
+<!-- arc-video:coach-poche -->
+<div class="arc-video-card" markdown>
+
+[![Le coach dans la poche](../video/coach-poche/poster.jpg)](../video/coach-poche/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 10 · 1 min 33</span>
+
+**[Le coach dans la poche](../video/coach-poche/index.html)** — La machine coach, la synchronisation automatique (horaires ou veille), la notification push, Remote Control et les commandes courtes, le tableau de bord mobile, et ce qui n'est pas possible.
+
+[Regarder](../video/coach-poche/index.html) · [English](../video/coach-poche/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
+
 ## Quand l'utiliser
 
 - Automatiquement, aux heures de `[sync].times`, ou dès que Garmin a du neuf avec `[sync].mode = "watch"` (voir [Le coach dans la poche](../mobile.md#4-synchronisation-automatique))

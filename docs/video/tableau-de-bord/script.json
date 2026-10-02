@@ -1,0 +1,161 @@
+{
+  "title": {
+    "fr": "Tour du propriétaire",
+    "en": "Dashboard tour"
+  },
+  "summary": {
+    "fr": "Visite guidée du tableau de bord local, en lecture seule : une question par vue."
+  },
+  "scenes": [
+    {
+      "id": "bib",
+      "min": 4.6,
+      "lead": 1.2,
+      "fr": [
+        "Étape cinq : le tour du propriétaire."
+      ],
+      "en": [
+        "Stage five: the owner's tour."
+      ]
+    },
+    {
+      "id": "launch",
+      "min": 8,
+      "chapter": {
+        "fr": "Une commande",
+        "en": "One command"
+      },
+      "fr": [
+        "Le tableau de bord tient en une commande : dashboard.sh.",
+        "Il s'ouvre sur cent vingt-sept point zéro point zéro point un, en lecture seule, construit depuis vos fichiers Markdown.",
+        "Un fichier écrit par le coach apparaît en trente secondes."
+      ],
+      "en": [
+        "The dashboard is one command: dashboard.sh.",
+        "It opens on 127.0.0.1, read-only, built from your Markdown files.",
+        "A file written by the coach shows up within thirty seconds."
+      ]
+    },
+    {
+      "id": "today",
+      "min": 8,
+      "chapter": {
+        "fr": "Aujourd'hui",
+        "en": "Today"
+      },
+      "fr": [
+        "Aujourd'hui : je cours, j'allège ou je me repose ?",
+        "Verdict et raison, bilan du matin, programme du jour avec sa météo."
+      ],
+      "en": [
+        "Today: do I run, ease off or rest?",
+        "Verdict and reason, morning check, today's plan with its weather."
+      ]
+    },
+    {
+      "id": "week",
+      "min": 8,
+      "chapter": {
+        "fr": "Semaine",
+        "en": "Week"
+      },
+      "fr": [
+        "Semaine : le prévu face au fait.",
+        "Le seuil de mardi est annulé, les côtes glissent à jeudi : la règle sept l'explique."
+      ],
+      "en": [
+        "Week: planned versus done.",
+        "Tuesday's threshold is cancelled, hills slide to Thursday: rule seven explains why."
+      ]
+    },
+    {
+      "id": "form",
+      "min": 8,
+      "chapter": {
+        "fr": "Forme et préparation",
+        "en": "Fitness and readiness"
+      },
+      "fr": [
+        "Forme et charge : condition, fatigue, forme.",
+        "Et Trail Shape : la préparation couvre-t-elle ce que la course exigera ?"
+      ],
+      "en": [
+        "Fitness and load: condition, fatigue, form.",
+        "And Trail Shape: does training cover what the race will demand?"
+      ]
+    },
+    {
+      "id": "session",
+      "min": 8,
+      "chapter": {
+        "fr": "Séances",
+        "en": "Sessions"
+      },
+      "fr": [
+        "Séances : la sortie de dimanche, dix-huit kilomètres.",
+        "Montées détectées, puis splits au kilomètre."
+      ],
+      "en": [
+        "Sessions: Sunday's run, eighteen kilometres.",
+        "Detected climbs, then kilometre splits."
+      ]
+    },
+    {
+      "id": "decisions",
+      "min": 8,
+      "chapter": {
+        "fr": "Décisions",
+        "en": "Decisions"
+      },
+      "fr": [
+        "Décisions : pourquoi cette séance a-t-elle changé ?",
+        "Chaque fiche montre l'avant, l'après et les sources."
+      ],
+      "en": [
+        "Decisions: why did this session change?",
+        "Each entry shows before, after and sources."
+      ]
+    },
+    {
+      "id": "more",
+      "min": 7,
+      "chapter": {
+        "fr": "Et le reste",
+        "en": "And the rest"
+      },
+      "fr": [
+        "Et aussi : santé, nutrition, rapports, performance, calendrier."
+      ],
+      "en": [
+        "And also: health, nutrition, reports, performance, calendar."
+      ]
+    },
+    {
+      "id": "mobile",
+      "min": 8,
+      "chapter": {
+        "fr": "Partout",
+        "en": "Anywhere"
+      },
+      "fr": [
+        "Tout tient aussi sur un téléphone.",
+        "Derrière un reverse proxy, en Docker, le workspace reste en lecture seule."
+      ],
+      "en": [
+        "It all fits on a phone too.",
+        "Behind a reverse proxy, in Docker, the workspace stays read-only."
+      ]
+    },
+    {
+      "id": "finish",
+      "min": 6,
+      "lead": 2.2,
+      "fr": [
+        "Pour aller plus loin : la page consacrée aux vues, dans la documentation."
+      ],
+      "en": [
+        "To go further: the “Views” page of the documentation."
+      ]
+    }
+  ]
+}

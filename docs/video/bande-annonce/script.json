@@ -1,0 +1,185 @@
+{
+  "title": {
+    "fr": "La bande-annonce",
+    "en": "The trailer"
+  },
+  "summary": {
+    "fr": "Le projet en un coup d'œil : le staff, le bilan matinal, les garde-fous, le jour de course, vos données."
+  },
+  "poster": 3.6,
+  "scenes": [
+    {
+      "id": "intro",
+      "min": 5.0,
+      "lead": 0.9,
+      "fr": [
+        "ai-running-coach : votre staff d'entraînement trail, directement dans votre éditeur."
+      ],
+      "en": [
+        "ai-running-coach: your trail training staff, right inside your editor."
+      ]
+    },
+    {
+      "id": "problem",
+      "min": 7.4,
+      "chapter": {
+        "fr": "Le constat",
+        "en": "The problem"
+      },
+      "fr": [
+        "Votre montre mesure tout : sommeil, variabilité cardiaque, allure, dénivelé.",
+        {
+          "text": "Mais qui relie les points ?",
+          "at": 3.6
+        }
+      ],
+      "en": [
+        "Your watch measures everything: sleep, heart rate variability, pace, elevation.",
+        {
+          "text": "But who connects the dots?",
+          "at": 3.6
+        }
+      ]
+    },
+    {
+      "id": "arch",
+      "min": 8.4,
+      "chapter": {
+        "fr": "Branché",
+        "en": "Plugged in"
+      },
+      "fr": [
+        "Le coach lit vos données Garmin, ou Intervals.icu, et écrit tout en Markdown, dans votre IDE."
+      ],
+      "en": [
+        "The coach reads your Garmin data, or Intervals.icu, and writes everything as Markdown, inside your IDE."
+      ]
+    },
+    {
+      "id": "staff",
+      "min": 7.6,
+      "chapter": {
+        "fr": "Le staff",
+        "en": "The staff"
+      },
+      "fr": [
+        "Quatre spécialistes travaillent ensemble : coach, stratège de course, médecin du sport et nutritionniste.",
+        "Gardez seulement ceux qu'il vous faut."
+      ],
+      "en": [
+        "Four specialists work together: coach, race strategist, sports doctor and nutritionist.",
+        "Keep only the ones you need."
+      ]
+    },
+    {
+      "id": "morning",
+      "min": 9.4,
+      "chapter": {
+        "fr": "Chaque matin",
+        "en": "Every morning"
+      },
+      "fr": [
+        "Chaque matin, trois signaux décident de la séance. Ce matin, ils sont au rouge : le seuil devient une endurance douce.",
+        {
+          "text": "Et la commande /why donne la raison, sans rien inventer.",
+          "at": 5.0
+        }
+      ],
+      "en": [
+        "Every morning, three signals decide the session. Today they're in the red: threshold becomes an easy run.",
+        {
+          "text": "And /why gives the reason, never made up.",
+          "at": 5.0
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "min": 10.0,
+      "chapter": {
+        "fr": "Préparation",
+        "en": "Building up"
+      },
+      "fr": [
+        "Le plan de la semaine passe par sept garde-fous calculés.",
+        {
+          "text": "Deux séances dures d'affilée ? Les côtes glissent à jeudi, puis tout part sur votre montre.",
+          "at": 3.9
+        }
+      ],
+      "en": [
+        "The week's plan goes through seven computed guardrails.",
+        {
+          "text": "Two hard days in a row? Hills move to Thursday, then everything goes to your watch.",
+          "at": 3.9
+        }
+      ]
+    },
+    {
+      "id": "race",
+      "min": 9.4,
+      "chapter": {
+        "fr": "Jour J",
+        "en": "Race day"
+      },
+      "fr": [
+        "Le jour J, votre course est découpée segment par segment : allures tirées de votre propre modèle, trois scénarios, et le ravitaillement qui va avec."
+      ],
+      "en": [
+        "On race day, your course is split segment by segment: paces from your own model, three scenarios, and the fuelling to match."
+      ]
+    },
+    {
+      "id": "trace",
+      "min": 8.4,
+      "chapter": {
+        "fr": "Traçable",
+        "en": "Traceable"
+      },
+      "fr": [
+        "Tout reste chez vous, en Markdown.",
+        "Un index SQLite jetable alimente un tableau de bord local : condition, fatigue, forme."
+      ],
+      "en": [
+        "Everything stays yours, in Markdown.",
+        "A disposable SQLite index feeds a local dashboard: fitness, fatigue, form."
+      ]
+    },
+    {
+      "id": "pocket",
+      "min": 7.6,
+      "chapter": {
+        "fr": "Dans la poche",
+        "en": "In your pocket"
+      },
+      "fr": [
+        "Et le coach vous suit partout : synchronisation automatique, notification sur le téléphone, et des commandes courtes pour aller à l'essentiel."
+      ],
+      "en": [
+        "And the coach follows you everywhere: automatic sync, a push notification, and short commands that get straight to the point."
+      ]
+    },
+    {
+      "id": "outro",
+      "min": 9.0,
+      "chapter": {
+        "fr": "C'est parti",
+        "en": "Let's go"
+      },
+      "fr": [
+        "Un clone, une installation, un court entretien avec /coach-setup…",
+        {
+          "text": "Prêt à courir plus malin ?",
+          "at": 5.6
+        }
+      ],
+      "en": [
+        "One clone, one install, a short interview with /coach-setup…",
+        {
+          "text": "Ready to run smarter?",
+          "at": 5.6
+        }
+      ]
+    }
+  ]
+}

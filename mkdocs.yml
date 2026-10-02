@@ -71,6 +71,7 @@ markdown_extensions:
 
 nav:
   - Accueil: index.md
+  - Vidéos: videos.md
   - Installation:
       - Démarrage rapide: quickstart.md
       - Configuration: configuration.md

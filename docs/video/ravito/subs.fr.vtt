@@ -1,0 +1,73 @@
+WEBVTT
+
+1
+00:00:01.200 --> 00:00:02.709
+Étape huit : ravito.
+
+2
+00:00:05.100 --> 00:00:13.563
+Camille tape /log, puis une phrase : deux gels et cinq cents millilitres au kilomètre quinze, genou gauche trois sur dix, RPE sept.
+
+3
+00:00:13.663 --> 00:00:15.791
+Le modèle y repère cinq morceaux.
+
+4
+00:00:16.641 --> 00:00:20.816
+Mais il ne calcule rien : il passe ces entités à un petit script Python.
+
+5
+00:00:20.916 --> 00:00:27.502
+Le script cherche chaque produit dans le catalogue de Camille : deux gels, vingt-cinq grammes pièce, cinquante grammes.
+
+6
+00:00:27.602 --> 00:00:31.308
+Le modèle extrait, le script calcule. Jamais l'inverse.
+
+7
+00:00:32.158 --> 00:00:35.139
+Un produit inconnu ? Deux barres qui se ressemblent ?
+
+8
+00:00:35.239 --> 00:00:40.545
+Le coach demande. Il n'invente jamais une valeur, et le reste de la phrase n'attend pas.
+
+9
+00:00:41.395 --> 00:00:45.293
+Glucides, liquide et effort rejoignent le fichier de la séance.
+
+10
+00:00:45.393 --> 00:00:47.542
+La douleur va dans le dossier santé.
+
+11
+00:00:47.642 --> 00:00:49.897
+Rien n'est écrasé ni compté deux fois.
+
+12
+00:00:50.747 --> 00:00:53.045
+Trois sur dix : le coach note, c'est tout.
+
+13
+00:00:53.145 --> 00:00:59.560
+À sept sur dix, seuil réglable, il recommande de consulter. L'outil ne remplace pas un avis médical.
+
+14
+00:01:00.410 --> 00:01:07.828
+Sur les sorties de plus de quatre-vingt-dix minutes, le script retient le meilleur débit réellement avalé : cinquante-six grammes par heure.
+
+15
+00:01:07.928 --> 00:01:14.791
+Plus dix de marge : un plafond à soixante-six. Avec les pesées avant et après, il en tire aussi le taux de sudation.
+
+16
+00:01:15.641 --> 00:01:20.200
+Le jour J : soixante grammes de glucides par heure, sous le plafond de Camille.
+
+17
+00:01:20.300 --> 00:01:28.572
+Après chaque sortie, une ligne compare la dépense Garmin et celle du modèle : alerte au-delà de quinze pour cent. Garmin reste la référence.
+
+18
+00:01:31.122 --> 00:01:34.401
+Pour aller plus loin : la page « log » de la documentation.

@@ -1,0 +1,25 @@
+{
+  "fr": {
+    "git": "[[ɡˈit]]",
+    "uv": "ou vé",
+    "cd": "cé dé",
+    "bash": "[[bˈaʃ]]",
+    "curl": "[[kˈœʁl]]",
+    "Claude Code": "[[klˈod kˈod]]",
+    "Copilot": "[[kɔpˈajlɔt]]",
+    "OpenCode": "[[ɔpˈɛn kˈod]]",
+    "CLI": "cé èl i",
+    "Windsurf": "[[wˈindsœʁf]]",
+    "/coach-doctor": "[[slˈaʃ kˈotʃ dɔktˈœʁ]]",
+    "macOS": "mac o s",
+    "garmin-mcp": "[[ɡaʁmˈin]] èm cé pé"
+  },
+  "en": {
+    "uv": "U V",
+    "cd": "C D",
+    "macOS": "mac O S",
+    "garmin-mcp": "garmin M C P",
+    "CLI": "C L I",
+    "/coach-doctor": "slash coach doctor"
+  }
+}

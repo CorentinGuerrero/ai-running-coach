@@ -1,0 +1,893 @@
+{
+ "generated_for": "Camille — mardi 2026-09-29 (J-54), workspace fictif",
+ "shots": [
+  {
+   "name": "aujourdhui",
+   "file": "aujourdhui.webp",
+   "view": "Aujourd'hui",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Aujourd'hui, mardi 29 septembre : verdict « Alléger » et encart « Pourquoi aujourd'hui ? » (bilan matinal appliqué).",
+   "boxes": {
+    "verdict": [
+     248,
+     140.1,
+     1008,
+     85.2
+    ],
+    "pourquoi": [
+     248,
+     241.3,
+     1008,
+     407.1
+    ],
+    "chip-bilan": [
+     269,
+     298.3,
+     106.4,
+     23.2
+    ],
+    "chip-appliquee": [
+     379.6,
+     298.3,
+     91.0,
+     23.2
+    ]
+   }
+  },
+  {
+   "name": "aujourdhui-sante",
+   "file": "aujourdhui-sante.webp",
+   "view": "Aujourd'hui",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Bilan du matin : HRV 38 ms sous la bande 52–70, FC de repos 52 (+6), readiness 34, sommeil 6 h 12.",
+   "boxes": {
+    "triade": [
+     269,
+     202.5,
+     966,
+     259.7
+    ],
+    "hrv": [
+     269,
+     230.2,
+     966,
+     41.8
+    ],
+    "fc-repos": [
+     269,
+     272.1,
+     966,
+     41.8
+    ],
+    "readiness": [
+     269,
+     379.0,
+     966,
+     41.8
+    ],
+    "sommeil": [
+     269,
+     420.9,
+     966,
+     41.3
+    ]
+   }
+  },
+  {
+   "name": "aujourdhui-programme",
+   "file": "aujourdhui-programme.webp",
+   "view": "Aujourd'hui",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Au programme : seuil annulé, EF 45' prévue ce soir, météo (créneau soir) et forme.",
+   "boxes": {
+    "programme": [
+     269,
+     517,
+     467,
+     270.7
+    ],
+    "seuil-annule": [
+     269,
+     547.8,
+     467,
+     39.2
+    ],
+    "ef45": [
+     269,
+     587.0,
+     467,
+     67.4
+    ],
+    "meteo": [
+     269,
+     667.2,
+     467,
+     23.2
+    ],
+    "forme": [
+     768,
+     517,
+     467,
+     270.7
+    ]
+   }
+  },
+  {
+   "name": "aujourdhui-complet",
+   "file": "aujourdhui-complet.webp",
+   "view": "Aujourd'hui",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 1512,
+   "scale": 2,
+   "description": "Page Aujourd'hui entière.",
+   "boxes": {
+    "verdict": [
+     248,
+     140.1,
+     1008,
+     85.2
+    ],
+    "triade": [
+     269,
+     714.5,
+     966,
+     259.7
+    ],
+    "programme": [
+     248,
+     1009.6,
+     1008,
+     309.5
+    ]
+   }
+  },
+  {
+   "name": "semaine",
+   "file": "semaine.webp",
+   "view": "Semaine",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Semaine du 28 septembre : seuil annulé mardi, côtes déplacées de mercredi à jeudi (garde-fou r7).",
+   "boxes": {
+    "aujourdhui": [
+     393.1,
+     215.5,
+     137.1,
+     270.6
+    ],
+    "seuil-annule": [
+     404.5,
+     281.0,
+     114.4,
+     75.0
+    ],
+    "cotes-deplacees": [
+     549.7,
+     281.0,
+     114.4,
+     75.0
+    ],
+    "jeudi-cotes": [
+     683.4,
+     215.5,
+     137.1,
+     270.6
+    ],
+    "samedi-longue": [
+     973.7,
+     215.5,
+     137.1,
+     270.6
+    ]
+   }
+  },
+  {
+   "name": "semaine-garde-fous",
+   "file": "semaine-garde-fous.webp",
+   "view": "Semaine",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Plan du coach : tableau des garde-fous (r7 qualité deux jours de suite → côtes jeudi).",
+   "boxes": {
+    "garde-fous": [
+     269,
+     591.1,
+     639.3,
+     93.0
+    ],
+    "regle-r7": [
+     269,
+     626.2,
+     639.3,
+     57.4
+    ],
+    "plan-du-coach": [
+     248,
+     308.9,
+     681.3,
+     591.1
+    ]
+   }
+  },
+  {
+   "name": "forme",
+   "file": "forme.webp",
+   "view": "Forme & charge",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Forme & charge : courbe condition / fatigue / forme, ratio de charge et volume hebdomadaire.",
+   "boxes": {
+    "courbe": [
+     248,
+     242.7,
+     1008,
+     444.1
+    ],
+    "ratio": [
+     248,
+     702.9,
+     1008,
+     197.1
+    ]
+   }
+  },
+  {
+   "name": "analyse",
+   "file": "analyse.webp",
+   "view": "Analyse",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Analyse : polarisation, découplage, VAM, durabilité (échantillons FIT fictifs).",
+   "boxes": {
+    "premier-bloc": [
+     248,
+     219.5,
+     1008,
+     276.5
+    ]
+   }
+  },
+  {
+   "name": "trail-shape",
+   "file": "trail-shape.webp",
+   "view": "Trail Shape",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Trail Shape : score de forme spécifique trail.",
+   "boxes": {
+    "score": [
+     248,
+     192.2,
+     1008,
+     145.8
+    ]
+   }
+  },
+  {
+   "name": "sante",
+   "file": "sante.webp",
+   "view": "Santé",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Santé : HRV nocturne vs bande personnelle, FC de repos, readiness, sommeil.",
+   "boxes": {
+    "hrv": [
+     248,
+     306.1,
+     1008,
+     432.0
+    ]
+   }
+  },
+  {
+   "name": "seance",
+   "file": "seance.webp",
+   "view": "Séance",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Séance du dimanche 27 septembre : 18,2 km, 820 m D+, FC 142, effort perçu 6.",
+   "boxes": {
+    "titre": [
+     248,
+     87.9,
+     1008,
+     32.2
+    ],
+    "zones": [
+     248,
+     482.8,
+     1008,
+     234.5
+    ]
+   }
+  },
+  {
+   "name": "seance-montees",
+   "file": "seance-montees.webp",
+   "view": "Séance",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "La même séance : montées détectées (D+, pente, VAM).",
+   "boxes": {
+    "montees": [
+     248,
+     80.2,
+     1008,
+     246.1
+    ],
+    "descente": [
+     248,
+     342.3,
+     1008,
+     303.5
+    ]
+   }
+  },
+  {
+   "name": "seance-splits",
+   "file": "seance-splits.webp",
+   "view": "Séance",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "La même séance : splits kilométriques.",
+   "boxes": {
+    "splits": [
+     248,
+     80.3,
+     1008,
+     819.7
+    ]
+   }
+  },
+  {
+   "name": "calendrier",
+   "file": "calendrier.webp",
+   "view": "Calendrier",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Calendrier annuel des séances.",
+   "boxes": {
+    "calendrier": [
+     248,
+     219.5,
+     1008,
+     214.6
+    ]
+   }
+  },
+  {
+   "name": "decisions",
+   "file": "decisions.webp",
+   "view": "Décisions",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Journal des décisions : bilan matinal du 29 et garde-fou r7 du 28.",
+   "boxes": {
+    "journal": [
+     248,
+     211.5,
+     1008,
+     148.6
+    ],
+    "bilan-matinal": [
+     249,
+     212.5,
+     1006,
+     73.8
+    ],
+    "garde-fou": [
+     249,
+     286.3,
+     1006,
+     72.8
+    ]
+   }
+  },
+  {
+   "name": "decision-detail",
+   "file": "decision-detail.webp",
+   "view": "Décision",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Détail de la décision du bilan matinal : avant/après (seuil → EF 45'), données, sources.",
+   "boxes": {
+    "avant-apres": [
+     248,
+     241.7,
+     1008,
+     209.0
+    ],
+    "donnees": [
+     248,
+     466.7,
+     1008,
+     252.7
+    ],
+    "sources": [
+     248,
+     735.4,
+     1008,
+     113.2
+    ]
+   }
+  },
+  {
+   "name": "materiel",
+   "file": "materiel.webp",
+   "view": "Matériel",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Matériel : chaussures (Crête Pro ~612 km / 700), équipement, inspections.",
+   "boxes": {
+    "chaussures": [
+     248,
+     298.2,
+     1008,
+     232.7
+    ],
+    "equipement": [
+     248,
+     546.9,
+     1008,
+     353.1
+    ],
+    "crete-pro": [
+     278.6,
+     401.3,
+     116.4,
+     17.0
+    ]
+   }
+  },
+  {
+   "name": "materiel-fiche",
+   "file": "materiel-fiche.webp",
+   "view": "Matériel — fiche",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Fiche « Crête Pro (bleue) » : kilomètres par mois, séances, prévision de retraite.",
+   "boxes": {
+    "titre": [
+     248,
+     87.9,
+     1008,
+     32.2
+    ],
+    "km-par-mois": [
+     248,
+     410.4,
+     1008,
+     359.4
+    ]
+   }
+  },
+  {
+   "name": "inspections",
+   "file": "inspections.webp",
+   "view": "Matériel — inspections",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Inspections photo de Crête Pro (bleue) : usure du talon gauche, comparaison avec la précédente.",
+   "boxes": {
+    "inspections": [
+     248,
+     327.6,
+     1008,
+     572.4
+    ],
+    "photos": [
+     282.8,
+     513.0,
+     72.0,
+     72.0
+    ]
+   }
+  },
+  {
+   "name": "nutrition",
+   "file": "nutrition.webp",
+   "view": "Nutrition",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Nutrition : poids et glucides par heure sur les sorties longues.",
+   "boxes": {
+    "poids": [
+     248,
+     140.1,
+     1008,
+     421.2
+    ],
+    "glucides": [
+     248,
+     577.3,
+     1008,
+     322.7
+    ]
+   }
+  },
+  {
+   "name": "rapports",
+   "file": "rapports.webp",
+   "view": "Rapports",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Liste des rapports hebdomadaires du coach.",
+   "boxes": {
+    "liste": [
+     248,
+     140.1,
+     1008,
+     215.4
+    ]
+   }
+  },
+  {
+   "name": "rapport",
+   "file": "rapport.webp",
+   "view": "Rapport",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Bilan de la semaine du 21 au 27 septembre : synthèse, indicateurs, semaine prochaine.",
+   "boxes": {
+    "rapport": [
+     248,
+     207.2,
+     681.3,
+     531.0
+    ],
+    "tableau": [
+     273,
+     426.4,
+     631.3,
+     142.4
+    ]
+   }
+  },
+  {
+   "name": "performance",
+   "file": "performance.webp",
+   "view": "Performance",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Performance : VO2max estimée et indices.",
+   "boxes": {
+    "premier-bloc": [
+     248,
+     192.2,
+     1008,
+     393.4
+    ]
+   }
+  },
+  {
+   "name": "mobile-aujourdhui",
+   "file": "mobile-aujourdhui.webp",
+   "view": "Aujourd'hui",
+   "viewport": "mobile 390×844 @3x",
+   "width": 390,
+   "height": 844,
+   "scale": 3,
+   "description": "Aujourd'hui sur téléphone : verdict « Alléger » et bilan du matin.",
+   "boxes": {
+    "verdict": [
+     16,
+     173.6,
+     358,
+     136.3
+    ],
+    "pourquoi": [
+     16,
+     325.9,
+     358,
+     453.6
+    ]
+   }
+  },
+  {
+   "name": "mobile-semaine",
+   "file": "mobile-semaine.webp",
+   "view": "Semaine",
+   "viewport": "mobile 390×844 @3x",
+   "width": 390,
+   "height": 844,
+   "scale": 3,
+   "description": "Semaine sur téléphone : séances du jour par jour.",
+   "boxes": {
+    "semaine": [
+     16,
+     285.0,
+     358,
+     559.0
+    ],
+    "aujourdhui": [
+     16,
+     370.2,
+     358,
+     211.8
+    ]
+   }
+  },
+  {
+   "name": "chat-empty",
+   "file": "chat-empty.webp",
+   "view": "Coach",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Page Coach avant la première question : conversation vide, contexte du coach à droite.",
+   "boxes": {
+    "fil": [
+     240,
+     122.3,
+     848,
+     635.2
+    ],
+    "saisie": [
+     240,
+     757.6,
+     848,
+     142.4
+    ],
+    "contexte": [
+     1112,
+     79.9,
+     280,
+     820.1
+    ],
+    "commandes": [
+     240,
+     757.6,
+     848,
+     142.4
+    ]
+   }
+  },
+  {
+   "name": "chat-typing",
+   "file": "chat-typing.webp",
+   "view": "Coach",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Le coach répond : trace des outils (HRV, FC de repos, readiness, météo) et bilan en tableau, réponse en cours.",
+   "boxes": {
+    "fil": [
+     240,
+     122.3,
+     848,
+     635.2
+    ],
+    "saisie": [
+     240,
+     757.6,
+     848,
+     142.4
+    ],
+    "trace": [
+     288,
+     195.2,
+     672,
+     264.4
+    ],
+    "reponse": [
+     297.6,
+     238.4,
+     652.8,
+     20.5
+    ],
+    "tableau": [
+     288,
+     506.0,
+     672,
+     190.8
+    ],
+    "question": [
+     244,
+     126.3,
+     840,
+     44.9
+    ]
+   }
+  },
+  {
+   "name": "chat-approval",
+   "file": "chat-approval.webp",
+   "view": "Coach",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Carte d'approbation : seuil 5 × 6 min remplacé par EF 45 min, diff avant/après, boutons Appliquer / Refuser.",
+   "boxes": {
+    "fil": [
+     240,
+     120.3,
+     848,
+     635.2
+    ],
+    "saisie": [
+     240,
+     755.6,
+     848,
+     144.4
+    ],
+    "carte": [
+     288,
+     398.1,
+     672,
+     295.5
+    ],
+    "diff": [
+     305,
+     492.2,
+     638,
+     138.4
+    ],
+    "appliquer": [
+     305,
+     643.3,
+     103.7,
+     34.9
+    ],
+    "refuser": [
+     416.7,
+     643.3,
+     90.3,
+     34.9
+    ]
+   }
+  },
+  {
+   "name": "chat-done",
+   "file": "chat-done.webp",
+   "view": "Coach",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Après l'accord : séance planifiée, fichier de décision écrit, confirmation du coach.",
+   "boxes": {
+    "fil": [
+     240,
+     120.3,
+     848,
+     635.2
+    ],
+    "saisie": [
+     240,
+     755.6,
+     848,
+     144.4
+    ],
+    "fichier": [
+     365.9,
+     625.7,
+     346.0,
+     23.6
+    ],
+    "confirmation": [
+     288,
+     649.3,
+     672,
+     48.0
+    ],
+    "carte": [
+     288,
+     255.7,
+     672,
+     259.1
+    ]
+   }
+  },
+  {
+   "name": "chat-samedi",
+   "file": "chat-samedi.webp",
+   "view": "Coach",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Deuxième question : la sortie longue de samedi est maintenue, créneau tôt le matin.",
+   "boxes": {
+    "fil": [
+     240,
+     120.3,
+     848,
+     635.2
+    ],
+    "saisie": [
+     240,
+     755.6,
+     848,
+     144.4
+    ],
+    "reponse": [
+     297.6,
+     533.5,
+     652.8,
+     20.5
+    ]
+   }
+  },
+  {
+   "name": "mobile-coach",
+   "file": "mobile-coach.webp",
+   "view": "Coach",
+   "viewport": "mobile 390×844 @3x",
+   "width": 390,
+   "height": 844,
+   "scale": 3,
+   "description": "Le coach sur téléphone : carte d'approbation au premier plan.",
+   "boxes": {
+    "carte": [
+     20,
+     290.3,
+     350,
+     318.7
+    ],
+    "appliquer": [
+     37,
+     558.8,
+     103.7,
+     34.9
+    ],
+    "diff": [
+     37,
+     407.6,
+     316,
+     138.4
+    ]
+   }
+  }
+ ]
+}
