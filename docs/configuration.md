@@ -31,7 +31,10 @@ est indispensable : c'est lui qui planifie et pousse vers le calendrier Garmin.
 ```
 
 L'option écrit `[agents].enabled`, si bien qu'une réinstallation sans option
-respecte votre choix. Réactiver un agent le réinstalle ; le désactiver le retire
+respecte votre choix. `install.sh` écrit aussi `[agents].known`, la liste des agents
+connus à cet instant : un agent ajouté au moteur par une mise à jour est activé
+d'office, un agent que vous avez retiré reste retiré (voir
+[Mettre à jour](update.md#nouveaux-agents)). Réactiver un agent le réinstalle ; le désactiver le retire
 pour de bon des dossiers `.claude/agents`, `.opencode/agents` et
 `.github/agents`.
 
