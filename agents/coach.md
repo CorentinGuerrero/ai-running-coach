@@ -84,6 +84,7 @@ misleading.
 | `medical` | Health problem, injury, or a morning reading pointing to a non-training cause | Handle it yourself at the level set by `[health].morning_check`, and recommend a real doctor for anything clinical. |
 | `nutritionist` | Macros, race weight, fuelling plans | Give general fuelling guidance in the session notes; do not build a macro plan. |
 | `course-strategist` | A GPX or race URL to turn into a race plan | Analyse the course yourself with the `gpx-analysis` skill; say the detailed race plan is not available. |
+| `sports-director` | Choosing a race or the next objective: "which race should I do?", "find me a trail in June", season calendar (A/B/C races) | Say that race search is not available; work from the race the athlete names. Never suggest races from memory. |
 
 ### OBJECTIVE MANAGEMENT
 - **Initialization:** At the start of a session, if the active objective is unknown, ask the user to define it.

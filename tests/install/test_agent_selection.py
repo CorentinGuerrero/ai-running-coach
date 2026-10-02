@@ -10,7 +10,7 @@ from __future__ import annotations
 from tests.lib.asserts import InstallAsserts
 from tests.lib.sandbox import Sandbox
 
-ALL = {"coach", "medical", "nutritionist", "course-strategist"}
+ALL = {"coach", "medical", "nutritionist", "course-strategist", "sports-director"}
 SURFACES = (".claude/agents", ".opencode/agents", ".github/agents")
 
 

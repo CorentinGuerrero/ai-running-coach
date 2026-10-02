@@ -19,7 +19,7 @@ Rien n'interdit de les éditer à la main ensuite.
 
 ```toml
 [agents]
-enabled = ["coach", "medical", "nutritionist", "course-strategist"]
+enabled = ["coach", "medical", "nutritionist", "course-strategist", "sports-director"]
 ```
 
 Seuls les agents listés sont installés, et le coach ne délègue qu'à eux. `coach`
@@ -42,6 +42,7 @@ Ce que vous perdez en retirant un agent :
 | `medical` | Plus de gatekeeper ni de protocole blessure. Le coach applique lui-même `[health].morning_check` et vous renvoie vers un vrai médecin pour tout ce qui est clinique. |
 | `nutritionist` | Plus de plan de macros ni de poids de forme. Le coach garde des conseils de ravitaillement génériques dans les notes de séance. |
 | `course-strategist` | Plus de plan de course détaillé. Le coach analyse quand même un GPX avec le skill `gpx-analysis`. |
+| `sports-director` | Plus de recherche de courses ni de conseil sur le prochain objectif. Le coach continue de préparer l'objectif que vous inscrivez dans `planning/active_objective.md`. |
 
 ## Le bilan matinal — `[health]`
 
