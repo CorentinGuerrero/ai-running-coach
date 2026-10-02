@@ -333,6 +333,27 @@ def load_config(workspace: Path) -> Dict[str, dict]:
     return merged
 
 
+DEFAULT_MAP_TILES = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+DEFAULT_MAP_ATTRIBUTION = "© OpenStreetMap contributors, SRTM · style © OpenTopoMap (CC-BY-SA)"
+_MAP_TILES_RE = re.compile(r"https://(\{s\}\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?/[^\s\"'<>]*\{z\}[^\s\"'<>]*")
+
+
+def _map_tiles(config: Dict[str, dict]) -> str:
+    """`[dashboard].map_tiles`, jamais en levant : modèle d'URL de tuiles en https, hôte littéral
+    (seul `{s}.` est permis en tête, pour les sous-domaines), `{z}` présent. Absente = défaut ;
+    vide, ou invalide (avertissement) = `""`, la carte n'affiche que la trace. L'hôte alimente
+    l'en-tête Content-Security-Policy (`arc_serve.tile_origin`) : rien d'autre n'y entre."""
+    value = config.get("dashboard", {}).get("map_tiles", DEFAULT_MAP_TILES)
+    if not isinstance(value, str):
+        value = ""
+    value = value.strip()
+    if value and not _MAP_TILES_RE.fullmatch(value):
+        print(f"avertissement : [dashboard].map_tiles « {value} » ignoré (https://hôte/…{{z}}/{{x}}/{{y}}… attendu) : "
+              "carte sans fond.", file=sys.stderr)
+        return ""
+    return value
+
+
 def _heat_threshold_c(config: Dict[str, dict]) -> float:
     """Résout `[health].heat_threshold_c`, jamais en levant : un typo dans
     `workspace.user.toml` (ex. `heat_threshold_c = "chaud"`) ne doit PAS casser
@@ -455,6 +476,9 @@ def settings(config: Dict[str, dict]) -> dict:
         "language": config.get("language", {}).get("documents", "fr") or "fr",
         # Page « Coach » (chat) : n'affiche l'entrée de nav que si le service est activé.
         "chat_enabled": bool(config.get("chat", {}).get("enabled", False)),
+        # Fond de carte de la page séance : modèle d'URL validé (`""` = trace seule) et mention légale.
+        "map_tiles": _map_tiles(config),
+        "map_attribution": str(config.get("dashboard", {}).get("map_attribution", DEFAULT_MAP_ATTRIBUTION) or ""),
         # VAM sur les montées détectées (#46, critère d'acceptation : « montée
         # minimale configurable (D+, pente) ») — `climb_min_grade_pct` en points de
         # pourcentage au workspace (ex. 5, pas 0.05), converti ici en fraction pour
@@ -2249,8 +2273,8 @@ def samples_by_ref(conn, ref: Union[int, str]) -> dict:
     # `arc_climb_match.py` — a besoin des positions) et de sortie du CLI `samples`
     # (débogage local d'un fichier `activities/fit/<id>.json` déjà lisible tel quel sur
     # le disque de l'athlète — pas une fuite nouvelle). Ce n'est PAS l'API du tableau de
-    # bord (`arc_serve.py`), qui n'appelle jamais cette fonction et ne renvoie jamais de
-    # coordonnée (voir `arc_climb_match.ASSUMPTIONS["privacy"]`).
+    # bord (`arc_serve.py`), qui n'appelle jamais cette fonction : sa seule route à
+    # coordonnées passe par `track` (voir `arc_climb_match.ASSUMPTIONS["privacy"]`).
     col = ref_column(ref)
     rows = conn.execute(
         "SELECT t_s, distance_m, altitude_m, hr_bpm, speed_ms, cadence_spm, lat AS lat_deg, lon AS lon_deg, "
@@ -2268,6 +2292,81 @@ def count_samples(conn, ref: Optional[Union[int, str]]) -> int:
     if ref is None:
         return 0
     return conn.execute(f"SELECT COUNT(*) FROM activity_sample WHERE {ref_column(ref)} = ?", (ref,)).fetchone()[0]
+
+
+# Plafond de points renvoyés par `track` : la carte et les graphiques liés de la page séance
+# n'en tirent rien de plus, et la réponse reste sous ~100 ko pour une sortie de plusieurs heures.
+TRACK_MAX_POINTS = 1500
+_TRACK_COLUMNS = (("d", "distance_m", 1), ("t", "t_s", 0), ("lat", "lat", 6), ("lon", "lon", 6),
+                  ("alt", "altitude_m", 1), ("hr", "hr_bpm", 0), ("spd", "speed_ms", 2),
+                  ("cad", "cadence_spm", 0))
+
+
+def track(conn, activity_id: int, max_points: int = TRACK_MAX_POINTS) -> Optional[dict]:
+    """Trace d'une séance pour la carte et les graphiques liés de la page séance —
+    `/api/activity/<id>/track`. `None` si l'activité n'existe pas.
+
+    Colonnes parallèles (`d`, `t`, `lat`, `lon`, `alt`, `hr`, `spd`, `cad`, une valeur ou
+    `None` par point) plutôt qu'un objet par point : deux à trois fois plus léger. Au-delà de
+    `max_points`, un point sur n est gardé (le dernier toujours, pour que la trace finisse à
+    l'arrivée). `reason_code` : `no_samples` (aucun FIT ingéré), `no_gps` (échantillons sans
+    position — tapis, home trainer : les graphiques restent possibles, pas la carte).
+
+    Seule route qui expose des coordonnées GPS, voir `arc_climb_match.ASSUMPTIONS["privacy"]`."""
+    row = conn.execute("SELECT garmin_activity_id, intervals_activity_id FROM activity WHERE id = ?",
+                       (activity_id,)).fetchone()
+    if row is None:
+        return None
+    ref = activity_ref(row)
+    rows = [] if ref is None else conn.execute(
+        f"SELECT {', '.join(col for _, col, _ in _TRACK_COLUMNS)} FROM activity_sample "
+        f"WHERE {ref_column(ref)} = ? ORDER BY t_s", (ref,)).fetchall()
+    if not rows:
+        return {"reason_code": "no_samples", "points": 0}
+    step = max(1, -(-len(rows) // max(2, max_points)))   # plafond de la division
+    kept = rows[::step]
+    if kept[-1] is not rows[-1]:
+        kept.append(rows[-1])
+    out: Dict[str, Any] = {key: [None if r[col] is None else round(r[col], digits) for r in kept]
+                           for key, col, digits in _TRACK_COLUMNS}
+    out["points"] = len(kept)
+    fixes = [(la, lo) for la, lo in zip(out["lat"], out["lon"]) if la is not None and lo is not None]
+    out["has_gps"] = bool(fixes)
+    if fixes:
+        lats, lons = [p[0] for p in fixes], [p[1] for p in fixes]
+        out["bounds"] = [[min(lats), min(lons)], [max(lats), max(lons)]]
+    else:
+        out["reason_code"] = "no_gps"
+        out.pop("lat")
+        out.pop("lon")
+    return out
+
+
+def session_gait(conn, activity_id: int) -> Optional[dict]:
+    """Dynamique de course d'UNE séance (#151, même règle que `gait_summary` : moyenne pondérée par
+    `covered_s`, repli sur le bloc `arc`, `arc_gait.resolve_session`) pour la page séance. `None`
+    hors course à pied, ou quand seule la cadence est connue (elle ne dit rien de la dynamique)."""
+    row = conn.execute("SELECT sport, data_json, garmin_activity_id, intervals_activity_id FROM activity "
+                       "WHERE id = ?", (activity_id,)).fetchone()
+    if row is None or row["sport"] not in M.RUNNING_SPORTS:
+        return None
+    ref = activity_ref(row)
+    sampled: Dict[str, Any] = {}
+    if ref is not None:
+        weight = "CASE WHEN covered_s IS NULL OR covered_s <= 0 THEN 1.0 ELSE covered_s END"
+        cols = [f"SUM(CASE WHEN {m} IS NOT NULL THEN {m} * {weight} END) / "
+                f"NULLIF(SUM(CASE WHEN {m} IS NOT NULL THEN {weight} END), 0) AS {m}" for m in GT.METRICS]
+        found = conn.execute(f"SELECT {', '.join(cols)} FROM activity_sample WHERE {ref_column(ref)} = ?",
+                             (ref,)).fetchone()
+        sampled = dict(found) if found else {}
+    try:
+        arc = json.loads(row["data_json"] or "{}")
+    except (TypeError, ValueError):
+        arc = {}
+    values, notes = GT.resolve_session(sampled, arc if isinstance(arc, dict) else {})
+    if not any(m != "cadence_spm" for m in values):
+        return None
+    return {"values": values, "notes": notes}
 
 
 # ---------------------------------------------------------------------------

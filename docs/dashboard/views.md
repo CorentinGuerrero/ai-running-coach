@@ -546,7 +546,23 @@ faute de fréquence cardiaque et d'effort perçu, un astérisque.
 
 ![Détail d'une séance : chiffres clés, météo, splits et analyse du coach](../assets/dashboard/seance.webp)
 
-- **Les chiffres clés** : distance, durée, allure, D+ / D-, FC moyenne et max, **HRR**
+- **La carte** : la trace GPS des échantillons FIT sur un fond topographique
+  (OpenTopoMap par défaut, `[dashboard].map_tiles`), colorée au choix par **allure**
+  (quintiles de la séance), **FC** (les mêmes zones que la barre « Zones FC »),
+  **pente** ou d'une seule couleur. Les montées détectées sont surlignées et
+  numérotées comme dans leur tableau ; « Sur la carte », dans ce tableau, cadre la
+  montée. Sans GPS (tapis, intérieur) ou sans FIT, une note le dit et la page reste
+  complète. Le serveur de tuiles ne voit que la zone affichée, jamais la trace ; un
+  `map_tiles = ""` coupe tout fond de carte (trace seule, hors ligne).
+- **Le profil** : altitude (montées détectées ombrées), FC, allure et cadence le
+  long de la distance, sur un axe commun. Un seul curseur relie les quatre graphiques
+  **et la carte** : survoler le profil déplace un point sur la trace, survoler la
+  trace place le curseur du profil, avec la lecture complète (distance, altitude,
+  pente, FC, allure, cadence, temps écoulé). Les arrêts (ravitaillement, pause) ne
+  sont pas des allures : au-delà de 20 min/km, la courbe s'interrompt.
+- **Les chiffres clés**, en trois groupes (effort, cœur, contexte) à côté de la
+  carte : distance, durée (en mouvement, et totale quand les pauses dépassent une
+  minute), allure, D+ / D-, FC moyenne et max, **HRR**
   (récupération cardiaque — « non mesuré » avec sa raison quand Garmin ne l'a pas),
   effet d'entraînement, charge, VO2max estimée quand la séance s'y prête, et le
   **découplage aérobie (Pa:HR)** (#45, facteur d'efficacité EF en complément) quand la
@@ -556,7 +572,13 @@ faute de fréquence cardiaque et d'effort perçu, un astérisque.
   **durabilité (fade GAP dernier tiers)** (#48, fade EF en complément) apparaît de la
   même façon, quand la sortie est éligible (plus de 90 minutes de mouvement, voir la
   section « Durabilité » de [Analyse](#analyse)) ; absente sinon.
-- **La météo du jour**, si une prévision a été enregistrée.
+- **La météo du jour**, si une prévision a été enregistrée, et le matériel porté.
+- **Ressenti & ravitaillement** : ce que vous avez déclaré, souvent avec `/log` —
+  effort perçu, glucides et boisson (et leur débit horaire), pesées avant/après,
+  taux de sudation, douleurs du jour (fichier santé). Absent si rien n'est déclaré.
+- **La foulée de la séance** (#151) : moyennes de la dynamique de course mesurée par
+  la montre (temps de contact, balance, oscillation, ratio vertical, longueur de
+  pas, cadence). Les tendances restent dans la carte « Foulée » de [Santé](#sante).
 - **Les zones FC** (#43) : une barre empilée du temps passé dans chacune des 5 zones,
   avec les bornes intérieures (bpm, ex. « Z1 < 146 · Z2 146-155 · … · Z5 ≥ 172 ») et
   la méthode effective (FC au seuil, Karvonen ou %FC max — voir
@@ -592,8 +614,8 @@ faute de fréquence cardiaque et d'effort perçu, un astérisque.
   page dédiée (`#/montee/<id>`) qui trace la VAM de chaque occurrence dans le temps
   et détaille FC (premier/dernier tiers de la montée) et dérive FC par 100 m de D+ —
   la même page que la liste des « Segments de montée » de [Analyse](#analyse).
-  Aucune coordonnée GPS n'est jamais exposée par le tableau de bord (positions
-  utilisées uniquement en interne pour l'appariement).
+  Les pages de montée n'exposent aucune coordonnée GPS : seule la carte de la page
+  séance (`/api/activity/<id>/track`) en renvoie.
 - **L'efficacité en descente** (#47) : un tableau, une ligne par classe de pente
   descendante qualifiante (pente moyenne réellement rencontrée, allure, distance,
   durée de mouvement, indicateur d'efficacité — voir la section « Efficacité en

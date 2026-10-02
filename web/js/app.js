@@ -2,6 +2,7 @@
 import * as F from "./format.js";
 import { navItems } from "./nav.js";
 import { timeChart, attachCursor, verdictStrip, yearCalendar } from "./chart.js";
+import { resampleByDistance, colorModes, sessionMap } from "./map.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const main = $("#main");
@@ -1539,47 +1540,76 @@ async function viewSessions(params) {
 }
 
 async function viewSession(id) {
-  const d = await api(`activity/${id}`);
+  // Trace (carte + profil) chargée en parallèle : une erreur sur elle ne doit jamais
+  // empêcher la page de s'afficher — la séance reste lisible sans carte.
+  const [d, tr] = await Promise.all([api(`activity/${id}`), api(`activity/${id}/track`).catch(() => null)]);
   const a = d.activity;
   const trail = SUMMARY.settings.sport === "trail";
   const missing = a.missing_reason || {};
-  const facts = [
-    ["Distance", F.distance(a.distance_m, 2)], ["Durée", F.duration(a.duration_s, { seconds: true })],
-    ["Allure", F.pace(a.distance_m, a.moving_duration_s || a.duration_s)],
+  const moving = a.moving_duration_s || a.duration_s;
+  const profile = tr && tr.points > 1 ? resampleByDistance(tr) : null;
+  const hasMap = !!(tr && tr.has_gps && profile);
+
+  // Grand livre de la séance : trois groupes courts plutôt qu'une grille de quinze cases
+  // égales — l'effort d'abord, le cœur ensuite, le contexte enfin.
+  const effort = [
+    ...(a.distance_m ? [["Distance", F.distance(a.distance_m, 2)]] : []),
+    ["Durée", `${F.duration(moving, { seconds: true })}${a.moving_duration_s && a.duration_s && a.duration_s - a.moving_duration_s >= 60 ? `<small class="muted"> en mouvement · ${F.duration(a.duration_s)} au total</small>` : ""}`],
+    ...(a.distance_m ? [["Allure", F.pace(a.distance_m, moving)]] : []),
     // GAP (#44) : uniquement pour la famille course à pied avec échantillons FIT
     // ingérés (arc_gap.ASSUMPTIONS) — absent (jamais une ligne à "—") sinon, pour
     // ne pas laisser croire qu'une valeur a été calculée et vaut zéro/inconnue.
-    ...(a.gap_pace_s_km != null ? [["GAP (allure ajustée à la pente)", F.paceFromSecPerKm(a.gap_pace_s_km)]] : []),
+    ...(a.gap_pace_s_km != null ? [["GAP <small class=\"muted\">allure ajustée à la pente</small>", F.paceFromSecPerKm(a.gap_pace_s_km)]] : []),
+    ...((trail && a.distance_m) || a.elevation_gain_m ? [["D+ / D-", a.elevation_gain_m != null ? `${F.elevation(a.elevation_gain_m)} / ${F.elevation(a.elevation_loss_m)}` : (missing.elevation_gain_m ? "non mesuré" : "—")]] : []),
+    ["Charge", `${F.num(a.load)} <small class="muted">${a.load_source === "trimp" ? "TRIMP" : a.load_source === "srpe" ? "effort perçu" : "estimée"}</small>`],
+    ["Effet d'entraînement", a.te_aerobic != null ? `${F.num(a.te_aerobic, 1)}${a.te_anaerobic != null ? `<small class="muted"> · ${F.num(a.te_anaerobic, 1)} anaérobie</small>` : ""}` : "—"],
+  ];
+  const heart = [
+    ["FC moy / max", a.avg_hr_bpm ? `${F.num(a.avg_hr_bpm)} / ${F.num(a.max_hr_bpm)} bpm` : (missing.avg_hr_bpm ? "non mesurée" : "—")],
+    ["HRR", a.recovery_hr_bpm != null ? `${F.num(a.recovery_hr_bpm)} bpm` : `<span class="muted">non mesuré${missing.recovery_hr_bpm ? ` — ${F.esc(missing.recovery_hr_bpm)}` : ""}</span>`],
     // Découplage aérobie / Pa:HR (#45) : uniquement si calculable (séance de course
     // à pied, ≥ 60 min de mouvement, effort jugé stable — arc_decoupling.ASSUMPTIONS)
     // — jamais une ligne à "—", qui laisserait croire à une valeur nulle mesurée.
     // Couleur seulement dans les deux sens univoques (revue de code #45) : 0-5 %
-    // (dérive attendue, repère de bonne durabilité) en positif, au-delà en
-    // négatif (dérive trop marquée) — une valeur négative (efficacité qui
-    // s'améliore, ou simplement du bruit de mesure) reste neutre, jamais
-    // colorée comme si « moins » était automatiquement « mieux ».
-    ...(a.decoupling_pct != null ? [["Découplage aérobie (Pa:HR)",
+    // (dérive attendue) en positif, au-delà en négatif — une valeur négative reste neutre.
+    ...(a.decoupling_pct != null ? [["Découplage (Pa:HR)",
       `<span class="${a.decoupling_pct >= 0 && a.decoupling_pct <= 5 ? "pos" : a.decoupling_pct > 5 ? "neg" : ""}">${a.decoupling_pct > 0 ? "+" : ""}${F.num(a.decoupling_pct, 1)} %</span>${a.ef_whole != null ? `<small class="muted"> · EF ${F.num(a.ef_whole, 2)}</small>` : ""}`]] : []),
-    // Durabilité (#48) : fade GAP entre le premier et le dernier tiers de la
-    // sortie longue — uniquement si calculable (voir arc_durability.ASSUMPTIONS),
-    // jamais une ligne à "—". Couleur seulement dans les deux sens univoques
-    // (même discipline que le découplage ci-dessus) : positif (ralentissement en
-    // fin de sortie) en négatif visuel, négatif ou nul (pas de baisse) neutre —
-    // jamais coloré comme si un fade positif était souhaitable.
-    ...(a.durability_gap_fade_pct != null ? [["Durabilité (fade GAP dernier tiers)",
-      `<span class="${a.durability_gap_fade_pct > 0 ? "neg" : ""}">${a.durability_gap_fade_pct > 0 ? "+" : ""}${F.num(a.durability_gap_fade_pct, 1)} %</span>${a.durability_ef_fade_pct != null ? `<small class="muted"> · fade EF ${a.durability_ef_fade_pct > 0 ? "+" : ""}${F.num(a.durability_ef_fade_pct, 1)} %</small>` : ""}`]] : []),
-    ...(trail || a.elevation_gain_m ? [["D+ / D-", a.elevation_gain_m != null ? `${F.elevation(a.elevation_gain_m)} / ${F.elevation(a.elevation_loss_m)}` : (missing.elevation_gain_m ? "non mesuré" : "—")]] : []),
-    ["FC moy / max", a.avg_hr_bpm ? `${F.num(a.avg_hr_bpm)} / ${F.num(a.max_hr_bpm)} bpm` : (missing.avg_hr_bpm ? "non mesurée" : "—")],
-    ["HRR", a.recovery_hr_bpm != null ? `${F.num(a.recovery_hr_bpm)} bpm` : `non mesuré${missing.recovery_hr_bpm ? ` — ${F.esc(missing.recovery_hr_bpm)}` : ""}`],
-    ["Effet d'entraînement", a.te_aerobic != null ? `${F.num(a.te_aerobic, 1)}${a.te_anaerobic != null ? ` / ${F.num(a.te_anaerobic, 1)} anaérobie` : ""}` : "—"],
+    // Durabilité (#48) : fade GAP entre le premier et le dernier tiers — jamais une
+    // ligne à "—" ; un fade positif (ralentissement) en négatif visuel, sinon neutre.
+    ...(a.durability_gap_fade_pct != null ? [["Durabilité <small class=\"muted\">fade GAP dernier tiers</small>",
+      `<span class="${a.durability_gap_fade_pct > 0 ? "neg" : ""}">${a.durability_gap_fade_pct > 0 ? "+" : ""}${F.num(a.durability_gap_fade_pct, 1)} %</span>${a.durability_ef_fade_pct != null ? `<small class="muted"> · EF ${a.durability_ef_fade_pct > 0 ? "+" : ""}${F.num(a.durability_ef_fade_pct, 1)} %</small>` : ""}`]] : []),
+    ...(a.avg_cadence_spm ? [["Cadence", `${F.num(a.avg_cadence_spm)} pas/min`]] : []),
+    ...(a.vo2max_est ? [["VO2max estimée", F.num(a.vo2max_est, 1)]] : []),
+  ];
+  const wx = d.weather;
+  const context = [
     // Matériel (#147) : chaussure attribuée par la règle unique (`arc_metrics.attribute_gear`, côté
     // serveur) et objets portés (`gear_ids`) — chaque nom renvoie vers sa fiche ; rien si absent.
     ...(d.gear?.shoe ? [["Chaussure", `${gearLink(d.gear.shoe.gear_id, d.gear.shoe.name)}${d.gear.shoe.source === "default" ? ` <small class="muted">paire par défaut</small>` : ""}`]] : []),
     ...(d.gear?.equipment?.length ? [["Équipement porté", d.gear.equipment.map((g) => gearLink(g.gear_id, g.name)).join(", ")]] : []),
-    ["Charge", `${F.num(a.load)} <small class="muted">${a.load_source === "trimp" ? "TRIMP" : a.load_source === "srpe" ? "effort perçu" : "estimée"}</small>`],
-    ...(a.vo2max_est ? [["VO2max estimée", F.num(a.vo2max_est, 1)]] : []),
+    ...(wx ? [["Météo", `${weatherChip(wx.category)} <small class="muted">${F.esc(wx.location)} · ${F.num(wx.temp_min_c)}–${F.num(wx.temp_max_c)} °C · vent ${F.num(wx.wind_kmh)} km/h</small>`]] : []),
   ];
+  const group = (title, rows) => (rows.length ? `<section class="ledger__group"><h2>${title}</h2><dl class="ledger__rows">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl></section>` : "");
+
+  const modes = profile ? colorModes(profile, d.hr_zones?.bounds_bpm) : {};
+  const modeOrder = ["pace", "hr", "grade", "plain"].filter((k) => modes[k]);
+  const firstMode = modeOrder[0];
+  const mapHtml = hasMap ? `<figure class="session-map">
+      <div class="map" id="s-map" role="region" aria-label="Carte de la séance : trace GPS"></div>
+      <figcaption class="map-bar">
+        <div class="toolbar" role="group" aria-label="Couleur de la trace">${modeOrder.map((k) => `<button type="button" class="seg${k === firstMode ? " is-on" : ""}" aria-pressed="${k === firstMode}" data-mode="${k}">${modes[k].label}</button>`).join("")}
+          <button type="button" class="seg seg--ghost" id="s-map-fit">Recentrer</button></div>
+        <p class="map-legend" id="s-map-legend"></p>
+      </figcaption></figure>` : "";
+  // Une séance de course sans FIT, ou un FIT sans GPS : on le dit une fois, sous le grand livre.
+  const runFamily = ["running", "trail"].includes(a.sport);
+  const outdoor = runFamily || ["hiking", "walking", "cycling"].includes(a.sport);
+  const mapNote = hasMap || !outdoor ? "" : tr?.reason_code === "no_gps"
+    ? note("Pas de carte : le fichier FIT de cette séance ne contient aucune position GPS (tapis, intérieur ou GPS coupé).")
+    : (runFamily && tr?.reason_code === "no_samples" ? note("Pas de carte : aucun échantillon FIT ingéré pour cette séance (skill <code>fit-download</code>).") : "");
+
   let splitsHtml = "";
+  let splitsMount = () => {};
   if (d.splits.length) {
     const all = d.splits;
     // Tours Garmin : souvent 1 km, mais un pas de séance structurée ou le reliquat
@@ -1605,35 +1635,192 @@ async function viewSession(id) {
     splitsHtml = `<section class="band"><h2>Splits</h2><p class="legend"><span class="legend__item"><span class="key key--bar"></span>${byKm ? "Temps au km" : "Allure (min/km)"}</span> ${hasGap ? `<span class="legend__item"><span class="key key--gap"></span>GAP (allure ajustée à la pente)</span> ` : ""}<span class="legend__item"><span class="key key--rhr"></span>FC moyenne</span></p>
       <div class="chart-host chart-host--nox" id="c-splits">${c.svg}</div><p class="readout" id="r-splits"></p>
       ${hidden ? `<p class="muted"><small>${hidden === 1 ? "Un tour de moins de 200 m n'est pas tracé" : `${hidden} tours de moins de 200 m ne sont pas tracés`} ; il${hidden === 1 ? " reste" : "s restent"} dans le tableau.</small></p>` : ""}
-      <div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">${unit}</th>${byKm ? "" : `<th scope="col" class="num">Distance</th>`}<th scope="col" class="num">Temps</th>${byKm ? "" : `<th scope="col" class="num">Allure</th>`}${hasGap ? `<th scope="col" class="num">GAP</th>` : ""}<th scope="col" class="num">D+ / D-</th><th scope="col" class="num">FC</th><th scope="col" class="num">Cadence</th><th scope="col">Lecture</th></tr></thead>
-      <tbody>${all.map((x) => `<tr><td>${x.km}</td>${byKm ? "" : `<td class="num">${x.distance_m != null ? F.distance(x.distance_m, 2) : "—"}</td>`}<td class="num">${F.clockShort(x.duration_s)}</td>${byKm ? "" : `<td class="num">${lapPace(x)}</td>`}${hasGap ? `<td class="num">${F.paceFromSecPerKm(x.gap_pace_s_km)}</td>` : ""}<td class="num">${x.elev_gain_m != null ? `+${F.num(x.elev_gain_m)} / -${F.num(x.elev_loss_m)}` : "—"}</td><td class="num">${F.num(x.avg_hr_bpm)}</td><td class="num">${F.num(x.cadence_spm)}</td><td>${F.esc(x.label || "")}</td></tr>`).join("")}</tbody></table></div></section>`;
-    setTimeout(() => attachCursor($("#c-splits"), c, (i) => {
+      ${all.length > 20 ? `<details class="fold"><summary>Les ${all.length} ${byKm ? "kilomètres" : "tours"} en détail</summary>` : ""}<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">${unit}</th>${byKm ? "" : `<th scope="col" class="num">Distance</th>`}<th scope="col" class="num">Temps</th>${byKm ? "" : `<th scope="col" class="num">Allure</th>`}${hasGap ? `<th scope="col" class="num">GAP</th>` : ""}<th scope="col" class="num">D+ / D-</th><th scope="col" class="num">FC</th><th scope="col" class="num">Cadence</th><th scope="col">Lecture</th></tr></thead>
+      <tbody>${all.map((x) => `<tr><td>${x.km}</td>${byKm ? "" : `<td class="num">${x.distance_m != null ? F.distance(x.distance_m, 2) : "—"}</td>`}<td class="num">${F.clockShort(x.duration_s)}</td>${byKm ? "" : `<td class="num">${lapPace(x)}</td>`}${hasGap ? `<td class="num">${F.paceFromSecPerKm(x.gap_pace_s_km)}</td>` : ""}<td class="num">${x.elev_gain_m != null ? `+${F.num(x.elev_gain_m)} / -${F.num(x.elev_loss_m)}` : "—"}</td><td class="num">${F.num(x.avg_hr_bpm)}</td><td class="num">${F.num(x.cadence_spm)}</td><td>${F.esc(x.label || "")}</td></tr>`).join("")}</tbody></table></div>${all.length > 20 ? "</details>" : ""}</section>`;
+    splitsMount = () => attachCursor($("#c-splits"), c, (i) => {
       const x = sp[i];
       const what = byKm ? F.clockShort(x.duration_s) : `${F.distance(x.distance_m, 2)} en ${F.clockShort(x.duration_s)} (${lapPace(x)})`;
       readout($("#r-splits"), `<strong>${unit} ${x.km}</strong> · ${what}${x.gap_pace_s_km != null ? ` · GAP ${F.paceFromSecPerKm(x.gap_pace_s_km)}` : ""} · FC ${F.num(x.avg_hr_bpm)}${x.elev_gain_m != null ? ` · +${F.num(x.elev_gain_m)} m` : ""}${x.label ? ` · ${F.esc(x.label)}` : ""}`);
-    }), 0);
+    });
   }
-  const wx = d.weather;
   // Séance sans FIT (#50, critère d'acceptation) : `climbs.reason_code === "no_samples"`
   // (`arc_serve.py::api_activity_climbs`, même `reason_code` porté par `descent` et
   // implicitement par `hr_zones.zone_seconds`, les trois dérivés de la MÊME table
   // `activity_sample` pour la même activité) signale l'absence totale d'échantillons
   // FIT ingérés pour une séance de la famille course à pied — jamais un simple test
-  // sur le texte français de `reason` (fragile, même motif que `climbs.applicable`
-  // ci-dessus). Plutôt que d'empiler trois notes vides identiques (zones FC, montées,
-  // descente), une seule note consolidée remplace les trois (critère d'acceptation :
-  // « séance sans FIT : sections masquées proprement »).
+  // sur le texte français de `reason`. Une seule note consolidée remplace les trois
+  // sections vides (critère d'acceptation : « séance sans FIT : sections masquées proprement »).
   const noFitSamples = !!(d.climbs && d.climbs.applicable !== false && d.climbs.reason_code === "no_samples");
-  main.innerHTML = `${header(a.name || F.SPORT[a.sport] || "Séance", `${F.dayLong(a.date)} · ${F.SPORT[a.sport] || a.sport}${a.location ? " · " + F.esc(a.location) : ""}`)}
-    <p><a href="#/seances">← Toutes les séances</a></p>
-    <dl class="facts facts--grid">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
-    ${wx ? `<p class="weather">${weatherChip(wx.category)} <span>${F.esc(wx.location)} · ${F.num(wx.temp_min_c)}–${F.num(wx.temp_max_c)} °C · vent ${F.num(wx.wind_kmh)} km/h</span></p>` : ""}
+  const climbs = (d.climbs && d.climbs.climbs) || [];
+  const prof = profile ? profileSection(profile, climbs, trail || a.elevation_gain_m) : null;
+  const sub = `${F.dayLong(a.date)} · ${F.SPORT[a.sport] || a.sport}${a.location ? " · " + F.esc(a.location) : ""} · <a href="#/seances">Toutes les séances</a>`;
+
+  main.innerHTML = `${header(a.name || F.SPORT[a.sport] || "Séance", sub)}
+    <div class="session-hero${hasMap ? "" : " session-hero--nomap"}">
+      ${mapHtml}
+      <div class="ledger">${group("Effort", effort)}${group("Cœur", heart)}${group("Contexte", context)}</div>
+    </div>
+    ${mapNote}
+    ${prof ? prof.html : ""}
+    ${loggedSection(a, d.pain)}
     ${noFitSamples ? noFitSamplesNote(d.hr_zones) : hrZoneSection(d.hr_zones)}
     ${splitsHtml}
-    ${noFitSamples ? "" : climbsSection(d.climbs)}
+    ${noFitSamples ? "" : climbsSection(d.climbs, { onMap: hasMap })}
     ${noFitSamples ? "" : descentSection(d.descent)}
+    ${sessionGaitSection(d.gait)}
     ${energySection(d.energy, noFitSamples)}
     <section class="band prose"><h2>Analyse du coach</h2>${d.body_html || "<p class=\"muted\">Pas de texte.</p>"}<p class="muted source">Source : <code>${F.esc(a.source_path)}</code></p></section>`;
+
+  splitsMount();
+  let mapCtl = null;
+  const moveProfile = prof ? prof.mount((j) => mapCtl?.showIndex(j)) : () => {};
+  if (!hasMap) return;
+  const legend = $("#s-map-legend");
+  const showLegend = (key) => {
+    const m = modes[key];
+    legend.innerHTML = m.legend
+      ? `${m.legend.map((l, b) => `<span class="map-legend__step"><span class="key key--trk${b}"></span>${F.esc(l)}</span>`).join("")}${m.legendNote ? `<span class="muted">${F.esc(m.legendNote)}</span>` : ""}`
+      : `<span class="muted">Survolez la trace ou le profil pour suivre la séance.</span>`;
+  };
+  try {
+    mapCtl = await sessionMap($("#s-map"), tr, profile, {
+      tiles: SUMMARY.settings.map_tiles, attribution: SUMMARY.settings.map_attribution, climbs,
+      onHover: (j) => { moveProfile(j); mapCtl?.showIndex(j); },
+    });
+  } catch (err) {
+    $(".session-map").outerHTML = note(`Carte indisponible : ${F.esc(err.message)}.`);
+    return;
+  }
+  mapCtl.setMode(modes[firstMode]);
+  showLegend(firstMode);
+  for (const btn of document.querySelectorAll(".map-bar [data-mode]")) {
+    btn.addEventListener("click", () => {
+      for (const b of document.querySelectorAll(".map-bar [data-mode]")) {
+        b.classList.toggle("is-on", b === btn);
+        b.setAttribute("aria-pressed", String(b === btn));
+      }
+      mapCtl.setMode(modes[btn.dataset.mode]);
+      showLegend(btn.dataset.mode);
+    });
+  }
+  $("#s-map-fit").addEventListener("click", () => mapCtl.reset());
+  for (const btn of document.querySelectorAll("[data-climb-km]")) {
+    btn.addEventListener("click", () => {
+      const [k0, k1] = btn.dataset.climbKm.split(",").map(Number);
+      mapCtl.focusRange(k0 * 1000, k1 * 1000);
+      $(".session-map").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
+    });
+  }
+}
+
+/** Profil de la séance, à pas de distance : altitude (montées détectées ombrées), puis FC,
+ * allure et cadence sur le même axe. Un curseur commun lie les graphiques entre eux et à
+ * la carte. `{html, mount(onIndex) → move(j)}`. */
+function profileSection(p, climbs, showElevation) {
+  const has = (arr) => arr.some((v) => v != null);
+  const total = p.d[p.n - 1] - p.d[0];
+  const kmStep = [1, 2, 5, 10, 20, 50].find((s) => total / 1000 / s <= 10) || 100;
+  const labels = p.d.map((d, j) => {
+    const km = (d - p.d[0]) / 1000;
+    const prev = j ? (p.d[j - 1] - p.d[0]) / 1000 : -1;
+    return Math.floor(km / kmStep) !== Math.floor(prev / kmStep) ? `${F.num(Math.floor(km / kmStep) * kmStep)} km` : "";
+  });
+  const inClimb = (j) => climbs.some((c) => p.d[j] >= c.start_km * 1000 && p.d[j] <= c.end_km * 1000);
+  // Axe robuste (5e-95e centile, marge 15 %) : un arrêt au ravitaillement ne doit pas écraser
+  // toute la courbe ; les valeurs hors de l'axe y sont ramenées à son bord.
+  const robust = (arr) => {
+    const v = arr.filter((x) => x != null).sort((a, b) => a - b);
+    const lo = v[Math.floor(v.length * 0.05)], hi = v[Math.floor(v.length * 0.95)];
+    const m = (hi - lo) * 0.15 || 1;
+    const y = { min: lo - m, max: hi + m };
+    return { y, values: arr.map((x) => (x == null ? null : Math.min(y.max, Math.max(y.min, x)))) };
+  };
+  const paceR = has(p.pace) ? robust(p.pace.map((v) => (v == null ? null : v / 60))) : null;
+  const cadR = has(p.cad) ? robust(p.cad) : null;
+  const paceFmt = (v) => `${Math.floor(v)}:${String(Math.round((v % 1) * 60) % 60).padStart(2, "0")}`;
+  const specs = [
+    showElevation && has(p.alt) && { id: "alt", title: "Altitude", height: 170, label: "Altitude le long de la séance", yFormat: (v) => F.num(v),
+      layers: [{ type: "area", values: p.alt, cls: "area area--elev", base: -1e9 },
+        ...(climbs.length ? [{ type: "area", values: p.alt.map((v, j) => (inClimb(j) ? v : null)), cls: "area area--climb", base: -1e9 }] : []),
+        { type: "line", values: p.alt, cls: "line line--elev" }] },
+    has(p.hr) && { id: "hr", title: "FC", height: 110, label: "Fréquence cardiaque le long de la séance", yFormat: (v) => F.num(v),
+      layers: [{ type: "line", values: p.hr, cls: "line line--rhr" }] },
+    paceR && { id: "pace", title: "Allure", height: 110, y: { ...paceR.y, invert: true }, label: "Allure le long de la séance, plus rapide en haut", yFormat: paceFmt,
+      layers: [{ type: "line", values: paceR.values, cls: "line line--pace" }] },
+    cadR && { id: "cad", title: "Cadence", height: 100, y: cadR.y, label: "Cadence le long de la séance", yFormat: (v) => F.num(v),
+      layers: [{ type: "line", values: cadR.values, cls: "line line--cad" }] },
+  ].filter(Boolean);
+  if (!specs.length) return null;
+  const xs = p.d.map(String);   // `timeChart` attend des chaînes (dates) ; l'échelle reste le rang
+  // Graduations kilométriques sous le dernier graphique seulement : un seul axe pour toute la pile.
+  const rows = specs.map((sp, k) => {
+    const last = k === specs.length - 1;
+    // Les bandes fines (FC, allure, cadence) n'ont que deux graduations : lisibles sur téléphone.
+    const y = sp.id === "alt" ? sp.y : { ...(sp.y || {}), ticks: 2 };
+    return { ...sp, c: timeChart(xs, sp.layers, [], { height: sp.height + (last ? 20 : 0), y, xLabels: last ? labels : labels.map(() => ""), label: sp.label, yFormat: sp.yFormat }) };
+  });
+  const climbKey = climbs.length && rows[0].id === "alt" ? `<span class="legend__item"><span class="key key--climb"></span>Montées détectées</span>` : "";
+  const html = `<section class="band profile"><h2>Profil</h2>
+    ${climbKey ? `<p class="legend">${climbKey}</p>` : ""}
+    <div class="profile__stack">${rows.map((r) => `<div class="profile__row"><span class="profile__label" aria-hidden="true">${r.title}</span><div class="chart-host chart-host--nox" id="c-prof-${r.id}">${r.c.svg}</div></div>`).join("")}</div>
+    <p class="readout readout--sticky" id="r-prof" aria-live="polite"></p></section>`;
+  const show = (j) => {
+    const km = (p.d[j] - p.d[0]) / 1000;
+    const g = p.grade[j];
+    readout($("#r-prof"), `<strong>${F.distance(km * 1000, 2)}</strong>`
+      + (p.alt[j] != null ? ` · ${F.elevation(p.alt[j])}` : "")
+      + (g != null ? ` · pente ${g > 0 ? "+" : ""}${F.num(g * 100, 0)}${NB}%` : "")
+      + (p.hr[j] != null ? ` · ${F.num(p.hr[j])}${NB}bpm` : "")
+      + (p.pace[j] != null ? ` · ${F.paceFromSecPerKm(p.pace[j])}` : "")
+      + (p.cad[j] != null ? ` · ${F.num(p.cad[j])}${NB}pas/min` : "")
+      + (p.t[j] != null ? ` <span class="muted">· ${F.clockShort(p.t[j] - (p.t[0] || 0))}</span>` : ""));
+  };
+  return {
+    html,
+    mount(onIndex) {
+      const moves = [];
+      const all = (j) => { for (const m of moves) m(j); show(j); };
+      for (const r of rows) {
+        moves.push(attachCursor($(`#c-prof-${r.id}`), r.c, (j) => { all(j); onIndex(j); }, null));
+      }
+      show(0);
+      return all;
+    },
+  };
+}
+
+/** « Ressenti & ravitaillement » : ce que l'athlète a déclaré (souvent par `/log`, #67) —
+ * effort perçu, glucides, boisson, pesées, douleurs du jour. Rien de déclaré : rien d'affiché. */
+function loggedSection(a, pain) {
+  const sweat = a.sweat_rate_l_h;
+  const hours = (a.moving_duration_s || a.duration_s || 0) / 3600;
+  const perHour = (v, unit) => (hours >= 0.5 ? `<small class="muted"> · ${F.num(v / hours, 0)}${NB}${unit}/h</small>` : "");
+  const rows = [
+    ...(a.rpe != null ? [["Effort perçu (RPE)", `${F.num(a.rpe, 0)}<small class="muted">${NB}/${NB}10</small>`]] : []),
+    ...(a.carbs_g != null ? [["Glucides", `${F.num(a.carbs_g, 0)}${NB}g${perHour(a.carbs_g, "g")}`]] : []),
+    ...(a.fluid_intake_ml != null ? [["Boisson", `${F.num(a.fluid_intake_ml, 0)}${NB}ml${perHour(a.fluid_intake_ml, "ml")}`]] : []),
+    ...(a.weight_pre_kg != null && a.weight_post_kg != null ? [["Pesée avant → après", `${F.weight(a.weight_pre_kg)} → ${F.weight(a.weight_post_kg)} <small class="muted">(${a.weight_post_kg - a.weight_pre_kg > 0 ? "+" : ""}${F.weight(a.weight_post_kg - a.weight_pre_kg)})</small>`]] : []),
+    ...(sweat != null ? [["Taux de sudation", `${F.num(sweat, 2)}${NB}L/h`]] : []),
+    ...((pain || []).map((x) => [`Douleur · ${F.esc(x.location)}`, `<span class="${Number(x.score) >= 7 ? "neg" : ""}">${F.esc(String(x.score))}<small class="muted">${NB}/${NB}10</small></span>`])),
+  ];
+  if (!rows.length) return "";
+  const hurt = (pain || []).some((x) => Number(x.score) >= 7);
+  return `<section class="band"><h2>Ressenti & ravitaillement</h2>
+    <dl class="facts">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
+    ${pain?.length ? `<p class="note">Douleurs déclarées ce jour-là (fichier santé).${hurt ? " Une douleur à 7/10 ou plus justifie l'avis d'un professionnel de santé." : ""}</p>` : ""}</section>`;
+}
+
+/** Foulée de CETTE séance (#151) : moyennes de la dynamique de course mesurée par la montre,
+ * même lecture que la carte « Foulée » de la vue Santé (tendances) — jamais un diagnostic. */
+function sessionGaitSection(g) {
+  if (!g?.values) return "";
+  const rows = GAIT_ROWS.filter(([k]) => g.values[k]).map(([k, label, fmt]) => {
+    const v = g.values[k];
+    const extra = k === "stance_balance_pct" ? ` <small class="muted">écart ${F.num(Math.abs(v.value - 50), 1)}${NB}pt</small>` : "";
+    return `<div><dt>${F.esc(label)}</dt><dd>${fmt(v.value)}${extra}${v.source === "arc" ? ` <span class="tag" title="Valeur du fichier de la séance, sans échantillons FIT">déclarée</span>` : ""}</dd></div>`;
+  }).join("");
+  return `<section class="band"><h2>Foulée</h2><dl class="facts">${rows}</dl>
+    <p class="note">Moyennes de la séance, pondérées par le temps. Le côté que porte la balance (gauche ou droite) n'est pas établi par le format FIT. Tendances : <a href="#/sante?section=foulee">carte « Foulée » de la vue Santé</a>.</p></section>`;
 }
 
 /** Section « Montées » de la page séance (#46, VAM) : un tableau, une ligne par
@@ -1665,7 +1852,7 @@ async function viewSession(id) {
 // à jour si `GRADE_CLASSES` change côté serveur.
 const GRADE_CLASS_ORDER = ["<5%", "5-10%", "10-15%", "15-20%", ">20%"];
 
-function climbsSection(climbs) {
+function climbsSection(climbs, { onMap = false } = {}) {
   const rows = (climbs && climbs.climbs) || [];
   const reason = climbs && climbs.reason;
   // `applicable === false` (jamais un test sur le texte français de `reason`,
@@ -1695,13 +1882,13 @@ function climbsSection(climbs) {
       <th scope="col">#</th><th scope="col" class="num">Km</th><th scope="col" class="num">Distance</th>
       <th scope="col" class="num">D+</th><th scope="col" class="num">Pente moy.</th>
       <th scope="col" class="num">Durée</th><th scope="col" class="num">VAM</th>
-      <th scope="col" class="num">vs précédent/meilleur</th></tr></thead>
+      <th scope="col" class="num">vs précédent/meilleur</th>${onMap ? `<th scope="col"><span class="visually-hidden">Carte</span></th>` : ""}</tr></thead>
     <tbody>${rows.map((c) => `<tr><td>${c.index}</td><td class="num">${F.distance(c.start_km * 1000, 1)} → ${F.distance(c.end_km * 1000, 1)}</td>
       <td class="num">${F.distance(c.distance_m, 2)}</td><td class="num">+${F.elevation(c.gain_m)}</td>
       <td class="num">${F.num(c.avg_grade * 100, 1)} % <span class="tag">${F.esc(c.grade_class)}</span></td>
       <td class="num">${F.clockShort(c.duration_elapsed_s)}</td>
       <td class="num">${F.vam(c.vam_elapsed_m_h)}<br><small class="muted">mvt ${F.vam(c.vam_moving_m_h)}</small></td>
-      <td class="num">${climbProgressionCell(c)}</td></tr>`).join("")}</tbody></table></div>
+      <td class="num">${climbProgressionCell(c)}</td>${onMap ? `<td><button type="button" class="link-btn" data-climb-km="${c.start_km},${c.end_km}">Sur la carte</button></td>` : ""}</tr>`).join("")}</tbody></table></div>
     ${classLegend ? `<p class="legend legend--small">VAM moyenne par pente : ${classLegend}</p>` : ""}</section>`;
 }
 

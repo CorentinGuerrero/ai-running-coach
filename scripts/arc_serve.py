@@ -56,7 +56,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional, Tuple
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_guardrails as G  # noqa: E402
@@ -330,6 +330,16 @@ class Store:
         """Réutilise `arc_index.gear_of_activity` (#147) — chaussure attribuée + équipement de la séance."""
         with self.lock:
             return I.gear_of_activity(self.conn, activity_id, today)
+
+    def track(self, activity_id: int, max_points: int):
+        """Réutilise `arc_index.track` — trace GPS et flux de la page séance (`None` si inconnue)."""
+        with self.lock:
+            return I.track(self.conn, activity_id, max_points)
+
+    def session_gait(self, activity_id: int):
+        """Réutilise `arc_index.session_gait` (#151) — dynamique de course d'une séance."""
+        with self.lock:
+            return I.session_gait(self.conn, activity_id)
 
     def performance_index(self, today: date) -> dict:
         """Réutilise `arc_index.performance_index` (#62) — voir aussi la CLI
@@ -679,7 +689,32 @@ def api_activity(store: Store, activity_id: int):
             "durability": api_activity_durability(store, activity_id),
             "energy": api_activity_energy(store, activity_id),
             "gear": store.gear_of_activity(activity_id, _today(store)),
+            "gait": store.session_gait(activity_id),
+            "pain": _pain_of_day(store, act["date"]),
             "body_html": render_markdown(I.C.body_after_block(body))}
+
+
+def _pain_of_day(store: Store, day: str) -> list:
+    """Douleurs déclarées le jour de la séance (#57/#67, `pain` du fichier santé, `/log`) : la
+    liste `{location, score}` telle que validée par le contrat, vide si rien n'est déclaré."""
+    row = store.one("SELECT data_json FROM health_day WHERE date = ? LIMIT 1", (day,))
+    try:
+        pain = json.loads(row["data_json"] or "{}").get("pain") if row else None
+    except (TypeError, ValueError, AttributeError):
+        pain = None
+    return [p for p in pain if isinstance(p, dict)] if isinstance(pain, list) else []
+
+
+def api_activity_track(store: Store, activity_id: int, q: Optional[dict] = None) -> Optional[dict]:
+    """`/api/activity/<id>/track[?points=N]` : trace GPS + flux (distance, altitude, FC,
+    vitesse, cadence) pour la carte et les graphiques liés de la page séance — voir
+    `arc_index.track`. `points` : plafond de points (2 à `TRACK_MAX_POINTS`, défaut ce
+    maximum). Seule route qui renvoie des coordonnées (`arc_climb_match.ASSUMPTIONS["privacy"]`)."""
+    try:
+        points = int(((q or {}).get("points") or [I.TRACK_MAX_POINTS])[0])
+    except (TypeError, ValueError):
+        points = I.TRACK_MAX_POINTS
+    return store.track(activity_id, max(2, min(I.TRACK_MAX_POINTS, points)))
 
 
 def api_activity_energy(store: Store, activity_id: int) -> dict:
@@ -1467,11 +1502,22 @@ def chat_proxy_port(config: dict, listen: str) -> Optional[int]:
     return port if 0 < port <= 65535 else None
 
 
+def tile_origin(template: str) -> str:
+    """Source CSP `img-src` des tuiles de carte, tirée du modèle déjà validé par
+    `arc_index._map_tiles` : `https://{s}.hôte/…` → `https://*.hôte`, `""` sans fond de carte."""
+    if not template:
+        return ""
+    parts = urlsplit(template.replace("{s}.", "SUBDOMAIN.", 1))
+    host = parts.netloc.replace("SUBDOMAIN.", "*.", 1)
+    return f"{parts.scheme}://{host}"
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "arc-dashboard"
     store: Store = None           # posé par serve()
     allowed_hosts: set = set()
     chat_port: Optional[int] = None   # posé par serve() ; None = pas de proxy
+    tile_src: str = ""                # posé par serve() : « ␣https://hôte » des tuiles de carte, ou vide
 
     def log_message(self, fmt, *args):         # silencieux : c'est un outil local
         pass
@@ -1504,7 +1550,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; style-src 'self' https://fonts.googleapis.com; "
-                         "font-src https://fonts.gstatic.com; img-src 'self' data:; "
+                         f"font-src https://fonts.gstatic.com; img-src 'self' data:{self.tile_src}; "
                          "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         self.end_headers()
         if self.command != "HEAD":
@@ -1602,11 +1648,14 @@ class Handler(BaseHTTPRequestHandler):
             self.store.refresh()
         try:
             match = re.fullmatch(r"/api/activity/(\d+)", url.path)
+            track_match = re.fullmatch(r"/api/activity/(\d+)/track", url.path)
             segment_match = re.fullmatch(r"/api/climb-segment/(\d+)", url.path)
             decision_match = re.fullmatch(r"/api/decision/([^/]+)", url.path)
             gear_match = re.fullmatch(r"/api/gear/([^/]+)", url.path)
             if match:
                 payload = api_activity(self.store, int(match.group(1)))
+            elif track_match:
+                payload = api_activity_track(self.store, int(track_match.group(1)), q)
             elif segment_match:
                 payload = api_climb_segment(self.store, int(segment_match.group(1)))
             elif decision_match:
@@ -1737,7 +1786,10 @@ def serve(workspace: Path, port: int, db=None, memory=False, today=None,
     httpd = bind(port, listen=listen)
     actual = httpd.server_address[1]
     Handler.allowed_hosts = host_allowlist(actual, extra_hosts)
-    Handler.chat_port = chat_proxy_port(I.load_config(workspace), listen)
+    config = I.load_config(workspace)
+    Handler.chat_port = chat_proxy_port(config, listen)
+    origin = tile_origin(I.settings(config)["map_tiles"])
+    Handler.tile_src = f" {origin}" if origin else ""
     Handler.store.start_background()
     print(f"URL: http://127.0.0.1:{actual}/", flush=True)
     try:
