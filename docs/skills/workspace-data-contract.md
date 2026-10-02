@@ -12,7 +12,7 @@ comparaison de parcours, jamais la prose.
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 12 · 1 min 32</span>
+<span class="arc-video__meta">En vidéo · Étape 12 · 1 min 42</span>
 
 **[Vos données, votre sentier](../video/donnees/index.html)** — Vos données restent des fichiers Markdown chez vous : un bloc validé, un index jetable, un tableau de bord local, et ce qui quitte la machine.
 

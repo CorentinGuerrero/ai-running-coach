@@ -10,7 +10,7 @@ entretien court et écrit le résultat au bon endroit.
 
 <div markdown>
 
-<span class="arc-video__meta">En vidéo · Étape 01 · 1 min 34</span>
+<span class="arc-video__meta">En vidéo · Étape 01 · 1 min 45</span>
 
 **[Ligne de départ](../video/ligne-de-depart/index.html)** — Du git clone au premier /today : installation, authentification Garmin, /coach-setup et /coach-doctor en moins de deux minutes.
 
