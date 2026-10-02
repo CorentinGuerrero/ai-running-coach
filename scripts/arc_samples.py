@@ -95,8 +95,9 @@ conversion `valeur × 180 / 2³¹`, voir `_semicircle_to_deg`) quand le FIT les 
 jamais une valeur inventée). Colonnes `lat`/`lon` de `activity_sample`, réservées par
 #42 « pour un usage futur » : #49 (identité de montée entre séances, `arc_climb_match.py`)
 est cet usage — la position n'est utilisée QUE pour apparier une montée détectée à un
-`climb_segment` déjà vu (bornes début/sommet), **jamais exposée telle quelle par l'API**
-(voir `arc_climb_match.ASSUMPTIONS["privacy"]`) : le tableau de bord et
+`climb_segment` déjà vu (bornes début/sommet) — et pour la carte de la page séance du
+tableau de bord, seule route qui l'expose (`/api/activity/<id>/track`, voir
+`arc_climb_match.ASSUMPTIONS["privacy"]`) : les routes de montée et
 `skills/course-comparison` ne reçoivent qu'un `segment_id` et un nom de lieu, jamais une
 coordonnée brute. Le format déjà normalisé (`tests/lib/synthetic.py::sample_session`)
 n'émet PAS ces clés (voir `tests/lint/test_synthetic_no_real_data.py`) : `sample_session`

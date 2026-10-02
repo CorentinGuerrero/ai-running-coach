@@ -291,7 +291,9 @@ export function timeChart(dates, layers, marks = [], opts = {}) {
 
 /**
  * Relie un graphique à une ligne de lecture : survol / toucher / clavier
- * déplacent un curseur et appellent onIndex(i). Rend la fonction de nettoyage.
+ * déplacent un curseur et appellent onIndex(i). Rend `move(i)`, qui place le
+ * curseur SANS rappeler onIndex — pour lier plusieurs graphiques (et la carte de
+ * la page séance) à un même curseur sans boucle.
  */
 export function attachCursor(host, chart, onIndex, initial = chart.n - 1) {
   const svg = host.querySelector("svg.chart");
@@ -299,12 +301,15 @@ export function attachCursor(host, chart, onIndex, initial = chart.n - 1) {
   const cursor = svg.querySelector(".cursor");
   const hit = svg.querySelector(".hit");
   let current = initial;
-  const set = (i) => {
+  const move = (i) => {
     current = Math.max(0, Math.min(chart.n - 1, i));
     const xx = chart.x(current);
     cursor.setAttribute("x1", xx);
     cursor.setAttribute("x2", xx);
     cursor.setAttribute("visibility", "visible");
+  };
+  const set = (i) => {
+    move(i);
     onIndex(current);
   };
   const fromEvent = (ev) => {
@@ -320,8 +325,8 @@ export function attachCursor(host, chart, onIndex, initial = chart.n - 1) {
     if (ev.key === "ArrowLeft") { set(current - 1); ev.preventDefault(); }
     if (ev.key === "ArrowRight") { set(current + 1); ev.preventDefault(); }
   });
-  if (chart.n) set(initial);
-  return () => {};
+  if (chart.n && initial !== null) set(initial);
+  return move;
 }
 
 /** Bande de verdicts (un rectangle par jour), alignée sur un timeChart. */

@@ -339,12 +339,15 @@ ASSUMPTIONS = {
         "recherche (`climb_segment`) reste figé."
     ),
     "privacy": (
-        "Les positions GPS ne quittent jamais ce module ni la base dérivée locale "
-        "(`.arc/coach.db`, jamais versionnée) : `arc_index.py` les stocke pour "
-        "l'appariement (mêmes colonnes `lat`/`lon` réservées par #42) mais aucune route de "
-        "`arc_serve.py` ni sortie du CLI `climb-history` ne les inclut — seuls un "
-        "`segment_id` (identifiant opaque) et le `location` déjà déclaré par l'athlète dans "
-        "le Markdown de la séance (jamais une coordonnée) sont exposés."
+        "Les positions GPS restent dans la base dérivée locale (`.arc/coach.db`, jamais "
+        "versionnée) : `arc_index.py` les stocke pour l'appariement (mêmes colonnes "
+        "`lat`/`lon` réservées par #42). Les routes de montée de `arc_serve.py` "
+        "(`/api/climb-segment*`) et le CLI `climb-history` ne les incluent jamais — seuls un "
+        "`segment_id` (identifiant opaque) et le `location` déclaré par l'athlète sont "
+        "exposés. La SEULE route qui renvoie des coordonnées est `/api/activity/<id>/track` "
+        "(carte de la page séance), servie par le tableau de bord local ou derrière un proxy "
+        "qui authentifie ; le serveur de tuiles du fond de carte (`[dashboard].map_tiles`) ne "
+        "reçoit que les tuiles demandées, jamais la trace."
     ),
 }
 
