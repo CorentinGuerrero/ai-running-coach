@@ -44,7 +44,8 @@ class TestDemDocumentation(unittest.TestCase):
         self.assertIn("elevation.md", read("mkdocs.yml"))
         page = read("docs/elevation.md")
         for needle in ("Etalab 2.0", "Copernicus", "10.5270/ESA-c5d3d65", "dem_for_activities",
-                       "coordonnées", "200 premiers et derniers mètres", "Hors ligne", "Hypothèses et limites"):
+                       "coordonnées", "dem_trim_m", "protège qu'en partie", "non commercial",
+                       "Hors ligne", "Hypothèses et limites"):
             self.assertIn(needle, page, needle)
 
     def test_configuration_and_agents_files_mention_the_feature(self):
