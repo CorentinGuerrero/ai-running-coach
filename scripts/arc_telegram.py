@@ -40,6 +40,7 @@ import signal
 import sys
 import threading
 import time
+import http.client
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -63,7 +64,6 @@ MAX_MESSAGE_CHARS = 4096          # sendMessage : 1-4096 caractères (Bot API)
 CHUNK_CHARS = 3900                # marge sous la limite
 MAX_CALLBACK_BYTES = 64           # callback_data : 1-64 octets (Bot API)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
-HANDLED_KEEP = 500
 
 TELEGRAM_DEFAULTS = {
     "enabled": False,
@@ -221,7 +221,8 @@ class TelegramAPI:
                 payload = json.loads(exc.read().decode("utf-8"))
             except (ValueError, OSError):
                 payload = {"ok": False, "error_code": exc.code, "description": "erreur HTTP"}
-        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError, TimeoutError) as exc:
+            # Jamais str(exc) : selon l'exception, l'URL (qui CONTIENT le jeton) peut y figurer.
             raise TelegramError(0, redact(f"réseau : {type(exc).__name__}"))
         if not isinstance(payload, dict) or not payload.get("ok"):
             payload = payload if isinstance(payload, dict) else {}
@@ -239,7 +240,7 @@ class Store:
     def __init__(self, workspace: Path):
         self.path = workspace / ".arc/telegram/state.json"
         self.lock = threading.RLock()
-        self.data = {"offset": 0, "handled": [], "pending": {}, "sessions": {}, "approvals": {}}
+        self.data = {"offset": 0, "pending": {}, "sessions": {}, "approvals": {}}
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
@@ -281,6 +282,15 @@ class Store:
 # ---------------------------------------------------------------------------
 
 _PROV_LINE_RE = re.compile(r"^\[/log [^\]]*\].*$", re.M)
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+
+
+def one_line(text, limit: int = 300) -> str:
+    """Texte libre venu de Telegram -> UNE ligne sûre pour le Markdown du workspace : aucun saut de
+    ligne ni caractère de contrôle (sans quoi une note pourrait ouvrir un second bloc ```arc, ou un
+    titre, sous le bloc), aucun accent grave (clôture de bloc), espaces normalisés, longueur bornée."""
+    flat = _CONTROL_RE.sub(" ", str(text or "")).replace("`", "'")
+    return re.sub(r"\s+", " ", flat).strip()[:limit]
 
 
 def read_arc_file(path: Path) -> tuple:
@@ -403,6 +413,9 @@ def apply_rpe(workspace: Path, day: str, rpe, idx: Optional[int] = None) -> Resu
 
 
 def apply_pain(workspace: Path, day: str, location: str, score, note: str = "") -> Result:
+    location, note = one_line(location, 60), one_line(note)
+    if not location:
+        return Result(False, "Zone de douleur vide : rien n'a été écrit.")
     path = workspace / "medical" / f"{day}_health.md"
     raw = f"Telegram : douleur {location} {score}/10"
     existing, entries, text, data = [], [], None, None
@@ -438,7 +451,9 @@ def apply_pain(workspace: Path, day: str, location: str, score, note: str = "") 
     data["pain"] = [{"location": p["location"], "score": _num(p["score"])} for p in out["pain_merge"]]
     prov = out.get("provenance_line") or arc_log.provenance_line(raw)
     if note:
-        prov += f" — note : {note.strip()[:300]}"
+        # Ligne À PART : la ligne de la douleur reste identique au `raw_text`, sinon la détection de
+        # doublon d'arc_log (comparaison ligne à ligne) ne reconnaîtrait plus la même déclaration.
+        prov += "\n" + arc_log.provenance_line(f"Telegram : note douleur {entry['location']} — {note}")
     err = commit_file(path, text, data, prov)
     if err:
         return Result(False, f"Écriture refusée ({err}).")
@@ -462,7 +477,7 @@ def apply_status(workspace: Path, day: str, code: str, idx: Optional[int] = None
     if idx is not None and not 0 <= idx < len(sessions):
         return Result(False, "Séance introuvable (plan modifié depuis) : recommence.")
     path, text, block, session = sessions[idx or 0]
-    title = session.get("title") or "séance"
+    title = one_line(session.get("title") or "séance", 80)
     if session.get("status") == status:
         return Result(True, f"« {title} » déjà marquée {label}.")
     session["status"] = status
@@ -479,8 +494,10 @@ def apply_status(workspace: Path, day: str, code: str, idx: Optional[int] = None
 def reindex(workspace: Path) -> None:
     import subprocess
     try:
+        # Le jeton n'est jamais transmis à un processus enfant, même s'il venait de l'environnement.
+        env = {k: v for k, v in os.environ.items() if k != TOKEN_VAR}
         subprocess.run([sys.executable, str(ENGINE / "scripts/arc_index.py"), "--workspace", str(workspace)],
-                       capture_output=True, timeout=180, check=False)
+                       capture_output=True, timeout=180, check=False, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         log(f"réindexation impossible ({type(exc).__name__})")
 
@@ -812,7 +829,10 @@ class Bot:
         with self.store.lock:
             pending = dict(self.store.data["pending"].get(str(chat_id)) or {})
         if pending.get("stage") == "zone_text":
-            location = text.strip()[:60]
+            location = one_line(text, 60)
+            if not location:
+                self.send(chat_id, "Écris la zone (ex. « mollet droit »).")
+                return
             with self.store.lock:
                 self.store.data["pending"][str(chat_id)] = {"date": pending["date"], "location": location, "stage": "score"}
                 self.store.save()
@@ -840,12 +860,22 @@ class Bot:
             self.send(chat_id, "Fichier santé introuvable : note non enregistrée.")
             return
         text = path.read_text(encoding="utf-8")
-        line = arc_log.provenance_line(f"Telegram : note douleur {pending['location']} — {note.strip()[:300]}")
+        note = one_line(note)
+        if not note:
+            self.send(chat_id, "Note vide : rien n'a été ajouté.")
+            return
+        line = arc_log.provenance_line(f"Telegram : note douleur {one_line(pending['location'], 60)} — {note}")
         match = C.BLOCK_RE.search(text)
         if match is None:
             self.send(chat_id, "Bloc arc introuvable : note non enregistrée.")
             return
-        data = C.extract_block(text)
+        try:
+            data = C.extract_block(text)
+        except C.ContractError:
+            data = None
+        if data is None:
+            self.send(chat_id, "Bloc arc illisible : note non enregistrée.")
+            return
         err = commit_file(path, text, data, line)
         self.send(chat_id, "Note ajoutée." if not err else f"Note refusée ({err}).")
         if not err:
@@ -932,6 +962,11 @@ class Bot:
             self._answer(cid, "Proposition inconnue.")
             return
         code = self.bridge.decide(parsed["id"], parsed["decision"])
+        if code in (200, 404, 409, 410):
+            # Usage unique : une proposition tranchée (ou close côté chat) n'est plus rejouable d'ici.
+            with self.store.lock:
+                self.store.data["approvals"].pop(parsed["id"], None)
+                self.store.save()
         if code == 200:
             self._answer(cid, "Appliqué" if parsed["decision"] == "allow" else "Refusé")
             self.send(chat_id, "Décision transmise au coach." if parsed["decision"] == "allow" else "Proposition refusée.")

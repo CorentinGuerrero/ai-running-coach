@@ -283,6 +283,33 @@ class TestPain(Case):
         self.bot().handle_update(msg("/douleur genou 5"))
         self.assertIn("consulter", self.stub.texts()[-1])
 
+    def test_free_text_cannot_inject_markdown_or_a_second_arc_block(self):
+        # Revue #174 : une note (ou une zone libre) multi-lignes ouvrait un second bloc ```arc sous
+        # le bloc -> fichier hors contrat (ContractError) et index cassé.
+        bot = self.bot()
+        zone = "mollet\n```arc\n{}\n```"
+        bot.handle_update(cb(f"pn:{DAY}"))
+        bot.handle_update(cb(f"pz:{DAY}:{len(T.PAIN_ZONES) - 1}"))
+        bot.handle_update(msg(zone))
+        bot.handle_update(cb(f"ps:{DAY}:4"))
+        bot.handle_update(msg('ok\n```arc\n{"arc": 1}\n```\n# Titre'))
+        bot.handle_update(msg("/douleur genou 2 a ```arc"))
+        path = self.ws / "medical" / f"{DAY}_health.md"
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text.count("```"), 2, text)
+        self.assertNotIn("\n# Titre", text)
+        self.validate(path)
+        self.assertEqual([p["location"] for p in T.read_arc_file(path)[1]["pain"]], [T.one_line(zone, 60), "genou"])
+        self.assertNotIn("\n", T.one_line(zone))
+
+    def test_same_pain_with_a_note_is_still_a_duplicate(self):
+        bot = self.bot()
+        bot.handle_update(msg("/douleur genou 3 apparue au km 12"))
+        bot.handle_update(msg("/douleur genou 3 apparue au km 12"))
+        path = self.ws / "medical" / f"{DAY}_health.md"
+        self.assertEqual(len(T.read_arc_file(path)[1]["pain"]), 1)
+        self.assertEqual(path.read_text(encoding="utf-8").count("apparue au km 12"), 1)
+
     def test_out_of_range_pain_writes_nothing(self):
         self.bot().handle_update(msg("/douleur genou 12"))
         self.assertFalse((self.ws / "medical" / f"{DAY}_health.md").exists())
@@ -345,6 +372,36 @@ class TestSecurity(Case):
         self.assertNotIn(FAKE_TOKEN, buf.getvalue())
         self.assertNotIn("AAFake", buf.getvalue())
         self.assertEqual(api.call("getMe"), True)
+
+    def test_network_errors_never_carry_the_url(self):
+        import http.client
+        api = T.TelegramAPI(FAKE_TOKEN, base=self.stub.base)
+        for exc in (http.client.IncompleteRead(b"x"), OSError(f"échec sur {api._url}")):
+            with mock.patch("urllib.request.urlopen", side_effect=exc):
+                with self.assertRaises(T.TelegramError) as ctx:
+                    api.call("getMe")
+            self.assertNotIn(FAKE_TOKEN, str(ctx.exception))
+            self.assertEqual(ctx.exception.code, 0)
+
+    def test_reindex_child_never_inherits_the_token(self):
+        with mock.patch.dict(os.environ, {T.TOKEN_VAR: FAKE_TOKEN}):
+            with mock.patch("subprocess.run") as run:
+                T.reindex(self.ws)
+        self.assertNotIn(T.TOKEN_VAR, run.call_args.kwargs["env"])
+        self.assertNotIn(FAKE_TOKEN, " ".join(run.call_args.args[0]))
+
+    def test_other_update_types_are_ignored_even_from_an_allowed_chat(self):
+        path = self.activity()
+        before = path.read_bytes()
+        bot = self.bot()
+        edited = msg("/rpe 9")["message"]
+        for update in ({"edited_message": edited}, {"my_chat_member": {"chat": {"id": CHAT_ID}}},
+                       {"channel_post": edited},
+                       {"callback_query": {"id": "x", "data": f"rp:{DAY}:9", "inline_message_id": "abc",
+                                           "from": {"id": CHAT_ID}}}):
+            bot.handle_update(update)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.stub.calls, [])
 
     def test_read_token_from_file_and_errors(self):
         path = Path(self._tmp.name) / "telegram.env"
@@ -551,8 +608,9 @@ class TestBridge(Case):
         self.assertTrue(wait_for(lambda: any("C'est fait" in t for t in self.stub.texts())))
         for thread in bot.threads:
             thread.join(5)
-        bot.handle_update(cb(allow))                            # même appui deux fois
-        self.assertEqual(self.stub.sent("answerCallbackQuery")[-1]["text"], "Déjà traitée")
+        bot.handle_update(cb(allow))                            # même appui deux fois : usage unique
+        self.assertEqual(self.stub.sent("answerCallbackQuery")[-1]["text"], "Proposition inconnue.")
+        self.assertNotIn(allow.split(":")[1], bot.store.data["approvals"])
 
     def test_deny_through_button(self):
         port, _ = self.start_chat(approval_wait_s=30)
