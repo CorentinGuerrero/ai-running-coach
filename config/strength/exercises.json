@@ -440,7 +440,7 @@
   },
   {
    "id": "bonjour_elastique",
-   "name": "Bonjour avec élastique",
+   "name": "Good morning avec élastique (charnière de hanche)",
    "group": "force",
    "targets": [
     "ischio_jambiers",
@@ -970,7 +970,7 @@
    "cues": [
     "Box stable et basse au départ, saut avec les deux pieds.",
     "Réception souple, pieds entiers sur la box, puis redescendre en marchant.",
-    "Ne jamais sauter vers le bas en réception : on descend en marchant."
+    "Ne jamais redescendre de la box en sautant : on descend en marchant."
    ],
    "progressions": [],
    "regressions": [

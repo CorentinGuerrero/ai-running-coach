@@ -44,8 +44,8 @@
    "kind": "phase",
    "emphasis": "force_maximale",
    "phase": "base",
-   "label": "Base — force générale",
-   "purpose": "Construire une base de force générale (jambes, hanches, gainage) avant les charges spécifiques : volume modéré, charges progressives, technique avant tout.",
+   "label": "Base — force (charges lourdes progressives)",
+   "purpose": "Développer la force des jambes et des hanches (emphase « force maximale » du gabarit) : charges lourdes, peu de répétitions, récupérations longues, sur une technique d'abord maîtrisée.",
    "sessions_per_week": {
     "min": 1,
     "max": 2
@@ -59,37 +59,37 @@
    "blocks": [
     {
      "exercise": "squat_gobelet",
-     "sets": 3,
-     "reps": 10,
-     "rest_s": 90,
+     "sets": 4,
+     "reps": 6,
+     "rest_s": 120,
      "tempo": "3-0-1",
-     "load": "Charge laissant 2 répétitions de réserve (RPE 7-8).",
+     "load": "Charge lourde laissant 1 à 2 répétitions de réserve (RPE 8) ; musculation nouvelle : 2 semaines à 10 répétitions, RPE 7.",
      "each_side": false
     },
     {
      "exercise": "souleve_de_terre_roumain_unilateral",
      "sets": 3,
-     "reps": 8,
-     "rest_s": 90,
+     "reps": 6,
+     "rest_s": 120,
      "tempo": "3-0-1",
-     "load": "Charge laissant 2 répétitions de réserve (RPE 7-8).",
+     "load": "Charge lourde laissant 1 à 2 répétitions de réserve (RPE 8) ; musculation nouvelle : 2 semaines à 10 répétitions, RPE 7.",
      "each_side": true
     },
     {
      "exercise": "montee_de_marche_lestee",
      "sets": 3,
-     "reps": 8,
-     "rest_s": 90,
-     "load": "Charge laissant 2 répétitions de réserve (RPE 7-8).",
+     "reps": 6,
+     "rest_s": 120,
+     "load": "Charge lourde laissant 1 à 2 répétitions de réserve (RPE 8) ; musculation nouvelle : 2 semaines à 10 répétitions, RPE 7.",
      "each_side": true
     },
     {
      "exercise": "mollet_unipodal_lestee",
      "sets": 3,
-     "reps": 10,
-     "rest_s": 60,
+     "reps": 8,
+     "rest_s": 90,
      "tempo": "2-1-2",
-     "load": "Charge laissant 2 répétitions de réserve (RPE 7-8).",
+     "load": "Charge lourde laissant 1 à 2 répétitions de réserve (RPE 8) ; musculation nouvelle : 2 semaines à 10 répétitions, RPE 7.",
      "each_side": true
     },
     {
@@ -119,7 +119,7 @@
     "etirement_flechisseurs_hanche"
    ],
    "notes": [
-    "Progression : ajouter 1 répétition par séance jusqu'au haut de la fourchette, puis augmenter la charge.",
+    "Progression : ajouter une répétition par séance jusqu'à 8, puis augmenter la charge et revenir à 6.",
     "Programme générique : privilégier l'amplitude propre et le contrôle plutôt que la charge."
    ]
   },
@@ -128,8 +128,8 @@
    "kind": "phase",
    "emphasis": "force_endurance",
    "phase": "development",
-   "label": "Développement — force et introduction à la pliométrie",
-   "purpose": "Renforcer les appuis unilatéraux (charges plus lourdes, peu de répétitions) et introduire quelques contacts pliométriques frais, avant les séances spécifiques.",
+   "label": "Développement — force-endurance et introduction à la pliométrie",
+   "purpose": "Prolonger la force acquise vers l'endurance de force (emphase « force-endurance » du gabarit) : charges modérées, plus de répétitions, récupérations courtes, et quelques contacts pliométriques frais avant les séances spécifiques.",
    "sessions_per_week": {
     "min": 1,
     "max": 2
@@ -153,35 +153,35 @@
     {
      "exercise": "fente_bulgare",
      "sets": 3,
-     "reps": 6,
-     "rest_s": 120,
-     "tempo": "3-0-1",
-     "load": "Charge laissant 1 à 2 répétitions de réserve (RPE 8).",
+     "reps": 10,
+     "rest_s": 60,
+     "tempo": "2-0-1",
+     "load": "Charge modérée laissant 2 à 3 répétitions de réserve (RPE 7).",
      "each_side": true
     },
     {
      "exercise": "souleve_de_terre_roumain_unilateral",
      "sets": 3,
-     "reps": 6,
-     "rest_s": 120,
-     "tempo": "3-0-1",
-     "load": "Charge laissant 1 à 2 répétitions de réserve (RPE 8).",
+     "reps": 10,
+     "rest_s": 60,
+     "tempo": "2-0-1",
+     "load": "Charge modérée laissant 2 à 3 répétitions de réserve (RPE 7).",
      "each_side": true
     },
     {
      "exercise": "mollet_unipodal_lestee",
-     "sets": 4,
-     "reps": 6,
-     "rest_s": 90,
-     "tempo": "3-1-1",
-     "load": "Charge laissant 1 à 2 répétitions de réserve (RPE 8).",
+     "sets": 3,
+     "reps": 15,
+     "rest_s": 45,
+     "tempo": "2-1-2",
+     "load": "Charge modérée laissant 2 à 3 répétitions de réserve (RPE 7).",
      "each_side": true
     },
     {
      "exercise": "pont_fessier_pied_sureleve",
      "sets": 3,
-     "reps": 8,
-     "rest_s": 75,
+     "reps": 12,
+     "rest_s": 45,
      "each_side": true
     },
     {
@@ -343,7 +343,7 @@
     "etirement_mollet"
    ],
    "notes": [
-    "Dernière séance au moins 5 à 7 jours avant la course (approximation du projet).",
+    "Dernière séance au moins 2 jours avant la course (règle de placement « faible », approximation du projet) ; plus tôt si l'athlète en ressent encore la fatigue.",
     "Aucun exercice nouveau pendant l'affûtage ; en cas de fatigue anormale, supprimer la séance."
    ]
   },

@@ -25,7 +25,9 @@ python3 scripts/arc_index.py strength --use hanches --garmin-json       # charge
 ```
 
 - `--phase` : `base`, `development`, `specific`, `taper`, `recovery` (ou leur libellé
-  français, ou l'emphase du gabarit de périodisation #189).
+  français, ou l'emphase du gabarit de périodisation #189). Avec un gabarit, c'est son
+  **emphase** qui compte : la phase spécifique des gabarits route vise `entretien` (et non la
+  pliométrie) — le coach passe alors `--phase entretien`.
 - `--use` : `descente`, `cheville`, `hanches`, `pied`.
 - `--equipment` : `none`, `elastic`, `dumbbell`, `step`, `box` (liste séparée par des
   virgules ; `none` — le poids du corps — est toujours disponible). Sans cette option, la
@@ -46,8 +48,8 @@ Programmes **par phase** — les emphases sont celles des gabarits de périodisa
 
 | Phase | Emphase | Programme | Séances / sem. | Fatigue |
 |---|---|---|---|---|
-| Base | `force_maximale` | `base_force_generale` — force générale, charges progressives | 1-2 | modérée |
-| Développement | `force_endurance` | `developpement_force_pliometrie` — force unilatérale, introduction à la pliométrie | 1-2 | modérée |
+| Base | `force_maximale` | `base_force_generale` — force, charges lourdes progressives (6 à 8 répétitions, RPE 8) | 1-2 | modérée |
+| Développement | `force_endurance` | `developpement_force_pliometrie` — force-endurance (10 à 15 répétitions, RPE 7), introduction à la pliométrie | 1-2 | modérée |
 | Spécifique | `pliometrie_excentrique` | `specifique_excentrique_pliometrie` — excentrique et pliométrie courte | 1-2 | élevée |
 | Affûtage | `entretien` | `affutage_entretien` — entretien à faible volume, aucune nouveauté | 1 | faible |
 | Récupération | `mobilite` | `recuperation_mobilite` — mobilité, sans charge | 2-3 | faible |
@@ -158,7 +160,7 @@ correspondance Garmin. Les consignes, progressions, régressions et précautions
 | Pont fessier unilatéral | `pont_fessier_unilateral` | fessiers, ischio_jambiers, gainage | aucun | `HIP_RAISE` / `SINGLE_LEG_HIP_RAISE` |
 | Pont fessier unilatéral, pied surélevé | `pont_fessier_pied_sureleve` | fessiers, ischio_jambiers | box/banc | `HIP_RAISE` / `SINGLE_LEG_HIP_RAISE_WITH_FOOT_ON_BENCH` |
 | Soulevé de terre roumain à une jambe (haltère) | `souleve_de_terre_roumain_unilateral` | ischio_jambiers, fessiers, equilibre | haltères | `DEADLIFT` / `SINGLE_LEG_ROMANIAN_DEADLIFT_WITH_DUMBBELL` |
-| Bonjour avec élastique | `bonjour_elastique` | ischio_jambiers, fessiers | élastique | `LEG_CURL` / `BAND_GOOD_MORNING` |
+| Good morning avec élastique (charnière de hanche) | `bonjour_elastique` | ischio_jambiers, fessiers | élastique | `LEG_CURL` / `BAND_GOOD_MORNING` |
 | Flexion de jambes glissante (ischio-jambiers) | `flexion_jambe_glissante` | ischio_jambiers | aucun | `LEG_CURL` / `SLIDING_LEG_CURL` |
 | Flexion de jambes glissante à une jambe | `flexion_jambe_glissante_unilaterale` | ischio_jambiers | aucun | `LEG_CURL` / `SINGLE_LEG_SLIDING_LEG_CURL` |
 | Nordique assisté (ischio-jambiers, excentrique) | `nordique_assiste` | ischio_jambiers | aucun | texte seul |
