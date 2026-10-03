@@ -408,8 +408,12 @@ def api_summary(store: Store, q: dict) -> dict:
         objective["weeks_left"] = round((race - today).days / 7, 1)
     athlete = _strip(store.one("SELECT * FROM athlete LIMIT 1"), "body_md", "source_path")
     latest = store.one("SELECT * FROM metric_day WHERE date <= ? ORDER BY date DESC LIMIT 1", (today.isoformat(),))
+    # Contexte du cycle (#166) retiré : aucune carte ne l'affiche (docs/cycle-menstruel.md), une
+    # donnée aussi personnelle ne sort donc pas de l'index par l'API — et la réponse reste
+    # identique à celle d'avant #166 pour qui n'a rien activé.
     health = _strip(store.one("SELECT * FROM health_day WHERE date <= ? ORDER BY date DESC LIMIT 1",
-                              (today.isoformat(),)), "body_md", "data_json")
+                              (today.isoformat(),)), "body_md", "data_json",
+                    "cycle_phase", "cycle_day", "cycle_source")
     files = store.rows("SELECT parsed_ok, COUNT(*) AS n FROM source_file WHERE kind IS NOT NULL "
                        "AND kind NOT IN ('athlete','objective') GROUP BY parsed_ok")
     # `collision` (#69, revue de code) : un item de `backfill()` peut être un

@@ -29,8 +29,9 @@ cycle_tracking = "manual"   # off | garmin | intervals | manual
 ou à l'installation : `./install.sh --cycle-tracking garmin`. `/coach-setup` pose la question
 une seule fois, de façon neutre ; la passer (ou répondre « / ») retient `off`.
 
-Une valeur invalide (faute de frappe, casse, type erroné) est traitée comme `off`, avec un
-avertissement : jamais une erreur, jamais un suivi activé par accident. Un mode qui ne
+La casse et les espaces sont ignorés (`"Garmin"` vaut `"garmin"`). Une valeur invalide (faute
+de frappe, type erroné) est traitée comme `off`, avec un avertissement : jamais une erreur,
+jamais un suivi activé par accident. Un mode qui ne
 correspond pas à la source de données (`garmin` avec intervals.icu, par exemple) retombe sur la
 déclaration manuelle.
 
@@ -108,8 +109,8 @@ Les trois clés optionnelles du bloc `arc` du fichier santé (`medical/AAAA-MM-J
 `cycle_source` (`garmin`, `intervals`, `manual`). Une donnée absente est une clé omise, jamais
 devinée ni reportée de la veille. Ces fichiers restent dans votre workspace privé, hors du
 dépôt ; aucune donnée réelle n'est jamais utilisée comme jeu d'essai du projet. Le tableau de
-bord n'affiche aucune carte dédiée : l'index SQLite garde la phase dans `health_day`, sans
-l'exposer.
+bord n'affiche aucune carte dédiée : l'index SQLite garde la phase dans `health_day`, et l'API
+locale du tableau de bord (`/api/summary`) la retire de sa réponse.
 
 ## Sources
 
