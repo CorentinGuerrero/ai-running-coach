@@ -293,6 +293,42 @@ class TestRecordAndContract(unittest.TestCase):
         self.assertTrue(arc_contract.validate(bad)[0])
 
 
+class TestCliReadsLiveConfig(unittest.TestCase):
+    """La CLI ignore `mode`/`source` de l'entrée JSON : seule la configuration vivante active la poussée."""
+
+    def run_cli(self, workspace: Path, payload: dict) -> dict:
+        import contextlib
+        import io
+        src = workspace / "in.json"
+        src.write_text(json.dumps(payload), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(N.main(["plan", "--workspace", str(workspace), "--input", str(src)]), 0)
+        return json.loads(buf.getvalue())
+
+    def test_payload_cannot_enable_the_push_when_config_is_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.run_cli(Path(tmp), {"date": DAY, "mode": "ask", "source": "garmin", "fluids": [{"ml": 500}]})
+            self.assertEqual(out["status"], "disabled")
+            self.assertEqual(out["reason"], "off")
+
+    def test_live_config_ask_enables_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "config").mkdir()
+            (ws / "config/workspace.user.toml").write_text('[nutrition]\ngarmin_sync = "ask"\n', encoding="utf-8")
+            out = self.run_cli(ws, {"date": DAY, "mode": "off", "fluids": [{"ml": 500, "time": "09:30"}],
+                                    "garmin_hydration": "No hydration data found for x"})
+            self.assertEqual(out["status"], "ready")
+
+
+class TestHydrationIntegerVolume(PlanBase):
+    def test_fractional_volume_is_rounded_to_an_integer_ml(self):
+        out = self.plan(fluids=[{"ml": 250.6, "time": "09:30:00"}], garmin_hydration={"valueInML": 0})
+        self.assertEqual(out["steps"][0]["args"]["value_in_ml"], 251)
+        self.assertIsInstance(out["steps"][0]["args"]["value_in_ml"], int)
+
+
 class TestCatalogueParsing(unittest.TestCase):
     def test_rows_carry_portion_and_optional_energy(self):
         rows = N.parse_catalogue_rows(CATALOGUE)

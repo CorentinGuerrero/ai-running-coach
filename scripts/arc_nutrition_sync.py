@@ -58,7 +58,8 @@ plan — entrée
      "garmin_food_log": <réponse brute de get_nutrition_daily_food_log(date)>,
      "garmin_hydration": <réponse brute de get_hydration_data(date)>,
      "confirm_keys": ["ab12..."],          # doublons que l'athlète a explicitement confirmés
-     "mode": "ask", "source": "garmin"}    # surcharges de test ; sinon configuration vivante
+     "mode": "ask", "source": "garmin"}    # surcharges de TEST (`build_plan` seulement) : la CLI les
+                                           # ignore et lit toujours la configuration vivante
 
 plan — sortie : `status` ∈ disabled | blocked | reads_needed | needs_input | ready |
 nothing_to_push ; `reads_needed` (lectures à faire AVANT de rappeler le plan), `steps`
@@ -517,6 +518,10 @@ def build_plan(payload: dict, config: Optional[dict] = None) -> dict:
                                    "l'idempotence repose sur `garmin_pushed`")
     for fl in fluids:
         ml = _num(fl.get("ml") if isinstance(fl, dict) else fl)
+        if ml is not None:
+            # `add_hydration_data(value_in_ml: int)` : un volume fractionnaire serait refusé par le
+            # schéma de l'outil — arrondi au ml (la clé porte la valeur réellement poussée).
+            ml = float(round(ml))
         when = _time(fl.get("time") if isinstance(fl, dict) else None) or default_time
         if ml is None or ml <= 0 or ml > MAX_HYDRATION_ML:
             out["needs_input"].append({"what": "hydration", "item": str(fl),
@@ -530,7 +535,7 @@ def build_plan(payload: dict, config: Optional[dict] = None) -> dict:
             out["skipped"].append({"key": key, "name": f"{ml:g} ml", "reason": "already_pushed"})
             continue
         out["steps"].append({"key": key, "kind": "add_hydration_data", "name": "eau", "ml": ml,
-                             "args": {"value_in_ml": int(ml) if float(ml).is_integer() else ml, "cdate": date,
+                             "args": {"value_in_ml": int(ml), "cdate": date,
                                       "timestamp": f"{date}T{when}.000"}})
 
     if out["needs_input"] and not out["steps"]:
@@ -650,14 +655,17 @@ def main(argv=None) -> int:
     try:
         payload = json.loads(raw)
         if args.cmd == "plan":
-            # La configuration vivante n'est lue que si l'entrée ne force pas mode ET source.
-            config = {} if ("mode" in payload and "source" in payload) else _config_for(args.workspace)
-            result = build_plan(payload, config)
+            # Toujours la configuration vivante : une entrée JSON ne peut pas activer la poussée
+            # (`mode`/`source` y sont des surcharges de test de `build_plan`, ignorées ici).
+            if isinstance(payload, dict):
+                payload.pop("mode", None)
+                payload.pop("source", None)
+            result = build_plan(payload, _config_for(args.workspace))
         elif args.cmd == "record":
             result = record_pushed(payload)
         else:
             result = import_log(payload)
-    except (json.JSONDecodeError, NutritionSyncError, KeyError) as exc:
+    except (json.JSONDecodeError, NutritionSyncError, KeyError, AttributeError, TypeError) as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, ensure_ascii=False))

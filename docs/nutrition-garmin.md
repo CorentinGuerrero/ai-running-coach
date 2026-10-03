@@ -19,9 +19,14 @@ y pousser, jamais de le faire de lui-même.
 ```
 
 Ou posez `garmin_sync = "ask"` sous `[nutrition]` dans `config/workspace.user.toml`, puis relancez
-`./install.sh` (une relance simple respecte la configuration et n'écrit rien). En mode passerelle
-`leanproxy`, `leanproxy_servers.yaml` n'est réécrit que s'il est absent : ajoutez les outils à la
-main à sa ligne `GARMIN_ENABLED_TOOLS`.
+`./install.sh` (une relance simple respecte la configuration et n'écrit rien).
+
+!!! warning "Mode direct uniquement"
+    En mode passerelle `leanproxy`, l'outil unique `invoke_tool` ne peut pas être filtré par nom de
+    sous-outil : `scripts/daily-sync.sh` ne pourrait pas interdire ces écritures en headless.
+    `./install.sh --nutrition-sync ask --use-leanproxy` est donc **refusé**, et un `ask` venu de la
+    configuration est ignoré (avertissement, aucun outil exposé) quand la passerelle est active.
+    N'ajoutez pas ces outils à la main dans `leanproxy_servers.yaml`.
 
 Outils ajoutés (noms, paramètres et formes vérifiés dans `garmin-mcp` au commit épinglé par
 `GARMIN_MCP_REF` d'`install.sh`) :
@@ -44,12 +49,16 @@ irréversible, ou qui écraserait une entrée de l'athlète, se corrige dans Gar
    deviné). Un produit hors catalogue, des calories absentes ou une heure absente : le coach
    **demande**, il ne pousse jamais une valeur inventée.
 4. Il **propose** en une question et attend un « oui » explicite pour cette poussée précise.
-5. Après le « oui », il écrit, relit le journal et trace les écritures dans `garmin_pushed`
-   (clé, aliment, quantité, `log_id` quand il est sans ambiguïté) du bloc `arc` : une relance ne
-   rejoue jamais une clé déjà tracée.
+5. Après le « oui », il écrit **une étape à la fois** et trace chaque écriture réussie dans
+   `garmin_pushed` (clé, aliment, quantité, `log_id` quand il est sans ambiguïté) du bloc `arc`
+   **avant l'écriture suivante** : une relance ne rejoue jamais une clé déjà tracée.
 
 `add_hydration_data` **ajoute** au total du jour côté Garmin : seule la trace `garmin_pushed`
-empêche de compter deux fois le même volume.
+empêche de compter deux fois le même volume. Limite assumée : une interruption entre une écriture
+Garmin et sa trace (fenêtre d'un seul appel) laisse l'écriture non tracée. Pour un aliment, la
+relance la retrouve dans le journal du jour et **demande** (`confirm_duplicates`) ; pour
+l'hydratation, rien ne permet de la reconnaître côté Garmin (le total du jour est affiché quand il
+est lisible) : vérifiez dans Garmin Connect et corrigez-y un éventuel doublon.
 
 ## Une seule source de vérité par jour
 
@@ -65,9 +74,8 @@ référence de dépense, inchangées.
 
 - **Indisponible avec `[data].source = "intervals"`** : intervals.icu n'a pas de journal
   alimentaire ni d'hydratation équivalents ; le coach le dit, il ne simule rien.
-- Jamais en headless : `scripts/daily-sync.sh` retire explicitement ces outils d'écriture. En mode
-  passerelle `leanproxy`, l'outil `invoke_tool` n'est pas filtrable par nom de sous-outil : seule la
-  consigne du skill protège alors.
+- Jamais en headless : `scripts/daily-sync.sh` retire explicitement ces outils d'écriture (mode
+  direct ; la passerelle `leanproxy` est refusée, voir plus haut).
 - Calories d'un produit sans colonne d'énergie : approximation de 4 kcal/g de glucides, seulement
   si l'athlète l'accepte, signalée comme estimée.
 - La forme de la réponse de `get_hydration_data` et des totaux de `get_nutrition_daily_food_log`
