@@ -449,7 +449,7 @@ def apply_heat(result: dict, session: dict, *, temp_c: Optional[float], feels_li
     if declared_pace_s_km is not None:
         result["declared_pace"] = {
             "pace_s_km": declared_pace_s_km,
-            "adjusted_pace_s_km": H.slow_pace_s_km(declared_pace_s_km, factor) if keep else None,
+            "adjusted_pace_s_km": round(H.slow_pace_s_km(declared_pace_s_km, factor), 1) if keep else None,
             "factor": factor if keep else None,
         }
     if adj["applies"]:
