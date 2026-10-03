@@ -35,14 +35,18 @@ const outcomeChip = (o) => (o ? chip("outcome", o, F.DECISION_OUTCOME[o] || o) :
 const effectChip = (e) => (e ? chip("effect", e, F.DECISION_EFFECT[e] || e) : "");
 
 // Effet des décisions (#175) : détail d'une évaluation (signaux, fenêtres, chiffres).
+// Valeurs arrondies à l'affichage (moyennes de fenêtre : 3 décimales côté API) ; conformité en %.
+const effectValue = (signal, v) => (signal === "compliance" ? `${F.num(v * 100)} %` : F.num(v, 1));
 function effectDetailHtml(ev) {
   if (!ev) return "";
   const rows = (ev.signals || []).map((s) => `<tr><th scope="row">${F.esc(s.label)}</th>
-      <td>${F.esc(s.pre.from)} → ${F.esc(s.pre.to)} (${s.pre.n})</td><td>${F.esc(s.post.from)} → ${F.esc(s.post.to)} (${s.post.n})</td>
-      <td>${F.esc(s.pre_value)} → ${F.esc(s.post_value)}</td><td>${F.esc(F.DECISION_EFFECT[s.verdict] || s.verdict)}</td></tr>`).join("");
+      <td>${F.dayShort(s.pre.from)} → ${F.dayShort(s.pre.to)} (${s.pre.n})</td><td>${F.dayShort(s.post.from)} → ${F.dayShort(s.post.to)} (${s.post.n})</td>
+      <td>${effectValue(s.signal, s.pre_value)} → ${effectValue(s.signal, s.post_value)}</td><td>${F.esc(F.DECISION_EFFECT[s.verdict] || s.verdict)}</td></tr>`).join("");
   const skipped = (ev.skipped || []).map((s) => `<li>${F.esc(s.label)} : ${F.esc(s.reason)}</li>`).join("");
-  return `${ev.reason ? `<p class="muted">${F.esc(ev.reason)}${ev.mature_on ? ` (au plus tôt le ${F.esc(ev.mature_on)})` : ""}</p>` : ""}
-    ${rows ? `<table class="data data--compact"><thead><tr><th scope="col">Signal</th><th scope="col">Avant (n)</th><th scope="col">Après (n)</th><th scope="col">Valeurs</th><th scope="col">Lecture</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+  return `${ev.reason ? `<p class="muted">${F.esc(ev.reason)}${ev.mature_on ? ` (au plus tôt le ${F.dayLong(ev.mature_on)})` : ""}</p>` : ""}
+    ${ev.action && F.DECISION_ACTION[ev.action] ? `<p class="muted">Nature de l'action (déduite de l'avant / après) : ${F.esc(F.DECISION_ACTION[ev.action])}</p>` : ""}
+    ${(ev.overlaps || []).length ? `<p class="muted">Autre(s) décision(s) dans la même fenêtre : effets confondus.</p>` : ""}
+    ${rows ? `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Signal</th><th scope="col">Avant (n)</th><th scope="col">Après (n)</th><th scope="col">Valeurs</th><th scope="col">Lecture</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
     ${skipped ? `<p class="muted">Signaux non évalués :</p><ul>${skipped}</ul>` : ""}`;
 }
 
@@ -3468,7 +3472,8 @@ async function viewDecisions(params) {
     effects = await api(`decision-effects?${eq}`);
   } catch { effects = null; }
   const effectById = new Map(((effects && effects.effects) || []).map((e) => [e.id, e]));
-  const synthesisHtml = !effects ? "" : `<section class="band" aria-labelledby="effets-title">
+  // Journal vide : l'état vide ci-dessous suffit, pas de carte de synthèse redondante au-dessus.
+  const synthesisHtml = !effects || !list.length ? "" : `<section class="band" aria-labelledby="effets-title">
       <h2 id="effets-title">Ce qui s'est passé ensuite</h2>
       ${(effects.synthesis || []).length
         ? `<ul>${effects.synthesis.map((g) => `<li>${F.esc(g.statement)}${g.trend ? ` — tendance ${F.esc(g.trend)}` : ""}${g.warning ? ` <span class="muted">(${F.esc(g.warning)})</span>` : ""}</li>`).join("")}</ul>`

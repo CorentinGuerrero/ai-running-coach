@@ -180,6 +180,11 @@ export const DECISION_EFFECT = {
   improved: "Évolution favorable", neutral: "Évolution stable", worsened: "Évolution défavorable",
   insufficient_data: "Données insuffisantes",
 };
+// Nature de l'action (#175, revue) : déduite de `before`/`after` par `arc_decision_effects.action_kind`.
+export const DECISION_ACTION = {
+  lighten: "allègement", cancel: "annulation", move: "report", intensify: "renforcement",
+  replace: "remplacement", other: "autre changement", unspecified: "non précisée",
+};
 
 // Échappement pour les chaînes insérées dans le DOM par innerHTML.
 export function esc(text) {
