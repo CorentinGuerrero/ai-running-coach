@@ -74,7 +74,7 @@ analysé, jamais sur `planning/active_objective.md`. Fade de fin de course
 depuis la durabilité récente (`scripts/arc_durability.py`, #48, rendu NEUTRE
 en temps total quand Riegel/VDOT s'applique déjà — jamais une double
 dégradation d'endurance — ou un repli générique signalé comme tel, échelonné à
-la durée réelle de la course), ajustement chaleur/acclimatation (#38) et
+la durée réelle de la course), ajustement chaleur/acclimatation (#38), pénalité de nuit (#184, voir ci-dessous) et
 vérification des barrières
 horaires (formats `HH:MM`, `+HH:MM` élapsé ou date-heure ISO 8601 pour un
 ultra multi-jours). Chaque segment porte sa **provenance**
@@ -86,6 +86,34 @@ bloc ```arc `race_plan` (voir
 [le skill `workspace-data-contract`](../skills/workspace-data-contract.md)) —
 socle du débrief post-course segment par segment (`scripts/arc_race_debrief.py`,
 #61 : voir [l'agent Coach](coach.md)).
+
+## Pénalité de nuit (#184)
+
+Sur un ultra, une partie de la course se court de nuit. Avec `--race-date`, un
+`--start` explicite et `--tz` (fuseau IANA, ex. `Europe/Paris`),
+`scripts/arc_race_pacing.py plan` calcule **localement, sans réseau**
+(`scripts/arc_solar.py`, algorithme NOAA — approximation de l'ordre de la
+minute) le crépuscule civil du lieu (premier point du GPX) et la **fraction de
+nuit** de chaque section, scénario par scénario, d'après son heure d'horloge
+réelle (départ, temps de section déjà pénalisés, arrêts ravito). Le temps de la
+section est multiplié par `night_factor` = 1 + fraction de nuit × pénalité :
+**5 %** à pleine nuit à plat/en montée, jusqu'à **+8 points** en descente
+(0,6 point par % de pente au-delà de 2 %) — des **approximations du projet**,
+aucune source vérifiée ne les chiffre pour un athlète donné ; réglables
+(`--night-penalty-pct`, `--night-descent-extra-max-pct`) ou désactivables
+(`--no-night`), et à recalibrer au débrief (#188). Le calcul itère (la pénalité
+décale les sections suivantes) jusqu'à convergence, bornée à 8 passes, et garde
+toujours `prudent ≥ réaliste ≥ ambitieux` section par section.
+
+La sortie ajoute `night_fraction`/`night_factor` par section et par scénario,
+et un objet `night` : `status` (`night`, `daylight`, `unavailable`,
+`disabled`), `scenarios[...].summary` (« 6,8 h de nuit, frontale requise de
+17:32 à 00:18 (J+1) ») et `gear_hint`. **Si la date, l'heure de départ
+explicite ou le fuseau manquent, aucun facteur de nuit n'est appliqué, la sortie
+reste identique à celle d'avant et `night.reason` le dit** — jamais une nuit
+supposée. Une course entièrement de jour n'ajoute aucun champ par section. Le
+contrôle de la frontale dans le matériel obligatoire reste celui de
+`arc_index.py equipment --race-plan` (#134).
 
 ## Dépense énergétique prévue par section
 

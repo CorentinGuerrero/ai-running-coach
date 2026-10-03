@@ -150,8 +150,24 @@ anciennes règles génériques ci-dessous quand un GPX est disponible :
 python3 scripts/arc_race_pacing.py plan \
   --gpx <fichier.gpx> --race-date <AAAA-MM-JJ> --start <HH:MM> \
   --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue> \
-  --pack-kg <poids sac/flasques/matériel porté, kg>
+  --pack-kg <poids sac/flasques/matériel porté, kg> \
+  --tz <fuseau IANA de la course, ex. Europe/Paris>
 ```
+
+**Nuit (#184).** Avec `--race-date`, `--start` (explicite) ET `--tz`, le script
+calcule seul (sans réseau) lever/coucher et crépuscule civil, la fraction de nuit
+de chaque section par scénario et applique une pénalité de vitesse dépendant de la
+pente (coefficients = approximations du projet, `assumptions.night`, réglables par
+`--night-penalty-pct`/`--night-descent-extra-max-pct`, `--no-night` pour couper).
+**Demande toujours le fuseau et l'heure de départ à l'athlète** (un ultra de nuit
+sans ces deux informations n'a PAS de pénalité de nuit : `night.status ==
+"unavailable"`, `night.reason` dit laquelle manque — dis-le, ne suppose jamais une
+nuit). Cite `night.scenarios.<scénario>.summary` (« X h de nuit, frontale requise de
+HH:MM à HH:MM ») dans le plan, avec le fait que la pénalité est une approximation.
+`night_fraction`/`night_factor` par section sont persistés dans `segments`, mais
+`night` lui-même est un KPI dérivé : ne le copie pas dans le bloc ```arc. La frontale
+va dans `gear` et son contrôle est celui de l'ÉTAPE 7 (`arc_index.py equipment
+--race-plan`), pas un second contrôle ici.
 
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
 (`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
@@ -329,7 +345,7 @@ Extrais : température min/max, vent, précipitations, couverture nuageuse.
 Produis une checklist détaillée :
 
 **Lampe frontale :**
-- Si départ avant 06h00 ou arrivée après coucher du soleil → lampe obligatoire
+- Si `night.status == "night"` (pénalité de nuit, ÉTAPE 4) → lampe requise de `night.scenarios.<scénario>.lamp_from` à `lamp_until` ; sans `--tz`, repli : départ avant 06h00 ou arrivée après coucher du soleil → lampe obligatoire
 - Puissance minimale recommandée (300 lm pour courir dans le noir)
 - Piles/batterie de rechange
 

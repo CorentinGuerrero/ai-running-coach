@@ -662,6 +662,11 @@ SUBSCHEMA = {
             "reason_code": _enum(RACE_SEGMENT_REASON_CODE),
             "predicted_time_s": "obj",
             "pace_s_km": "obj",
+            # Pénalité de nuit (#184, `arc_race_pacing.apply_night_penalty`) : fraction du temps
+            # de la section courue de nuit et multiplicateur de temps, par scénario (mêmes clés
+            # que `predicted_time_s`). Absents si le plan n'a pas de nuit.
+            "night_fraction": "obj",
+            "night_factor": "obj",
             "notes": "list",
         },
     },

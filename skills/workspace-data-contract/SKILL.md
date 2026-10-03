@@ -986,6 +986,7 @@ réalisé segment par segment sans recalculer sa propre segmentation.
 | `reason_code` | `extrapolated` `no_model` `missing_elevation` | raison informative attachée à la prédiction, voir `notes` |
 | `predicted_time_s` | objet | temps prédit par scénario, secondes — **mêmes clés que `scenarios` ci-dessus** (`ambitious`/`realistic`/`safe`) |
 | `pace_s_km` | objet | allure prédite par scénario, s/km, mêmes clés |
+| `night_fraction`, `night_factor` | objet | pénalité de nuit (#184) : part du temps de la section courue de nuit, et multiplicateur de temps appliqué, par scénario (mêmes clés) — présents seulement si le plan comporte de la nuit (`--race-date`, `--start` et `--tz` fournis) |
 | `notes` | liste | avertissements courts (ex. extrapolation hors plage du modèle, altitude GPX manquante) |
 
 ```arc
