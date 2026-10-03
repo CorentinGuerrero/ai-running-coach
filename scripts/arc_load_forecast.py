@@ -37,6 +37,17 @@ STATUS_PAST = "target_past"
 STATUS_NO_PLAN = "no_plan"
 STATUS_INSUFFICIENT_HISTORY = "insufficient_history"
 
+# Recalage d'échelle « réel / estimé » (revue #172) : une séance RÉELLE avec FC pèse son TRIMP de Banister,
+# une séance PLANIFIÉE son estimation sRPE (minutes × RPE attendu × RPE_TO_TRIMP). Selon la physiologie de
+# l'athlète, le rapport des deux varie d'environ 0,9 à 1,45 pour la même séance (FC de réserve 55-90 %,
+# H/F) : la condition de départ, bâtie sur du TRIMP réel, se viderait alors vers une charge planifiée plus
+# basse et la forme prévue le jour J serait gonflée (≈ +12 pour un plan identique à l'historique avec un
+# rapport de 1,3 sur trois semaines). Le rapport est mesuré sur les séances PLANIFIÉES PASSÉES appariées à
+# une activité réelle — jamais un second modèle : la même estimation, recalée sur l'athlète.
+CALIBRATION_WINDOW_DAYS = 56
+CALIBRATION_MIN_PAIRS = 5
+CALIBRATION_BOUNDS = (0.5, 2.0)
+
 
 def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
@@ -74,23 +85,54 @@ def _normalise_weeks(planned_weeks: List[dict]) -> Dict[str, List[dict]]:
     return out
 
 
+def calibration(pairs: List[tuple]) -> dict:
+    """Rapport charge réelle / charge estimée sur des paires `(réelle, estimée)` de séances planifiées
+    passées appariées à une activité. PURE. `applied` faux (échelle 1, estimation brute de R1) si moins de
+    `CALIBRATION_MIN_PAIRS` paires exploitables ou si le rapport sort de `CALIBRATION_BOUNDS` (FC de repos /
+    max, intensités planifiées ou appariements probablement incohérents : on ne recale pas sur un artefact)."""
+    usable = [(r, e) for r, e in pairs if r and e and r > 0 and e > 0]
+    out = {"pairs": len(usable), "window_days": CALIBRATION_WINDOW_DAYS, "ratio": None, "applied": False,
+           "scale": 1.0}
+    if len(usable) < CALIBRATION_MIN_PAIRS:
+        return {**out, "reason": f"moins de {CALIBRATION_MIN_PAIRS} séances planifiées passées appariées à une "
+                                 f"activité sur {CALIBRATION_WINDOW_DAYS} j : charge planifiée NON recalée."}
+    ratio = round(sum(r for r, _ in usable) / sum(e for _, e in usable), 3)
+    lo, hi = CALIBRATION_BOUNDS
+    if not lo <= ratio <= hi:
+        return {**out, "ratio": ratio, "reason": f"rapport réel/estimé {ratio} hors de [{lo} ; {hi}] : charge "
+                                                 "planifiée NON recalée (vérifier FC de repos/max et intensités)."}
+    return {**out, "ratio": ratio, "applied": True, "scale": ratio, "reason": None}
+
+
+def _entering(series: List[dict], day: date) -> Optional[dict]:
+    """État « en entrant dans la journée » `day` : forme du point `day` (déjà calculée avant sa charge
+    par `daily_series`) et condition / fatigue / ACWR du point de la VEILLE — les quatre valeurs sont
+    ainsi cohérentes (forme = condition − fatigue) et la charge du jour même (la course) n'y entre pas."""
+    by_date = {p["date"]: p for p in series}
+    point, before = by_date.get(day.isoformat()), by_date.get((day - timedelta(days=1)).isoformat())
+    if point is None or before is None:
+        return None
+    return {"date": point["date"], "form": point["form"], "fitness": before["fitness"],
+            "fatigue": before["fatigue"], "acwr": before["acwr"]}
+
+
 def _summary(series: List[dict], today: date, target: date, race: Optional[date]) -> dict:
-    """Points clés d'une série projetée `[today, target]` (forme à la date visée, pic de fatigue…)."""
-    projected = [p for p in series if p["date"] >= today.isoformat()]
-    end = projected[-1] if projected else None
-    peak = max(projected, key=lambda p: p["fatigue"]) if projected else None
-    acwr_points = [p for p in projected if p.get("acwr") is not None]
+    """Points clés d'une série projetée jusqu'à la date visée. Tout est lu « en entrant dans la
+    journée » visée : pic de fatigue, ACWR max et charge totale portent sur `[today, veille de la
+    cible]` — la charge de la course elle-même (souvent la plus lourde du bloc) ne fait jamais de la
+    semaine de course le « pic de fatigue » ni de l'ACWR du jour J le maximum du bloc."""
+    window = [p for p in series if today.isoformat() <= p["date"] < target.isoformat()]
+    peak = max(window, key=lambda p: p["fatigue"]) if window else None
+    acwr_points = [p for p in window if p.get("acwr") is not None]
     acwr_peak = max(acwr_points, key=lambda p: p["acwr"]) if acwr_points else None
-    race_point = next((p for p in projected if race and p["date"] == race.isoformat()), None)
+    end = _entering(series, target)
     return {
-        "race_day": ({"date": race_point["date"], "form": race_point["form"], "fitness": race_point["fitness"],
-                      "fatigue": race_point["fatigue"], "acwr": race_point["acwr"]} if race_point else None),
-        "end": ({"date": end["date"], "form": end["form"], "fitness": end["fitness"],
-                 "fatigue": end["fatigue"]} if end else None),
+        "race_day": _entering(series, race) if race else None,
+        "end": ({k: end[k] for k in ("date", "form", "fitness", "fatigue")} if end else None),
         "peak_fatigue": ({"date": peak["date"], "week_start": _monday(date.fromisoformat(peak["date"])).isoformat(),
                           "fatigue": peak["fatigue"]} if peak else None),
         "acwr_max": ({"date": acwr_peak["date"], "value": acwr_peak["acwr"]} if acwr_peak else None),
-        "planned_load_total": _round(sum(p["load"] for p in projected)),
+        "planned_load_total": _round(sum(p["load"] for p in window)),
     }
 
 
@@ -120,7 +162,7 @@ def _week_rows(series: List[dict], weeks_by_start: Dict[str, List[dict]], today:
 
 def forecast(real_loads: Dict[str, float], today: date, race_date: Optional[str], until: Optional[date],
              planned_weeks: List[dict], activities: Optional[List[dict]] = None,
-             recent_pace_s_km: Optional[float] = None) -> dict:
+             recent_pace_s_km: Optional[float] = None, calib: Optional[dict] = None) -> dict:
     """Projection de condition/fatigue/forme sur `[today, cible]`, où cible = `until` ou la date de
     l'objectif. PURE.
 
@@ -128,12 +170,14 @@ def forecast(real_loads: Dict[str, float], today: date, race_date: Optional[str]
     (`{week_start, sessions[]}`, séances au format du contrat `week`). `activities` : activités réelles
     `{date, sport, load}` de la semaine en cours (apparient les séances d'aujourd'hui — le réel prime,
     jamais compté deux fois). Un jour sans séance planifiée compte 0 de charge (hypothèse, signalée
-    par `weeks_unplanned`) ; jamais d'extrapolation de la moyenne récente."""
+    par `weeks_unplanned`) ; jamais d'extrapolation de la moyenne récente. `calib` (voir `calibration`) :
+    quand `applied`, la charge PROJETÉE (jamais la réelle) est multipliée par `calib["scale"]`."""
     race = _parse(race_date)
     target = until or race
     base = {"status": None, "today": today.isoformat(), "race_date": race.isoformat() if race else None,
             "target_date": target.isoformat() if target else None, "is_estimate": True,
-            "assumptions_ref": "arc_metrics.ASSUMPTIONS[\"load_forecast\"] (/api/assumptions)"}
+            "assumptions_ref": "arc_metrics.ASSUMPTIONS[\"load_forecast\"] (/api/assumptions)",
+            "calibration": calib or calibration([])}
     if target is None:
         return {**base, "status": STATUS_NO_OBJECTIVE,
                 "reason": "Aucun objectif actif (planning/active_objective.md sans date de course) et pas de "
@@ -152,6 +196,7 @@ def forecast(real_loads: Dict[str, float], today: date, race_date: Optional[str]
                           "même plancher que le garde-fou R1."}
 
     weeks_by_start = _normalise_weeks(planned_weeks)
+    scale = base["calibration"]["scale"] if base["calibration"].get("applied") else 1.0
     loads: Dict[str, float] = {d: v for d, v in real_loads.items() if date.fromisoformat(d) < today}
     acts_by_week: Dict[str, List[dict]] = {}
     for act in activities or []:
@@ -169,10 +214,13 @@ def forecast(real_loads: Dict[str, float], today: date, race_date: Optional[str]
         end_of_week = monday + timedelta(days=6)
         week_context = {"week_activities": acts_by_week.get(key, []), "recent_run_pace_s_km": recent_pace_s_km}
         day_loads = G._week_loads_by_date(week_context, sessions, monday, end_of_week, today, zero_proposed=False)
+        # Part RÉELLE seule (même appel, séances proposées à zéro) : le recalage ne touche que l'estimé.
+        real_part = G._week_loads_by_date(week_context, sessions, monday, end_of_week, today, zero_proposed=True)
         for day_iso, load in day_loads.items():
             day = date.fromisoformat(day_iso)
             if today <= day <= target:
-                loads[day_iso] = load
+                real = real_part.get(day_iso, 0.0)
+                loads[day_iso] = real + (load - real) * scale
         if _active_sessions(sessions):
             planned_weeks_n += 1
             unresolved += G._unresolved_duration_dates(sessions, recent_pace_s_km)
@@ -223,12 +271,12 @@ def apply_alternative(planned_weeks: List[dict], alternative_weeks: List[dict]) 
 
 def compare(real_loads: Dict[str, float], today: date, race_date: Optional[str], until: Optional[date],
             planned_weeks: List[dict], alternative_weeks: List[dict], activities: Optional[List[dict]] = None,
-            recent_pace_s_km: Optional[float] = None) -> dict:
+            recent_pace_s_km: Optional[float] = None, calib: Optional[dict] = None) -> dict:
     """Plan actuel vs plan modifié : deux projections + écarts (alternatif − actuel). PURE.
     Une projection non `ok` (historique, pas de plan…) est rendue telle quelle, sans écarts."""
-    current = forecast(real_loads, today, race_date, until, planned_weeks, activities, recent_pace_s_km)
+    current = forecast(real_loads, today, race_date, until, planned_weeks, activities, recent_pace_s_km, calib)
     modified_weeks = apply_alternative(planned_weeks, alternative_weeks)
-    alternative = forecast(real_loads, today, race_date, until, modified_weeks, activities, recent_pace_s_km)
+    alternative = forecast(real_loads, today, race_date, until, modified_weeks, activities, recent_pace_s_km, calib)
     replaced = sorted(set(_normalise_weeks(alternative_weeks)) & set(_normalise_weeks(planned_weeks)))
     added = sorted(set(_normalise_weeks(alternative_weeks)) - set(_normalise_weeks(planned_weeks)))
     out = {"current": current, "alternative": alternative, "replaced_weeks": replaced, "added_weeks": added,
@@ -265,18 +313,34 @@ def compare(real_loads: Dict[str, float], today: date, race_date: Optional[str],
 # ---------------------------------------------------------------------------
 
 
-def _planned_weeks_from_index(conn, since: date) -> List[dict]:
-    """Semaines planifiées indexées (hors `shadowed`, voir #69) dont la date est ≥ `since`."""
+def _planned_weeks_from_index(conn, since: date, until: Optional[date] = None) -> List[dict]:
+    """Semaines planifiées indexées (hors `shadowed`, voir #69) dont la date est dans `[since, until]`."""
     rows = conn.execute(
         "SELECT week_start, date, sport, planned_duration_s, planned_distance_m, planned_elevation_m, "
-        "intensity, status FROM planned_session WHERE shadowed = 0 AND date >= ? ORDER BY date",
-        (since.isoformat(),)).fetchall()
+        "intensity, status FROM planned_session WHERE shadowed = 0 AND date >= ? AND date <= ? ORDER BY date",
+        (since.isoformat(), (until or date.max).isoformat())).fetchall()
     weeks: Dict[str, List[dict]] = {}
     for week_start, day, sport, duration_s, distance_m, elevation_m, intensity, status in rows:
         weeks.setdefault(week_start or _monday(date.fromisoformat(day)).isoformat(), []).append({
             "date": day, "sport": sport, "planned_duration_s": duration_s, "planned_distance_m": distance_m,
             "planned_elevation_m": elevation_m, "intensity": intensity, "status": status})
     return [{"week_start": k, "sessions": v} for k, v in sorted(weeks.items())]
+
+
+def _calibration_pairs(conn, today: date, recent_pace_s_km: Optional[float]) -> List[tuple]:
+    """Paires `(charge réelle, charge estimée)` des séances planifiées des `CALIBRATION_WINDOW_DAYS`
+    derniers jours (veille incluse) appariées à une activité réelle — même appariement que la conformité
+    et R1 (`arc_metrics.resolve_sessions`), même estimation que la projection (`projected_session_load`)."""
+    start, end = today - timedelta(days=CALIBRATION_WINDOW_DAYS), today - timedelta(days=1)
+    sessions = [s for w in _planned_weeks_from_index(conn, start, end) for s in w["sessions"]
+                if not G._is_excluded(s)]
+    by_date: Dict[str, List[dict]] = {}
+    for d, sport, load in conn.execute("SELECT date, sport, load FROM activity WHERE date >= ? AND date <= ?",
+                                       (start.isoformat(), end.isoformat())).fetchall():
+        by_date.setdefault(d, []).append({"date": d, "sport": sport, "load": load or 0.0, "_used": False})
+    resolved = M.resolve_sessions(sorted(sessions, key=lambda s: s.get("date") or ""), by_date, end.isoformat())
+    return [(r["actual"].get("load") or 0.0, G.projected_session_load(r["session"], recent_pace_s_km))
+            for r in resolved if r["actual"]]
 
 
 def load_forecast(conn, today: date, until: Optional[date] = None,
@@ -293,9 +357,10 @@ def load_forecast(conn, today: date, until: Optional[date] = None,
     planned = _planned_weeks_from_index(conn, monday)
     pace = G._recent_run_pace_s_km(conn, today)
     race_date = G._active_objective_race_date(conn)
+    calib = calibration(_calibration_pairs(conn, today, pace))
     if alternative_weeks is not None:
-        return compare(real_loads, today, race_date, until, planned, alternative_weeks, activities, pace)
-    return forecast(real_loads, today, race_date, until, planned, activities, pace)
+        return compare(real_loads, today, race_date, until, planned, alternative_weeks, activities, pace, calib)
+    return forecast(real_loads, today, race_date, until, planned, activities, pace, calib)
 
 
 def alternative_weeks_from_block(block: dict) -> List[dict]:
@@ -313,7 +378,7 @@ def alternative_weeks_from_block(block: dict) -> List[dict]:
 
 
 def render_text(result: dict) -> str:
-    """Rendu texte court (CLI sans `--json`), vocabulaire générique : condition / fatigue / forme."""
+    """Rendu texte court (CLI `--text`), vocabulaire générique : condition / fatigue / forme."""
     lines = []
     if "current" in result:                       # comparaison
         for label, key in (("Plan actuel", "current"), ("Plan modifié", "alternative")):
@@ -330,12 +395,20 @@ def render_text(result: dict) -> str:
         return f"Projection indisponible ({result['status']}) : {result.get('reason')}"
     race_day, end = result.get("race_day"), result.get("end")
     point = race_day or end
+    unplanned = result["weeks_unplanned"]
     lines.append(f"Estimation (pas une mesure) jusqu'au {result['target_date']} — "
-                 f"{result['weeks_planned']} semaine(s) planifiée(s), {result['weeks_unplanned']} non planifiée(s) "
-                 "(charge nulle supposée" + (" : forme prévue optimiste)." if result["weeks_unplanned"] else ")."))
+                 f"{result['weeks_planned']} semaine(s) planifiée(s)"
+                 + (f", {unplanned} non planifiée(s) (charge nulle supposée : forme prévue optimiste)." if unplanned
+                    else "."))
+    calib = result.get("calibration") or {}
+    if calib.get("applied"):
+        lines.append(f"Charge planifiée recalée ×{calib['scale']:.2f} (réel/estimé sur {calib['pairs']} séance(s) "
+                     f"appariée(s) des {calib['window_days']} derniers jours).")
+    else:
+        lines.append(f"Charge planifiée non recalée : {calib.get('reason') or 'aucun rapport réel/estimé disponible.'}")
     if point:
         label = "Forme prévue le jour J" if race_day else "Forme à la date visée"
-        lines.append(f"{label} ({point['date']}) : {point['form']:+.1f} "
+        lines.append(f"{label} ({point['date']}, en entrant dans la journée) : {point['form']:+.1f} "
                      f"(condition {point['fitness']:.1f}, fatigue {point['fatigue']:.1f}).")
     peak = result.get("peak_fatigue")
     if peak:
