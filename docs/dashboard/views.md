@@ -722,7 +722,7 @@ kilomètre : pas de graphique, c'est normal.
   à la pente) que vous avez tenue sur chaque durée de 30 s à 2 h, sur 42, 90 et
   365 jours, et, quand les données le permettent, votre **vitesse critique** et votre
   **réserve anaérobie D′** (ajustement sur les meilleurs efforts de 3 à 20 min, avec
-  sa qualité : nombre de points, R², erreur standard) et leur **tendance** (un point
+  sa qualité : nombre de points, incertitude sur chaque paramètre, R²) et leur **tendance** (un point
   tous les 28 jours). Ce ne sont pas des mesures de laboratoire : un effort jamais
   couru à fond sous-estime la vitesse critique. Quand l'ajustement est impossible
   (moins de 3 efforts, une seule séance, courbe plate…), la carte affiche

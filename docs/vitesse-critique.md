@@ -37,7 +37,7 @@ approximations du projet**, pas des valeurs publiées.
 `python3 scripts/arc_index.py pace-curve [--days N] [--lt-speed-ms V]` (et
 `/api/pace-curve`) calcule, pour chaque durée standard de 30 s à 2 h, la
 **meilleure allure moyenne** que vous avez tenue, à partir des échantillons FIT
-seconde par seconde :
+(regroupés par pas de 5 s à l'indexation) :
 
 - en **GAP** (allure ajustée à la pente, [modèle de Minetti](marques.md)) : une
   côte et un plat de même coût énergétique se valent. La vitesse critique est donc
@@ -46,7 +46,13 @@ seconde par seconde :
 - sur des **fenêtres glissantes de temps écoulé** : un effort « de 10 min » qui
   contient 90 s d'arrêt n'est pas un effort de 10 min. Une fenêtre n'est retenue
   que si les échantillons couvrent au moins 95 % de sa durée — un trou de signal
-  la disqualifie, il n'est jamais interpolé ;
+  ou une pause automatique de la montre la disqualifie, il n'est jamais interpolé.
+  Un arrêt enregistré (ravitaillement en trail, feu rouge) compte comme du temps à
+  vitesse nulle : un meilleur effort qui l'enjambe est pénalisé. C'est voulu : sur
+  le temps de *mouvement*, les morceaux de part et d'autre de l'arrêt seraient
+  recollés alors que D′ se reconstitue pendant l'arrêt — un effort intermittent
+  passerait pour un effort continu et gonflerait CS et D′. Sur le temps écoulé,
+  l'erreur va dans le sens prudent (vitesse critique basse) ;
 - sur trois périodes : **42 jours**, **90 jours**, **365 jours** (le meilleur de
   toutes les séances de la période). Une séance sans altitude exploitable (tapis,
   capteur barométrique absent) est écartée et comptée à part — jamais supposée plate.
@@ -67,8 +73,12 @@ calcul **refuse** de répondre — et dit pourquoi — quand :
 | `poor_fit` | R² inférieur à 0,95 : efforts hétérogènes |
 
 Un ajustement accepté rend sa **qualité** : nombre de points, R², erreur standard
-(en mètres), erreur standard de la vitesse critique, et un niveau « bonne »
-(au moins 4 points, R² ≥ 0,99), « moyenne » (R² ≥ 0,97) ou « faible ».
+de l'estimation (en mètres), erreur standard de la vitesse critique et de D′ (en
+valeur et en %), et un niveau « bonne » (au moins 4 points, vitesse critique à
+± 2 % et D′ à ± 10 %), « moyenne » (± 5 % et ± 25 %) ou « faible ». Le R² n'entre
+pas dans ce niveau : la distance croissant presque proportionnellement à la durée,
+il dépasse 0,99 même pour des efforts peu cohérents — il ne sert que de garde-fou
+grossier (refus sous 0,95). Ces seuils sont une approximation du projet.
 
 La **tendance** refait l'ajustement tous les 28 jours, chacun sur le meilleur de
 90 jours se terminant à ce point ; un point sans ajustement valide reste vide, jamais
@@ -110,7 +120,8 @@ Ces pourcentages sont une **approximation du projet**. Pour `vo2max`,
 
 **Contrôle avec le seuil lactique Garmin.** Quand l'athlète dispose d'un seuil
 lactique estimé par sa montre, le coach le passe en `--lt-speed-ms` (m/s) et un
-écart de plus de 5 % est **signalé avec les deux valeurs, jamais arbitré** : ce
+écart de plus de 5 % est **signalé avec les deux valeurs, jamais arbitré** (une
+vitesse hors de 1,5–7 m/s est refusée : unité probablement mal convertie) : ce
 sont deux estimations par des méthodes différentes (vos meilleurs efforts d'un côté,
 un algorithme propriétaire non documenté publiquement dans le détail de l'autre), et
 elles ne désignent pas exactement la même intensité.

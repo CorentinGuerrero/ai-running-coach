@@ -39,7 +39,9 @@ régression linéaire (moindres carrés) sur les meilleurs efforts de
 `fit_cs` **refuse explicitement** (`status: "refused"`, `reason_code`) quand les
 données ne le permettent pas — jamais d'extrapolation silencieuse, jamais de
 valeur par défaut. Qualité rapportée : `n_points`, `r2`, `see_m` (erreur
-standard de l'estimation, en mètres), `cs_se_ms`.
+standard de l'estimation, en mètres), `cs_se_ms`, `d_prime_se_m` et le niveau
+`quality`, jugé sur l'erreur standard RELATIVE de CS et D′ (`ASSUMPTIONS["quality"]`),
+pas sur le R² (presque toujours > 0,99 pour une régression distance-durée).
 
 Stdlib uniquement (CONTRIBUTING.md).
 """
@@ -88,7 +90,21 @@ D_PRIME_MAX_M = 1000.0
 
 # R² minimal pour accepter l'ajustement : en dessous, les « meilleurs efforts »
 # ne suivent pas la relation distance-durée linéaire (efforts hétérogènes).
+# Garde-fou GROSSIER seulement : la distance croît presque proportionnellement à la
+# durée, si bien que le R² d'une régression distance-durée dépasse 0,99 même pour des
+# efforts peu cohérents. La QUALITÉ (`QUALITY_SE_PCT`) se juge donc sur l'erreur
+# standard RELATIVE de chaque paramètre, pas sur le R² (revue de code #169).
 MIN_R2 = 0.95
+
+# Niveaux de qualité : erreur standard relative maximale (%) de la CS et de D′.
+# « bonne » exige en plus au moins 4 points (avec 3 points, 1 seul degré de liberté).
+# Seuils = approximation du projet (voir ASSUMPTIONS["quality"]).
+QUALITY_SE_PCT = {"bonne": (2.0, 10.0), "moyenne": (5.0, 25.0)}
+QUALITY_MIN_POINTS_GOOD = 4
+
+# Plage plausible d'une vitesse au seuil lactique (m/s) : hors de cette plage (ex. une
+# valeur 10 fois trop petite, unité mal convertie), le contrôle est refusé, jamais calculé.
+LT_SPEED_PLAUSIBLE_MS = (1.5, 7.0)
 
 # Pas de la tendance (jours) et fenêtre de « meilleur de » de chaque point.
 TREND_STEP_DAYS = 28
@@ -122,8 +138,13 @@ ASSUMPTIONS = {
     "windows_and_gaps": (
         "Fenêtres glissantes sur le temps ÉCOULÉ, grille régulière à la résolution des échantillons (5 s) : "
         "une fenêtre n'est retenue que si les échantillons couvrent au moins 95 % de sa durée (covered_s) ; un "
-        "trou de signal ou une pause non enregistrée la disqualifie, jamais interpolé. Un arrêt enregistré "
-        "(vitesse nulle) compte comme du temps couvert à vitesse nulle. Résolution de 5 s : la fenêtre de 30 s "
+        "trou de signal ou une pause non enregistrée (pause automatique de la montre) la disqualifie, jamais "
+        "interpolé. Un arrêt enregistré (vitesse nulle, ex. ravitaillement en trail) compte comme du temps "
+        "couvert à vitesse nulle : un meilleur effort qui enjambe un ravitaillement est donc pénalisé. "
+        "Compromis assumé : des fenêtres sur le temps de MOUVEMENT recolleraient les morceaux de part et "
+        "d'autre de l'arrêt, alors que D′ se reconstitue pendant l'arrêt — un effort intermittent passerait pour "
+        "un effort continu et gonflerait CS et D′. Sur le temps écoulé, l'erreur va dans le sens prudent "
+        "(CS basse). Résolution de 5 s : la fenêtre de 30 s "
         "est la plus courte exploitable ; un pic de vitesse GPS isolé peut gonfler les durées très courtes "
         "(hors ajustement CS/D′, qui part de 3 min)."
     ),
@@ -138,6 +159,14 @@ ASSUMPTIONS = {
         "viennent d'une seule séance est refusé, jamais une CS. Même avec 2 séances, des points hérités "
         "d'un effort plus long restent des bornes basses. La qualité (n, R², erreur standard) est toujours "
         "rapportée ; une CS issue d'un ajustement « moyenne » ou « faible » est un ordre de grandeur."
+    ),
+    "quality": (
+        "Qualité d'un ajustement accepté jugée sur l'erreur standard RELATIVE de chaque paramètre (erreur "
+        "standard de la pente et de l'ordonnée de la régression, rapportée à la CS et à D′) : « bonne » si au "
+        "moins 4 points, CS à ±2 % et D′ à ±10 % ; « moyenne » si CS à ±5 % et D′ à ±25 % ; « faible » sinon. Le "
+        "R² n'y entre pas : la distance croissant presque proportionnellement à la durée, il dépasse 0,99 même "
+        "pour des efforts peu cohérents (il ne sert que de garde-fou grossier, seuil 0,95). Seuils : "
+        "approximation du projet, pas des valeurs publiées."
     ),
     "refusal": (
         "Refus explicite (jamais d'extrapolation silencieuse) : moins de 3 durées disponibles entre 3 et "
@@ -164,7 +193,8 @@ ASSUMPTIONS = {
         "écart de plus de 5 % entre CS et vitesse au seuil est SIGNALÉ, jamais arbitré — les deux sont des "
         "estimations par des méthodes différentes (CS : meilleurs efforts de l'athlète ; seuil Garmin : "
         "algorithme propriétaire non documenté publiquement dans le détail). Le seuil lactique et la CS ne "
-        "désignent pas exactement la même intensité : un écart modéré est normal."
+        "désignent pas exactement la même intensité : un écart modéré est normal. Une vitesse au seuil hors de "
+        "1,5-7 m/s est refusée (unité probablement mal convertie), jamais comparée."
     ),
 }
 
@@ -305,10 +335,11 @@ def fit_cs(points: Sequence[dict], *, fit_min_s: int = FIT_MIN_S, fit_max_s: int
     r2 = 1.0 - ssr / sst if sst > 0 else 1.0
     see = math.sqrt(ssr / (n - 2)) if n > 2 else 0.0
     cs_se = see / math.sqrt(sxx)
+    dp_se = see * math.sqrt(1.0 / n + mt * mt / sxx)   # erreur standard de l'ordonnée (D′)
     pts = [{"duration_s": int(t), "distance_m": round(d, 1), "fitted_m": round(f, 1)}
            for t, d, f in zip(ts, ds, fitted)]
     common = {"n_points": n, "r2": round(r2, 4), "see_m": round(see, 1), "cs_se_ms": round(cs_se, 4),
-              "points": pts}
+              "d_prime_se_m": round(dp_se, 1), "points": pts}
     if cs <= 0:
         return _refused("non_positive_cs", "vitesse critique non positive : efforts incohérents", **common)
     if dp < D_PRIME_MIN_M or dp > D_PRIME_MAX_M:
@@ -318,10 +349,18 @@ def fit_cs(points: Sequence[dict], *, fit_min_s: int = FIT_MIN_S, fit_max_s: int
     if r2 < MIN_R2:
         return _refused("poor_fit", f"ajustement médiocre (R² = {r2:.3f}, minimum {MIN_R2:g}) : "
                                     "efforts hétérogènes", **common)
-    quality = "bonne" if (n >= 4 and r2 >= 0.99) else "moyenne" if r2 >= 0.97 else "faible"
+    cs_se_pct, dp_se_pct = cs_se / cs * 100.0, dp_se / dp * 100.0
+    good, fair = QUALITY_SE_PCT["bonne"], QUALITY_SE_PCT["moyenne"]
+    if n >= QUALITY_MIN_POINTS_GOOD and cs_se_pct <= good[0] and dp_se_pct <= good[1]:
+        quality = "bonne"
+    elif cs_se_pct <= fair[0] and dp_se_pct <= fair[1]:
+        quality = "moyenne"
+    else:
+        quality = "faible"
     return {"status": "ok", "valid": True, "reason": None, "reason_code": None,
             "cs_ms": round(cs, 4), "cs_pace_s_km": round(1000.0 / cs, 1), "d_prime_m": round(dp, 1),
-            "quality": quality, **common}
+            "quality": quality, "cs_se_pct": round(cs_se_pct, 1), "d_prime_se_pct": round(dp_se_pct, 1),
+            **common}
 
 
 def d_prime_budget_s(fit: Optional[dict], speed_ms: float) -> Optional[float]:
@@ -362,8 +401,13 @@ def cs_trend(activity_curves: Sequence[dict], today: date, *, days: int = TREND_
 def compare_threshold(fit: Optional[dict], threshold_speed_ms: Optional[float]) -> dict:
     """Compare la CS à une vitesse au seuil lactique (m/s, fournie par l'appelant, jamais lue ici).
     Signale (`diverges`) un écart > `THRESHOLD_DIVERGENCE_PCT` % ; ne choisit jamais l'une des deux."""
-    if threshold_speed_ms is None or threshold_speed_ms <= 0:
+    if threshold_speed_ms is None or threshold_speed_ms <= 0 or not math.isfinite(threshold_speed_ms):
         return {"available": False, "reason": "vitesse au seuil lactique non fournie"}
+    lo, hi = LT_SPEED_PLAUSIBLE_MS
+    if not lo <= threshold_speed_ms <= hi:
+        return {"available": False,
+                "reason": f"vitesse au seuil lactique {threshold_speed_ms:g} m/s hors de [{lo:g} ; {hi:g}] m/s : "
+                          "unité probablement mal convertie, contrôle non effectué"}
     if not fit or not fit.get("valid"):
         return {"available": False, "reason": "CS non ajustable (voir le motif du refus)"}
     delta = (fit["cs_ms"] - threshold_speed_ms) / threshold_speed_ms * 100.0

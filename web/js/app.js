@@ -2350,8 +2350,8 @@ function paceCurveSection(data) {
   let fitHtml;
   if (fit && fit.valid) {
     fitHtml = `<p class="lead-num">${F.paceFromSecPerKm(fit.cs_pace_s_km)} <small>vitesse critique (GAP) · réserve anaérobie D′ ${F.num(fit.d_prime_m, 0)} m</small></p>
-      <p class="muted">Qualité ${F.esc(fit.quality)} : ${fit.n_points} efforts de 3 à 20 min, R² ${F.num(fit.r2, 3)}, erreur standard ${F.num(fit.see_m, 0)} m
-      (± ${F.num(fit.cs_se_ms * 3.6, 2)} km/h sur la vitesse critique). Estimation à partir des meilleurs efforts
+      <p class="muted">Qualité ${F.esc(fit.quality)} : ${fit.n_points} efforts de 3 à 20 min, incertitude ± ${F.num(fit.cs_se_pct, 1)} % sur la vitesse critique
+      (± ${F.num(fit.cs_se_ms * 3.6, 2)} km/h) et ± ${F.num(fit.d_prime_se_m, 0)} m sur D′, R² ${F.num(fit.r2, 3)}. Estimation à partir des meilleurs efforts
       d'entraînement, pas d'un test : un effort jamais couru à fond la sous-estime.</p>`;
   } else {
     fitHtml = note(`Données insuffisantes pour ajuster la vitesse critique : ${F.esc((fit && fit.reason) || "aucun effort exploitable")}.`);
@@ -2489,7 +2489,7 @@ const HYP_SUFFIX = {
   delta_alert: "Seuil d'alerte d'écart", calibration: "Calibration personnelle",
   gap_basis: "Vitesses en GAP", windows_and_gaps: "Fenêtres et trous de signal",
   best_efforts_not_tests: "Meilleurs efforts, pas des tests", refusal: "Refus explicite", trend: "Tendance",
-  targets: "Cibles d'intervalles", lactate_crosscheck: "Contrôle avec le seuil lactique Garmin",
+  targets: "Cibles d'intervalles", quality: "Qualité de l'ajustement", lactate_crosscheck: "Contrôle avec le seuil lactique Garmin",
 };
 
 /** Lien vers une famille d'hypothèses (`#/hypotheses?modele=<id>`), depuis n'importe quelle vue. */

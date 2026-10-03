@@ -91,6 +91,17 @@ class TestActivityCurve(unittest.TestCase):
         self.assertAlmostEqual(res["curve"][300], 5.0, delta=0.02)
         self.assertNotIn(600, res["curve"])   # toute fenêtre de 10 min enjambe le trou (couverture 90 %)
 
+    def test_small_signal_gap_averages_over_covered_time(self):
+        # 10 min à 5 m/s avec un trou de 20 s au milieu (3 % < 5 %) : la fenêtre reste retenue et sa
+        # vitesse est la moyenne sur le temps COUVERT (5,0), pas la distance divisée par 10 min (4,83).
+        first = _samples([(300, 5.0)])
+        second = _samples([(300, 5.0)])
+        shift = 320.0
+        dist0 = first[-1]["distance_m"] + 5.0 * RES + 20 * 5.0
+        shifted = [{**s, "t_s": s["t_s"] + shift, "distance_m": s["distance_m"] + dist0} for s in second]
+        res = CS.activity_curve(first + shifted)
+        self.assertAlmostEqual(res["curve"][600], 5.0, delta=0.02)
+
     def test_no_altitude_activity_is_skipped_with_reason(self):
         flat_no_alt = [{k: v for k, v in s.items() if k != "altitude_m"} for s in _effort_activity(300, 5.0)]
         res = CS.activity_curve(flat_no_alt)
@@ -200,6 +211,28 @@ class TestFitCs(unittest.TestCase):
     def test_no_points_at_all(self):
         self.assertEqual(CS.fit_cs([])["reason_code"], "insufficient_points")
 
+    def test_quality_follows_parameter_uncertainty_not_r2(self):
+        # Revue de code #169 : le R² d'une régression distance-durée dépasse 0,99 même pour des efforts
+        # peu cohérents ; le niveau de qualité se juge sur l'erreur standard RELATIVE de CS et D′.
+        exact = CS.fit_cs(_points(4.0, 200.0))
+        self.assertEqual(exact["quality"], "bonne")
+        self.assertAlmostEqual(exact["d_prime_se_m"], 0.0, delta=0.1)
+        # ±2 % alternés sur la vitesse : R² ≈ 0,999 (l'ancien critère aurait dit « bonne »), D′ à ±40 %.
+        noisy = CS.fit_cs([{"duration_s": p["duration_s"], "speed_ms": p["speed_ms"] * (1 + e)}
+                           for p, e in zip(_points(3.8, 150.0), (0.02, -0.02, 0.02, -0.02, 0.02))])
+        self.assertEqual(noisy["status"], "ok", noisy["reason"])
+        self.assertGreater(noisy["r2"], 0.99)                    # R² trompeusement excellent…
+        self.assertGreater(noisy["d_prime_se_pct"], 10.0)        # … mais D′ mal déterminée
+        self.assertEqual(noisy["quality"], "faible")
+        # erreur standard de l'ordonnée : see·√(1/n + t̄²/Sxx)
+        ts = [p["duration_s"] for p in noisy["points"]]
+        mt = sum(ts) / len(ts)
+        sxx = sum((t - mt) ** 2 for t in ts)
+        dists = [p["distance_m"] for p in noisy["points"]]
+        fitted = [p["fitted_m"] for p in noisy["points"]]
+        see = (sum((d - f) ** 2 for d, f in zip(dists, fitted)) / (len(ts) - 2)) ** 0.5
+        self.assertAlmostEqual(noisy["d_prime_se_m"], see * (1 / len(ts) + mt * mt / sxx) ** 0.5, delta=1.0)
+
 
 class TestBudgetTrendThreshold(unittest.TestCase):
     def test_d_prime_budget(self):
@@ -219,6 +252,10 @@ class TestBudgetTrendThreshold(unittest.TestCase):
         self.assertGreater(far["delta_pct"], 5.0)
         self.assertNotIn("preferred", far)
         self.assertFalse(CS.compare_threshold(fit, None)["available"])
+        # unité mal convertie (Garmin rend parfois une vitesse 10 fois plus petite) ou NaN : refus, jamais comparé
+        self.assertFalse(CS.compare_threshold(fit, 0.39)["available"])
+        self.assertFalse(CS.compare_threshold(fit, float("nan"))["available"])
+        self.assertFalse(CS.compare_threshold(fit, float("inf"))["available"])
         self.assertFalse(CS.compare_threshold({"valid": False}, 3.5)["available"])
 
     def test_trend_improves_and_refuses_without_data(self):
