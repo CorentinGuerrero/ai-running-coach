@@ -244,6 +244,21 @@ illisible) → **demandez**, ne devinez jamais une phase. Le cycle reste un CONT
 lecture du bilan matinal : aucun diagnostic, aucune règle, aucun commentaire sur la
 régularité.
 
+## Poussée vers Garmin (opt-in, #167)
+
+Après l'écriture et la ligne de confirmation, **uniquement** si `python3 scripts/arc_nutrition_sync.py mode`
+rend `available: true` (`[nutrition].garmin_sync = "ask"`, source Garmin) : **proposez** de pousser
+l'apport (`nutrition_items` appariés, `fluid_intake_ml`) vers le journal alimentaire et l'hydratation de
+Garmin Connect. À `off` (défaut) : n'en parlez pas. Avec `[data].source = "intervals"` : dites en une ligne
+que c'est indisponible, ne simulez rien. **Jamais en headless, jamais sans un « oui » explicite pour CETTE
+poussée.** Le protocole complet (plan → lectures → question → écritures → `record` → `garmin_pushed` dans le
+bloc ```arc de l'activité) est celui de `GARMIN NUTRITION PUSH` dans `agents/nutritionist.md` ; le script
+`scripts/arc_nutrition_sync.py` fait toute la décision (création unique des aliments personnalisés, doublons,
+idempotence) — vous ne faites qu'appeler les outils et passer du JSON. Produit hors catalogue ou calories
+absentes : demandez la valeur d'étiquette, ne poussez jamais une valeur devinée. Une saisie déjà dans
+`garmin_pushed` (même clé) n'est jamais repoussée. Une journée alimentée depuis le journal Garmin
+(`intake_source: "garmin"`) n'est jamais poussée : une seule source de vérité par jour.
+
 ## Confirmation
 
 Une seule ligne, dans la langue des documents, **nommant le produit

@@ -21,6 +21,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
 | 📱 **Le coach dans la poche** | synchronisation Garmin automatique + notification push, et dialogue avec le coach depuis le téléphone (Claude Code Remote Control) — sans renoncer à votre abonnement |
 | 🌙 **Cycle menstruel (opt-in)** | contexte facultatif du bilan matinal (phase du cycle), désactivé par défaut : jamais une règle ni un diagnostic, veille RED-S — voir [Cycle menstruel](docs/cycle-menstruel.md) |
+| 🍽️ **Apports vers Garmin (opt-in)** | le coach propose de pousser ce que vous déclarez (`/log`, rapports) vers le journal alimentaire et l'hydratation de Garmin Connect, désactivé par défaut, jamais sans votre « oui » — voir [Apports vers Garmin](docs/nutrition-garmin.md) |
 | 🎛️ **Coach configurable** | style de coaching, discipline (trail ou route), bilan santé matinal, profil d'athlète |
 | 📚 **Documentation** | guide de démarrage rapide, configuration, dépannage |
 

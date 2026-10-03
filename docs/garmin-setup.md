@@ -139,6 +139,16 @@ clé) ; repasser à `off` et relancer l'installation les retire. En mode passere
 `leanproxy_servers.yaml` n'étant réécrit que s'il est absent, ajoutez-les à la main à sa ligne
 `GARMIN_ENABLED_TOOLS`. Détail : [Cycle menstruel](cycle-menstruel.md).
 
+## Apports vers Garmin Connect (opt-in, #167)
+
+Les outils `get_custom_foods`, `get_custom_food_serving_units`, `get_nutrition_daily_food_log`,
+`get_nutrition_daily_meals`, `get_hydration_data` (lecture) et `create_custom_food`,
+`log_custom_food`, `log_food`, `add_hydration_data` (écriture, « oui » explicite, jamais en
+headless) ne figurent **pas** dans la liste blanche ci-dessus. `install.sh` les y ajoute uniquement
+avec `[nutrition].garmin_sync = "ask"` (ou `./install.sh --nutrition-sync ask`, qui écrit la clé) ;
+repasser à `off` et relancer l'installation les retire. En mode passerelle, ajoutez-les à la main à
+`GARMIN_ENABLED_TOOLS` de `leanproxy_servers.yaml`. Détail : [Apports vers Garmin](nutrition-garmin.md).
+
 ## Synchronisation du matériel Garmin
 
 Garmin Connect gère son propre matériel (attribution automatique par sport, seuils de retraite).
