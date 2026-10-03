@@ -65,6 +65,12 @@ Matériel : chaussures route
   (#60)"): convert m/s to a min/km range for the `Cible allure :` line —
   never paste the raw m/s value, the athlete reads pace, not speed.
 - **HR target** (`hr_target.bounds_bpm`, low then high): `Cible FC : LOW-HIGH bpm`.
+- **Heat-adjusted pace (#171):** on a hot/🔴 day run the targets command with
+  `--heat`; when `heat_adjustment.applies` and `intensity_maintained`, write the
+  `Cible allure :` line from `pace_target.adjusted` (or `declared_pace.adjusted_pace_s_km`)
+  — the HR line stays unchanged — and add a `Chaleur : …` line with
+  `heat_adjustment.step_note`. For `reschedule_*` actions do not create the
+  event as planned: propose the alternative, create it after confirmation.
 - **Hill-repeat D+ lower bound** (`hill_repeats.per_rep.elevation_gain_m`):
   `≥ X m D+ par répétition` — same "lower bound, not a centered prediction"
   rule as `garmin-workout-scheduling`/`agents/coach.md`.

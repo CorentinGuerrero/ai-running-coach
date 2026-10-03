@@ -129,6 +129,15 @@ Renders `{"intensity", "sport", "hr_target", "pace_target", "hill_repeats"}`. **
 
 `scripts/arc_workout_targets.py` also exposes `dto_hr_step`/`dto_pace_step` (build a ready `ExecutableStepDTO` from a target, low bound rejected if it exceeds the high bound) and `validate_workout_step_dto` (shape-checks a step against the tables above, including HR/pace range ordering) — use them instead of hand-rolling the JSON when the step carries a personal target.
 
+## Heat-adjusted targets (#171)
+
+On a hot (> 25 °C) or 🔴 forecast day, add `--heat` to the same command (`python3 scripts/arc_workout_targets.py targets --heat --session … [--slot morning|midday|evening] [--pace-s-km N]`; weather read from that day's indexed `medical/*_meteo.md`, or `--temp-c`). The result gains `heat_adjustment`, `pace_target.adjusted` and `trace`. Same pure function and coefficients as the race pacing (`scripts/arc_heat.py`, single source) — never compute the factor by hand.
+
+- **HR target unchanged** (`hr_target` — HR is the reference). Only the pace is slowed: build the `pace.zone` step from `pace_target.adjusted.speed_low_ms`/`speed_high_ms` (still m/s, still low-then-high; already divided by the factor) instead of `pace_target`, and append `heat_adjustment.step_note` to the step `description` (e.g. "chaleur 27 °C : allure × 1.1, FC inchangée") so the pushed workout carries the reason. Duration is kept.
+- `action` `reschedule_or_lighten` / `reschedule_or_indoor` (🔴): do NOT push the original session; propose the move (or the endurance-at-HR / indoor alternative) and push only after the athlete confirms. For `reschedule_or_lighten` (quality, `intensity_maintained` false) there is no adjusted pace to push; for `reschedule_or_indoor` (easy/long), if the athlete explicitly keeps it outdoors, push `pace_target.adjusted` with the HR target unchanged.
+- `action` `prefer_cool_slot`: propose the cool slot first; if the athlete takes it, re-run the command with `--slot morning|evening` and push THAT output; if they keep the hot one, push with the lowered pace targets.
+- Persist `trace.heat_adjustment` on the session in the week file's `arc` block, then validate (`python3 scripts/arc_index.py --validate <file>`).
+
 ## Templates
 
 ### Simple Z1 run (TESTED — workout_id 1661521722)

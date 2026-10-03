@@ -56,6 +56,10 @@ c'est une borne basse plausible, pas une prévision centrée — à formuler
 « Personal targets », pour le détail complet (mapping, provenance,
 conversions d'unités, D+ attendu vs mesuré).
 
+## Cibles ajustées à la chaleur (#171)
+
+Un jour chaud (> 25 °C) ou 🔴, ajoutez `--heat` à la commande ci-dessus : le résultat gagne `heat_adjustment`, `pace_target.adjusted` (m/s, déjà divisé par le facteur de chaleur) et `trace`. La séance poussée reflète ces cibles : le pas `pace.zone` utilise `pace_target.adjusted` (allure ralentie, durée conservée), la cible FC reste **inchangée**, et la note de chaleur (`step_note`, ex. « chaleur 27 °C : allure × 1.1, FC inchangée ») est ajoutée à la description du pas. Si l'action est `reschedule_or_lighten` / `reschedule_or_indoor` (🔴), la séance d'origine n'est pas poussée : l'alternative est proposée puis poussée après confirmation de l'athlète. Avec `prefer_cool_slot`, si l'athlète choisit le créneau frais, la commande est relancée avec `--slot` et c'est cette sortie qui est poussée. Côté intervals.icu, la ligne « Cible allure » du texte reprend l'allure ajustée. La trace `heat_adjustment` est recopiée dans la séance du bloc `arc` de la semaine.
+
 ## Fichier source
 
 `skills/garmin-workout-scheduling/SKILL.md`
