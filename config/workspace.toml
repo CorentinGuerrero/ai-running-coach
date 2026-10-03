@@ -157,6 +157,20 @@ heat_threshold_c = 25.0
 # jamais une règle automatique ni un diagnostic. Valeur invalide = "off" + avertissement.
 cycle_tracking = "off"
 
+[nutrition]
+# Poussée des apports vers Garmin Connect (#167) — OPT-IN STRICT.
+#   "off" — défaut : rien n'est jamais poussé, aucun outil de journal alimentaire/hydratation
+#           n'est exposé (liste blanche inchangée)
+#   "ask" — après un /log ou un rapport nutrition, le coach PROPOSE de pousser l'apport vers le
+#           journal alimentaire et l'hydratation de Garmin Connect ; chaque poussée exige un
+#           « oui » explicite, n'a jamais lieu en headless (daily-sync) et reste idempotente
+#           (trace `garmin_pushed`). Les outils ne sont ajoutés à la liste blanche qu'à
+#           l'installation : relancer `./install.sh` après le changement (ou
+#           `./install.sh --nutrition-sync ask`).
+# Indisponible avec [data].source = "intervals" ou "strava" (dit explicitement). Valeur invalide = "off".
+# Une seule source de vérité par jour : voir docs/configuration.md.
+garmin_sync = "off"
+
 [data]
 # Source de données primaire des agents (#68).
 #   "garmin"    — Garmin Connect, via garmin-mcp (défaut, comportement historique)

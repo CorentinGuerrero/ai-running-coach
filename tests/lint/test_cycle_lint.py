@@ -37,8 +37,16 @@ class TestDefaultsStayOff(unittest.TestCase):
     def test_whitelist_extension_only_inside_resolve_cycle_tracking(self):
         install = read("install.sh")
         hits = [i for i, line in enumerate(install.splitlines())
-                if 'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,' in line]
+                if 'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_CYCLE_TOOLS"' in line]
         self.assertEqual(len(hits), 1)
+        # Aucune AUTRE extension de la liste blanche que les deux opt-in connus (#166 cycle,
+        # #167 nutrition, chacun verrouillé dans son propre lint) : une troisième doit être revue.
+        extensions = sorted(line.strip() for line in install.splitlines()
+                            if 'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,' in line)
+        self.assertEqual(extensions, sorted([
+            'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_CYCLE_TOOLS"',
+            'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_NUTRITION_TOOLS"',
+        ]))
         body = install[install.index("resolve_cycle_tracking() {"):]
         self.assertIn('[[ "$CYCLE_TRACKING" == "garmin" ]]', body.split("persist_cycle_tracking")[0])
 

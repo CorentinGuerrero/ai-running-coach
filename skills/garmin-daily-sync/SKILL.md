@@ -81,6 +81,11 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
   coach le propose en session interactive). **Aucune écriture côté Garmin en headless** : `add_gear_to_activity` ne
   s'appelle jamais ici, personne ne peut confirmer. Avec `[data].source = "intervals"`, aucun
   matériel par séance n'est lisible (voir `AGENTS.md`) : `gear_id` reste absent, jamais deviné.
+- **Apports vers Garmin (#167, opt-in `[nutrition].garmin_sync`)** : **aucune écriture nutrition
+  ni hydratation côté Garmin en headless** — `log_food`, `log_custom_food`, `create_custom_food`,
+  `add_hydration_data` ne s'appellent jamais ici (personne ne peut confirmer) ; `scripts/daily-sync.sh`
+  les retire explicitement. N'importez pas non plus le journal alimentaire Garmin dans `nutrition/` :
+  c'est une lecture interactive, à la demande (`agents/nutritionist.md`).
 
 - **Déclencheurs (`trigger=…`, facultatif)** : posés par `scripts/garmin_watch.py` quand la
   surveillance (`[sync].mode = "watch"`) a vu du neuf chez Garmin — `morning` (sommeil du
@@ -124,7 +129,7 @@ Remote Control) et l'IDE partagent. Il délègue tout à l'agent `coach` et au s
    > "No gear data found…" when nothing is attached: then write nothing. Report a non-empty
    > `conflict` (Garmin says A, athlete says B — athlete kept) and any `unmapped_garmin` /
    > `ambiguous` result (NOT `ignored_garmin`: those stay silent) in your summary, once per gear, by gear NAME (from `get_activity_gear`'s `displayName`,
-   > never a raw uuid), never attribute them. NEVER call `add_gear_to_activity` here. For TODAY's `medical/YYYY-MM-DD_health.md`, when `morning_check` is
+   > never a raw uuid), never attribute them. NEVER call `add_gear_to_activity` here, nor any Garmin nutrition/hydration write (`log_food`, `log_custom_food`, `create_custom_food`, `add_hydration_data`). For TODAY's `medical/YYYY-MM-DD_health.md`, when `morning_check` is
    > `full` or `minimal`, record the gatekeeper `verdict` (`green`/`amber`/`red`) and
    > `verdict_reason` per the morning-check rules (`agents/medical.md`) — never leave it to
    > chance, step 4 below depends on it; document language from `config/workspace.toml` for

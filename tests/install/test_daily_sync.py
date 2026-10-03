@@ -55,6 +55,16 @@ class TestDataSourceAwareTools(InstallAsserts):
             self.assertOutputContains(proc, "mcp__garmin__add_gear_to_activity")
             self.assertOutputContains(proc, "mcp__garmin__remove_gear_from_activity")
 
+    def test_garmin_source_forbids_nutrition_writes_in_headless_runs(self):
+        """#167 : jamais d'écriture journal alimentaire / hydratation sans le « oui » de l'athlète."""
+        with Sandbox() as sb:
+            ws = self._workspace(sb, None)
+            proc = sb.script("daily-sync.sh", "--dry-run", ARC_WORKSPACE=str(ws))
+            self.assertSucceeded(proc)
+            for tool in ("log_food", "log_custom_food", "create_custom_food", "update_custom_food",
+                         "upsert_and_log", "delete_food_log", "add_hydration_data"):
+                self.assertOutputContains(proc, f"mcp__garmin__{tool}")
+
     def test_garmin_source_forbids_workout_writes_in_headless_runs(self):
         """Le run non surveillé ne pousse ni ne supprime jamais de séance/parcours chez Garmin."""
         with Sandbox() as sb:

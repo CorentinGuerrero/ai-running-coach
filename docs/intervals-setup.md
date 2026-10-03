@@ -147,6 +147,12 @@ qu'elles ne sont pas disponibles :
 - **Upload de parcours** (`course-strategist`) — reste limité à l'analyse GPX
   locale (skill `gpx-analysis`).
 
+## Apports vers Garmin (#167)
+
+`[nutrition].garmin_sync` est **indisponible** avec `[data].source = "intervals"` : intervals.icu n'a
+pas de journal alimentaire ni d'hydratation équivalents. Le coach le dit explicitement, `install.sh`
+n'expose aucun outil. Voir [Apports vers Garmin](nutrition-garmin.md).
+
 ## Cycle menstruel (opt-in, #166)
 
 Avec `[health].cycle_tracking = "intervals"`, la phase vient du champ wellness `menstrualPhase`,

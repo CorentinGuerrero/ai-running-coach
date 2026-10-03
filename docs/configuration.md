@@ -124,6 +124,26 @@ diagnostic, jamais un assouplissement d'un verdict rouge.
 
 Détail, vérifications et sources : [Cycle menstruel](cycle-menstruel.md).
 
+## La poussée des apports vers Garmin — `[nutrition].garmin_sync` (#167)
+
+```toml
+[nutrition]
+garmin_sync = "off"   # off (défaut) | ask
+```
+
+**Opt-in strict.** À `off` (défaut, ou clé absente), rien n'est poussé, aucun outil n'est exposé et
+aucun agent n'en parle. `ask` : après un `/log` ou un rapport nutrition, le coach **propose** de
+pousser l'apport vers le journal alimentaire et l'hydratation de Garmin Connect ; chaque poussée
+exige un « oui » explicite, n'a jamais lieu en headless (`/garmin-daily-sync`) et reste idempotente.
+Les outils ne sont ajoutés à la liste blanche qu'à l'installation : **relancez `./install.sh`**
+après le changement (ou installez avec `--nutrition-sync ask`, qui écrit la clé). Indisponible avec
+`[data].source = "intervals"` ou `"strava"`, et en mode passerelle `--use-leanproxy` (refusé : les écritures n'y
+sont pas filtrables en headless). Une seule source de vérité par jour (fichiers du dépôt **ou** journal
+Garmin, jamais les deux) : voir [Apports vers Garmin](nutrition-garmin.md).
+
+!!! warning "Une valeur invalide ne casse rien"
+    Une valeur hors de `off`/`ask` est traitée comme `off`, avec un avertissement.
+
 ## La source de données — `[data].source` (#68)
 
 ```toml

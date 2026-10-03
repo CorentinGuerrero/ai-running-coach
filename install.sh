@@ -26,6 +26,7 @@
 #   ./install.sh --source intervals # Intervals.icu au lieu de Garmin (#68)
 #   ./install.sh --source strava    # Strava au lieu de Garmin (#164)
 #   ./install.sh --cycle-tracking MODE # off (défaut) | garmin | intervals | manual — contexte du cycle menstruel, opt-in (#166)
+#   ./install.sh --nutrition-sync MODE # off (défaut) | ask — pousser les apports vers Garmin Connect, opt-in (#167)
 #   ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
 #   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
 #   ./install.sh --no-medical       # tous les agents sauf le médecin
@@ -94,6 +95,14 @@ GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_ac
 # source est Garmin. Noms vérifiés dans src/garmin_mcp/womens_health.py du commit épinglé ci-dessus.
 # `get_pregnancy_summary` (même module) n'est volontairement PAS ajouté : hors périmètre.
 GARMIN_CYCLE_TOOLS="get_menstrual_data_for_date,get_menstrual_calendar_data"
+# Outils de nutrition/hydratation (#167) : JAMAIS dans la liste blanche par défaut — ajoutés par
+# resolve_nutrition_sync() uniquement quand [nutrition].garmin_sync = "ask" (opt-in) et que la source
+# est Garmin. Noms vérifiés dans src/garmin_mcp/nutrition.py, data_management.py (add_hydration_data)
+# et health_wellness.py (get_hydration_data) du commit épinglé ci-dessus. Volontairement ABSENTS :
+# delete_food_log, update_custom_food, upsert_and_log (écriture irréversible / qui écrase une entrée
+# de l'athlète — à corriger dans Garmin Connect). Les écritures restent derrière un « oui » explicite
+# et sont interdites en headless (scripts/daily-sync.sh).
+GARMIN_NUTRITION_TOOLS="get_custom_foods,get_custom_food_serving_units,get_nutrition_daily_food_log,get_nutrition_daily_meals,get_hydration_data,create_custom_food,log_custom_food,log_food,add_hydration_data"
 
 # Chat avec le coach et sync sur une API (--llm) : modèles par défaut, UNE constante
 # chacun. Identifiant OpenRouter « deepseek/deepseek-v4.1-flash » vérifié dans le catalogue
@@ -148,6 +157,7 @@ ENABLED_AGENTS=""  # résolu par resolve_agents()
 PRESET=""          # --preset laptop|coach-server|docker (défaut : aucun)
 SOURCE="garmin"    # --source garmin|intervals|strava (#68, #164) — source de données primaire
 CYCLE_TRACKING="off" # --cycle-tracking off|garmin|intervals|manual (#166) — contexte du cycle, opt-in
+NUTRITION_SYNC="off" # --nutrition-sync off|ask (#167) — poussée des apports vers Garmin, opt-in
 LLM_PROVIDER=""    # --llm openrouter|anthropic|openai — chat + sync sur une API
 LLM_MODEL_ARG=""   # --model ID (avec --llm)
 LLM_BASE_URL_ARG="" # --base-url URL (avec --llm openai : API compatible OpenAI)
@@ -170,6 +180,7 @@ EXPLICIT_REMOTE_CONTROL=0
 EXPLICIT_AGENTS=0
 EXPLICIT_SOURCE=0
 EXPLICIT_CYCLE=0   # --cycle-tracking passé (#166) : seul cas où [health].cycle_tracking est écrit
+EXPLICIT_NUTRITION=0 # --nutrition-sync passé (#167) : seul cas où [nutrition].garmin_sync est écrit
 # Vrai (1) uniquement quand --source a été passé explicitement ET que la
 # valeur résolue diffère de celle DÉJÀ en config (resolve_source()) — jamais
 # sur un simple rerun sans --source. C'est ce qui protège un serveur MCP
@@ -189,6 +200,7 @@ Usage :
   ./install.sh --ide IDE          # claude | copilot | opencode | gemini | cursor | windsurf
   ./install.sh --source SOURCE    # garmin (défaut) | intervals | strava — source de données primaire (#68, #164)
   ./install.sh --cycle-tracking MODE # off (défaut) | garmin | intervals | manual — contexte du cycle menstruel, opt-in (#166)
+  ./install.sh --nutrition-sync MODE # off (défaut) | ask — pousser les apports vers Garmin Connect, opt-in (#167)
   ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
   ./install.sh --no-medical       # tous les agents sauf le médecin
@@ -352,6 +364,7 @@ while [[ $# -gt 0 ]]; do
         --ide) need_value "$@"; IDE="$2"; EXPLICIT_IDE=1; shift 2 ;;
         --source) need_value "$@"; SOURCE="$2"; EXPLICIT_SOURCE=1; shift 2 ;;
         --cycle-tracking) need_value "$@"; CYCLE_TRACKING="$2"; EXPLICIT_CYCLE=1; shift 2 ;;
+        --nutrition-sync) need_value "$@"; NUTRITION_SYNC="$2"; EXPLICIT_NUTRITION=1; shift 2 ;;
         --no-auth) DO_AUTH=0; EXPLICIT_DO_AUTH=1; shift ;;
         --auth) DO_AUTH=1; EXPLICIT_DO_AUTH=1; shift ;;  # annule --no-auth composé par un préréglage
         --use-leanproxy) USE_LEANPROXY=1; EXPLICIT_LEANPROXY=1; shift ;;
@@ -405,6 +418,17 @@ validate_cycle_tracking() {
 }
 if [[ "$EXPLICIT_CYCLE" -eq 1 ]]; then
     validate_cycle_tracking
+fi
+
+# Valide $NUTRITION_SYNC (#167, même principe).
+validate_nutrition_sync() {
+    case "$NUTRITION_SYNC" in
+        off|ask) ;;
+        *) die "Mode de synchronisation nutrition inconnu : « $NUTRITION_SYNC ». Valides : off, ask (voir --help)." ;;
+    esac
+}
+if [[ "$EXPLICIT_NUTRITION" -eq 1 ]]; then
+    validate_nutrition_sync
 fi
 
 # Valide $SOURCE (défini ici pour être appelable dès l'analyse des arguments
@@ -827,6 +851,64 @@ persist_cycle_tracking() {
     python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
         --workspace "$WORKSPACE_ROOT" --section health --key cycle_tracking --value "$CYCLE_TRACKING" >/dev/null \
         || warn "Impossible d'écrire [health].cycle_tracking — vérifiez config/workspace.user.toml."
+}
+
+# Détermine la synchronisation nutrition (#167) : --nutrition-sync (explicite), sinon
+# [nutrition].garmin_sync de la configuration EXISTANTE, sinon "off". Valeur invalide EN CONFIG =
+# "off" + avertissement (jamais un échec). Seul "ask" (avec la source Garmin) ajoute les outils de
+# nutrition/hydratation à la liste blanche ; tout autre cas la laisse strictement inchangée — un
+# rerun avec "off" en config la ramène donc à la liste par défaut. Ne s'exécute qu'APRÈS
+# resolve_cycle_tracking : les deux extensions s'ajoutent, sans se connaître.
+resolve_nutrition_sync() {
+    if [[ "$EXPLICIT_NUTRITION" -eq 0 ]]; then
+        NUTRITION_SYNC="off"
+        if have python3; then
+            local previous
+            previous="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
+                --workspace "$WORKSPACE_ROOT" --section nutrition --key garmin_sync --default off 2>/dev/null)" \
+                || previous="off"
+            # Même tolérance que scripts/arc_nutrition_sync.py (casse et espaces ignorés).
+            previous="$(printf '%s' "$previous" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+            case "$previous" in
+                off|ask) NUTRITION_SYNC="$previous" ;;
+                "") ;;
+                *) warn "[nutrition].garmin_sync = « $previous » invalide (off, ask) — traité comme « off »." ;;
+            esac
+        fi
+    fi
+    if [[ "$NUTRITION_SYNC" == "ask" ]]; then
+        # Mode passerelle : `invoke_tool` est un outil unique, `scripts/daily-sync.sh` ne peut pas en
+        # retirer les écritures nutrition par nom — seule une consigne protégerait alors le run
+        # headless. On refuse donc d'exposer ces écritures derrière leanproxy (mode direct requis).
+        if [[ "$USE_LEANPROXY" -eq 1 ]]; then
+            if [[ "$EXPLICIT_NUTRITION" -eq 1 ]]; then
+                die "--nutrition-sync ask est incompatible avec --use-leanproxy : les écritures Garmin ne peuvent pas y être interdites en headless. Utilisez le mode direct (voir docs/nutrition-garmin.md)."
+            fi
+            warn "[nutrition].garmin_sync = « ask » ignoré en mode passerelle leanproxy (écritures non filtrables en headless) — aucun outil nutrition exposé ; mode direct requis."
+            return 0
+        fi
+        if [[ "$SOURCE" == "garmin" ]]; then
+            GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_NUTRITION_TOOLS"
+            log "Synchronisation nutrition (opt-in) : outils de journal alimentaire et d'hydratation ajoutés à la liste blanche garmin"
+        else
+            # intervals.icu et Strava (#164) n'ont ni journal alimentaire ni hydratation : rien à pousser.
+            warn "[nutrition].garmin_sync = « ask » indisponible avec [data].source = « $SOURCE » (journal alimentaire et hydratation propres à Garmin Connect) — aucun outil exposé (voir docs/nutrition-garmin.md)."
+        fi
+    fi
+}
+
+# Enregistre la synchronisation nutrition — UNIQUEMENT si --nutrition-sync a été passé
+# explicitement (un rerun, ou une installation par défaut, n'écrit jamais cette clé).
+persist_nutrition_sync() {
+    [[ "$EXPLICIT_NUTRITION" -eq 1 ]] || return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [nutrition].garmin_sync = $NUTRITION_SYNC"
+        return 0
+    fi
+    have python3 || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+        --workspace "$WORKSPACE_ROOT" --section nutrition --key garmin_sync --value "$NUTRITION_SYNC" >/dev/null \
+        || warn "Impossible d'écrire [nutrition].garmin_sync — vérifiez config/workspace.user.toml."
 }
 
 # Enregistre le staff retenu dans la config personnelle.
@@ -2124,6 +2206,7 @@ main() {
     resolve_agents
     resolve_source
     resolve_cycle_tracking
+    resolve_nutrition_sync
     print_config_recap
     [[ "$DRY_RUN" -eq 1 ]] && warn "Mode dry-run : aucune modification ne sera effectuée."
     echo
@@ -2149,6 +2232,7 @@ main() {
     persist_agents
     persist_source
     persist_cycle_tracking
+    persist_nutrition_sync
     persist_llm
     persist_budgets
     if [[ "$DAILY_SYNC" -eq 1 || "$REMOTE_CONTROL" -eq 1 ]]; then
