@@ -232,6 +232,8 @@ class Store:
         self.last_index = 0.0
         self.last_counts: dict = {}
         self.metrics_cache = I.MetricsCache()
+        # Courbes allure-durée par séance (#169), voir `arc_index.pace_curve(curve_cache=...)`.
+        self.pace_curve_cache: dict = {}
         self.ready = threading.Event()
         self.background = background
         self._stop = threading.Event()
@@ -250,6 +252,7 @@ class Store:
                     # les échantillons vont être réingérés.
                     self.conn.close()
                     self.metrics_cache.clear()
+                    self.pace_curve_cache.clear()
                     self.conn = I.open_db(self.workspace, self.db, self.memory, rebuild=True)
                     counts = I.index_workspace(self.conn, self.workspace, self.today, self.metrics_cache)
                 self.last_counts = counts
@@ -320,6 +323,11 @@ class Store:
         """Réutilise `arc_index.gait_summary` (#151) — voir aussi la CLI `gait-summary`."""
         with self.lock:
             return I.gait_summary(self.conn, today, weeks)
+
+    def pace_curve(self, today: date, days: Optional[int], lt_speed_ms: Optional[float]) -> dict:
+        """Réutilise `arc_index.pace_curve` (#169) — voir aussi la CLI `pace-curve`."""
+        with self.lock:
+            return I.pace_curve(self.conn, today, days, lt_speed_ms, curve_cache=self.pace_curve_cache)
 
     def gear_detail(self, gear_id: str, today: date):
         """Réutilise `arc_index.gear_detail` (#147) — fiche d'une paire/d'un objet, `None` si inconnu."""
@@ -457,6 +465,21 @@ def api_summary(store: Store, q: dict) -> dict:
             "nutrition": (store.one("SELECT COUNT(*) AS n FROM nutrition_day") or {}).get("n", 0),
         },
     }
+
+
+def api_pace_curve(store: Store, q: dict) -> dict:
+    """Courbe allure-durée GAP, vitesse critique CS et D′ (#169) : `/api/pace-curve?days=N&lt_speed_ms=V`.
+    Additive : ne touche à aucune route existante. Délègue à `arc_index.pace_curve` (mêmes chiffres que
+    la CLI `pace-curve`) ; `days` (1 à 730, défaut 365) = profondeur de la tendance. Refus explicite et
+    motivé quand les données ne permettent pas l'ajustement — jamais une CS inventée. Aucune donnée GPS
+    ni de santé."""
+    days_raw = q.get("days", [""])[0]
+    days = max(1, min(730, int(days_raw))) if days_raw.isdigit() else None
+    try:
+        lt = float(q.get("lt_speed_ms", [""])[0])
+    except ValueError:
+        lt = None
+    return store.pace_curve(_today(store), days, lt)
 
 
 def api_gait(store: Store, q: dict) -> dict:
@@ -1471,7 +1494,7 @@ ROUTES = {
     "/api/trail-shape": api_trail_shape, "/api/energy-trend": api_energy_trend,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
-    "/api/gait": api_gait,
+    "/api/gait": api_gait, "/api/pace-curve": api_pace_curve,
 }
 
 # ---------------------------------------------------------------------------

@@ -718,6 +718,18 @@ kilomètre : pas de graphique, c'est normal.
   power-hiking sur les fortes pentes n'est jamais retirée (c'est comment vous
   bougez réellement sur cette pente), seulement signalée au survol quand elle
   domine le panier.
+- **Vitesse critique et courbe allure-durée** (#169) : la **meilleure allure GAP** (ajustée
+  à la pente) que vous avez tenue sur chaque durée de 30 s à 2 h, sur 42, 90 et
+  365 jours, et, quand les données le permettent, votre **vitesse critique** et votre
+  **réserve anaérobie D′** (ajustement sur les meilleurs efforts de 3 à 20 min, avec
+  sa qualité : nombre de points, incertitude sur chaque paramètre, R²) et leur **tendance** (un point
+  tous les 28 jours). Ce ne sont pas des mesures de laboratoire : un effort jamais
+  couru à fond sous-estime la vitesse critique. Quand l'ajustement est impossible
+  (moins de 3 efforts, une seule séance, courbe plate…), la carte affiche
+  « Données insuffisantes » et le motif — jamais une valeur. Le détail, les
+  motifs de refus et l'usage par le coach : [Vitesse critique](../vitesse-critique.md).
+  Hors tableau de bord : `python3 scripts/arc_index.py pace-curve [--days N] [--lt-speed-ms V]`
+  (API : `/api/pace-curve`).
 - **Hypothèses** : un lien vers la vue [Hypothèses](#hypotheses), qui réunit toutes les
   formules et leurs limites.
 

@@ -2306,9 +2306,86 @@ function slopeModelSection(model, band) {
   return { html, chart, bins };
 }
 
+// Libellé d'une durée de la courbe allure-durée (30 s, 5 min, 2 h) — axe x par INDICE.
+function paceCurveDurationLabel(s) {
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  return `${F.num(s / 3600, s % 3600 ? 1 : 0)} h`;
+}
+
+/** Section « Vitesse critique et courbe allure-durée » (#169) : meilleure allure GAP par durée
+ * (fenêtres 42 j / 90 j / 365 j, axe y inversé : plus rapide en haut), CS/D′ de la fenêtre de
+ * 90 j avec sa qualité (n, R², erreur standard), tendance. Aucun calcul côté client : tout vient
+ * de `/api/pace-curve`. Un ajustement refusé affiche son motif (« données insuffisantes »), jamais
+ * une valeur. Axe x par indice de durée (échelle non linéaire, comme `slopeModelSection`). */
+function paceCurveSection(data) {
+  const title = "<h2>Vitesse critique et courbe allure-durée</h2>";
+  if (!data) return { html: `<section class="band">${title}${note("Courbe indisponible.")}</section>` };
+  const w90 = data.windows.find((w) => w.window_days === data.trend_window_days) || data.windows[0];
+  if (!data.n_activities || !w90 || !w90.curve.length) {
+    return { html: `<section class="band">${title}${note(`Données insuffisantes : ${F.esc(data.reason || "aucune séance de course avec échantillons FIT (altitude) sur la période")}.`)}</section>` };
+  }
+  const durs = data.durations_s;
+  // Seules quelques durées sont étiquetées sur l'axe (lisibilité mobile) ; le survol nomme chacune.
+  const LABELLED = [60, 300, 600, 1200, 3600, 7200];
+  const xLabels = durs.map((d) => (LABELLED.includes(d) ? paceCurveDurationLabel(d) : ""));
+  const series = (w) => durs.map((d) => { const r = w.curve.find((c) => c.duration_s === d); return r ? r.pace_s_km : null; });
+  const isolated = (vals) => vals.map((v, i) => (v != null && (i === 0 || vals[i - 1] == null) && (i + 1 >= vals.length || vals[i + 1] == null) ? v : null));
+  const byDays = Object.fromEntries(data.windows.map((w) => [w.window_days, w]));
+  const main90 = series(w90);
+  const layers = [];
+  if (byDays[365]) layers.push({ type: "line", values: series(byDays[365]), cls: "line line--slope-generic" });
+  if (byDays[42]) layers.push({ type: "line", values: series(byDays[42]), cls: "line line--fatigue" });
+  layers.push({ type: "line", values: main90, cls: "line line--slope" }, { type: "dots", values: isolated(main90), cls: "dot dot--slope", r: 3 });
+  const marks = [];
+  const fit = data.current;
+  if (fit && fit.valid) marks.push({ type: "hline", value: fit.cs_pace_s_km, cls: "mark", label: "CS" });
+  const all = layers.flatMap((l) => l.values).filter((v) => v != null);
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const margin = (hi - lo) * 0.1 || 10;
+  const chart = timeChart(xLabels, layers, marks, {
+    height: 220, y: { invert: true, min: Math.max(0, lo - margin), max: hi + margin },
+    label: "Meilleure allure ajustée à la pente par durée", yFormat: (v) => F.paceFromSecPerKm(v), xLabels,
+  });
+  let fitHtml;
+  if (fit && fit.valid) {
+    fitHtml = `<p class="lead-num">${F.paceFromSecPerKm(fit.cs_pace_s_km)} <small>vitesse critique (GAP) · réserve anaérobie D′ ${F.num(fit.d_prime_m, 0)} m</small></p>
+      <p class="muted">Qualité ${F.esc(fit.quality)} : ${fit.n_points} efforts de 3 à 20 min, incertitude ± ${F.num(fit.cs_se_pct, 1)} % sur la vitesse critique
+      (± ${F.num(fit.cs_se_ms * 3.6, 2)} km/h) et ± ${F.num(fit.d_prime_se_m, 0)} m sur D′, R² ${F.num(fit.r2, 3)}. Estimation à partir des meilleurs efforts
+      d'entraînement, pas d'un test : un effort jamais couru à fond la sous-estime.</p>`;
+  } else {
+    fitHtml = note(`Données insuffisantes pour ajuster la vitesse critique : ${F.esc((fit && fit.reason) || "aucun effort exploitable")}.`);
+  }
+  const chk = data.threshold_check;
+  const chkHtml = chk && chk.available
+    ? `<p class="muted">Seuil lactique Garmin : écart ${chk.delta_pct > 0 ? "+" : ""}${F.num(chk.delta_pct, 1)} % avec la vitesse critique${chk.diverges ? " — divergence signalée, aucune des deux valeurs n'est préférée" : ""}.</p>` : "";
+  // Tendance : un point tous les 28 j (meilleur de 90 j) ; les refus laissent un trou, jamais une valeur reportée.
+  const tr = data.trend;
+  const trVals = tr.map((p) => (p.status === "ok" ? p.cs_pace_s_km : null));
+  let trendHtml = "", trendChart = null;
+  if (trVals.some((v) => v != null)) {
+    const tv = trVals.filter((v) => v != null);
+    const tlo = Math.min(...tv), thi = Math.max(...tv), tm = (thi - tlo) * 0.2 || 10;
+    trendChart = timeChart(tr.map((p) => p.date), [
+      { type: "line", values: trVals, cls: "line line--slope" }, { type: "dots", values: trVals, cls: "dot dot--slope", r: 3 },
+    ], [], { height: 160, y: { invert: true, min: Math.max(0, tlo - tm), max: thi + tm }, label: "Vitesse critique (allure GAP), tendance", yFormat: (v) => F.paceFromSecPerKm(v) });
+    trendHtml = `<h3>Tendance</h3><div class="chart-host" id="c-cstrend">${trendChart.svg}</div><p class="readout" id="r-cstrend"></p>`;
+  }
+  const html = `<section class="band">${title}
+    <p class="muted">Meilleure allure ajustée à la pente (GAP) tenue sur chaque durée, sur ${F.num(data.n_activities)} sortie${data.n_activities > 1 ? "s" : ""}
+      de course avec FIT. ${hypLink("vitesse-critique")}</p>
+    ${fitHtml}${chkHtml}
+    <p class="legend"><span class="legend__item"><span class="key key--slope"></span>90 jours</span>
+      <span class="legend__item"><span class="key key--fatigue"></span>42 jours</span>
+      <span class="legend__item"><span class="key key--slope-generic"></span>365 jours</span></p>
+    <div class="chart-host" id="c-pcurve">${chart.svg}</div><p class="readout" id="r-pcurve"></p>${trendHtml}
+    ${data.skipped_no_grade ? `<p class="legend legend--small">${data.skipped_no_grade} séance${data.skipped_no_grade > 1 ? "s" : ""} sans altitude exploitable écartée${data.skipped_no_grade > 1 ? "s" : ""}.</p>` : ""}</section>`;
+  return { html, chart, w90, durs, trendChart, tr };
+}
+
 async function viewPerformance(params) {
   const band = params && params.get("bande") === "all" ? "all" : "endurance";
-  const [p, slope] = await Promise.all([api("performance"), api(`slope-model?band=${band}`)]);
+  const [p, slope, pace] = await Promise.all([api("performance"), api(`slope-model?band=${band}`), api("pace-curve").catch(() => null)]);
   const trail = p.sport === "trail";
   let chartHtml = empty("Pas encore d'estimation", "La VO2max effective s'estime sur les séances de course d'au moins 20 minutes, à plus de 70 % de la FC max, avec distance et FC moyenne.");
   let c = null;
@@ -2321,11 +2398,13 @@ async function viewPerformance(params) {
   const rec = p.records.length ? `<table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">Temps</th><th scope="col" class="num">Allure</th><th scope="col">Date</th></tr></thead><tbody>${p.records.map((r) => `<tr><th scope="row">${r.km} km</th><td class="num">${F.clock(r.time_s)}</td><td class="num">${F.pace(r.km * 1000, r.time_s)}</td><td>${F.dayShort(r.date)} ${r.date.slice(0, 4)}</td></tr>`).join("")}</tbody></table>` : note("Pas de splits kilométriques indexés : les records se calculent sur les séances qui en ont.");
   const { html: slopeHtml, chart: slopeChart, bins: slopeBins } = slopeModelSection(slope, band);
   const { html: indexHtml, charts: indexCharts } = performanceIndexSection(SUMMARY.performance_index);
+  const paceSec = paceCurveSection(pace);
   main.innerHTML = `${header("Performance", "Estimations modélisées à partir des moyennes de chaque séance : des ordres de grandeur, pas des mesures.")}
     <section class="band"><h2>VO2max effective</h2>${p.vo2max_current ? `<p class="lead-num">${F.num(p.vo2max_current, 1)} <small>ml/kg/min, tendance 30 j${p.vo2max_date !== SUMMARY.today ? ` au ${F.dayShort(p.vo2max_date)}` : ""}</small></p>` : ""}${chartHtml}</section>
     <section class="band band--split"><div><h2>Prédictions</h2><table class="data data--compact"><thead><tr><th scope="col">Distance</th><th scope="col" class="num">VDOT</th><th scope="col" class="num">Riegel</th></tr></thead><tbody>${pred}</tbody></table>
       ${trail ? note("En trail, la distance « effort » ajoute le dénivelé (1000 m D+ ≈ 1,75 km de plat, <code>config/sports/trail.md</code>). Sable, vent et barrières ne sont pas modélisés.") : ""}</div>
       <div><h2>Records</h2>${rec}</div></section>
+    ${paceSec.html}
     ${slopeHtml}
     <p class="note">Kilométrage des chaussures, équipement et inspections : <a href="#/materiel">vue Matériel</a>.</p>
     ${indexHtml}
@@ -2336,6 +2415,16 @@ async function viewPerformance(params) {
     const hrTxt = b.hr_bpm != null ? ` · FC médiane ${F.num(b.hr_bpm, 0)} bpm` : "";
     const runTxt = b.run_share != null && b.run_share < 0.95 ? ` · couru ${F.num(b.run_share * 100, 0)} %` : "";
     readout($("#r-slope"), `<strong>${slopeGradeLabel(b)}</strong> · ${F.paceFromSecPerKm(b.pace_s_km)} · ${b.source === "personal" ? `personnel (${b.n_activities} séance${b.n_activities > 1 ? "s" : ""})` : "générique"}${hrTxt}${runTxt}`);
+  });
+  if (paceSec.chart) attachCursor($("#c-pcurve"), paceSec.chart, (i) => {
+    const r = paceSec.w90.curve.find((c) => c.duration_s === paceSec.durs[i]);
+    readout($("#r-pcurve"), r
+      ? `<strong>${paceCurveDurationLabel(r.duration_s)}</strong> · ${F.paceFromSecPerKm(r.pace_s_km)} (GAP) · ${F.dayShort(r.date)} ${r.date.slice(0, 4)}`
+      : `<strong>${paceCurveDurationLabel(paceSec.durs[i])}</strong> · pas d'effort exploitable sur 90 j`);
+  });
+  if (paceSec.trendChart) attachCursor($("#c-cstrend"), paceSec.trendChart, (i) => {
+    const p = paceSec.tr[i];
+    readout($("#r-cstrend"), `<strong>${F.dateLong(p.date)}</strong> · ${p.status === "ok" ? `${F.paceFromSecPerKm(p.cs_pace_s_km)} · D′ ${F.num(p.d_prime_m, 0)} m · R² ${F.num(p.r2, 3)}` : F.esc(p.reason || "pas d'ajustement")}`);
   });
   for (const c2 of indexCharts) {
     attachCursor($(`#${c2.id}`), c2.chart, (i) => readout($(`#${c2.readoutId}`),
@@ -2366,6 +2455,7 @@ const HYP_FAMILIES = [
   { id: "durabilite", title: "Durabilité", prefix: "durability_" },
   { id: "pente", title: "Allure selon la pente", prefix: "slope_model_" },
   { id: "energie", title: "Dépense énergétique", prefix: "energy_" },
+  { id: "vitesse-critique", title: "Vitesse critique et D′", prefix: "cs_" },
 ];
 const HYP_LABELS = {
   trimp: "TRIMP de Banister", trimp_sex_default: "Sexe non renseigné", srpe: "Charge sans FC (session-RPE)",
@@ -2397,6 +2487,9 @@ const HYP_SUFFIX = {
   time_weighting: "Pondération par le temps", missing_speed: "Vitesse manquante", missing_elevation: "Altitude manquante",
   mass_linearity: "Linéarité en masse", no_exception: "Entrées incomplètes", race_pacing_integration: "Plan de course",
   delta_alert: "Seuil d'alerte d'écart", calibration: "Calibration personnelle",
+  gap_basis: "Vitesses en GAP", windows_and_gaps: "Fenêtres et trous de signal",
+  best_efforts_not_tests: "Meilleurs efforts, pas des tests", refusal: "Refus explicite", trend: "Tendance",
+  targets: "Cibles d'intervalles", quality: "Qualité de l'ajustement", lactate_crosscheck: "Contrôle avec le seuil lactique Garmin",
 };
 
 /** Lien vers une famille d'hypothèses (`#/hypotheses?modele=<id>`), depuis n'importe quelle vue. */

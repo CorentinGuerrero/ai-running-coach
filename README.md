@@ -19,6 +19,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | 🚀 **Installation automatisée** | un script pour installer et configurer tout (uv, Garmin, IDE) |
 | 👟 **Suivi du matériel** | kilométrage par paire depuis Garmin, prévision de retraite, équipement et kits, inspection photo (`/inspection`), contrôle du matériel de course |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
+| 🎯 **Vitesse critique** | courbe allure-durée en GAP, vitesse critique et réserve anaérobie D′ estimées sur vos meilleurs efforts (refus explicite si les données manquent), cibles d'intervalles en % de la vitesse critique — voir [Vitesse critique](docs/vitesse-critique.md) |
 | 📱 **Le coach dans la poche** | synchronisation Garmin automatique + notification push, et dialogue avec le coach depuis le téléphone (Claude Code Remote Control) — sans renoncer à votre abonnement |
 | 🌙 **Cycle menstruel (opt-in)** | contexte facultatif du bilan matinal (phase du cycle), désactivé par défaut : jamais une règle ni un diagnostic, veille RED-S — voir [Cycle menstruel](docs/cycle-menstruel.md) |
 | 🍽️ **Apports vers Garmin (opt-in)** | le coach propose de pousser ce que vous déclarez (`/log`, rapports) vers le journal alimentaire et l'hydratation de Garmin Connect, désactivé par défaut, jamais sans votre « oui » — voir [Apports vers Garmin](docs/nutrition-garmin.md) |
@@ -183,6 +184,7 @@ La documentation complète est disponible sur [GitHub Pages](https://mmornati.gi
 - [Tableau de bord](docs/dashboard/index.md) · [Les vues](docs/dashboard/views.md) · [Migrer vos fichiers](docs/dashboard/migration.md) · [Mode headless](docs/dashboard/headless.md) · [Docker](docs/dashboard/docker.md)
 - [Les agents](docs/agents.md)
 - [Les skills](docs/skills.md)
+- [Vitesse critique et courbe allure-durée](docs/vitesse-critique.md)
 - [Base de connaissances (resources)](docs/resources.md)
 - [Dépannage](docs/troubleshooting.md)
 - [FAQ](docs/faq.md)

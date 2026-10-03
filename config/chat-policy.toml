@@ -56,8 +56,8 @@ stdin_scripts = ["scripts/arc_log.py", "scripts/arc_nutrition_sync.py"]
 # Tout argument positionnel ou valeur qui ressemble à un chemin (« / », extension connue) subit
 # le même contrôle. `--help` / `-h` sont toujours permis.
 [shell.scripts."scripts/arc_index.py"]
-flags = ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active"]
-value_options = ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since", "--limit", "--trigger", "--outcome", "--months", "--band", "--last-pass", "--activities", "--garmin-gear", "--chat-gear", "--kit", "--sport", "--gear"]
+flags = ["--memory", "--rebuild", "--with-gps", "--assumptions", "--calibration", "--active", "--json"]
+value_options = ["--today", "--activity", "--weeks", "--segment", "--date", "--days", "--since", "--limit", "--trigger", "--outcome", "--months", "--band", "--last-pass", "--activities", "--garmin-gear", "--chat-gear", "--kit", "--sport", "--gear", "--lt-speed-ms"]
 # nargs="?" : la valeur est facultative (`--race-plan` seul = plan de course actif).
 optional_value_options = ["--race-plan"]
 read_options = ["--validate", "--race-plan"]
@@ -109,7 +109,7 @@ output_options = ["--db"]
 # `--session` : chemin/Semaine.md#SÉLECTEUR (le JSON en ligne, avec ses accolades, reste refusé).
 [shell.scripts."scripts/arc_workout_targets.py"]
 flags = ["--memory"]
-value_options = ["--structure-text", "--band", "--today"]
+value_options = ["--structure-text", "--band", "--today", "--lt-speed-ms"]
 read_options = ["--session"]
 output_options = ["--db"]
 
