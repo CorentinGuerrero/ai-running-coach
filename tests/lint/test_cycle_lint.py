@@ -37,7 +37,7 @@ class TestDefaultsStayOff(unittest.TestCase):
     def test_whitelist_extension_only_inside_resolve_cycle_tracking(self):
         install = read("install.sh")
         hits = [i for i, line in enumerate(install.splitlines())
-                if 'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,' in line]
+                if 'GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_CYCLE_TOOLS"' in line]
         self.assertEqual(len(hits), 1)
         body = install[install.index("resolve_cycle_tracking() {"):]
         self.assertIn('[[ "$CYCLE_TRACKING" == "garmin" ]]', body.split("persist_cycle_tracking")[0])

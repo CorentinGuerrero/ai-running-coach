@@ -125,6 +125,11 @@ else
     CLAUDE_DISALLOWED+=",mcp__garmin__schedule_workouts,mcp__garmin__schedule_week,mcp__garmin__upload_workout"
     CLAUDE_DISALLOWED+=",mcp__garmin__create_strength_workout,mcp__garmin__delete_workout"
     CLAUDE_DISALLOWED+=",mcp__garmin__unschedule_workout,mcp__garmin__unschedule_workouts,mcp__garmin__upload_course"
+    # #167 : idem pour le journal alimentaire et l'hydratation (poussée des apports, opt-in
+    # `[nutrition].garmin_sync`) — jamais d'écriture nutrition sans le « oui » de l'athlète.
+    CLAUDE_DISALLOWED+=",mcp__garmin__log_food,mcp__garmin__log_custom_food,mcp__garmin__create_custom_food"
+    CLAUDE_DISALLOWED+=",mcp__garmin__update_custom_food,mcp__garmin__upsert_and_log,mcp__garmin__delete_food_log"
+    CLAUDE_DISALLOWED+=",mcp__garmin__add_hydration_data"
     CLAUDE_DISALLOWED+=",$PROTECTED_PATHS"
     SOURCE_LABEL="Garmin"
     AUTH_CMD_HINT="uv run garmin-mcp-auth"
