@@ -2090,7 +2090,14 @@ print_config_recap() {
     # Les préréglages ne touchent jamais au staff d'agents (voir apply_preset) :
     # « défaut » veut dire ici config/workspace.user.toml ou, à défaut, tous.
     recap_line "Agents" "$ENABLED_AGENTS" "$([[ "$EXPLICIT_AGENTS" -eq 1 ]] && echo "explicite" || echo "défaut")"
-    recap_line "$(case "$SOURCE" in intervals) echo "Auth Intervals.icu" ;; strava) echo "Auth Strava" ;; *) echo "Auth Garmin" ;; esac)" \
+    # Pas de « case » dans $( ) : bash 3.2 (macOS) l'analyse mal et affiche le texte brut.
+    local auth_label
+    case "$SOURCE" in
+        intervals) auth_label="Auth Intervals.icu" ;;
+        strava) auth_label="Auth Strava" ;;
+        *) auth_label="Auth Garmin" ;;
+    esac
+    recap_line "$auth_label" \
         "$([[ "$DO_AUTH" -eq 1 ]] && echo "activée" || echo "sautée")" "$(_config_origin "$EXPLICIT_DO_AUTH")"
     recap_line "Passerelle leanproxy" \
         "$([[ "$USE_LEANPROXY" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_LEANPROXY")"
