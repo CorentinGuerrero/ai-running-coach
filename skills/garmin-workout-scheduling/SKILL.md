@@ -214,6 +214,8 @@ Loop = `RepeatGroupDTO` with `numberOfIterations` + `endCondition` iterations(7)
 
 Known-good strength `category` values: `SQUAT`, `LUNGE`, `CARDIO`, `PLANK`, `BENCH_PRESS`, `PULL_UP`, `CURL`, `SHOULDER_PRESS`, `ROW`, `DEADLIFT`, `TRICEPS_EXTENSION`. `exerciseName` is free-text; unsupported names fall back to category `CARDIO`/`Other` on the watch. Timed core work (e.g. gainage): use endCondition time(2) with a `PLANK` category instead of reps.
 
+**Library source (#191):** do not invent strength exercises — `python3 scripts/arc_index.py strength --phase <p> [--use <u>] [--equipment …] --garmin-json` returns this exact DTO (`workout_data`) with `category`/`exerciseName` only for pairs verified in Garmin's public catalogue (`GARMIN_VERIFIED` in `scripts/arc_strength.py`; 47 categories, checked 2026-10-04), plus the `create_strength_workout` arguments. An exercise without a verified pair is emitted WITHOUT `category`/`exerciseName` (French name in `description`) — never guess a key. Confirmation rules below are unchanged.
+
 Alternative helper: `create_strength_workout(name, exercises)` — simpler but estimates 45s/set and loses structured reps/weight; prefer the structured JSON when detail matters.
 
 ## Workflow

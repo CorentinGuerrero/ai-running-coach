@@ -79,6 +79,8 @@ Matériel : chaussures route
   placeholder or an invented number.
 - Strength sessions: one line per exercise (`sets x reps @ weight`), same
   spirit as the Garmin `RepeatGroupDTO` detail requirement, just as text.
+  The exercises come from the shipped library (#191): paste the output of
+  `python3 scripts/arc_index.py strength --phase <p> [--use <u>] [--equipment …] --text`, never invented.
 
 ## Idempotency — no upsert exists, check before every push
 
