@@ -25,7 +25,7 @@
 #   ./install.sh --ide copilot      # GitHub Copilot (CLI, VS Code, agent cloud)
 #   ./install.sh --source intervals # Intervals.icu au lieu de Garmin (#68)
 #   ./install.sh --cycle-tracking MODE # off (défaut) | garmin | intervals | manual — contexte du cycle menstruel, opt-in (#166)
-  ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
+#   ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
 #   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
 #   ./install.sh --no-medical       # tous les agents sauf le médecin
 #   ./install.sh --no-auth          # saute l'authentification Garmin
@@ -174,6 +174,7 @@ Usage :
   ./install.sh --preset PRESET    # laptop | coach-server | docker — voir --help ci-dessous
   ./install.sh --ide IDE          # claude | copilot | opencode | gemini | cursor | windsurf
   ./install.sh --source SOURCE    # garmin (défaut) | intervals — source de données primaire (#68)
+  ./install.sh --cycle-tracking MODE # off (défaut) | garmin | intervals | manual — contexte du cycle menstruel, opt-in (#166)
   ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
   ./install.sh --no-medical       # tous les agents sauf le médecin
