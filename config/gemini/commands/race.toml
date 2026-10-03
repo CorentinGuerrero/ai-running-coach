@@ -38,7 +38,7 @@ If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
 >   nutrition/gear scenario count without re-deriving new numbers.
 >
 > When `trail-shape` has `status: "ok"` (race still ahead), ALSO run
-> `python3 scripts/arc_index.py load-forecast --json` (#172) and handle EVERY
+> `python3 scripts/arc_index.py load-forecast` (#172) and handle EVERY
 > `status`: `ok` → report `race_day.form` (« forme prévue le jour J »), the
 > `peak_fatigue.week_start` and `acwr_max.value`, as an ESTIMATE from the planned
 > sessions (never a measurement), naming `weeks_unplanned` when > 0 (zero load
@@ -52,7 +52,7 @@ If `coach` is enabled **and** a `task`/subagent tool is available, delegate to
 
 If `coach` is not enabled, or if you cannot delegate at all (no `task`/
 subagent tool available, e.g. running as a bare Gemini CLI command), run
-`scripts/arc_index.py trail-shape` (and `load-forecast --json`) and look for a `race_plan` yourself.
+`scripts/arc_index.py trail-shape` (and `load-forecast`) and look for a `race_plan` yourself.
 
 ## Output contract
 

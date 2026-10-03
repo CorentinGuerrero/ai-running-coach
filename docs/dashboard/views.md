@@ -112,12 +112,17 @@ Trois graphiques, sur 3 mois, 6 mois ou un an :
   pic de fatigue** et l'**ACWR projeté** (maximum sur le bloc). La charge de chaque
   séance planifiée est **estimée** (durée × intensité prescrite, le même estimateur
   que les [garde-fous](../guardrails.md)) : c'est une estimation à partir du
-  planifié, **jamais une mesure**. Un jour sans séance compte pour une charge nulle ;
+  planifié, **jamais une mesure**. Comme une séance réelle avec fréquence cardiaque
+  pèse souvent plus (ou moins) que son estimation, la charge planifiée est **recalée**
+  sur le rapport réel / estimé de vos séances planifiées des 56 derniers jours (au
+  moins 5 séances appariées) — le recalage, ou son absence, est écrit sous la courbe.
+  La forme prévue le jour J est celle **en entrant dans la journée** : la charge de la
+  course elle-même n'y compte pas. Un jour sans séance compte pour une charge nulle ;
   les semaines non planifiées sont comptées et signalées, car elles rendent la forme
   prévue optimiste. Rien n'est tracé — la raison est écrite à la place — sans objectif
   actif, sans séance planifiée avant la course, ou avec moins de 84 jours d'historique
   (même plancher que le garde-fou R1). La même projection, hors tableau de bord :
-  `python3 scripts/arc_index.py load-forecast [--until AAAA-MM-JJ] [--json]`
+  `python3 scripts/arc_index.py load-forecast [--until AAAA-MM-JJ] [--text]`
   (`/api/load-forecast`) ; `--compare <fichier>` oppose le plan actuel à une variante
   d'affûtage (les semaines de même lundi sont remplacées) et chiffre l'écart de forme
   le jour J.

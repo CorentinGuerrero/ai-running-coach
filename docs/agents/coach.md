@@ -117,12 +117,13 @@ composantes chiffrés.
 
 Pour toute question d'affûtage (« serai-je frais le jour J ? ») ou avant d'ajuster
 les dernières semaines d'un bloc, le coach lance
-`python3 scripts/arc_index.py load-forecast --json` et **cite les chiffres** :
+`python3 scripts/arc_index.py load-forecast` et **cite les chiffres** :
 forme prévue le jour J, semaine du pic de fatigue, ACWR projeté. Pour justifier une
 variante d'affûtage, il écrit les semaines alternatives dans un fichier temporaire et
 compare avec `--compare` (écart de forme prévue le jour J, de pic de fatigue et de
 charge totale). C'est une **estimation à partir du planifié** — même estimateur de
-charge que les garde-fous, aucun second modèle — dite comme telle, avec les semaines
+charge que les garde-fous, aucun second modèle, recalée sur le rapport réel / estimé
+de vos séances passées quand il est mesurable — dite comme telle, avec les semaines
 non planifiées nommées. Elle ne remplace ni le bilan matinal, ni les garde-fous, et
 ne modifie pas le score Trail Shape.
 

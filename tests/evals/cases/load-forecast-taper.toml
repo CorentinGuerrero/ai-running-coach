@@ -2,7 +2,7 @@
 # L'APPUI, pas par une impression. Fixture `load-forecast-taper/` : ~110 jours d'historique (au-delà du
 # plancher de 84 j de R1), un objectif dans 20 jours après le lundi courant (`{{WEEK_START+20}}`) et trois
 # semaines planifiées SANS affûtage (la semaine de course reste chargée) — dates relatives, jamais codées
-# en dur. `python3 scripts/arc_index.py load-forecast --json` rend une forme prévue le jour J faible ou
+# en dur. `python3 scripts/arc_index.py load-forecast` rend une forme prévue le jour J faible ou
 # négative ; le prompt ne donne AUCUN chiffre : la preuve que l'agent a lancé la CLI est la forme prévue
 # citée en chiffre signé.
 #

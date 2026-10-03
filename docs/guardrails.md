@@ -55,7 +55,8 @@ Seuils et sévérités : `[guardrails]` de `config/workspace.toml`, voir
 Les règles R1/R4 ne regardent que la semaine proposée. Pour voir l'effet d'un
 plan sur **tout le bloc** (forme prévue le jour J, semaine de pic de fatigue, ACWR
 projeté), `python3 scripts/arc_index.py load-forecast` réutilise exactement la
-même estimation de charge planifiée et le même plancher d'historique (84 jours) :
+même estimation de charge planifiée (recalée sur le rapport réel / estimé de vos
+séances passées, ce que R1 ne fait pas) et le même plancher d'historique (84 jours) :
 voir [Forme & charge](dashboard/views.md#forme-charge). Une estimation, jamais une
 mesure.
 

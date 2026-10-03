@@ -50,7 +50,7 @@ Le compte à rebours (`objective.days_left`) et le score viennent de
 - Le plan de course existant (`kind: "race_plan"`), s'il y en a un — nommé,
   jamais recalculé ici.
 - Une ligne **« Forme prévue le jour J »** (#172) tirée de
-  `python3 scripts/arc_index.py load-forecast --json` : l'**estimation** de votre
+  `python3 scripts/arc_index.py load-forecast` : l'**estimation** de votre
   forme à la date de la course d'après les séances planifiées (jamais une mesure),
   avec le nombre de semaines non planifiées s'il y en a (charge nulle supposée, donc
   forme optimiste). Si la projection est indisponible, une ligne dit pourquoi
