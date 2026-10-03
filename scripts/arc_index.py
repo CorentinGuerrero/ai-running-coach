@@ -473,7 +473,7 @@ def settings(config: Dict[str, dict]) -> dict:
         "sport": config.get("sport", {}).get("primary", "trail") or "trail",
         "morning_check": config.get("health", {}).get("morning_check", "full") or "full",
         "heat_threshold_c": _heat_threshold_c(config),
-        # Contexte du cycle menstruel (#166) : "off" (défaut) | "garmin" | "manual" ; toute autre
+        # Contexte du cycle menstruel (#166) : "off" (défaut) | "garmin" | "intervals" | "manual" ; toute autre
         # valeur → "off" avec avertissement (scripts/arc_cycle.py), jamais une exception.
         "cycle_tracking": CY.cycle_tracking_mode(config),
         "agents": list(agents),

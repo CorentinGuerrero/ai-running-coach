@@ -15,8 +15,10 @@ hydratation, chaleur), jamais une règle automatique ni un diagnostic.
              d'intervals.icu (même appel `get_wellness_for_date` que le bilan
              matinal, aucune installation à refaire).
   "manual" — la phase est déclarée par l'athlète (`/log`).
-Toute autre valeur (typo, casse, type erroné) est traitée comme "off" avec un
-avertissement : jamais une exception, jamais un mode actif par accident.
+La casse et les espaces autour de la valeur sont ignorés (« Garmin » = « garmin »,
+comme dans `install.sh`). Toute autre valeur (faute de frappe, type erroné) est
+traitée comme "off" avec un avertissement : jamais une exception, jamais un mode
+actif par accident.
 
 Usage
 -----

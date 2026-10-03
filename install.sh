@@ -133,7 +133,7 @@ AGENTS_ARG=""      # --agents coach,medical,… (défaut : la config, sinon tous
 ENABLED_AGENTS=""  # résolu par resolve_agents()
 PRESET=""          # --preset laptop|coach-server|docker (défaut : aucun)
 SOURCE="garmin"    # --source garmin|intervals (#68) — source de données primaire
-CYCLE_TRACKING="off" # --cycle-tracking off|garmin|manual (#166) — contexte du cycle, opt-in
+CYCLE_TRACKING="off" # --cycle-tracking off|garmin|intervals|manual (#166) — contexte du cycle, opt-in
 LLM_PROVIDER=""    # --llm openrouter|anthropic|openai — chat + sync sur une API
 LLM_MODEL_ARG=""   # --model ID (avec --llm)
 LLM_BASE_URL_ARG="" # --base-url URL (avec --llm openai : API compatible OpenAI)
@@ -774,6 +774,9 @@ resolve_cycle_tracking() {
             previous="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
                 --workspace "$WORKSPACE_ROOT" --section health --key cycle_tracking --default off 2>/dev/null)" \
                 || previous="off"
+            # Même tolérance que scripts/arc_cycle.py (casse et espaces ignorés) : sans elle, « Garmin »
+            # serait « garmin » pour les agents mais « off » ici — outils appelés mais jamais exposés.
+            previous="$(printf '%s' "$previous" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
             case "$previous" in
                 off|garmin|intervals|manual) CYCLE_TRACKING="$previous" ;;
                 "") ;;

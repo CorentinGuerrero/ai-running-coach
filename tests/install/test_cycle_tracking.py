@@ -86,3 +86,33 @@ class TestCycleTrackingInstall(InstallAsserts):
         with Sandbox() as sb:
             proc = sb.install("--preset", "laptop", "--cycle-tracking", "peut-etre", **DARWIN)
             self.assertNotEqual(proc.returncode, 0)
+
+    def test_default_whitelist_is_exactly_the_constant(self):
+        # Revue #166 : sans opt-in, la liste exposée est À L'IDENTIQUE la constante historique —
+        # aucun outil ajouté, retiré ni réordonné pour un utilisateur existant.
+        import re
+        constant = re.search(r'^GARMIN_TOOL_WHITELIST="([^"]+)"',
+                             (self.repo_root() / "install.sh").read_text(), re.M).group(1)
+        with Sandbox() as sb:
+            self.assertSucceeded(sb.install("--preset", "laptop", **DARWIN))
+            self.assertEqual(",".join(_tools(sb)), constant)
+
+    def test_config_value_is_case_insensitive_like_arc_cycle(self):
+        # Revue #166 : « Garmin » vaut « garmin » pour scripts/arc_cycle.py (les agents) — l'installeur
+        # doit exposer les mêmes outils, sinon les agents les appelleraient sans qu'ils existent.
+        with Sandbox() as sb:
+            (sb.repo / "config/workspace.user.toml").write_text('[health]\ncycle_tracking = " Garmin "\n')
+            self.assertSucceeded(sb.install("--preset", "laptop", **DARWIN))
+            for tool in CYCLE_TOOLS:
+                self.assertIn(tool, _tools(sb))
+
+    def test_garmin_mode_with_intervals_source_exposes_nothing_and_succeeds(self):
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "laptop", "--source", "intervals", "--cycle-tracking", "garmin", **DARWIN)
+            self.assertSucceeded(proc)
+            self.assertNotIn("get_menstrual", (sb.repo / ".mcp.json").read_text())
+
+    @staticmethod
+    def repo_root():
+        from tests.lib.sandbox import REPO_ROOT
+        return REPO_ROOT
