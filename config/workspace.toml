@@ -304,6 +304,28 @@ ntfy_delay_s = 60
 # pour une autre conversation ou une approbation tardive. 0 = tout le reste du jour.
 turn_budget_max_eur = 1.0
 
+[telegram]
+# Bot Telegram (#174, voir docs/telegram.md) : retours en un geste SANS modèle ni clé d'API
+# (boutons du résumé quotidien : séance faite / pas faite / décalée, RPE, douleur), écrits
+# dans le workspace par la même logique que /log. Désactivé par défaut ; installé par
+# `./install.sh --telegram` (service `scripts/coach-telegram.sh`, interrogation périodique :
+# aucune adresse publique à exposer).
+enabled = false
+# Fichier du jeton du bot (ligne TELEGRAM_BOT_TOKEN=…), HORS dépôt, mode 600 — jamais dans ce TOML.
+token_file = "~/.config/ai-running-coach/telegram.env"
+# Identifiants des chats autorisés (liste blanche). Vide = tout est refusé. Se récupère avec
+# `python3 scripts/arc_telegram.py whoami` (voir docs/telegram.md). Exemple : ["123456789"].
+allowed_chat_ids = []
+# Envoie le résumé de la synchronisation quotidienne (avec ses boutons) sur Telegram, en plus
+# de ntfy s'il est configuré.
+send_summary = true
+# Conversation libre (niveau 2) : relaie le texte libre au service du chat du tableau de bord
+# (mêmes politique, approbations et plafond de dépense). Exige [chat].enabled = true et une clé
+# d'API facturée (docs/mobile.md). false = les retours en un geste seulement.
+chat_bridge = false
+# Durée (s) d'une interrogation longue de l'API Telegram (getUpdates).
+poll_timeout_s = 30
+
 [dashboard]
 # Tableau de bord local (`scripts/dashboard.sh`) : lecture seule, n'écoute que sur
 # 127.0.0.1 — l'adresse n'est volontairement pas configurable. Si le port est pris,

@@ -36,6 +36,7 @@
 #   ./install.sh --remote-control   # service Remote Control (le coach dans la poche)
 #   ./install.sh --llm openrouter   # chat + sync sur une API (openrouter|anthropic|openai)
 #   ./install.sh --chat             # service du chat avec le coach (dashboard)
+#   ./install.sh --telegram         # bot Telegram : retours en un geste, sans LLM (docs/telegram.md)
 #   ./install.sh --dry-run          # affiche les actions sans rien exécuter
 #   ./install.sh --help
 #
@@ -116,6 +117,8 @@ LLM_ANTHROPIC_CHAT_MODEL="claude-sonnet-5-5"
 LLM_ANTHROPIC_SYNC_MODEL="claude-haiku-4-5"
 # Clés API : dans ce fichier (mode 600), jamais dans le TOML ni dans le shell.
 LLM_ENV_FILE="${ARC_LLM_ENV:-$HOME/.config/ai-running-coach/llm.env}"
+# Jeton du bot Telegram (#174) : même discipline (mode 600, hors dépôt, jamais dans le TOML).
+TELEGRAM_ENV_FILE="$HOME/.config/ai-running-coach/telegram.env"
 
 # Détection du répertoire du projet (racine du dépôt) = le « moteur »
 # (agents, skills, scripts). Le workspace (données personnelles + config IDE)
@@ -163,6 +166,8 @@ LLM_MODEL_ARG=""   # --model ID (avec --llm)
 LLM_BASE_URL_ARG="" # --base-url URL (avec --llm openai : API compatible OpenAI)
 DO_CHAT=0          # --chat : service du chat avec le coach
 CHAT_BUDGET=""     # --chat-budget EUR
+DO_TELEGRAM=0      # --telegram : bot Telegram (retours en un geste, #174)
+TELEGRAM_CHAT_ID="" # --telegram-chat-id ID : ajoute un chat à [telegram].allowed_chat_ids
 SYNC_BUDGET=""     # --sync-budget EUR
 
 # Options qu'un préréglage peut fixer ; « explicite » gagne toujours, quel que
@@ -218,6 +223,8 @@ Usage :
   ./install.sh --chat             # active [chat] et installe le service (scripts/coach-chat.sh)
   ./install.sh --chat-budget EUR  # plafond quotidien du chat ([chat].daily_budget_eur)
   ./install.sh --sync-budget EUR  # plafond quotidien de la sync ([sync].daily_budget_eur)
+  ./install.sh --telegram         # active [telegram] et installe le service (scripts/coach-telegram.sh)
+  ./install.sh --telegram-chat-id ID # avec --telegram : autorise ce chat (liste blanche, jamais le jeton)
   ./install.sh --dry-run          # affiche les actions sans rien exécuter
   ./install.sh --help
 
@@ -229,6 +236,11 @@ API n'est jamais écrite dans la config : ~/.config/ai-running-coach/llm.env
 ATTENTION : n'exportez PAS ANTHROPIC_API_KEY dans votre shell ou votre profil :
 cela empêche Remote Control de fonctionner (docs/mobile.md). Le chat et la sync
 la lisent dans llm.env et ne la passent qu'à leur propre process.
+
+--telegram active [telegram].enabled et installe le service du bot. Le jeton du
+bot (BotFather) n'est JAMAIS une option de ligne de commande : ~/.config/ai-running-coach/telegram.env
+(mode 600, créé avec une ligne d'exemple commentée) — à remplir vous-même.
+Un rerun n'écrase jamais [telegram] : --telegram-chat-id AJOUTE un chat à la liste.
 
 Préréglages (--preset), chacun ne fait que composer les options ci-dessus —
 toute option passée explicitement l'emporte toujours, quel que soit l'ordre
@@ -381,6 +393,8 @@ while [[ $# -gt 0 ]]; do
         --base-url) need_value "$@"; LLM_BASE_URL_ARG="$2"; shift 2 ;;
         --chat) DO_CHAT=1; shift ;;
         --chat-budget) need_value "$@"; CHAT_BUDGET="$2"; shift 2 ;;
+        --telegram) DO_TELEGRAM=1; shift ;;
+        --telegram-chat-id) need_value "$@"; TELEGRAM_CHAT_ID="$2"; shift 2 ;;
         --sync-budget) need_value "$@"; SYNC_BUDGET="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --help|-h) usage ;;
@@ -394,6 +408,9 @@ validate_budget() {
     [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v v="$value" 'BEGIN { exit !(v + 0 > 0) }' \
         || die "$flag : nombre strictement positif attendu en EUR (reçu « $value »)."
 }
+[[ -z "$TELEGRAM_CHAT_ID" || "$TELEGRAM_CHAT_ID" =~ ^-?[0-9]+$ ]] \
+    || die "--telegram-chat-id : identifiant numérique attendu (python3 scripts/arc_telegram.py whoami)."
+[[ -z "$TELEGRAM_CHAT_ID" || "$DO_TELEGRAM" -eq 1 ]] || die "--telegram-chat-id s'utilise avec --telegram."
 [[ -z "$CHAT_BUDGET" ]] || validate_budget --chat-budget "$CHAT_BUDGET"
 [[ -z "$SYNC_BUDGET" ]] || validate_budget --sync-budget "$SYNC_BUDGET"
 if [[ -n "$LLM_PROVIDER" ]]; then
@@ -2059,6 +2076,85 @@ install_chat() {
     fi
 }
 
+# Fichier du jeton Telegram : créé (mode 600) avec une ligne d'exemple COMMENTÉE si absent ;
+# on n'y écrit jamais de jeton, on n'en affiche jamais.
+ensure_telegram_env() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} $TELEGRAM_ENV_FILE (mode 600, variable TELEGRAM_BOT_TOKEN)"
+        return 0
+    fi
+    if [[ ! -f "$TELEGRAM_ENV_FILE" ]]; then
+        mkdir -p "$(dirname "$TELEGRAM_ENV_FILE")"
+        ( umask 077; cat > "$TELEGRAM_ENV_FILE" <<'EOF'
+# Jeton du bot Telegram (BotFather) — mode 600, jamais versionné, jamais dans le TOML.
+# Une ligne NOM=valeur sans espace autour du « = ». Décommentez et complétez :
+# TELEGRAM_BOT_TOKEN=
+EOF
+        )
+        ok "Fichier du jeton créé : $TELEGRAM_ENV_FILE (mode 600)"
+    else
+        chmod 600 "$TELEGRAM_ENV_FILE" 2>/dev/null || true
+        if ! grep -qE "^[[:space:]]*(export[[:space:]]+)?#?[[:space:]]*TELEGRAM_BOT_TOKEN=" "$TELEGRAM_ENV_FILE"; then
+            printf '# TELEGRAM_BOT_TOKEN=\n' >> "$TELEGRAM_ENV_FILE"
+        fi
+    fi
+    if grep -qE "^[[:space:]]*(export[[:space:]]+)?TELEGRAM_BOT_TOKEN=.+" "$TELEGRAM_ENV_FILE"; then
+        ok "Jeton TELEGRAM_BOT_TOKEN présent (valeur non affichée)"
+    else
+        warn "Jeton absent : créez un bot avec @BotFather (docs/telegram.md) puis ajoutez TELEGRAM_BOT_TOKEN=<jeton> dans $TELEGRAM_ENV_FILE (mode 600, jamais dans le TOML)."
+    fi
+}
+
+# Ajoute $TELEGRAM_CHAT_ID à [telegram].allowed_chat_ids sans jamais retirer ni remplacer
+# un identifiant déjà autorisé.
+add_telegram_chat_id() {
+    [[ -n "$TELEGRAM_CHAT_ID" ]] || return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [telegram].allowed_chat_ids += $TELEGRAM_CHAT_ID"
+        return 0
+    fi
+    have python3 || return 0
+    local current args=() id
+    current="$(effective_value telegram allowed_chat_ids)"
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        args+=(--list "$id")
+    done <<< "$current"
+    if printf '%s\n' "$current" | grep -qxF -- "$TELEGRAM_CHAT_ID"; then
+        ok "Chat $TELEGRAM_CHAT_ID déjà autorisé"
+        return 0
+    fi
+    args+=(--list "$TELEGRAM_CHAT_ID")
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+        --workspace "$WORKSPACE_ROOT" --section telegram --key allowed_chat_ids "${args[@]}" >/dev/null \
+        && ok "Chat $TELEGRAM_CHAT_ID ajouté à [telegram].allowed_chat_ids" \
+        || warn "Impossible d'écrire [telegram].allowed_chat_ids — vérifiez config/workspace.user.toml."
+}
+
+install_telegram() {
+    [[ "$DO_TELEGRAM" -eq 1 ]] || return 0
+    log "Bot Telegram (scripts/coach-telegram.sh install)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [telegram].enabled = true"
+    else
+        have python3 && python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+            --workspace "$WORKSPACE_ROOT" --section telegram --key enabled --value true --type bool >/dev/null \
+            || warn "Impossible d'écrire [telegram].enabled — vérifiez config/workspace.user.toml."
+    fi
+    add_telegram_chat_id
+    ensure_telegram_env
+    if [[ "$(effective_value telegram chat_bridge)" == "true" ]]; then
+        log "Conversation libre activée : elle exige [chat].enabled = true et une clé d'API facturée (docs/telegram.md)."
+    else
+        log "Retours en un geste uniquement (sans clé d'API) ; la conversation libre est opt-in : [telegram].chat_bridge."
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        ARC_WORKSPACE="$WORKSPACE_ROOT" ARC_DRY_RUN=1 "$PROJECT_ROOT/scripts/coach-telegram.sh" install --dry-run
+    else
+        ARC_WORKSPACE="$WORKSPACE_ROOT" "$PROJECT_ROOT/scripts/coach-telegram.sh" install
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # 7. Vérification finale
 # ---------------------------------------------------------------------------
@@ -2189,6 +2285,7 @@ print_config_recap() {
         "$([[ "$REMOTE_CONTROL" -eq 1 ]] && echo "oui" || echo "non")" "$(_config_origin "$EXPLICIT_REMOTE_CONTROL")"
     [[ -z "$LLM_PROVIDER" ]] || recap_line "Chat + sync sur API" "$LLM_PROVIDER" "explicite"
     [[ "$DO_CHAT" -eq 0 ]] || recap_line "Service du chat" "oui" "explicite"
+    [[ "$DO_TELEGRAM" -eq 0 ]] || recap_line "Bot Telegram" "oui" "explicite"
     recap_line "Workspace" "$WORKSPACE_ROOT" "$([[ -n "$WORKSPACE_ARG" ]] && echo "explicite" || echo "défaut")"
     recap_line "Dry-run" \
         "$([[ "$DRY_RUN" -eq 1 ]] && echo "oui" || echo "non")" "$([[ "$DRY_RUN" -eq 1 ]] && echo "explicite" || echo "défaut")"
@@ -2241,6 +2338,7 @@ main() {
     install_daily_sync
     install_remote_control
     install_chat
+    install_telegram
     verify
 }
 
