@@ -771,7 +771,7 @@ detect_auth_failure() {
         erreur_pattern='^ERREUR.*(connect-strava|jetons? strava|strava.*(expir|invalid|refus)|401)'
     elif [[ "$SOURCE" == "intervals" ]]; then
         # Texte réel de `ICUAPIError` (intervals_icu_mcp/client.py, vérifié
-        # contre eddmann/intervals-icu-mcp) pour un 401 : "Unauthorized. Check
+        # contre hhopke/intervals-icu-mcp, identique chez eddmann) pour un 401 : "Unauthorized. Check
         # your API key and athlete ID.", restitué tel quel par ResponseBuilder.
         raw_pattern='unauthorized\. check your api key and athlete id'
         erreur_pattern='^ERREUR.*(intervals-icu-mcp-auth|cl[ée] api|athlete id|401)'
