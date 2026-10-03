@@ -150,8 +150,32 @@ anciennes règles génériques ci-dessous quand un GPX est disponible :
 python3 scripts/arc_race_pacing.py plan \
   --gpx <fichier.gpx> --race-date <AAAA-MM-JJ> --start <HH:MM> \
   --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue> \
-  --pack-kg <poids sac/flasques/matériel porté, kg>
+  --pack-kg <poids sac/flasques/matériel porté, kg> \
+  --tz <fuseau IANA de la course, ex. Europe/Paris>
 ```
+
+**Nuit (#184).** Avec `--race-date`, `--start` (explicite) ET `--tz`, le script
+calcule seul (sans réseau) lever/coucher et crépuscule civil, la fraction de nuit
+de chaque section par scénario et applique une pénalité de vitesse dépendant de la
+pente (coefficients = approximations du projet, `assumptions.night`, réglables par
+`--night-penalty-pct`/`--night-descent-extra-max-pct`, `--no-night` pour couper).
+**Fuseau (`--tz`), une seule fois :** reprends `timezone` du plan de course déjà
+persisté s'il existe ; sinon déduis-le du lieu de la course quand il est sans
+ambiguïté (pays à fuseau unique : France métropolitaine → Europe/Paris,
+Italie → Europe/Rome…) et DIS le fuseau retenu ; demande-le seulement si le
+lieu est ambigu (pays à plusieurs fuseaux, outre-mer, lieu inconnu). Persiste-le
+dans le champ `timezone` du bloc ```arc pour ne jamais le redemander. Si
+`night.timezone_warning` est présent, le fuseau est peu vraisemblable pour la
+longitude du départ : signale-le et vérifie-le avant de citer les heures de nuit.
+**Heure de départ : demande-la** si elle n'est pas connue (règlement, site de la
+course) — jamais devinée. Sans date, heure de départ explicite ou fuseau, il n'y a
+PAS de pénalité de nuit (`night.status == "unavailable"`, `night.reason` dit
+laquelle manque) : dis-le, ne suppose jamais une nuit. Cite `night.scenarios.<scénario>.summary` (« X h de nuit, frontale requise de
+HH:MM à HH:MM ») dans le plan, avec le fait que la pénalité est une approximation.
+`night_fraction`/`night_factor` par section sont persistés dans `segments`, mais
+`night` lui-même est un KPI dérivé : ne le copie pas dans le bloc ```arc. La frontale
+va dans `gear` et son contrôle est celui de l'ÉTAPE 7 (`arc_index.py equipment
+--race-plan`), pas un second contrôle ici.
 
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
 (`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
@@ -329,7 +353,7 @@ Extrais : température min/max, vent, précipitations, couverture nuageuse.
 Produis une checklist détaillée :
 
 **Lampe frontale :**
-- Si départ avant 06h00 ou arrivée après coucher du soleil → lampe obligatoire
+- Si `night.status == "night"` (pénalité de nuit, ÉTAPE 4) → lampe requise de `night.scenarios.<scénario>.lamp_from` à `lamp_until` ; sans `--tz`, repli : départ avant 06h00 ou arrivée après coucher du soleil → lampe obligatoire
 - Puissance minimale recommandée (300 lm pour courir dans le noir)
 - Piles/batterie de rechange
 

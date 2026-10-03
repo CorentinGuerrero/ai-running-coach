@@ -110,6 +110,15 @@ chaude ET que l'athlète a peu été exposé à la chaleur récemment
 (`arc_index.heat_acclimation_today`, #38) : un pari optimiste sur une
 acclimatation supposée serait plus dangereux qu'un plan trop prudent.
 
+## Nuit (voir `ASSUMPTIONS["night"]`, #184)
+
+Avec `--race-date`, `--start` explicite et `--tz`, l'heure d'horloge de chaque section
+(par scénario, arrêts ravito compris) est confrontée au crépuscule civil calculé localement
+(`arc_solar.py`) ; le temps de la section est multiplié par `1 + fraction de nuit × pénalité`
+(pénalité dépendant de la pente, approximation du projet), en itérant (bornée) puisque la
+pénalité décale les sections suivantes, et en gardant `prudent >= réaliste >= ambitieux`.
+Sans ces entrées, ou de jour : sortie inchangée (clé additive `night` seulement).
+
 ## Allure de BASE : endurance mise à l'échelle de l'intensité de course (voir `ASSUMPTIONS["base_pace"]`)
 
 `arc_slope_model.predict_speed` rend une allure de la bande « endurance »
@@ -153,7 +162,7 @@ import math
 import statistics
 import sys
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -303,6 +312,30 @@ DEFAULT_PACK_KG = 0.0
 # fausserait silencieusement la masse totale et donc tout le calcul d'énergie.
 PACK_KG_MIN = 0.0
 PACK_KG_MAX = 30.0
+
+# Pénalité de NUIT (#184, épopée #170) — voir `ASSUMPTIONS["night"]`. TOUS ces coefficients
+# sont des APPROXIMATIONS DU PROJET : aucune source vérifiée n'en donne la valeur pour un
+# athlète donné (visibilité réduite, vigilance, foulée prudente sur terrain technique).
+# Pénalité de TEMPS (%) à pleine nuit sur plat/montée :
+NIGHT_BASE_PENALTY_PCT = 5.0
+# Supplément de temps (points de %) par point de % de DESCENTE au-delà de
+# `NIGHT_DESCENT_FREE_GRADE_PCT`, plafonné à `NIGHT_DESCENT_EXTRA_MAX_PCT` : on freine
+# davantage en descente de nuit (le sol se lit mal) qu'à plat.
+NIGHT_DESCENT_FREE_GRADE_PCT = 2.0
+NIGHT_DESCENT_EXTRA_PER_GRADE_PCT = 0.6
+NIGHT_DESCENT_EXTRA_MAX_PCT = 8.0
+# Bornes de validation des options CLI (rejette une saisie manifestement fausse).
+NIGHT_PENALTY_PCT_MAX = 30.0
+# Itérations (bornées) du calcul, car la pénalité décale l'heure de passage des sections
+# suivantes, donc leur fraction de nuit ; critère d'arrêt sur le facteur (écart absolu max).
+NIGHT_MAX_ITERATIONS = 8
+NIGHT_CONVERGENCE_TOL = 1e-4
+# Contrôle de vraisemblance du fuseau (`--tz`) : écart (heures) au-delà duquel le décalage UTC
+# du fuseau au départ s'éloigne trop de l'heure solaire de la longitude du départ (lon / 15).
+# Les fuseaux réels s'en écartent de 0 à ~3 h (Espagne l'été ≈ +2 h, ouest de la Chine ≈ +3 h) :
+# au-delà, le fuseau est probablement faux (course sur un autre continent). Approximation du projet,
+# simple AVERTISSEMENT, jamais un refus.
+NIGHT_TZ_SUSPECT_OFFSET_H = 3.5
 
 
 def _round_passage(seconds: float) -> int:
@@ -649,6 +682,56 @@ ASSUMPTIONS = {
         "TOUJOURS présent quand `energy.available=True`, même `status=\"insufficient\"` — un agent "
         "qui veut savoir SI une calibration a été appliquée lit ce seul champ, jamais une comparaison "
         "manuelle brut/calibré."
+    ),
+    "night": (
+        "Pénalité de NUIT (#184, épopée #170). Le calcul n'a lieu que si TROIS entrées sont connues : "
+        "la date de course (`--race-date`), l'heure de départ EXPLICITE (`--start`, jamais le défaut "
+        "07:00) et le fuseau horaire IANA (`--tz`, ex. Europe/Paris) ; sinon `night.status = "
+        "\"unavailable\"` avec la raison, AUCUN facteur de nuit n'est appliqué et la sortie reste "
+        "identique à celle d'avant #184 (hors la clé additive `night`). `--no-night` le désactive "
+        "explicitement. Heures de lever/coucher et crépuscule civil calculées localement, sans réseau "
+        "(`arc_solar.py`, algorithme NOAA, approximation de l'ordre de la minute) à la position du "
+        "PREMIER point du GPX (approximation : sur un ultra qui traverse plusieurs degrés de longitude, "
+        "l'écart est de ~4 min par degré). « Nuit » = soleil à plus de 6° sous l'horizon (crépuscule "
+        "civil, convention) : c'est la limite retenue pour la frontale, avec une marge à prévoir "
+        "côté athlète (forêt, ciel couvert).\n\n"
+        "**Fraction de nuit par section et par scénario** (`night_fraction`, part du TEMPS DE COURSE "
+        "de la section — arrêts ravito exclus — passée de nuit) d'après l'heure d'horloge de chaque "
+        "section, déduite du départ, des temps de section déjà pénalisés et des arrêts ravito. "
+        "**Facteur** (`night_factor`, multiplicateur du temps) = 1 + `night_fraction` × pénalité, "
+        "avec pénalité = `NIGHT_BASE_PENALTY_PCT` (5 %) à plat/en montée, plus en DESCENTE "
+        "`NIGHT_DESCENT_EXTRA_PER_GRADE_PCT` (0,6 point par % de pente au-delà de "
+        "`NIGHT_DESCENT_FREE_GRADE_PCT` = 2 %), plafonné à `NIGHT_DESCENT_EXTRA_MAX_PCT` (8 points) "
+        "— la pente utilisée est la pente MOYENNE de la section (`grade_mean_pct`). **Approximations "
+        "du projet, jamais des mesures** : aucune source vérifiée ne chiffre ces pourcentages pour "
+        "cet athlète ; réglables par `--night-penalty-pct` et `--night-descent-extra-max-pct`, et "
+        "l'écart réel s'apprend au débrief (#188).\n\n"
+        "**Itération** : la pénalité ralentit, donc décale l'heure de passage des sections suivantes "
+        "et leur fraction de nuit. Le calcul itère (au plus `NIGHT_MAX_ITERATIONS` = 8 passes, arrêt "
+        "quand le facteur varie de moins de `NIGHT_CONVERGENCE_TOL`) ; `night.iterations` et "
+        "`night.converged` le disent. **Cohérence des scénarios** : après chaque passe le temps de "
+        "chaque section est forcé à `prudent >= réaliste >= ambitieux` (une section de nuit pleine "
+        "pénalisée pour l'un et de jour pour l'autre ne doit jamais inverser l'ordre) ; "
+        "`night.scenario_order_clamped_segments` compte les sections concernées. La pénalité "
+        "s'applique APRÈS la renormalisation neutre du fade et la chaleur, et avant les passages et "
+        "barrières horaires (qui en tiennent donc compte).\n\n"
+        "**Résumé par scénario** (`night.scenarios[s]`) : `night_duration_s` (temps passé de nuit "
+        "entre le départ et l'arrivée, arrêts compris — on a besoin de lumière à l'arrêt aussi), "
+        "`lamp_from`/`lamp_until` (premier et dernier instant de nuit pendant la course, heure "
+        "locale ISO) et `summary` en français. Une course entièrement de jour n'émet AUCUN champ "
+        "`night_*` par section (`night.status = \"daylight\"`). Le contrôle de la frontale dans le "
+        "matériel obligatoire reste celui de `arc_index.py equipment --race-plan` (#134) : "
+        "`night.gear_hint` y renvoie, rien n'est dupliqué ici. Cas polaire : nuit blanche = zéro nuit, "
+        "nuit polaire = nuit continue (masque calculé sur l'altitude du soleil minute par minute).\n\n"
+        "**Horloge** : le temps écoulé est compté en UTC (une course qui traverse le passage à l'heure "
+        "d'hiver ne glisse pas d'une heure) ; seul l'affichage (`lamp_from`, `summary`) est en heure "
+        "locale du fuseau, décalage du moment compris. Une section dont l'ordre des scénarios a été "
+        "forcé porte un `night_factor` qui inclut ce forçage (multiplicateur réellement appliqué), pas "
+        "seulement la nuit. **Fuseau** : aucune base hors-ligne lieu → fuseau dans la bibliothèque "
+        "standard, le fuseau est donc une ENTRÉE ; contrôle grossier de vraisemblance seulement "
+        "(`NIGHT_TZ_SUSPECT_OFFSET_H` = 3,5 h d'écart entre le décalage UTC du fuseau et l'heure "
+        "solaire de la longitude du départ → `night.timezone_warning` et avertissement, jamais un "
+        "refus ; une erreur d'une heure passe inaperçue)."
     ),
 }
 
@@ -1574,6 +1657,252 @@ def _renormalize_fade_time_neutral(segments: Sequence[dict], provisional_totals:
     return out, note
 
 
+# ---------------------------------------------------------------------------
+# Pénalité de nuit (#184, voir ASSUMPTIONS["night"])
+# ---------------------------------------------------------------------------
+
+def night_penalty_fraction(grade_mean_pct: Optional[float], *, base_pct: float = NIGHT_BASE_PENALTY_PCT,
+                            descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT) -> float:
+    """Pénalité de temps (fraction, 0.05 = +5 %) à PLEINE nuit pour une section de pente
+    moyenne `grade_mean_pct` : `base_pct` à plat/en montée, plus un supplément proportionnel à
+    la pente de descente au-delà de `NIGHT_DESCENT_FREE_GRADE_PCT`, plafonné à
+    `descent_extra_max_pct`. Une pente inconnue (`None`) vaut plat. Approximation du projet."""
+    extra = 0.0
+    if grade_mean_pct is not None and grade_mean_pct < -NIGHT_DESCENT_FREE_GRADE_PCT:
+        extra = min(descent_extra_max_pct,
+                    NIGHT_DESCENT_EXTRA_PER_GRADE_PCT * (-grade_mean_pct - NIGHT_DESCENT_FREE_GRADE_PCT))
+    return (base_pct + extra) / 100.0
+
+
+def _stops_after_segments(segments: Sequence[dict], aid_stations: Sequence[dict]) -> Tuple[List[float], float]:
+    """Secondes d'arrêt ravito APRÈS chaque segment (même règle que `compute_passages` :
+    un ravito est traversé dès que son `km` <= `km_end` du segment), et total des arrêts
+    rattachés au-delà de la fin du GPX."""
+    stops = [0.0] * len(segments)
+    idx = 0
+    aid_sorted = sorted(aid_stations, key=lambda a: a["km"])
+    for i, seg in enumerate(segments):
+        while idx < len(aid_sorted) and aid_sorted[idx]["km"] <= seg["km_end"]:
+            stops[i] += aid_sorted[idx].get("stop_s", DEFAULT_AID_STATION_STOP_S)
+            idx += 1
+    beyond = sum(a.get("stop_s", DEFAULT_AID_STATION_STOP_S) for a in aid_sorted[idx:])
+    return stops, beyond
+
+
+def build_night_mask(segments: Sequence[dict], aid_stations: Sequence[dict], start_dt: datetime,
+                      lat: float, lon: float, *, base_pct: float = NIGHT_BASE_PENALTY_PCT,
+                      descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT):
+    """Masque de nuit couvrant largement la course (borne haute = temps le plus lent × pénalité
+    maximale + tous les arrêts + 1 h de marge)."""
+    import arc_solar as SOLAR
+    slowest = max((sum(seg["predicted_time_s"][s] or 0 for seg in segments) for s in SCENARIOS), default=0)
+    stops, beyond = _stops_after_segments(segments, aid_stations)
+    horizon_s = slowest * (1.0 + (base_pct + descent_extra_max_pct) / 100.0) + sum(stops) + beyond + 3600.0
+    start_utc = start_dt.astimezone(timezone.utc)
+    return SOLAR.NightMask(start_utc, start_utc + timedelta(seconds=horizon_s), lat, lon)
+
+
+def apply_night_penalty(segments: Sequence[dict], aid_stations: Sequence[dict], start_dt: datetime, mask, *,
+                         base_pct: float = NIGHT_BASE_PENALTY_PCT,
+                         descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT,
+                         max_iterations: int = NIGHT_MAX_ITERATIONS) -> Tuple[List[dict], dict]:
+    """Applique la pénalité de nuit — pure. `start_dt` : départ CONSCIENT (fuseau), `mask` :
+    `arc_solar.NightMask`. Rend `(segments, info)`. Si aucune section n'est courue de nuit dans
+    aucun scénario, rend `segments` INCHANGÉS (aucun champ ajouté) avec
+    `info["has_night"] = False`. Sinon chaque segment gagne `night_fraction` et `night_factor`
+    (objets par scénario) et ses temps/allures pénalisés. `info` : `has_night`, `iterations`,
+    `converged`, `clamped_segments`."""
+    n = len(segments)
+    stops, _beyond = _stops_after_segments(segments, aid_stations)
+    base = {s: [seg["predicted_time_s"][s] for seg in segments] for s in SCENARIOS}
+    pen = [night_penalty_fraction(seg.get("grade_mean_pct"), base_pct=base_pct,
+                                  descent_extra_max_pct=descent_extra_max_pct) for seg in segments]
+    factor = {s: [1.0] * n for s in SCENARIOS}
+
+    def times_from(factors):
+        t = {s: [None if base[s][i] is None else base[s][i] * factors[s][i] for i in range(n)] for s in SCENARIOS}
+        clamped = set()
+        for i in range(n):  # prudent >= réaliste >= ambitieux, section par section
+            for slower, faster in (("realistic", "ambitious"), ("safe", "realistic")):
+                a, b = t[slower][i], t[faster][i]
+                if a is not None and b is not None and a < b - 1e-9:
+                    t[slower][i] = b
+                    clamped.add(i)
+        return t, clamped
+
+    # Horloge en UTC : `datetime` conscient + `timedelta` ajoute du temps MURAL dans le fuseau
+    # (zoneinfo), faux d'une heure après un changement d'heure en pleine course (dernier
+    # dimanche d'octobre en Europe) — le temps écoulé, lui, est absolu.
+    start_utc = start_dt.astimezone(timezone.utc)
+
+    def walk(t):
+        fractions = {s: [0.0] * n for s in SCENARIOS}
+        for s in SCENARIOS:
+            clock = start_utc
+            for i in range(n):
+                dur = t[s][i]
+                if dur is None:
+                    continue
+                end = clock + timedelta(seconds=dur)
+                if dur > 0:
+                    fractions[s][i] = min(1.0, mask.night_seconds(clock, end) / dur)
+                clock = end + timedelta(seconds=stops[i])
+        return fractions
+
+    iterations, converged = 0, False
+    for iterations in range(1, max_iterations + 1):
+        t, _ = times_from(factor)
+        fractions = walk(t)
+        new_factor = {s: [1.0 + fractions[s][i] * pen[i] for i in range(n)] for s in SCENARIOS}
+        delta = max((abs(new_factor[s][i] - factor[s][i]) for s in SCENARIOS for i in range(n)), default=0.0)
+        factor = new_factor
+        if delta < NIGHT_CONVERGENCE_TOL:
+            converged = True
+            break
+    t, clamped = times_from(factor)
+    fractions = walk(t)
+
+    has_night = any(f > 1e-9 for s in SCENARIOS for f in fractions[s])
+    info = {"has_night": has_night, "iterations": iterations, "converged": converged,
+            "clamped_segments": len(clamped)}
+    if not has_night:
+        return list(segments), info
+
+    out = []
+    for i, seg in enumerate(segments):
+        new_time: Dict[str, Optional[int]] = {}
+        new_pace: Dict[str, Optional[float]] = {}
+        nf: Dict[str, Optional[float]] = {}
+        nfac: Dict[str, Optional[float]] = {}
+        for s in SCENARIOS:
+            old = seg["predicted_time_s"][s]
+            if old is None:
+                new_time[s], new_pace[s], nf[s], nfac[s] = None, seg["pace_s_km"][s], None, None
+                continue
+            eff = t[s][i] / old if old else 1.0
+            if abs(eff - 1.0) < 1e-12:
+                new_time[s], new_pace[s] = old, seg["pace_s_km"][s]
+            else:
+                new_time[s] = int(round(t[s][i] / SEGMENT_ROUND_S)) * SEGMENT_ROUND_S
+                p = seg["pace_s_km"][s]
+                new_pace[s] = round(p * eff, 1) if p is not None else None
+            nf[s] = round(fractions[s][i], 3)
+            nfac[s] = round(eff, 4)
+        out.append({**seg, "predicted_time_s": new_time, "pace_s_km": new_pace,
+                    "night_fraction": nf, "night_factor": nfac})
+    return out, info
+
+
+def _fmt_local(dt: datetime, ref: datetime) -> str:
+    days = (dt.date() - ref.date()).days
+    return dt.strftime("%H:%M") + (f" (J+{days})" if days > 0 else "")
+
+
+def night_scenario_summary(mask, start_dt: datetime, total_s: Optional[float], tz) -> dict:
+    """Résumé de nuit d'un scénario sur la course entière, départ -> arrivée (arrêts compris)."""
+    if total_s is None:
+        return {"night_duration_s": None, "summary": "temps de course indisponible : pas de résumé de nuit"}
+    start_utc = start_dt.astimezone(timezone.utc)  # temps écoulé absolu (changement d'heure)
+    end = start_utc + timedelta(seconds=total_s)
+    windows = mask.night_windows(start_utc, end)
+    night_s = round(mask.night_seconds(start_utc, end))
+    if not windows:
+        return {"night_duration_s": 0, "summary": "aucune nuit pendant la course, frontale non requise"}
+    local = [(a.astimezone(tz), b.astimezone(tz)) for a, b in windows]
+    ref = start_dt.astimezone(tz)
+    spans = "; ".join(f"{_fmt_local(a, ref)} à {_fmt_local(b, ref)}" for a, b in local)
+    if night_s >= 3600:
+        amount = f"{night_s / 3600.0:.1f}".replace(".", ",") + " h"
+    else:  # « 0,0 h de nuit » pour 2 min de crépuscule serait trompeur
+        amount = f"{max(1, round(night_s / 60.0))} min"
+    return {
+        "night_duration_s": night_s,
+        "lamp_from": local[0][0].isoformat(timespec="minutes"),
+        "lamp_until": local[-1][1].isoformat(timespec="minutes"),
+        "summary": f"{amount} de nuit, frontale requise de {spans}",
+    }
+
+
+NIGHT_GEAR_HINT = (
+    "Frontale (et piles/batterie de rechange) à inscrire dans `gear` du plan ; le contrôle contre "
+    "l'inventaire est celui de `python3 scripts/arc_index.py equipment --race-plan <plan>` (#134).")
+
+
+def night_unavailable(status: str, reason: str, note: str) -> dict:
+    return {"status": status, "reason": reason, "note": note}
+
+
+def timezone_plausibility_warning(start_dt: datetime, lon: float, tz_name: str) -> Optional[str]:
+    """Avertissement (français) si le décalage UTC du fuseau au départ s'écarte de plus de
+    `NIGHT_TZ_SUSPECT_OFFSET_H` de l'heure solaire de la longitude `lon` (lon / 15 h), écart
+    ramené dans [-12, 12[ h ; `None` sinon. Contrôle grossier : il attrape un fuseau d'un autre
+    continent, pas une erreur d'une heure."""
+    offset_h = start_dt.utcoffset().total_seconds() / 3600.0
+    diff = (offset_h - lon / 15.0 + 12.0) % 24.0 - 12.0
+    if abs(diff) <= NIGHT_TZ_SUSPECT_OFFSET_H:
+        return None
+    return (f"fuseau « {tz_name} » (UTC{offset_h:+g} h au départ) peu vraisemblable pour la longitude "
+            f"{lon:.2f}° du départ (heure solaire ≈ UTC{lon / 15.0:+.1f} h) : vérifier --tz, les heures "
+            "de nuit en dépendent")
+
+
+def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_known, enabled,
+                 base_pct, descent_extra_max_pct):
+    """Étape « nuit » de `build_race_plan` (#184). Rend `(night, mask, start_dt, tzinfo)` ;
+    `night` porte `_apply`/`_segments` (clés privées retirées par l'appelant) quand des
+    sections sont pénalisées."""
+    if not enabled:
+        return night_unavailable("disabled", "disabled",
+                                 "pénalité de nuit désactivée (--no-night)"), None, None, None
+    missing = None
+    if not race_date:
+        missing = ("no_race_date", "date de course inconnue (--race-date) : facteur de nuit non appliqué")
+    elif not start_time_known:
+        missing = ("no_start_time", "heure de départ non fournie (--start) : facteur de nuit non appliqué")
+    elif not tz:
+        missing = ("no_timezone", "fuseau horaire non fourni (--tz, ex. Europe/Paris) : facteur de nuit "
+                                  "non appliqué")
+    elif not pts:
+        missing = ("no_gpx_position", "aucune position GPX : facteur de nuit non appliqué")
+    if missing:
+        return night_unavailable("unavailable", *missing), None, None, None
+
+    import arc_solar as SOLAR
+    zone = SOLAR.resolve_timezone(tz)
+    base_date = date.fromisoformat(race_date)
+    start_dt = datetime(base_date.year, base_date.month, base_date.day, hh, mm, tzinfo=zone)
+    lat, lon = pts[0]["lat"], pts[0]["lon"]
+    tz_warning = timezone_plausibility_warning(start_dt, lon, tz)
+    mask = build_night_mask(segments, aid_stations, start_dt, lat, lon, base_pct=base_pct,
+                            descent_extra_max_pct=descent_extra_max_pct)
+    new_segments, info = apply_night_penalty(segments, aid_stations, start_dt, mask, base_pct=base_pct,
+                                             descent_extra_max_pct=descent_extra_max_pct)
+    sun = SOLAR.local_sun_times(base_date, lat, lon, zone)
+    night = {
+        "status": "night" if info["has_night"] else "daylight",
+        "timezone": tz,
+        "location": {"lat": round(lat, 4), "lon": round(lon, 4), "source": "gpx_start"},
+        "parameters": {
+            "base_penalty_pct": base_pct, "descent_extra_max_pct": descent_extra_max_pct,
+            "descent_free_grade_pct": NIGHT_DESCENT_FREE_GRADE_PCT,
+            "descent_extra_per_grade_pct": NIGHT_DESCENT_EXTRA_PER_GRADE_PCT,
+            "twilight": "civil (soleil à 6° sous l'horizon)",
+        },
+        "sun": {k: (v.isoformat(timespec="minutes") if hasattr(v, "isoformat") else v)
+                for k, v in sun.items() if k != "solar_noon"},
+        "iterations": info["iterations"], "converged": info["converged"],
+        "scenario_order_clamped_segments": info["clamped_segments"],
+        "scenarios": {},
+        "gear_hint": NIGHT_GEAR_HINT,
+    }
+    if tz_warning:
+        night["timezone_warning"] = tz_warning
+    if info["has_night"]:
+        night["_apply"] = True
+        night["_segments"] = new_segments
+    return night, mask, start_dt, zone
+
+
 def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      aid_stations: Optional[Sequence[dict]] = None,
                      fade_pct: float = 0.0, fade_source: str = "generic",
@@ -1590,7 +1919,10 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      pack_kg: float = DEFAULT_PACK_KG, pack_kg_provided: bool = True,
                      calibration_band: Optional[str] = None,
                      calibration_band_source: Optional[str] = None,
-                     calibration: Optional[dict] = None) -> dict:
+                     calibration: Optional[dict] = None,
+                     tz: Optional[str] = None, start_time_known: bool = True,
+                     night_enabled: bool = True, night_penalty_pct: float = NIGHT_BASE_PENALTY_PCT,
+                     night_descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
@@ -1601,8 +1933,13 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     `resolve_calibration_band` pour les deux premiers), jamais par cette
     fonction (qui reste pure).
 
+    `tz` (nom IANA), `start_time_known` (faux = `start_time` est le défaut, pas un choix),
+    `night_*` : pénalité de nuit (#184, `ASSUMPTIONS["night"]`) — appliquée seulement si la date
+    de course, l'heure de départ explicite et le fuseau sont connus, sinon la clé additive
+    `night` dit pourquoi et les temps restent ceux d'avant #184.
+
     Lève `ValueError` si `start_time` n'est pas un `HH:MM` valide (revue de
-    code #59, nit : jamais un repli silencieux sur 07:00)."""
+    code #59, nit : jamais un repli silencieux sur 07:00) ou si `tz` est inconnu."""
     hh, mm = _parse_hhmm(start_time, label="--start")
     base_date = date.fromisoformat(race_date) if race_date else date.today()
     start_dt = datetime(base_date.year, base_date.month, base_date.day, hh, mm)
@@ -1676,7 +2013,19 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             f"{FADE_TIME_NEUTRAL_MAX_DURATION_S / 3600.0:.0f} h) : le fade reste ADDITIF (pas neutralisé) "
             "malgré une prédiction Riegel/VDOT — voir ASSUMPTIONS['fade'].")
 
+    night, night_mask, night_start_dt, night_tzinfo = _night_stage(
+        pts, segments, aid_stations, hh, mm, race_date, tz, start_time_known, night_enabled,
+        night_penalty_pct, night_descent_extra_max_pct)
+    if night.pop("_apply", None) is not None:
+        segments = night.pop("_segments")
+    if night.get("timezone_warning"):
+        warnings.append(night["timezone_warning"])
+
     passages = compute_passages(segments, aid_stations)
+    if night_mask is not None:
+        for scenario in SCENARIOS:
+            night["scenarios"][scenario] = night_scenario_summary(
+                night_mask, night_start_dt, passages["totals_s"][scenario], night_tzinfo)
     cutoffs = check_cutoffs(passages["aid_station_passages"], aid_stations, start_dt)
     for aid_passage in passages["aid_station_passages"]:
         if aid_passage.get("note"):
@@ -1715,6 +2064,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         "fade_notes": fade_notes,
         "heat_factor": round(heat_factor, 3),
         "heat_notes": heat_notes,
+        "night": night,
         "start_time": start_time,
         "race_date": race_date,
         "warnings": warnings,
@@ -1980,6 +2330,16 @@ def _validate_pack_kg(value: Optional[float]) -> float:
     return value
 
 
+def _validate_night_pct(value: Optional[float], default: float, label: str) -> float:
+    """Valide une option de pénalité de nuit (%) : `None` -> défaut ; non finie ou hors
+    `[0, NIGHT_PENALTY_PCT_MAX]` -> `ValueError` (jamais acceptée silencieusement)."""
+    if value is None:
+        return default
+    if not math.isfinite(value) or not (0.0 <= value <= NIGHT_PENALTY_PCT_MAX):
+        raise ValueError(f"{label} : valeur entre 0 et {NIGHT_PENALTY_PCT_MAX:g} attendue, « {value} » reçue.")
+    return value
+
+
 def _read_temp_max_c(args) -> Optional[float]:
     if args.temp_max_c is not None:
         return float(args.temp_max_c)
@@ -2008,7 +2368,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--segment-m", type=float, default=DEFAULT_SEGMENT_M, dest="segment_m",
                      help="longueur cible d'un segment, en mètres (défaut 750)")
     ap.add_argument("--race-date", metavar="AAAA-MM-JJ", dest="race_date", help="date de la course")
-    ap.add_argument("--start", default="07:00", help="heure de départ HH:MM (défaut 07:00)")
+    ap.add_argument("--start", default=None, help="heure de départ HH:MM (défaut 07:00 ; sans cette option "
+                                                    "explicite, aucune pénalité de nuit n'est appliquée)")
+    ap.add_argument("--tz", default=None,
+                     help="fuseau horaire IANA de la course (ex. Europe/Paris) : requis, avec --race-date et "
+                          "--start, pour la pénalité de nuit (heures de lever/coucher calculées localement)")
+    ap.add_argument("--no-night", action="store_true", dest="no_night",
+                     help="désactive la pénalité de nuit (voir ASSUMPTIONS['night'])")
+    ap.add_argument("--night-penalty-pct", type=float, dest="night_penalty_pct",
+                     help=f"pénalité de temps (%%) à pleine nuit sur plat/montée (défaut "
+                          f"{NIGHT_BASE_PENALTY_PCT:g}, approximation du projet)")
+    ap.add_argument("--night-descent-extra-max-pct", type=float, dest="night_descent_extra_max_pct",
+                     help=f"supplément maximal (points de %%) de pénalité de nuit en descente (défaut "
+                          f"{NIGHT_DESCENT_EXTRA_MAX_PCT:g}, approximation du projet)")
     ap.add_argument("--aid-stations", dest="aid_stations_path",
                      help="fichier JSON : liste d'objets {km, name, cutoff?, cutoff_day?, stop_s?}")
     ap.add_argument("--official-distance-m", type=float, dest="official_distance_m",
@@ -2044,8 +2416,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if len(pts) < 2:
         print(f"ERREUR : GPX sans trace exploitable — {args.gpx}", file=sys.stderr)
         return 1
+    start_time_known = args.start is not None
+    args.start = args.start or "07:00"
     try:
         hh, mm = _parse_hhmm(args.start, label="--start")
+        night_penalty_pct = _validate_night_pct(args.night_penalty_pct, NIGHT_BASE_PENALTY_PCT,
+                                                "--night-penalty-pct")
+        night_descent_extra_max_pct = _validate_night_pct(
+            args.night_descent_extra_max_pct, NIGHT_DESCENT_EXTRA_MAX_PCT, "--night-descent-extra-max-pct")
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
@@ -2110,7 +2488,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             weight_kg=weight_kg, weight_source=weight_source,
             pack_kg=pack_kg, pack_kg_provided=pack_kg_provided,
             calibration_band=calibration_band, calibration_band_source=calibration_band_source,
-            calibration=calibration)
+            calibration=calibration, tz=args.tz, start_time_known=start_time_known,
+            night_enabled=not args.no_night, night_penalty_pct=night_penalty_pct,
+            night_descent_extra_max_pct=night_descent_extra_max_pct)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1

@@ -868,6 +868,9 @@ def build_race_debrief(plan: dict, activity: dict, *,
     }
     if fade:
         result["fade"] = fade
+    night = night_error_summary(segments, segment_debriefs, scenario)
+    if night:
+        result["night"] = night
     if carbs:
         result["carbs"] = carbs
     if weather:
@@ -875,6 +878,45 @@ def build_race_debrief(plan: dict, activity: dict, *,
     if aid_times is not None:
         result["aid_station_times"] = aid_times
     return _drop_none(result)
+
+
+# Fraction de nuit à partir de laquelle une section compte comme « de nuit » / en dessous de
+# laquelle elle compte comme « de jour » pour l'erreur de la pénalité de nuit (#184, prépare
+# #188) : approximation du projet, les sections entre les deux (crépuscule) sont ignorées.
+NIGHT_SEGMENT_MIN_FRACTION = 0.5
+DAY_SEGMENT_MAX_FRACTION = 0.05
+
+
+def night_error_summary(segments: Sequence[dict], segment_debriefs: Sequence[dict],
+                         scenario: str) -> Optional[dict]:
+    """Erreur plan/réalisé des sections de NUIT, séparée de celle des sections de jour (#184,
+    prépare #188). Le temps planifié inclut déjà la pénalité de nuit : `delta_pct` d'une
+    section de nuit mesure donc l'erreur RÉSIDUELLE de la pénalité (positif = plus lent que
+    prévu malgré elle), à comparer à celle des sections de jour. Moyenne pondérée par le temps
+    planifié, sections de résolution `high` uniquement (`ASSUMPTIONS['resolution']`). `None`
+    si le plan n'a pas de `night_fraction` ou si aucune section de nuit n'est comparable."""
+    fractions = {seg["id"]: (seg.get("night_fraction") or {}).get(scenario) for seg in segments}
+    groups: Dict[str, List[Tuple[float, float]]] = {"night": [], "day": []}
+    for entry in segment_debriefs:
+        frac = fractions.get(entry["id"])
+        if frac is None or entry.get("resolution") != "high" or entry.get("delta_pct") is None \
+                or not entry.get("planned_time_s"):
+            continue
+        if frac >= NIGHT_SEGMENT_MIN_FRACTION:
+            groups["night"].append((entry["delta_pct"], entry["planned_time_s"]))
+        elif frac <= DAY_SEGMENT_MAX_FRACTION:
+            groups["day"].append((entry["delta_pct"], entry["planned_time_s"]))
+    if not groups["night"]:
+        return None
+    out: Dict[str, object] = {}
+    for key, items in groups.items():
+        if items:
+            den = sum(w for _, w in items)
+            out[f"{key}_segments"] = len(items)
+            out[f"{key}_delta_pct"] = round(sum(d * w for d, w in items) / den, 1)
+    if "day_delta_pct" in out:
+        out["night_minus_day_pct"] = round(out["night_delta_pct"] - out["day_delta_pct"], 1)
+    return out
 
 
 def _weather_subset(weather: dict) -> dict:
