@@ -104,6 +104,13 @@ temps) plutôt qu'en remplacement complet de Garmin :
    Garmin reste la destination **primaire** : Intervals.icu n'est utilisé que
    sur demande explicite.
 
+### Et le MCP officiel de COROS ?
+
+Audité dans #168 : il peut s'ajouter à la main pour un usage interactif, mais il
+n'est pas une source du projet (noms d'outils non vérifiables, authentification
+OAuth interactive, pas de support documenté de Claude Code). Les montres COROS
+passent par Intervals.icu ; voir [Montres COROS](coros.md).
+
 ## Agents
 
 ### Quel agent dois-je utiliser ?

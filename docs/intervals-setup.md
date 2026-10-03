@@ -119,6 +119,12 @@ les cibles s'écrivent en texte dans `description`), pas d'upsert (vérification
 `get_calendar_events` avant chaque push), vérification limitée aux champs que
 `get_event` renvoie réellement.
 
+## Montres COROS
+
+COROS n'a pas de source dédiée : sa montre se synchronise vers Intervals.icu et
+c'est le chemin supporté. Le MCP officiel de COROS a été audité (#168) et reste
+hors du projet : voir [Montres COROS](coros.md).
+
 ## Fonctionnalités et champs indisponibles avec cette source
 
 Aucune valeur n'est jamais devinée à leur place — l'agent dit explicitement
