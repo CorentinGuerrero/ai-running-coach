@@ -33,6 +33,13 @@ Options
     --output          Fichier Markdown de sortie (défaut stdout)
     --json            Fichier JSON de sortie (dump structuré)
     --quiet           N'affiche que les erreurs
+    --dem             Corrige l'altitude par un MNT public (#176) : IGN RGE ALTI en France,
+                      Copernicus GLO-90 via Open-Meteo ailleurs. Envoie des COORDONNÉES
+                      amincies au fournisseur (voir docs/elevation.md) ; hors ligne, le
+                      comportement antérieur (altitude du fichier) reste le repli.
+    --no-dem          Désactive la correction même avec `[elevation].dem = "auto"`
+    --dem-step        Pas d'amincissement des coordonnées envoyées (m, défaut config/50)
+    --workspace       Workspace (config `[elevation]`, cache `.arc/dem-cache.json`)
 
 Sortie
 ------
@@ -60,6 +67,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 from arc_elevation import smooth_moving_average  # noqa: E402
 import arc_climb  # noqa: E402
+import arc_dem  # noqa: E402
 
 NS = {"g": "http://www.topografix.com/GPX/1/1"}
 
@@ -109,8 +117,10 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def compute_metrics(pts: list[dict], smooth: int = 3) -> dict:
-    """Calcule distance, D+/D- (lissé), altitudes et profil par km."""
+def compute_metrics(pts: list[dict], smooth: int = 3, min_step_m: float = 1.0) -> dict:
+    """Calcule distance, D+/D- (lissé), altitudes et profil par km. `min_step_m` : pas
+    d'altitude ignoré (1 m pour un GPX brut ; 0 pour une série MNT interpolée, #176 —
+    voir `arc_elevation.ASSUMPTIONS["dem_series"]`)."""
     # 1) distance cumulée + altitude brute
     dist = [0.0]
     for i in range(1, len(pts)):
@@ -127,9 +137,9 @@ def compute_metrics(pts: list[dict], smooth: int = 3) -> dict:
         if ele[i] is None or ele[i - 1] is None:
             continue
         d = ele[i] - ele[i - 1]
-        if d > 1.0:
+        if d > min_step_m:
             dp += d
-        elif d < -1.0:
+        elif d < -min_step_m:
             dm += abs(d)
 
     # 4) profil par km
@@ -228,13 +238,40 @@ def format_kmh_pace(kmh: float) -> str:
     return f"{60 / kmh * 60:.0f}:{((60 / kmh) * 60 % 60 * 60 / 60):02.0f}".replace(":", ":")
 
 
-def build_report(name: str, m: dict, climbs: list[dict], target: dict) -> str:
+def _dem_section(dem: dict | None) -> list[str]:
+    """Bloc « correction altimétrique » du rapport (#176) : vide si le MNT n'a pas été demandé."""
+    if not dem:
+        return []
+    if dem["status"] == "unavailable":
+        return [f"> ⚠️ Correction MNT indisponible ({dem.get('error')}) — altitudes du fichier conservées.", ""]
+    c = dem["comparison"]
+    pct = f" ({c['delta_gain_pct']:+.0f} %)" if c["delta_gain_pct"] is not None else ""
+    lines = ["## Correction altimétrique (MNT)",
+             "| | D+ fichier | D+ MNT (référence) | Écart |",
+             "|:--|:--|:--|:--|",
+             f"| D+ | {c['file_gain_m']:.0f} m | **{c['dem_gain_m']:.0f} m** | {c['delta_gain_m']:+.0f} m{pct} |",
+             f"| D- | {c['file_loss_m']:.0f} m | **{c['dem_loss_m']:.0f} m** | "
+             f"{c['dem_loss_m'] - c['file_loss_m']:+.0f} m |",
+             ""]
+    lines.append("Les chiffres du rapport (D+, D-, profil, montées) sont calculés sur l'altitude MNT. "
+                 f"Pas d'échantillonnage {dem['report']['step_m']} m, {dem['report']['nodes']} points "
+                 "envoyés au fournisseur (coordonnées seules).")
+    if dem["status"] == "partial":
+        lines.append(f"Couverture partielle : {dem['report'].get('coverage_pct')} % des points résolus, "
+                     "le reste interpolé.")
+    lines.extend(f"_{a}_" for a in dem["report"]["attribution"])
+    lines.append("")
+    return lines
+
+
+def build_report(name: str, m: dict, climbs: list[dict], target: dict, dem: dict | None = None) -> str:
     km = m["distance_m"] / 1000
     lines = [f"# Analyse parcours GPX — {name or 'Parcours'}", ""]
     lines.append(f"**Fichier analysé :** distance réelle **{km:.1f} km** · D+ **{m['elevation_gain_m']:.0f} m** · "
                  f"D- **{m['elevation_loss_m']:.0f} m** · alt {m['alt_min']} → {m['alt_max']} m · "
                  f"**{'boucle fermée' if m['is_loop'] else 'point-to-point'}** · {m['points']} points GPS")
     lines.append("")
+    lines.extend(_dem_section(dem))
 
     # Verdict compat
     if target.get("distance") or target.get("dp"):
@@ -287,6 +324,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--output", type=Path, default=None, help="Fichier Markdown de sortie (défaut stdout)")
     ap.add_argument("--json", type=Path, default=None, help="Fichier JSON de sortie")
     ap.add_argument("--quiet", action="store_true", help="N'affiche que les erreurs")
+    ap.add_argument("--dem", action="store_true",
+                    help="Corrige l'altitude par MNT public (IGN France / Copernicus ailleurs, #176)")
+    ap.add_argument("--no-dem", action="store_true", help="Désactive la correction MNT (même en mode auto)")
+    ap.add_argument("--dem-step", type=float, default=None, help="Pas d'amincissement des coordonnées (m)")
+    ap.add_argument("--workspace", default=None, help="Workspace (config [elevation], cache .arc/)")
     args = ap.parse_args(argv)
 
     if not args.gpx.exists():
@@ -298,9 +340,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERREUR : aucun point trkpt dans {args.gpx}", file=sys.stderr)
         return 1
 
+    if args.dem and args.no_dem:
+        print("ERREUR : --dem et --no-dem sont incompatibles.", file=sys.stderr)
+        return 1
     m = compute_metrics(pts, smooth=args.smooth)
+    climbs_smooth = args.smooth
+    dem = None
+    from coach_setup import workspace_root  # noqa: E402 — config lue seulement ici
+    workspace = workspace_root(args.workspace)
+    settings = arc_dem.load_settings(workspace)
+    if args.dem or (settings["dem"] == "auto" and not args.no_dem):
+        cache = arc_dem.DemCache(arc_dem.cache_path(workspace), enabled=settings["cache"])
+        res = arc_dem.resample_track(pts, step_m=args.dem_step or settings["step_m"], cache=cache)
+        if res["status"] == "unavailable":
+            print(f"AVERTISSEMENT : correction MNT indisponible ({res['report'].get('error')}) — "
+                  "altitudes du fichier conservées.", file=sys.stderr)
+            dem = {"status": "unavailable", "error": res["report"].get("error"), "report": res["report"]}
+        else:
+            comparison = arc_dem.compare_gain_loss([p["ele"] for p in pts], res["ele"], file_smooth=args.smooth)
+            pts = [{**p, "ele_file": p["ele"], "ele": z} for p, z in zip(pts, res["ele"])]
+            m = compute_metrics(pts, smooth=1, min_step_m=0.0)
+            climbs_smooth = 1
+            dem = {"status": res["status"], "comparison": comparison, "report": res["report"]}
+    m["elevation_source"] = "dem" if dem and dem["status"] != "unavailable" else "file"
     climbs = detect_climbs(pts, m, min_gain=args.min_gain, min_dist=args.min_climb_dist,
-                           min_grade_pct=args.min_grade, smooth=args.smooth)
+                           min_grade_pct=args.min_grade, smooth=climbs_smooth)
 
     target = {}
     if args.target_distance:
@@ -309,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.target_dp:
         target["dp"] = args.target_dp
 
-    report = build_report(args.name, m, climbs, target)
+    report = build_report(args.name, m, climbs, target, dem)
 
     if args.json:
         dump = {
@@ -319,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
             "climbs": climbs,
             "target": target,
         }
+        if dem:
+            dump["dem"] = dem
         args.json.write_text(json.dumps(dump, indent=2, ensure_ascii=False))
         if not args.quiet:
             print(f"JSON écrit dans {args.json}")

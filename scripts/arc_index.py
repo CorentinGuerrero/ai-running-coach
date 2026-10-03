@@ -272,6 +272,7 @@ import arc_cs as CS  # noqa: E402
 import arc_cycle as CY  # noqa: E402
 import arc_decision_effects as DE  # noqa: E402
 import arc_decoupling as DC  # noqa: E402
+import arc_dem as DEM  # noqa: E402
 import arc_descent as DS  # noqa: E402
 import arc_durability as DU  # noqa: E402
 import arc_energy as EN  # noqa: E402
@@ -3857,6 +3858,33 @@ def decoupling_trend(conn, today: date, weeks: Optional[int] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def activity_dem_check(conn, workspace: Path, ref: Union[int, str], *, http_get=None) -> dict:
+    """Compare l'altitude enregistrée d'une séance au MNT (#176) — OPT-IN STRICT : sans
+    `[privacy].dem_for_activities = true`, aucune coordonnée ne part et le rapport le dit
+    (`status = "disabled"`). Lecture seule : l'altitude enregistrée n'est JAMAIS remplacée ni
+    écrite dans l'index ou le Markdown ; seule la comparaison D+ enregistré / D+ MNT et le biais
+    moyen sont rendus. Début/fin de trace (200 m) non envoyés. Jamais d'exception réseau :
+    `status = "unavailable"` + raison (repli hors ligne)."""
+    label = ref_label(ref)
+    cfg = DEM.load_settings(workspace)
+    if not cfg["activities"]:
+        return {**label, "status": "disabled",
+                "reason": "correction MNT des séances désactivée : une trace d'activité révèle votre "
+                          "domicile. Activez `[privacy].dem_for_activities = true` dans "
+                          "config/workspace.user.toml pour l'autoriser (voir docs/elevation.md)."}
+    act = conn.execute(f"SELECT id FROM activity WHERE {ref_column(ref)} = ?", (ref,)).fetchone()
+    if act is None:
+        return {**label, "status": "unknown_activity", "reason": unknown_activity_reason(ref)}
+    rows = samples_by_ref(conn, ref)["samples"]
+    if not rows:
+        return {**label, "status": "no_samples", "reason": "aucun échantillon FIT ingéré pour cette séance"}
+    cache = DEM.DemCache(DEM.cache_path(workspace), enabled=cfg["cache"])
+    result = DEM.activity_check(rows, cache=cache, http_get=http_get)
+    return {**label, **result, "attribution": result.get("report", {}).get("attribution", []),
+            "note": "comparaison seulement — l'altitude enregistrée n'est pas modifiée (le baromètre "
+                    "reste souvent meilleur sur un FIT récent)"}
+
+
 def activity_climb_report(conn, ref: Union[int, str]) -> dict:
     """Rapport VAM (#46) d'une séance, par `garmin_activity_id` — pour la CLI
     (`arc_index.py vam --activity`) et pour les agents en headless. Lit les
@@ -4688,7 +4716,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
-                                 "decision-effects", "load-forecast", "plan-templates", "strength"))
+                                 "decision-effects", "load-forecast", "plan-templates", "strength", "dem-check"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -5016,6 +5044,12 @@ def main(argv=None) -> int:
             raise ConfigError("commande « gap » : garmin_activity_id attendu "
                                "(--activity ou argument positionnel, ex. arc_index.py gap 19287537093).")
         print(json.dumps(activity_gap_report(conn, ref), ensure_ascii=False))
+        return 0
+    if args.command == "dem-check":
+        ref = parse_activity_selector(args.activity if args.activity is not None else args.selector, args.command)
+        if ref is None:
+            raise ConfigError("commande « dem-check » : identifiant de séance requis (--activity ou argument positionnel).")
+        print(json.dumps(activity_dem_check(conn, workspace, ref), ensure_ascii=False))
         return 0
     if args.command == "decoupling":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

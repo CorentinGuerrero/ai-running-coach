@@ -207,3 +207,36 @@ def grade_series(samples: Sequence[dict], *, window_m: float = DEFAULT_GRADE_WIN
                 continue
             ordered[segment[li]]["grade"] = (a_k - a_j) / span
     return ordered
+
+
+def gain_loss(values: Sequence[Optional[float]], *, smooth_taps: int = 1,
+              min_step_m: float = 0.0) -> tuple:
+    """`(D+, D-)` en mètres d'une série d'altitudes (`None` ignorés), après lissage
+    optionnel (`smooth_taps`) ; un pas strictement inférieur ou égal à `min_step_m`
+    est ignoré (seuil anti-bruit : `analyze_gpx.compute_metrics` utilise 1,0 m sur un
+    GPX brut, voir `ASSUMPTIONS["dem_series"]` pour le cas d'une série issue d'un MNT,
+    #176). Série de moins de 2 valeurs → `(0.0, 0.0)`."""
+    series = smooth_moving_average(values, smooth_taps)
+    gain = loss = 0.0
+    for prev, cur in zip(series, series[1:]):
+        if prev is None or cur is None:
+            continue
+        step = cur - prev
+        if step > min_step_m:
+            gain += step
+        elif step < -min_step_m:
+            loss += -step
+    return gain, loss
+
+
+ASSUMPTIONS["dem_series"] = (
+    "Une altitude rééchantillonnée sur un modèle numérique de terrain (MNT, `arc_dem.py`, #176) "
+    "n'est interpolée linéairement que ENTRE des nœuds espacés de `step_m` (50 m par défaut) : "
+    "entre deux nœuds il n'y a aucun bruit, donc son D+ se calcule SANS lissage ni seuil "
+    "(`gain_loss(smooth_taps=1, min_step_m=0)`) — le seuil de 1 m par point de `analyze_gpx` "
+    "supprimerait, lui, toute pente douce échantillonnée plus finement que 1 m (5 m de pas à 5 % "
+    "= 0,25 m/point). Conséquence assumée : une ondulation plus courte que `step_m`, ou plus "
+    "fine que la résolution du MNT (1 m pour RGE ALTI, 90 m pour Copernicus GLO-90), n'est PAS "
+    "comptée ; le D+ MNT est donc une référence de TERRAIN, comparable au D+ d'un GPX lissé, "
+    "jamais au cumul brut d'un baromètre."
+)

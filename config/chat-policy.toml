@@ -78,14 +78,14 @@ value_options = ["--last-period", "--today"]
 read_options = ["--input"]
 
 [shell.scripts."scripts/arc_race_pacing.py"]
-flags = ["--memory", "--rebuild"]
+flags = ["--memory", "--rebuild", "--dem", "--no-dem"]
 value_options = ["--today", "--band", "--months", "--segment-m", "--race-date", "--start", "--official-distance-m", "--fade-pct", "--fade-weeks", "--temp-max-c", "--pack-kg", "--terrain"]
 read_options = ["--gpx", "--aid-stations", "--weather-file"]
 output_options = ["--db"]
 
 [shell.scripts."skills/gpx-analysis/scripts/analyze_gpx.py"]
-flags = ["--quiet"]
-value_options = ["--name", "--target-distance", "--target-dp", "--smooth", "--min-gain", "--min-grade", "--min-climb-dist"]
+flags = ["--quiet", "--dem", "--no-dem"]
+value_options = ["--name", "--target-distance", "--target-dp", "--smooth", "--min-gain", "--min-grade", "--min-climb-dist", "--dem-step"]
 read_options = ["--gpx"]
 output_options = ["--output", "--json"]
 

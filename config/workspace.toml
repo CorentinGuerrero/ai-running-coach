@@ -338,3 +338,26 @@ port = 8765
 # Modifier ces clés demande de relancer le tableau de bord (en-tête Content-Security-Policy).
 map_tiles = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
 map_attribution = "© OpenStreetMap contributors, SRTM · style © OpenTopoMap (CC-BY-SA)"
+
+[elevation]
+# Correction altimétrique par modèle numérique de terrain (#176, scripts/arc_dem.py,
+# docs/elevation.md). DÉSACTIVÉE par défaut : aucune coordonnée ne quitte votre machine.
+#   "off"  — défaut ; la correction n'a lieu que sur demande (`analyze_gpx.py --dem`,
+#            `arc_race_pacing.py --dem`)
+#   "auto" — les GPX de COURSE (itinéraires publics : analyse de parcours, plan de course)
+#            sont corrigés d'office ; repli sur l'altitude du fichier hors ligne (avec avertissement)
+# Fournisseurs : IGN RGE ALTI (Géoplateforme, France métropolitaine) puis Copernicus GLO-90
+# via Open-Meteo (ailleurs). Seules des coordonnées arrondies, amincies, sont envoyées.
+# Valeur invalide = "off" + avertissement.
+dem = "off"
+# Pas d'amincissement des coordonnées envoyées (m, 5 à 500) : un point tous les `step_m`.
+step_m = 50
+# Cache local des altitudes (<workspace>/.arc/dem-cache.json, jamais dans le dépôt).
+cache = true
+
+[privacy]
+# Séances personnelles (`arc_index.py dem-check <séance>`) : une trace d'activité révèle votre
+# domicile. Tant que `false` (défaut), AUCUNE trace de séance n'est envoyée à un service
+# d'altimétrie. `true` = autorise la comparaison altitude enregistrée / MNT (jamais un
+# remplacement), début et fin de trace (200 m) exclus. Indépendant de [elevation].dem.
+dem_for_activities = false
