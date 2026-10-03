@@ -17,9 +17,10 @@ file = "hrv-collapsed.json"
 
 [expect]
 tools_called = ["get_hrv_data", "get_rhr_day", "get_training_readiness"]
+# La phase doit être reliée à la lecture (même phrase, à 160 caractères près) : un simple
+# écho de « phase lutéale » (déjà dans la demande) ailleurs dans la réponse ne suffit pas.
 must_match = [
-  "lutéal|luteal",
-  "contexte|nuanc|cohérent|plausible|peut expliquer",
+  "(lutéal|luteal)[^.\\n]{0,160}(contexte|nuanc|cohérent|plausible|peut expliquer|possible)|(contexte|nuanc|cohérent|plausible|peut expliquer)[^.\\n]{0,160}(lutéal|luteal)",
 ]
 must_not_match = ["tu as (un|une) (trouble|syndrome)"]
 files_with_arc_block = ["medical/*_health.md"]
