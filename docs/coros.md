@@ -20,11 +20,12 @@ Pourquoi pas une source `coros` :
 
 1. **Les noms d'outils ne sont pas vérifiables à la source.** `tools/list`
    exige un jeton OAuth ; le serveur n'est pas open source. Les seuls noms
-   connus viennent d'un projet tiers (voir « Références »), qui annonce 22
-   outils, alors qu'une revue de presse en compte 15 en 5 groupes : la liste
-   évolue et nous ne pouvons pas l'épingler à un commit comme pour
-   `garmin-mcp` ou `intervals-icu-mcp`. Règle du projet : jamais de nom d'outil
-   deviné.
+   connus viennent d'un projet tiers (voir « Références »), qui en annonce 22
+   fin juillet 2026, contre 15 au lancement selon une revue de presse de mai
+   2026 ; le journal des versions de COROS montre des ajouts en juin puis en
+   septembre 2026. La liste évolue et nous ne pouvons pas l'épingler à un
+   commit comme pour `garmin-mcp` ou `intervals-icu-mcp`. Règle du projet :
+   jamais de nom d'outil deviné.
 2. **L'exécution sans tête n'est pas démontrée.** L'authentification est
    OAuth 2.0 interactive (code d'autorisation + PKCE) ; selon le tiers, le
    jeton d'accès dure environ 30 jours et le jeton de rafraîchissement est
@@ -34,8 +35,9 @@ Pourquoi pas une source `coros` :
    acceptable pour `garmin-daily-sync`.
 3. **Le gain est partiel.** Le MCP officiel apporterait des tours (laps)
    détaillés, le FIT et des mesures de récupération ; mais l'écriture de
-   séances est contradictoire entre les sources (voir plus bas) et le FIT est
-   plafonné à 50 fichiers par jour.
+   séances, annoncée par COROS le 21 septembre 2026, n'est confirmée par
+   aucune source indépendante (voir plus bas), et le FIT est plafonné à 50
+   demandes de fichiers par jour.
 
 Ce qui ferait changer la décision : un `tools/list` public ou épinglé, un
 support documenté de Claude Code (jeton persistant en mode sans tête), et une
@@ -45,8 +47,11 @@ stubs, `coach-doctor`).
 
 ## Aujourd'hui : COROS via Intervals.icu
 
-La montre synchronise ses activités et son bien-être vers Intervals.icu (via
-l'intégration entre les deux comptes), puis `./install.sh --source intervals`
+La montre synchronise ses activités et une partie de son bien-être vers
+Intervals.icu (via l'intégration entre les deux comptes : sommeil et FC de
+repos ; la HRV n'arrive pas chez tous les utilisateurs selon le
+[forum Intervals.icu](https://forum.intervals.icu/t/coros-support-added/37006)),
+puis `./install.sh --source intervals`
 installe le serveur MCP épinglé `intervals-icu-mcp`. Limites déjà documentées :
 pas de score de readiness (HRV + FC de repos uniquement), pas de FC de
 récupération ni de `splits` par km, séances poussées en texte libre. Détail :
@@ -61,9 +66,9 @@ Le FIT d'une activité s'obtient par l'API REST d'Intervals.icu
 | Fait | Preuve |
 |---|---|
 | Point d'accès `https://mcp.coros.com/mcp`, transport HTTP | `POST` sans jeton → `401` avec `www-authenticate: Bearer resource_metadata="https://mcpeu.coros.com/.well-known/oauth-protected-resource/mcp"` |
-| Authentification **OAuth 2.0**, portées `openid mcp.tools offline_access` | document `/.well-known/oauth-protected-resource` (`bearer_methods_supported: header`) |
-| Serveur d'autorisation `https://mcpeu.coros.com`, **PKCE S256**, **enregistrement dynamique de client** (`/connect/register`), flux `authorization_code`, `refresh_token`, `device_code` | document `/.well-known/oauth-authorization-server` |
-| Instances régionales | en-tête `mr: mcp_eu_prod` ; `mcpcn` rapporté par un tiers, non sondé |
+| Authentification **OAuth 2.0**, portées `openid mcp.tools offline_access` | document `https://mcpeu.coros.com/.well-known/oauth-protected-resource/mcp` (`bearer_methods_supported: header`) |
+| Serveur d'autorisation `https://mcpeu.coros.com`, **PKCE S256**, **enregistrement dynamique de client** (`/connect/register`), flux annoncés dont `authorization_code`, `refresh_token` et `device_code` | document `https://mcpeu.coros.com/.well-known/oauth-authorization-server` |
+| Instance qui a répondu (depuis l'Europe) | en-tête `mr: mcp_eu_prod` ; COROS dit avoir fusionné les URL régionales le 19 mai 2026 ; `https://mcpcn.coros.com/mcp` rapporté par un tiers, non sondé |
 
 L'enregistrement dynamique et le flux appareil sont techniquement compatibles
 avec un client MCP en ligne de commande, mais cela ne prouve pas que COROS
@@ -83,15 +88,21 @@ d'aide <https://support.coros.com/hc/en-us/articles/5146420791060> renvoie 403
   (pas, calories, sommeil, HRV, stress, FC de repos), profil et appareils,
   fichiers `.fit` (GPS, seconde par seconde), cycle menstruel.
 - Écriture : création/édition de plans et de séances (course sur route, trail,
-  vélo), plans de 4 à 16 semaines, planification jusqu'à 14 jours à l'avance.
-  **Contradiction** : un compte rendu de mai 2026 décrit le lancement comme
-  lecture seule (« écriture à venir ») et un projet tiers a constaté des
-  erreurs `Unknown tool` sur les outils d'écriture. L'état actuel de
-  l'écriture est donc **non vérifié**.
+  vélo), plans de 4 à 16 semaines, synchronisation vers la bibliothèque ou le
+  calendrier jusqu'à 14 jours à l'avance. Selon le journal des versions de
+  COROS, l'écriture n'a été ajoutée que le **21 septembre 2026** : ce n'est
+  donc pas une contradiction avec les sources plus anciennes (revue de presse
+  de mai 2026 : lancement en lecture seule ; projet tiers fin juillet 2026 :
+  erreurs `Unknown tool` sur les outils d'écriture), mais aucune source
+  indépendante postérieure ne la confirme : écriture **non vérifiée**.
 - Limites : 50 demandes de fichiers `.fit` par jour ; accès « uniquement après
   autorisation explicite » de l'utilisateur.
-- Calendrier : URL unique consolidée le 19 mai 2026 selon COROS (et non en
-  juillet 2026 comme supposé dans l'issue).
+- Calendrier (journal des versions de la page) : lancement en lecture seule
+  le 5 mai 2026 (page datée du 4 mai), URL régionales fusionnées en une seule
+  le 19 mai, ajout des splits, du FIT, du stress et de la HRV de sommeil le
+  22 juin, écriture le 21 septembre 2026. Aucune des sources consultées ne
+  mentionne une version d'application (la « v4.8.8 » et le « juillet 2026 »
+  de l'issue #168 n'y apparaissent pas).
 
 ### Noms d'outils rapportés par un tiers (non vérifiés)
 
@@ -130,9 +141,12 @@ configurée :
 
 - Claude Desktop : Réglages → Connecteurs → connecteur personnalisé, URL
   `https://mcp.coros.com/mcp` (procédure indiquée par COROS).
-- Claude Code (non documenté par COROS, **non testé ici**) : la commande
-  générique `claude mcp add --transport http coros https://mcp.coros.com/mcp`
-  puis `/mcp` pour l'autorisation OAuth.
+- Claude Code : **non documenté par COROS et non testé ici** (l'audit ne
+  s'est jamais authentifié). À titre indicatif seulement, la commande
+  générique d'ajout d'un serveur MCP HTTP serait
+  `claude mcp add --transport http coros https://mcp.coros.com/mcp`, puis
+  `/mcp` pour lancer l'autorisation OAuth ; rien ne garantit que COROS
+  accepte ce client.
 
 Dans ce cas, le coach ne connaît pas ces outils : rien dans `AGENTS.md`, les
 agents ou les skills ne les utilise, rien n'est persisté au contrat `arc`

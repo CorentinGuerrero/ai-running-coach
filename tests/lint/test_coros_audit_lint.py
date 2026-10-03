@@ -22,10 +22,23 @@ NAMES = (
 )
 
 
+SECTION = "### Noms d'outils rapportés par un tiers (non vérifiés)"
+
+
+def _documented_names() -> set[str]:
+    """Identifiants camelCase cités dans la section « non vérifiés » (lus dans la doc)."""
+    tail = DOC.read_text(encoding="utf-8").partition(SECTION)[2]
+    section = tail.split("\n## ", 1)[0]
+    return set(re.findall(r"`((?:query|get|download|analyze)[A-Z][A-Za-z]+)`", section))
+
+
 class TestCorosAudit(unittest.TestCase):
+    def test_documented_names_cover_reference_list(self):
+        # Garde-fou de l'extraction : la liste figée doit rester un sous-ensemble.
+        self.assertTrue(set(NAMES) <= _documented_names())
     def test_tool_names_only_in_unverified_section(self):
         text = DOC.read_text(encoding="utf-8")
-        head, sep, tail = text.partition("### Noms d'outils rapportés par un tiers (non vérifiés)")
+        head, sep, tail = text.partition(SECTION)
         self.assertTrue(sep, "section « non vérifiés » absente")
         section = tail.split("\n## ", 1)[0]
         for name in NAMES:
@@ -38,7 +51,9 @@ class TestCorosAudit(unittest.TestCase):
         self.assertNotRegex(text, r"outil[s]? vérifié[s]?\b(?! par)")
 
     def test_names_absent_from_prompts_and_code(self):
-        roots = ["AGENTS.md", "install.sh", "scripts", ".claude", "skills", "agents", "config"]
+        roots = ["AGENTS.md", "install.sh", "scripts", ".claude", ".github", "skills", "agents",
+                 "config", "templates"]
+        names = set(NAMES) | _documented_names()
         for root in roots:
             p = REPO / root
             files = [p] if p.is_file() else (list(p.rglob("*")) if p.exists() else [])
@@ -49,8 +64,8 @@ class TestCorosAudit(unittest.TestCase):
                     body = f.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
                     continue
-                for name in NAMES:
-                    self.assertNotIn(name, body, f"{name} dans {f.relative_to(REPO)}")
+                for name in sorted(names):
+                    self.assertFalse(name in body, f"{name} dans {f.relative_to(REPO)}")
 
     def test_doc_in_nav_and_decision_recorded(self):
         self.assertIn("coros.md", (REPO / "mkdocs.yml").read_text(encoding="utf-8"))
