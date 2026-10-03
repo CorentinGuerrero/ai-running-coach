@@ -369,8 +369,11 @@ class TestPaceCurveIndex(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _activity(self, gid, day, durations):
+        # `gid` entier = Garmin ; chaîne `i<chiffres>` = intervals.icu (#68), `s<chiffres>` = Strava (#164).
+        col = ("garmin_activity_id" if isinstance(gid, int)
+               else "intervals_activity_id" if gid.startswith("i") else "strava_activity_id")
         fields = (f'"arc": 1, "kind": "activity", "date": "{day}", "sport": "running", '
-                  f'"duration_s": 1500, "distance_m": 5000, "garmin_activity_id": {gid}')
+                  f'"duration_s": 1500, "distance_m": 5000, "{col}": {json.dumps(gid)}')
         (self.ws / "activities" / f"{day}_running.md").write_text(
             f"# Titre\n\n```arc\n{{{fields}}}\n```\n", encoding="utf-8")
         fit = self.ws / "activities" / "fit"
@@ -447,6 +450,26 @@ class TestPaceCurveIndex(unittest.TestCase):
         self._index()
         I.pace_curve(self.conn, today, curve_cache=cache)
         self.assertNotIn(910000020, cache)
+
+    def test_strava_and_intervals_sourced_samples_are_used(self):
+        # #164 : séances Strava (`s<chiffres>`) et intervals.icu (`i<chiffres>`) mêlées à Garmin — toutes
+        # comptent (REF_COLUMNS), avec ou sans cache, jamais écartées en silence.
+        refs = ("s9100000001", "s9100000002", "i9100000003", 910000034, "s9100000005")
+        for i, (ref, t) in enumerate(zip(refs, (180, 300, 480, 720, 1200))):
+            day = (date.fromisoformat(self.TODAY) - timedelta(days=4 + 5 * i)).isoformat()
+            self._activity(ref, day, t)
+        self._index()
+        today = date.fromisoformat(self.TODAY)
+        rep = I.pace_curve(self.conn, today)
+        self.assertEqual(rep["n_activities"], 5)
+        self.assertEqual(rep["current"]["status"], "ok", rep["current"]["reason"])
+        self.assertAlmostEqual(rep["current"]["cs_ms"], self.CS_MS, delta=0.08)
+        best_refs = {r["ref"] for r in rep["windows"][1]["curve"]}
+        self.assertIn("s9100000005", best_refs)
+        cache = {}
+        cached = I.pace_curve(self.conn, today, curve_cache=cache)
+        self.assertEqual(json.dumps(rep, sort_keys=True), json.dumps(cached, sort_keys=True))
+        self.assertIn("s9100000001", cache)
 
     def test_no_activities(self):
         self._index()

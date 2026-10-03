@@ -4505,7 +4505,7 @@ def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
     since = (today - timedelta(days=lookback - 1)).isoformat()
     marks = ",".join("?" for _ in M.RUNNING_SPORTS)
     rows = conn.execute(
-        f"SELECT id, date, garmin_activity_id, intervals_activity_id FROM activity "
+        f"SELECT id, date, {', '.join(REF_COLUMNS)} FROM activity "
         f"WHERE sport IN ({marks}) AND date >= ? AND date <= ? ORDER BY date, id",
         (*M.RUNNING_SPORTS, since, today.isoformat())).fetchall()
     curves = []
