@@ -81,7 +81,8 @@ agents ou par les commandes courtes plutôt que par un skill dédié :
 | `arc_log.py` | skill `log` (`/log`) | Arithmétique, correspondance catalogue et fusion idempotente pour la saisie libre |
 | `arc_race_pacing.py` | `course-strategist` | Allures de course par segment depuis le modèle personnel pente → allure (#59) |
 | `arc_race_debrief.py` | `coach`, `course-strategist` | Débrief post-course plan vs réalisé, par segment (#61) |
-| `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60) |
+| `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60), plage en % de la vitesse critique quand l'ajustement est valide (#169) |
+| `arc_cs.py` | `arc_index.py pace-curve`, `arc_workout_targets.py` | Courbe allure-durée en GAP, vitesse critique et D′ (#169) — fonctions pures, voir [Vitesse critique](vitesse-critique.md) |
 | `arc_trail_shape.py` | `coach`, `/race` | Score Trail Shape, préparation à l'objectif actif (#63) |
 | `garmin_gear_backfill.py` | `coach` (interactif, sur accord), à la main | Rattrape le matériel Garmin sur l'historique (#145) : simulation par défaut, `--apply` ; dépend de `garminconnect` (via l'environnement garmin-mcp), voir [Rattraper le matériel de l'historique](garmin-setup.md#rattraper-le-materiel-de-lhistorique) |
 
@@ -112,6 +113,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `descent` | Efficacité en descente |
 | `durability` | Fade d'endurance sur séance longue (> 90 min) |
 | `energy` | Dépense énergétique modèle (RE3 + marche) vs Garmin, contrôle d'écart |
+| `pace-curve` | Courbe allure-durée en GAP (42/90/365 j), vitesse critique et D′, tendance ; `--days N`, `--lt-speed-ms V` (contrôle avec le seuil lactique Garmin) (#169) |
 | `climb-history` | Historique d'une montée reconnue d'une séance à l'autre (`--segment`, #49) |
 | `decisions` | Journal des décisions tracées (filtrable par date, fenêtre, déclencheur, issue) |
 | `slope-model` | Modèle personnel pente → allure (#58) |

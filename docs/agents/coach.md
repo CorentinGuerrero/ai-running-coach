@@ -85,6 +85,15 @@ endurance/récupération, et le D+ attendu (borne basse) pour un travail de côt
 Une cible dont la **valeur** ressort `null` est retirée du DTO Garmin plutôt
 que devinée.
 
+Pour les séances `tempo`/`threshold`/`vo2max`, la même sortie porte `cs_target`
+(#169) : une plage de vitesse en % de la **vitesse critique** de l'athlète,
+**en complément** de la zone FC et seulement si l'ajustement est valide (sinon
+`null` + motif : le coach s'en tient à la zone FC). Le coach cite la qualité de
+l'ajustement, rappelle que l'allure est « équivalent plat » (GAP), et signale —
+sans trancher — un écart de plus de 5 % avec le seuil lactique Garmin. La courbe
+elle-même : `python3 scripts/arc_index.py pace-curve`. Voir
+[Vitesse critique](../vitesse-critique.md).
+
 ### Score Trail Shape (#63)
 
 `python3 scripts/arc_index.py trail-shape` compare les 8 dernières semaines

@@ -26,6 +26,7 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
                                                                         # journal des décisions, en JSON (#54)
     arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
                                                                         # dépense modèle vs Garmin, en JSON
+    arc_index.py pace-curve [--days N] [--lt-speed-ms V]              # courbe allure-durée GAP, CS/D′ (#169)
     arc_index.py energy --calibration [--weeks N]                     # calibration personnelle (ratio
                                                                         # Garmin/modèle par panier route/trail)
 
@@ -236,6 +237,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_climb as VC  # noqa: E402
 import arc_climb_match as VM  # noqa: E402
 import arc_contract as C  # noqa: E402
+import arc_cs as CS  # noqa: E402
 import arc_cycle as CY  # noqa: E402
 import arc_decoupling as DC  # noqa: E402
 import arc_descent as DS  # noqa: E402
@@ -3142,11 +3144,13 @@ def index_workspace(conn, workspace: Path, today: Optional[str] = None,
     # `decoupling_*`/`vam_*`/`descent_*`/`durability_*`/`slope_model_*` ci-dessus
     # (collision possible, ex. "model", "no_exception").
     energy_assumptions = {f"energy_{key}": value for key, value in EN.ASSUMPTIONS.items()}
+    # `arc_cs.ASSUMPTIONS` (#169) fusionné à PART, sous des clés préfixées `cs_`.
+    cs_assumptions = {f"cs_{key}": value for key, value in CS.ASSUMPTIONS.items()}
     for key, value in (("settings", _j(conf)),
                        ("assumptions", _j({**M.ASSUMPTIONS, **G.ASSUMPTIONS, **decoupling_assumptions,
                                            **vam_assumptions, **descent_assumptions,
                                            **durability_assumptions, **slope_model_assumptions,
-                                           **energy_assumptions})),
+                                           **energy_assumptions, **cs_assumptions})),
                        ("today", today or date.today().isoformat())):
         conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
     conn.commit()
@@ -4475,6 +4479,51 @@ def gait_summary(conn, today: Optional[date] = None, weeks: int = GAIT_DEFAULT_W
     return GT.gait_summary(sessions, _inspection_rows(conn), today, weeks, names)
 
 
+PACE_CURVE_LOOKBACK_DAYS = 365 + CS.TREND_WINDOW_DAYS   # fenêtre 365 j + profondeur de tendance par défaut
+
+
+def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
+               lt_speed_ms: Optional[float] = None) -> dict:
+    """Courbe allure-durée en GAP, vitesse critique CS et réserve anaérobie D′ (#169) — commande
+    « pace-curve » et `/api/pace-curve`.
+
+    Calculée À LA LECTURE depuis `activity_sample` (séances de course route/trail avec FIT
+    ingéré, `arc_metrics.RUNNING_SPORTS`) : aucune table nouvelle. Tout le détail (fenêtres
+    glissantes sur temps écoulé, couverture, refus explicites, qualité) : `arc_cs.ASSUMPTIONS`.
+    `days` : profondeur de la tendance (défaut 365). `lt_speed_ms` : vitesse au seuil lactique
+    fournie par l'appelant (agent), pour le contrôle de cohérence — jamais lue ici.
+    N'est pas soumis à `[health].morning_check` : aucune donnée de santé."""
+    today = today or date.today()
+    depth = days if days and days > 0 else CS.TREND_DEFAULT_DAYS
+    lookback = max(PACE_CURVE_LOOKBACK_DAYS, depth + CS.TREND_WINDOW_DAYS)
+    since = (today - timedelta(days=lookback - 1)).isoformat()
+    marks = ",".join("?" for _ in M.RUNNING_SPORTS)
+    rows = conn.execute(
+        f"SELECT id, date, garmin_activity_id, intervals_activity_id FROM activity "
+        f"WHERE sport IN ({marks}) AND date >= ? AND date <= ? ORDER BY date, id",
+        (*M.RUNNING_SPORTS, since, today.isoformat())).fetchall()
+    curves = []
+    skipped_no_grade = 0
+    for row in rows:
+        ref = activity_ref(row)
+        if ref is None:
+            continue
+        samples_rows = conn.execute(
+            "SELECT t_s, distance_m, altitude_m, speed_ms, covered_s "
+            f"FROM activity_sample WHERE {ref_column(ref)} = ? ORDER BY t_s", (ref,)).fetchall()
+        if not samples_rows:
+            continue
+        result = CS.activity_curve([dict(r) for r in samples_rows])
+        if result["reason_code"] == "no_grade":
+            skipped_no_grade += 1
+            continue
+        if result["curve"]:
+            curves.append({"date": row["date"], "ref": ref, "curve": result["curve"]})
+    report = CS.build_report(curves, today, days=depth, skipped_no_grade=skipped_no_grade)
+    report["threshold_check"] = CS.compare_threshold(report["current"], lt_speed_ms)
+    return report
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
@@ -4482,7 +4531,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
-                                 "inspections", "gear-career", "gait-summary"))
+                                 "inspections", "gear-career", "gait-summary", "pace-curve"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4570,6 +4619,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « slope-model » : fenêtre d'historique (mois) — sans cette option, "
                              "le modèle déjà stocké (fenêtre `[metrics].slope_model_months`) est renvoyé "
                              "tel quel ; avec elle, recalculé à la volée pour cette fenêtre (#58)")
+    parser.add_argument("--lt-speed-ms", type=float, metavar="V", dest="lt_speed_ms",
+                        help="commande « pace-curve » (#169) : vitesse (m/s) au seuil lactique Garmin, "
+                             "pour le contrôle de cohérence avec la CS (signalé, jamais arbitré)")
+    parser.add_argument("--json", action="store_true",
+                        help="commande « pace-curve » : sortie JSON (déjà le défaut, accepté pour la clarté)")
     parser.add_argument("--band", choices=SL.BANDS, default="endurance",
                         help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
                              "arc_slope_model.ASSUMPTIONS['population'])")
@@ -4652,6 +4706,12 @@ def main(argv=None) -> int:
         career = gear_career(conn, args.gear, today_date)
         print(json.dumps(career, ensure_ascii=False))
         return 1 if "error" in career else 0
+    if args.command == "pace-curve":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        if args.days is not None and args.days < 1:
+            raise ConfigError(f"--days : un entier >= 1 attendu, « {args.days} » reçu.")
+        print(json.dumps(pace_curve(conn, today_date, args.days, args.lt_speed_ms), ensure_ascii=False))
+        return 0
     if args.command == "performance-index":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         print(json.dumps(performance_index(conn, today_date), ensure_ascii=False))

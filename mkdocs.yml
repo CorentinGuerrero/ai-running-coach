@@ -91,6 +91,7 @@ nav:
       - Derrière un reverse proxy (Docker): dashboard/docker.md
       - Le chat avec le coach: dashboard/chat.md
   - Dépense énergétique modèle: energie.md
+  - Vitesse critique et courbe allure-durée: vitesse-critique.md
   - Agents:
       - Vue d'ensemble: agents.md
       - Coach: agents/coach.md
