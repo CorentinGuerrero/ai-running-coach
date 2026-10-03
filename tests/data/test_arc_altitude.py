@@ -77,6 +77,32 @@ class TestFactorShape(unittest.TestCase):
                            AL.altitude_time_factor(2500.0, loss_pct_per_1000m=4.6))
 
 
+class TestSectionExcess(unittest.TestCase):
+    """Revue #185 : excédent moyen pondéré par la distance (effet non linéaire du seuil, densité
+    de points GPX), plutôt que l'altitude moyenne des points."""
+
+    def test_section_crossing_threshold_is_penalised_for_its_high_part(self):
+        # col 1 200 -> 2 800 m à pente constante : altitude moyenne 2 000 m
+        d = [i * 100.0 for i in range(17)]
+        a = [1200.0 + i * 100.0 for i in range(17)]
+        ex = AL.excess_above(a, d)
+        self.assertAlmostEqual(ex, 1300.0 ** 2 / 2 / 1600.0, delta=1.0)   # ≈ 528 m, > 500 m (moyenne − seuil)
+        self.assertGreater(AL.altitude_time_factor(1500.0 + ex), AL.altitude_time_factor(2000.0))
+        # section moyenne 1 500 m qui franchit le seuil : pénalité faible mais non nulle
+        self.assertGreater(AL.excess_above([1000.0, 2000.0], [0.0, 1000.0]), 0.0)
+
+    def test_point_density_does_not_bias(self):
+        # 1 km à 1 500 m puis 1 km à 2 500 m, la partie basse 10 fois plus densément échantillonnée
+        d = [i * 10.0 for i in range(101)] + [1000.0 + i * 100.0 for i in range(1, 11)]
+        a = [1500.0] * 101 + [2500.0] * 10
+        self.assertAlmostEqual(AL.excess_above(a, d), 500.0, delta=55.0)
+
+    def test_cap_pointwise_and_missing(self):
+        self.assertEqual(AL.excess_above([9000.0, 9000.0], [0.0, 10.0]), AL.ALTITUDE_CAP_M - 1500.0)
+        self.assertIsNone(AL.excess_above([None, None], [0.0, 10.0]))
+        self.assertEqual(AL.excess_above([None, 1600.0], [0.0, 10.0]), 100.0)
+
+
 class TestAcclimation(unittest.TestCase):
     def test_declared_days_ramp_and_cap(self):
         self.assertEqual(AL.altitude_credit(None, None)["total"], 0.0)
@@ -130,6 +156,7 @@ class TestRacePenalty(unittest.TestCase):
     def test_section_factors_follow_mean_altitude(self):
         factors = [(seg["altitude_m"], seg["altitude_factor"]) for seg in self.high["segments"]]
         for alt, f in factors:
+            # sections entièrement au-dessus du seuil : excédent moyen = altitude moyenne − seuil
             self.assertAlmostEqual(f, AL.altitude_time_factor(alt), delta=2e-3)
         high_alt = max(factors)[1]
         low_alt = min(factors)[1]
@@ -151,10 +178,37 @@ class TestRacePenalty(unittest.TestCase):
         self.assertEqual(acc["altitude"]["acclimation"]["credit"]["declared"], 0.5)
 
     def test_training_exposure_reduces_penalty(self):
-        exposure = {"status": "exposed", "windows": {"28": {"thresholds": {"1500": {"duration_s": 36000}}}}}
+        exposure = {"status": "exposed", "as_of": "2026-06-10",
+                    "windows": {"28": {"thresholds": {"1500": {"duration_s": 36000}}}}}
         trained = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, altitude_exposure=exposure, **_kw())
         self.assertLess(trained["totals"]["time_s"]["realistic"], self.high["totals"]["time_s"]["realistic"])
         self.assertEqual(trained["altitude"]["acclimation"]["credit"]["training"], 0.25)
+        self.assertTrue(trained["altitude"]["acclimation"]["training_credited"])
+
+    def test_training_exposure_not_credited_far_from_race_or_without_date(self):
+        """Revue #185 : une exposition mesurée des semaines avant la course (ou sans date de course,
+        ou sans date de mesure) n'est jamais créditée — l'acclimatation se perd."""
+        base = {"status": "exposed", "windows": {"28": {"thresholds": {"1500": {"duration_s": 36000}}}}}
+        cases = [({**base, "as_of": "2026-05-01"}, "2026-06-20"),   # 50 j avant
+                 ({**base, "as_of": "2026-06-25"}, "2026-06-20"),   # course passée
+                 (base, "2026-06-20"),                              # date de mesure inconnue
+                 ({**base, "as_of": "2026-06-10"}, None)]           # date de course inconnue
+        for exposure, race_date in cases:
+            plan = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, altitude_exposure=exposure,
+                                      **_kw(race_date=race_date))
+            acc = plan["altitude"]["acclimation"]
+            self.assertEqual(acc["credit"]["training"], 0.0, (exposure.get("as_of"), race_date))
+            self.assertFalse(acc["training_credited"])
+            self.assertIn("non créditée", acc["note"])
+        ok, _ = AL.training_credit_lead({"as_of": "2026-06-06"}, "2026-06-20")
+        self.assertTrue(ok)   # borne incluse : 14 j
+        ok, _ = AL.training_credit_lead({"as_of": "2026-06-05"}, "2026-06-20")
+        self.assertFalse(ok)
+
+    def test_warning_says_default_on_and_how_to_opt_out(self):
+        w = [x for x in self.high["warnings"] if x.startswith("altitude :")][0]
+        self.assertIn("--no-altitude", w)
+        self.assertIn("par défaut", w)
 
     def test_composes_with_heat(self):
         hot_low = RP.build_race_plan(_pts(0.0), PERSONAL_BINS, temp_max_c=30.0, acclimated=False, **_kw())
@@ -208,6 +262,10 @@ class TestExposureReport(unittest.TestCase):
             {"date": "2026-09-22", "max_altitude_m": None, "altitude_s": None, "above_s": {}},
         ]
 
+    def test_as_of_is_the_window_end(self):
+        """Revue #185 : la date de fin de fenêtre sert à décider si l'exposition est créditée."""
+        self.assertEqual(AL.exposure_report(self.rows(), TODAY)["as_of"], TODAY.isoformat())
+
     def test_windows_and_thresholds(self):
         rep = AL.exposure_report(self.rows(), TODAY)
         self.assertEqual(rep["status"], "exposed")
@@ -252,10 +310,10 @@ class TestExposureIndex(unittest.TestCase):
         self.conn.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def activity(self, day, gid, altitudes=None):
-        data = {"arc": 1, "kind": "activity", "date": day, "sport": "trail", "duration_s": 3600,
+    def activity(self, day, gid, altitudes=None, sport="trail"):
+        data = {"arc": 1, "kind": "activity", "date": day, "sport": sport, "duration_s": 3600,
                 "distance_m": 10000, "garmin_activity_id": gid}
-        (self.ws / f"activities/{day}_trail.md").write_text(f"# S\n\n```arc\n{json.dumps(data)}\n```\n", encoding="utf-8")
+        (self.ws / f"activities/{day}_{sport}.md").write_text(f"# S\n\n```arc\n{json.dumps(data)}\n```\n", encoding="utf-8")
         if altitudes is not None:
             records = [{"t_s": i * 5, "distance_m": i * 15.0, "speed_ms": 3.0, "altitude_m": a}
                        for i, a in enumerate(altitudes)]
@@ -279,6 +337,15 @@ class TestExposureIndex(unittest.TestCase):
         self.assertGreater(w["thresholds"]["2000"]["duration_s"], 0)
         self.assertGreaterEqual(w["thresholds"]["1500"]["duration_s"], w["thresholds"]["2000"]["duration_s"])
         self.assertEqual(w["max_altitude_m"], 2100)
+
+    def test_indoor_sessions_are_not_missing_altitude(self):
+        """Revue #185 : une séance de renforcement n'a pas d'altitude à mesurer — elle n'est ni
+        comptée comme séance ni comme « sans altitude »."""
+        self.activity("2026-09-20", 1, [2100.0] * 200)
+        self.activity("2026-09-21", 2, sport="strength")
+        w = self.report()["windows"]["28"]
+        self.assertEqual(w["sessions"], 1)
+        self.assertEqual(w["sessions_without_altitude"], 0)
 
     def test_empty_workspace(self):
         self.assertEqual(self.report()["status"], "no_activity")

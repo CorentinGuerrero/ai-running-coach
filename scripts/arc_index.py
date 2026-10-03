@@ -4559,9 +4559,12 @@ def altitude_exposure(conn, today: Optional[date] = None, days: Optional[int] = 
            f"SUM(CASE WHEN altitude_m IS NOT NULL THEN {weight} END) AS alt_s, {thr_cols} "
            f"FROM activity_sample GROUP BY {ref}) s "
            f"ON s.ref = CAST(COALESCE(a.garmin_activity_id, a.intervals_activity_id, a.strava_activity_id) AS TEXT) "
-           f"WHERE a.date >= ? AND a.date <= ? ORDER BY a.date, a.id")
+           f"WHERE a.date >= ? AND a.date <= ? "
+           f"AND COALESCE(a.sport, '') NOT IN ({', '.join('?' for _ in AL.EXPOSURE_EXCLUDED_SPORTS)}) "
+           f"ORDER BY a.date, a.id")
     rows = []
-    for r in conn.execute(sql, (*AL.EXPOSURE_THRESHOLDS_M, since.isoformat(), today.isoformat())):
+    for r in conn.execute(sql, (*AL.EXPOSURE_THRESHOLDS_M, since.isoformat(), today.isoformat(),
+                                *AL.EXPOSURE_EXCLUDED_SPORTS)):
         rows.append({"date": r["date"], "max_altitude_m": r["max_alt"], "altitude_s": r["alt_s"],
                      "above_s": {t: r[f"ge_{t}"] or 0.0 for t in AL.EXPOSURE_THRESHOLDS_M}})
     return AL.exposure_report(rows, today, windows)

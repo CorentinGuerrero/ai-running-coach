@@ -11,7 +11,7 @@ TOUS les coefficients sont des hypothèses documentées (`ASSUMPTIONS`), affich�
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # --- Pénalité de course -----------------------------------------------------------------------
 # Seuil (m) au-dessous duquel AUCUNE pénalité n'est appliquée. Choix du projet : la source citée
@@ -37,6 +37,11 @@ ALTITUDE_ACCLIMATION_FULL_DAYS = 14
 # exposition intermittente (séances isolées, retour à basse altitude) protège moins qu'un séjour.
 ALTITUDE_TRAINING_MAX_CREDIT = 0.25
 ALTITUDE_TRAINING_FULL_HOURS = 10.0   # heures ≥ seuil sur 28 j pour le crédit maximal
+# L'exposition mesurée n'est créditée que si la fenêtre de mesure se termine au plus
+# `ALTITUDE_TRAINING_MAX_LEAD_DAYS` jours avant la course (choix du projet : une exposition
+# mesurée des semaines avant la course n'est pas présumée persister le jour J). Date de course
+# inconnue : jamais créditée.
+ALTITUDE_TRAINING_MAX_LEAD_DAYS = 14
 
 # --- Métrique d'exposition --------------------------------------------------------------------
 EXPOSURE_THRESHOLDS_M = (1500, 2000)
@@ -45,23 +50,37 @@ EXPOSURE_WINDOWS_DAYS = (14, 28)
 # col franchi 30 s ou une dérive barométrique ne fasse compter une séance).
 EXPOSURE_MIN_SESSION_S = 300.0
 EXPOSURE_CREDIT_WINDOW_DAYS = 28
+# Sports sans altitude pertinente (salle, piscine, repos) : exclus de la métrique, sinon une séance
+# de renforcement compterait comme « séance sans altitude » (donnée manquante) alors qu'elle n'a
+# simplement pas d'altitude à mesurer (revue #185).
+EXPOSURE_EXCLUDED_SPORTS = ("strength", "indoor_cycling", "home_trainer", "elliptical", "rest",
+                            "swimming", "rowing")
 
 ASSUMPTIONS: Dict[str, str] = {
     "race_penalty": (
-        "Pénalité d'altitude de course (#185). Pour chaque section, altitude MOYENNE du GPX (ou "
-        "corrigée par MNT quand `elevation_dem` est présent dans le plan, #176 : les altitudes du "
-        "plan sont alors celles du MNT). Sous `ALTITUDE_THRESHOLD_M` (1 500 m) : aucun effet, sortie "
-        "inchangée. Au-dessus : perte de VO2max = `ALTITUDE_VO2MAX_LOSS_PCT_PER_1000M` × (altitude − "
-        "seuil)/1 000, et facteur de TEMPS = 1/(1 − perte × (1 − crédit d'acclimatation)). Source de "
-        "la pente : Wehrlin & Hallén 2006, Eur J Appl Physiol 96:404-412, doi:10.1007/s00421-005-0081-9 "
-        "(VO2max −6,3 % par 1 000 m, plage 4,6-7,5 %, linéaire de 300 à 2 800 m, 8 athlètes "
-        "d'endurance, altitude simulée aiguë). **La traduction perte de VO2max -> perte de vitesse "
-        "est une approximation du projet** : on suppose qu'une allure d'ultra, courue à fraction "
-        "constante de la VO2max, perd la même fraction relative de vitesse. Le critère de "
-        "performance de l'étude (temps jusqu'à épuisement à vitesse constante, −14,5 % par 1 000 m) "
-        "n'est PAS repris : il mesure un effort proche du maximum, pas une allure d'ultra. Seuil "
-        "de 1 500 m, plafond d'altitude de 4 500 m (au-delà de 2 800 m, hors plage mesurée : "
-        "extrapolation, signalée) : choix du projet. Facteur identique pour les trois scénarios "
+        "Pénalité d'altitude de course (#185). Pour chaque section, EXCÉDENT MOYEN d'altitude "
+        "au-dessus du seuil, pondéré par la distance (moyenne de max(0, altitude − seuil) le long de "
+        "la section, altitude plafonnée point par point, `excess_above`) : une section qui franchit "
+        "le seuil (col 1 200 -> 2 800 m) n'est pénalisée que pour sa partie haute, sans biais de "
+        "densité des points GPX ; `altitude_m` de la section reste son altitude moyenne (affichage). "
+        "Altitudes du GPX, ou du MNT quand `elevation_dem` est présent dans le plan (#176). Sous "
+        "`ALTITUDE_THRESHOLD_M` (1 500 m) partout : aucun effet, sortie inchangée. Au-dessus : perte "
+        "= `ALTITUDE_VO2MAX_LOSS_PCT_PER_1000M` × excédent/1 000, facteur de TEMPS = 1/(1 − perte × "
+        "(1 − crédit d'acclimatation)). Source de la pente : Wehrlin & Hallén 2006, Eur J Appl "
+        "Physiol 96:404-412, doi:10.1007/s00421-005-0081-9 (VO2max −6,3 % par 1 000 m, plage "
+        "4,6-7,5 %, linéaire de 300 à 2 800 m, 8 athlètes d'endurance, chambre hypobare, exposition "
+        "aiguë). **La traduction perte de VO2max -> perte de vitesse d'ultra est une approximation "
+        "du projet**, pas un résultat de l'étude : à fraction constante de la VO2max (allure tenue à "
+        "la FC ou au ressenti), la vitesse baisserait d'autant ; mais une allure d'ultra (environ "
+        "50-70 % de la VO2max) est aussi limitée par la fatigue musculaire, l'alimentation et le "
+        "terrain, que l'hypoxie touche moins. Le modèle ATTÉNUE donc la pente en ne comptant la "
+        "perte qu'au-dessus de 1 500 m, et non depuis 300 m comme l'étude : il n'applique qu'environ "
+        "30 % de la perte de VO2max de l'étude à 2 000 m, 45 % à 2 500 m, 50 % à 2 800 m — "
+        "atténuation choisie, non mesurée, sans autre facteur. Le critère de performance de l'étude "
+        "(temps jusqu'à épuisement à 107 % de la VO2max du niveau de la mer, −14,5 % par 1 000 m) "
+        "n'est PAS repris : effort supra-maximal. Seuil de 1 500 m, plafond d'altitude de 4 500 m "
+        "(au-delà de 2 800 m, hors plage mesurée : extrapolation, signalée) : choix du projet. "
+        "Facteur identique pour les trois scénarios "
         "(l'ordre prudent >= réaliste >= ambitieux est donc conservé), composé multiplicativement "
         "avec chaleur et nuit, section par section, avant la nuit. Limites : effet individuel très "
         "variable (4,6-7,5 % mesuré), pas de modèle du mal aigu des montagnes, de l'hydratation ni "
@@ -71,14 +90,19 @@ ASSUMPTIONS: Dict[str, str] = {
         "crédit de réduction de la perte = min(`ALTITUDE_ACCLIMATION_MAX_CREDIT` (0,5), 0,5 × jours "
         "déclarés sur place/`ALTITUDE_ACCLIMATION_FULL_DAYS` (14)) — `--altitude-acclimated-days N` ; "
         "plus, si l'index contient des séances avec altitude, un crédit d'exposition à l'entraînement "
-        "= `ALTITUDE_TRAINING_MAX_CREDIT` (0,25) × min(1, heures ≥ 1 500 m sur 28 j/10). Les deux "
+        "= `ALTITUDE_TRAINING_MAX_CREDIT` (0,25) × min(1, heures ≥ 1 500 m sur 28 j/10), seulement "
+        "si la course a lieu au plus `ALTITUDE_TRAINING_MAX_LEAD_DAYS` (14) jours après la fin de la "
+        "fenêtre mesurée (date de course connue) : un plan calculé des semaines à l'avance ne "
+        "crédite pas une exposition qui aura pu se perdre — le recalculer dans les deux dernières "
+        "semaines. Seuil d'exposition fixe à 1 500 m, même si `--altitude-threshold-m` change. Les deux "
         "crédits s'ajoutent, plafonnés à 0,5 : l'acclimatation n'annule jamais la pénalité. Un pari "
         "optimiste sur une acclimatation supposée est plus risqué qu'un plan trop prudent : sans "
         "déclaration ni exposition mesurée, le crédit est NUL (athlète non acclimaté)."),
     "exposure": (
         "Exposition à l'altitude à l'entraînement (#185, `arc_index.py altitude-exposure`, sur le "
         "modèle de `heat-acclimation`). Fenêtres glissantes de 14 et 28 jours (`--days N` pour une "
-        "seule) se terminant à `--today`. Source : les ÉCHANTILLONS FIT ingérés (`activity_sample."
+        "seule) se terminant à `--today` (`as_of`), séances de terrain seulement (salle, piscine, "
+        "repos exclus : `EXPOSURE_EXCLUDED_SPORTS`). Source : les ÉCHANTILLONS FIT ingérés (`activity_sample."
         "altitude_m`) ; le temps au-dessus de chaque seuil (1 500 m, 2 000 m) est la somme des "
         "`covered_s` (1 s si absent). Une séance compte au seuil si elle y passe au moins "
         "`EXPOSURE_MIN_SESSION_S` (5 min). Les résumés d'activité du contrat ne portent aucune "
@@ -99,6 +123,40 @@ def altitude_credit(acclimated_days: Optional[int], training_hours_ge_threshold:
         training = ALTITUDE_TRAINING_MAX_CREDIT * min(1.0, training_hours_ge_threshold / ALTITUDE_TRAINING_FULL_HOURS)
     total = min(ALTITUDE_ACCLIMATION_MAX_CREDIT, declared + training)
     return {"declared": round(declared, 4), "training": round(training, 4), "total": round(total, 4)}
+
+
+def excess_above(altitudes: Sequence[Optional[float]], distances_m: Sequence[float],
+                 threshold_m: float = ALTITUDE_THRESHOLD_M) -> Optional[float]:
+    """Excédent MOYEN (m) au-dessus de `threshold_m`, pondéré par la distance (trapèzes entre
+    points consécutifs avec altitude, altitude plafonnée à `ALTITUDE_CAP_M` point par point).
+    `None` sans aucun point avec altitude ; un seul point : son excédent. Pure (voir `ASSUMPTIONS`)."""
+    def ex(a):
+        return max(0.0, min(a, ALTITUDE_CAP_M) - threshold_m)
+    pairs = [(a, d) for a, d in zip(altitudes, distances_m) if a is not None]
+    if not pairs:
+        return None
+    num = den = 0.0
+    for (a0, d0), (a1, d1) in zip(pairs, pairs[1:]):
+        w = max(0.0, d1 - d0)
+        num += w * (ex(a0) + ex(a1)) / 2.0
+        den += w
+    return num / den if den > 0 else sum(ex(a) for a, _ in pairs) / len(pairs)
+
+
+def training_credit_lead(exposure: Optional[dict], race_date: Optional[str]) -> Tuple[bool, str]:
+    """L'exposition mesurée peut-elle être créditée pour cette course ? Rend `(ok, raison)` — voir
+    `ALTITUDE_TRAINING_MAX_LEAD_DAYS`. Pure."""
+    from datetime import date as _date
+    as_of = (exposure or {}).get("as_of")
+    if not race_date:
+        return False, "date de course inconnue : exposition mesurée non créditée"
+    if not as_of:
+        return False, "date de mesure de l'exposition inconnue : exposition non créditée"
+    lead = (_date.fromisoformat(race_date) - _date.fromisoformat(as_of)).days
+    if lead < 0 or lead > ALTITUDE_TRAINING_MAX_LEAD_DAYS:
+        return False, (f"exposition mesurée {lead} jours avant la course (hors 0-{ALTITUDE_TRAINING_MAX_LEAD_DAYS} j) : "
+                       "non créditée — recalculer le plan dans les deux dernières semaines")
+    return True, f"exposition mesurée {lead} jours avant la course"
 
 
 def altitude_time_factor(altitude_m: Optional[float], *, credit: float = 0.0,
@@ -151,7 +209,7 @@ def exposure_report(rows: Sequence[dict], today, windows: Sequence[int] = EXPOSU
         status = "exposed" if top["sessions"] else "none"
         note = ("exposition mesurée" if status == "exposed"
                 else f"aucune séance ≥ {thresholds[0]} m sur {longest['window_days']} jours")
-    return {"status": status, "note": note, "windows": out_windows,
+    return {"status": status, "note": note, "as_of": today.isoformat(), "windows": out_windows,
             "thresholds_m": list(thresholds), "min_session_s": EXPOSURE_MIN_SESSION_S,
             "assumption": ASSUMPTIONS["exposure"]}
 

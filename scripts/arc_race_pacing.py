@@ -2045,15 +2045,27 @@ def _technicity_stage(pts, segments, technicity, scale: Optional[float] = None):
 # Pénalité d'altitude (#185, voir ASSUMPTIONS["altitude"])
 # ---------------------------------------------------------------------------
 
-def _segment_mean_altitudes(pts: Sequence[dict], segments: Sequence[dict]) -> List[Optional[float]]:
-    """Altitude moyenne (m) des points GPX de chaque section (`None` sans altitude). Avec la
+def _segment_altitudes(pts: Sequence[dict], segments: Sequence[dict], threshold_m: float
+                       ) -> List[Tuple[Optional[float], Optional[float], Optional[float]]]:
+    """Par section : `(altitude moyenne, excédent moyen au-dessus de threshold_m, altitude max)`
+    en m, moyenne et excédent pondérés par la distance (`None` sans altitude) — l'excédent nourrit
+    le facteur, la moyenne l'affichage (voir `AL.ASSUMPTIONS["race_penalty"]`). Avec la
     correction MNT (#176), `pts` porte déjà les altitudes corrigées."""
-    dist_km = [d / 1000.0 for d in _cumulative_distances(pts)]
-    out: List[Optional[float]] = []
+    dist_m = _cumulative_distances(pts)
+    out: List[Tuple[Optional[float], Optional[float], Optional[float]]] = []
     for seg in segments:
-        vals = [p["ele"] for p, d in zip(pts, dist_km)
-                if p.get("ele") is not None and seg["km_start"] - 5e-4 <= d <= seg["km_end"] + 5e-4]
-        out.append(sum(vals) / len(vals) if vals else None)
+        lo, hi = seg["km_start"] * 1000.0 - 0.5, seg["km_end"] * 1000.0 + 0.5
+        sel = [(p["ele"], d) for p, d in zip(pts, dist_m) if p.get("ele") is not None and lo <= d <= hi]
+        if not sel:
+            out.append((None, None, None))
+            continue
+        num = den = 0.0
+        for (a0, d0), (a1, d1) in zip(sel, sel[1:]):
+            num += (d1 - d0) * (a0 + a1) / 2.0
+            den += d1 - d0
+        mean = num / den if den > 0 else sum(a for a, _ in sel) / len(sel)
+        excess = AL.excess_above([a for a, _ in sel], [d for _, d in sel], threshold_m)
+        out.append((mean, excess, max(a for a, _ in sel)))
     return out
 
 
@@ -2066,11 +2078,15 @@ def apply_altitude_penalty(pts: Sequence[dict], segments: Sequence[dict], *, cre
     ajouté). Sinon chaque section gagne `altitude_m` et `altitude_factor` (scalaire, identique
     pour les trois scénarios : l'ordre prudent >= réaliste >= ambitieux est conservé) et ses
     temps/allures majorés."""
-    alts = _segment_mean_altitudes(pts, segments)
-    factors = [AL.altitude_time_factor(a, credit=credit, threshold_m=threshold_m,
-                                       loss_pct_per_1000m=loss_pct_per_1000m) for a in alts]
+    triples = _segment_altitudes(pts, segments, threshold_m)
+    alts = [a for a, _, _ in triples]
+    factors = [AL.altitude_time_factor(None if ex is None else threshold_m + ex, credit=credit,
+                                       threshold_m=threshold_m, loss_pct_per_1000m=loss_pct_per_1000m)
+               for _, ex, _ in triples]
     known = [a for a in alts if a is not None]
+    peaks = [m for (_, _, m), f in zip(triples, factors) if m is not None and f > 1.0]
     info = {"max_mean_altitude_m": round(max(known)) if known else None,
+            "max_altitude_m": round(max(peaks)) if peaks else None,
             "sections_above": sum(1 for f in factors if f > 1.0), "applied": any(f > 1.0 for f in factors)}
     if not info["applied"]:
         return list(segments), info
@@ -2090,7 +2106,8 @@ def apply_altitude_penalty(pts: Sequence[dict], segments: Sequence[dict], *, cre
     return out, info
 
 
-def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_days, exposure, coverage):
+def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_days, exposure, coverage,
+                    race_date=None):
     """Étape « altitude » de `build_race_plan` (#185). Rend `(altitude, segments, warnings)`."""
     params = {"threshold_m": threshold_m, "vo2max_loss_pct_per_1000m": loss_pct,
               "altitude_cap_m": AL.ALTITUDE_CAP_M, "measured_max_m": AL.ALTITUDE_MEASURED_MAX_M,
@@ -2108,27 +2125,34 @@ def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_da
                 "note": f"toutes les sections sous {threshold_m:.0f} m : aucun effet",
                 "parameters": params}, segments, []
     hours = AL.training_hours_ge(exposure)
-    credit = AL.altitude_credit(acclimated_days, hours)
+    lead_ok, lead_note = AL.training_credit_lead(exposure, race_date)
+    credit = AL.altitude_credit(acclimated_days, hours if lead_ok else None)
     new_segments, info = apply_altitude_penalty(pts, segments, credit=credit["total"], threshold_m=threshold_m,
                                                 loss_pct_per_1000m=loss_pct)
     before = {s: sum(x["predicted_time_s"][s] or 0 for x in segments) for s in SCENARIOS}
     after = {s: sum(x["predicted_time_s"][s] or 0 for x in new_segments) for s in SCENARIOS}
     altitude = {
         "status": "applied", "max_mean_altitude_m": info["max_mean_altitude_m"],
+        "max_altitude_m": info["max_altitude_m"],
         "sections_above": info["sections_above"],
         "elevation_source": "gpx",
         "acclimation": {"declared_days": acclimated_days, "training_hours_ge_1500m_28d": (
             round(hours, 2) if hours is not None else None), "credit": credit,
-            "note": ("aucune acclimatation déclarée ni exposition mesurée : athlète supposé non acclimaté"
-                     if credit["total"] == 0 else "crédit d'acclimatation appliqué (approximation du projet)")},
+            "training_credited": bool(lead_ok and hours),
+            "note": ("aucune acclimatation déclarée ni exposition mesurée créditée : athlète supposé non acclimaté"
+                     if credit["total"] == 0 else "crédit d'acclimatation appliqué (approximation du projet)")
+                    + (f" ; {lead_note}" if hours else "")},
         "time_added_s": {s: after[s] - before[s] for s in SCENARIOS},
         "parameters": params,
     }
-    warnings = [f"altitude : {info['sections_above']} section(s) au-dessus de {threshold_m:.0f} m (max moyen "
-                f"{info['max_mean_altitude_m']} m), temps réaliste +{round((after['realistic'] - before['realistic']) / 60)} "
-                "min — approximation du projet (ASSUMPTIONS['altitude'])"]
-    if info["max_mean_altitude_m"] is not None and info["max_mean_altitude_m"] > AL.ALTITUDE_MEASURED_MAX_M:
-        warnings.append(f"altitude moyenne de section > {AL.ALTITUDE_MEASURED_MAX_M:.0f} m : hors de la plage "
+    added_min = (after["realistic"] - before["realistic"]) / 60.0
+    warnings = [f"altitude : {info['sections_above']} section(s) au-dessus de {threshold_m:.0f} m (point haut "
+                f"{info['max_altitude_m']} m), temps réaliste "
+                + (f"+{round(added_min)} min" if added_min >= 1 else "+< 1 min")
+                + " — pénalité appliquée par défaut depuis #185 (`--no-altitude` pour l'ancien calcul), "
+                "approximation du projet (ASSUMPTIONS['altitude'])"]
+    if info["max_altitude_m"] is not None and info["max_altitude_m"] > AL.ALTITUDE_MEASURED_MAX_M:
+        warnings.append(f"altitude > {AL.ALTITUDE_MEASURED_MAX_M:.0f} m sur le parcours : hors de la plage "
                         "mesurée par la source, pénalité extrapolée")
     return altitude, new_segments, warnings
 
@@ -2275,7 +2299,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     # l'itération de nuit lit ensuite (composition multiplicative chaleur x altitude x nuit).
     altitude, segments, altitude_warnings = _altitude_stage(
         pts, segments, altitude_enabled, altitude_threshold_m, altitude_loss_pct_per_1000m,
-        altitude_acclimated_days, altitude_exposure, coverage)
+        altitude_acclimated_days, altitude_exposure, coverage, race_date)
     warnings.extend(altitude_warnings)
 
     night, night_mask, night_start_dt, night_tzinfo = _night_stage(
