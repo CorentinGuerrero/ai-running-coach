@@ -254,8 +254,9 @@ def _dem_section(dem: dict | None) -> list[str]:
              f"{c['dem_loss_m'] - c['file_loss_m']:+.0f} m |",
              ""]
     lines.append("Les chiffres du rapport (D+, D-, profil, montées) sont calculés sur l'altitude MNT. "
-                 f"Pas d'échantillonnage {dem['report']['step_m']} m, {dem['report']['nodes']} points "
-                 "envoyés au fournisseur (coordonnées seules).")
+                 f"Pas d'échantillonnage {dem['report']['step_m']} m : {dem['report']['nodes']} points "
+                 f"interrogés, dont {dem['report'].get('coords_sent', 0)} envoyés au fournisseur "
+                 "(coordonnées seules, le reste depuis le cache local).")
     if dem["status"] == "partial":
         lines.append(f"Couverture partielle : {dem['report'].get('coverage_pct')} % des points résolus, "
                      "le reste interpolé.")
@@ -362,7 +363,8 @@ def main(argv: list[str] | None = None) -> int:
             m = compute_metrics(pts, smooth=1, min_step_m=0.0)
             climbs_smooth = 1
             dem = {"status": res["status"], "comparison": comparison, "report": res["report"]}
-    m["elevation_source"] = "dem" if dem and dem["status"] != "unavailable" else "file"
+    if dem is not None:  # clé absente sans MNT demandé : sortie inchangée par rapport à avant #176
+        m["elevation_source"] = "dem" if dem["status"] != "unavailable" else "file"
     climbs = detect_climbs(pts, m, min_gain=args.min_gain, min_dist=args.min_climb_dist,
                            min_grade_pct=args.min_grade, smooth=climbs_smooth)
 

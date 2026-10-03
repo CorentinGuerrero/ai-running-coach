@@ -2453,7 +2453,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   "altitudes du fichier conservées.", file=sys.stderr)
         else:
             dem_info = {"status": dem_res["status"],
-                        **DEM.compare_gain_loss([p.get("ele") for p in pts], dem_res["ele"]),
+                        # D+ fichier mesuré comme le plan l'aurait fait sans --dem (lissage
+                        # 3 points, sans seuil : `course_totals`) : l'écart affiché est
+                        # exactement l'effet de la correction sur le plan.
+                        **DEM.compare_gain_loss([p.get("ele") for p in pts], dem_res["ele"],
+                                                file_smooth=EL.DEFAULT_SMOOTH_TAPS, file_min_step_m=0.0),
                         "step_m": dem_res["report"]["step_m"], "providers": dem_res["report"]["providers"],
                         "attribution": dem_res["report"]["attribution"]}
             pts = [{**p, "ele": z} for p, z in zip(pts, dem_res["ele"])]
