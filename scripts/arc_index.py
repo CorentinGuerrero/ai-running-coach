@@ -210,6 +210,16 @@ asymétrie des inspections photo, `confidence` (effectifs) et `contradictions` (
 l'usure). Jamais un diagnostic, aucune modification de charge — voir `arc_gait.ASSUMPTIONS` et
 `arc_metrics.ASSUMPTIONS["gait"]`. Lecture seule ; `/api/gait` la sert au tableau de bord.
 
+`load-forecast [--until DATE] [--compare FICHIER] [--text]` (#172) projette condition / fatigue / forme jour
+par jour de l'état réel d'aujourd'hui jusqu'à la date de l'objectif actif (ou `--until`), à partir de la
+charge ESTIMÉE des séances planifiées (même estimateur que le garde-fou R1, jamais un second modèle) :
+forme prévue le jour J, semaine de pic de fatigue, ACWR projeté sur le bloc. Jour sans séance = charge nulle,
+semaines non planifiées comptées ; états honnêtes `no_objective` / `no_plan` / `insufficient_history`
+(même plancher que R1) / `target_past`. `--compare` oppose le plan actuel à un plan modifié (les semaines de
+même lundi sont remplacées) et chiffre les écarts. Estimation, jamais une mesure — voir
+`arc_metrics.ASSUMPTIONS["load_forecast"]`. Sortie JSON comme les autres commandes ; `--text` pour un résumé
+lisible. Lecture seule ; `/api/load-forecast` la sert au tableau de bord.
+
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
 <workspace>/.arc/coach.db), `--memory` (base en mémoire, rien sur disque),
@@ -4194,6 +4204,28 @@ def trail_shape_report(conn, today: date) -> dict:
     return TS.trail_shape_report(objective, rows, today)
 
 
+def load_forecast(conn, today: date, until: Optional[str] = None, compare: Optional[str] = None) -> dict:
+    """Projection de charge sur le bloc (#172) — commande « load-forecast » et `/api/load-forecast`.
+
+    Délègue ENTIÈREMENT à `arc_load_forecast` (import PARESSEUX : ce module importe `arc_guardrails`,
+    qui importe `arc_index`). `until` : AAAA-MM-JJ ; `compare` : chemin d'un fichier semaine(s) (ou `-`)."""
+    import arc_guardrails as GR
+    import arc_load_forecast as LF
+    until_date = None
+    if until:
+        try:
+            until_date = date.fromisoformat(until)
+        except ValueError:
+            raise ConfigError(f"--until : date AAAA-MM-JJ attendue, « {until} » reçue.")
+    alternative = None
+    if compare is not None:
+        try:
+            alternative = LF.alternative_weeks_from_block(GR._read_week_argument(compare))
+        except (ValueError, OSError, ConfigError) as exc:
+            raise ConfigError(f"--compare : {str(exc).removeprefix('--week : ')}")
+    return LF.load_forecast(conn, today, until_date, alternative)
+
+
 def _inspection_rows(conn, gear_id: Optional[str] = None) -> List[dict]:
     """Inspections indexées (plus récentes d'abord), colonnes JSON décodées, `path` = fichier."""
     sql = ("SELECT source_path, date, gear_id, distance_m, condition, asymmetry_level, asymmetry_side, "
@@ -4635,7 +4667,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
-                                 "decision-effects"))
+                                 "decision-effects", "load-forecast"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4717,8 +4749,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commande « decision-effects » : rendu texte lisible (défaut : JSON, comme les "
-                             "autres sous-commandes)")
+                        help="commandes « decision-effects » et « load-forecast » : rendu texte lisible (défaut : "
+                             "JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
                              "(journal courant, voir DECISION_INACTIVE_OUTCOMES)")
@@ -4730,8 +4762,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « pace-curve » (#169) : vitesse (m/s) au seuil lactique Garmin, "
                              "pour le contrôle de cohérence avec la CS (signalé, jamais arbitré)")
     parser.add_argument("--json", action="store_true",
-                        help="commandes « pace-curve » et « decision-effects » : sortie JSON (déjà le "
-                             "défaut, accepté pour la clarté)")
+                        help="commandes « pace-curve », « decision-effects » et « load-forecast » : sortie JSON "
+                             "(déjà le défaut, accepté pour la clarté)")
+    parser.add_argument("--until", metavar="AAAA-MM-JJ",
+                        help="commande « load-forecast » (#172) : date de fin de la projection (défaut : date de "
+                             "l'objectif actif)")
+    parser.add_argument("--compare", metavar="FICHIER",
+                        help="commande « load-forecast » (#172) : plan modifié à comparer au plan actuel — fichier "
+                             "semaine(s) (bloc ```arc ou JSON, `weeks[]` ou une semaine), `-` pour stdin ; les "
+                             "semaines de même lundi REMPLACENT celles du plan actuel")
     parser.add_argument("--band", choices=SL.BANDS, default="endurance",
                         help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
                              "arc_slope_model.ASSUMPTIONS['population'])")
@@ -4813,6 +4852,15 @@ def main(argv=None) -> int:
     if args.command == "gait-summary":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         print(json.dumps(gait_summary(conn, today_date, args.weeks or GAIT_DEFAULT_WEEKS), ensure_ascii=False))
+        return 0
+    if args.command == "load-forecast":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        report = load_forecast(conn, today_date, args.until, args.compare)
+        if args.text:
+            import arc_load_forecast as LF
+            print(LF.render_text(report))
+        else:
+            print(json.dumps(report, ensure_ascii=False))
         return 0
     if args.command == "gear-career":
         if not args.gear:

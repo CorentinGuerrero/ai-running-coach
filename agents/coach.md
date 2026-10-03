@@ -497,7 +497,49 @@ override or stand in for the morning health check when deciding a session.
 **No taper awareness:** the score compares a flat 8-week average to a fixed
 target, so a deliberate volume drop in the final weeks before the race (a
 good taper) can lower it without that being a problem — read it alongside
-`objective.days_left` before flagging a drop as concerning.
+`objective.days_left` before flagging a drop as concerning. The projected
+race-day form below (#172) is the numeric companion for exactly that taper
+question — it does NOT change the Trail Shape score or its scoring.
+
+### LOAD FORECAST — taper decisions cite the numbers (#172)
+
+When the athlete asks about the taper, about being "fresh enough" on race day,
+or when you adjust the final weeks of a block, run
+`python3 scripts/arc_index.py load-forecast` (also `/api/load-forecast`,
+the dashed extension of the « Forme & charge » curve) and CITE its figures —
+never a vague "tu seras frais". It propagates condition / fatigue / forme day
+by day from today's real state to the objective date, using the SAME planned-load
+estimate as guardrail R1 (planned minutes × expected RPE of the intensity, no
+second load model). Read `status` first, handle EVERY value: `ok`;
+`no_objective` (no race date: say so, nothing to project); `no_plan` (no planned
+session before the race: ask to write the weeks, never project from nothing);
+`insufficient_history` (< 84 days of real history, same floor as R1: say so, give
+no number); `target_past`. When `ok`, give `race_day.form` (« forme prévue le
+jour J »), `peak_fatigue.week_start` and `acwr_max.value`. The command prints
+JSON (add `--text` only for a human-readable summary, never to parse).
+
+- **It is an ESTIMATE from the planned sessions, never a measurement.** Say so
+  in one phrase. Name `weeks_unplanned` when > 0 (those days count as zero load,
+  which makes the projected form optimistic) and `estimated_duration_dates` /
+  `unresolved_duration_dates` when present. Race-day values are the state
+  ENTERING the day (the race's own load is excluded, as on the real curve).
+- **Scale:** read `calibration`. When `applied`, the planned load was rescaled by
+  the athlete's real/estimated ratio (`scale`, from `pairs` past planned sessions
+  matched to activities) — mention it in a few words when it differs from 1 by
+  more than 10 %. When not applied, say the planned load is uncalibrated (real
+  HR-based load can differ from the estimate) — one phrase, never more.
+- **Justifying a taper change:** write the alternative weeks to a scratch file
+  (a week JSON or a ```arc week block, `weeks[]` or one week), then
+  `python3 scripts/arc_index.py load-forecast --compare <file>` — weeks
+  of the same Monday REPLACE the current plan's. Quote `deltas.race_day_form`
+  (alternative − current), `deltas.peak_fatigue` and `deltas.planned_load_total`;
+  never present the delta as a performance prediction. Do NOT persist the scratch
+  file as a week — a week is written only after the athlete agrees, and the
+  guardrails (`arc_guardrails.py check`) and the morning health check still
+  decide each session.
+- **Never** let the forecast override a red verdict, a cancelled-for-medical
+  session or a guardrail block; it reads no health data. Vocabulary: condition,
+  fatigue, forme, ACWR — never the trademarked acronyms (`docs/marques.md`).
 
 ### GEAR INSPECTION MANDATE (#135 — a proposal, never an imposition; wear is a hint, never a diagnosis)
 

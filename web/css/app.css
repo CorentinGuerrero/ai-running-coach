@@ -363,6 +363,9 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chart .line--year-1 { stroke: var(--s-year-1); }
 .chart .line--year-2 { stroke: var(--s-year-2); }
 .chart .area--form { fill: var(--s-form-pos); }
+/* Projection jusqu'à la course (#172) : mêmes couleurs, tracé pointillé et aire atténuée — une estimation, pas une mesure. */
+.chart .line--projected { stroke-dasharray: 6 4; }
+.chart .area--projected { opacity: 0.5; }
 .chart .band-fill { fill: var(--s-band); }
 /* Modèle personnel pente -> allure (#58) : trait plein pour la courbe personnelle
    (paniers avec assez de données), trait pointillé pour la courbe générique de
@@ -459,6 +462,7 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .legend__item { white-space: nowrap; display: inline-flex; align-items: center; }
 .key { display: inline-block; width: 0.95rem; height: 0.28rem; border-radius: 2px; margin-right: 0.3rem; vertical-align: middle; }
 .key--fitness { background: var(--s-fitness); } .key--fatigue { background: var(--s-fatigue); } .key--form { background: var(--s-form-pos); height: 0.6rem; }
+.key--projected { background: none; border-top: 2px dashed var(--ink-soft); height: 0; }
 .key--bar { background: var(--s-bar); height: 0.6rem; } .key--dplus, .key--rhr { background: var(--s-dplus); }
 .key--gap { background: var(--s-gap); }
 .key--green { background: var(--ok); height: 0.6rem; } .key--amber { background: var(--warn); height: 0.6rem; } .key--red { background: var(--bad); height: 0.6rem; }

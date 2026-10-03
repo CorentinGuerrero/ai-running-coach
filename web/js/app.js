@@ -818,9 +818,44 @@ async function viewToday() {
 // Vue : Forme & charge
 // ---------------------------------------------------------------------------
 
+/** Projection de charge jusqu'à la course (#172) : « forme prévue le jour J » ou l'état honnête d'indisponibilité. */
+function forecastBlock(fc) {
+  if (!fc) return "";
+  if (fc.status !== "ok") {
+    const why = {
+      no_objective: "Aucun objectif actif : pas de date de course vers laquelle projeter la forme.",
+      no_plan: "Aucune séance planifiée d'ici la course : écrivez les semaines pour obtenir une projection.",
+      insufficient_history: "Historique insuffisant (moins de 84 jours) : la projection serait faussée par le démarrage de la condition.",
+      target_past: "La date de la course est passée : rien à projeter.",
+      invalid_until: "Date de projection invalide.",
+    }[fc.status] || fc.reason || "";
+    return why ? note(`Projection indisponible. ${F.esc(why)}`) : "";
+  }
+  const day = fc.race_day || fc.end;
+  const peak = fc.peak_fatigue;
+  const acwr = fc.acwr_max;
+  const unplanned = fc.weeks_unplanned
+    ? ` ${fc.weeks_unplanned} semaine${fc.weeks_unplanned > 1 ? "s" : ""} non planifiée${fc.weeks_unplanned > 1 ? "s" : ""} : charge supposée nulle, la forme prévue est alors optimiste.` : "";
+  const cal = fc.calibration || {};
+  const scale = cal.applied
+    ? ` Charge planifiée recalée ×${F.num(cal.scale, 2)} sur vos ${cal.pairs} dernières séances planifiées réalisées.`
+    : cal.ratio == null
+      ? " Charge planifiée non recalée (trop peu de séances planifiées réalisées pour mesurer l'écart réel / estimé)."
+      : ` Charge planifiée non recalée (écart réel / estimé ×${F.num(cal.ratio, 2)} jugé aberrant : vérifier FC de repos / max).`;
+  return `<dl class="facts facts--inline">
+      <div><dt>${fc.race_day ? "Forme prévue le jour J" : "Forme prévue à la date visée"}</dt><dd class="${day.form >= 0 ? "pos" : "neg"}">${day.form > 0 ? "+" : ""}${F.num(day.form, 1)}</dd></div>
+      <div><dt>Pic de fatigue</dt><dd>${peak ? `sem. du ${F.dayShort(peak.week_start)}` : "—"}</dd></div>
+      <div><dt>ACWR projeté (max)</dt><dd>${acwr ? F.num(acwr.value, 2) : "—"}</dd></div></dl>
+    <p class="muted">Projection = <strong>estimation</strong> à partir du planifié (même modèle de charge que les garde-fous), pas une mesure.${scale}${unplanned} ${hypLink("charge")}</p>`;
+}
+
 async function viewForm(params) {
   const days = Number(params.get("jours")) || 180;
-  const [form, load] = await Promise.all([api(`form?days=${days}`), api("load?weeks=26")]);
+  const [form, load, forecast] = await Promise.all([
+    api(`form?days=${days}`), api("load?weeks=26"),
+    // La projection est un plus : son absence (erreur réseau/serveur) ne casse jamais la vue.
+    api("load-forecast").catch(() => null),
+  ]);
   const s = SUMMARY;
   const trail = s.settings.sport === "trail";
   const series = form.series;
@@ -828,16 +863,37 @@ async function viewForm(params) {
     main.innerHTML = header("Forme & charge") + empty("Pas encore de séances", "La courbe de forme se construit à partir des séances indexées. Il faut environ six semaines d'historique pour qu'elle soit parlante.");
     return;
   }
-  const dates = series.map((p) => p.date);
+  const histDates = series.map((p) => p.date);
+  // Prolongement en pointillés jusqu'à la course (#172) : ESTIMATION à partir du planifié, jamais une mesure.
+  const projected = forecast && forecast.status === "ok"
+    ? forecast.series.filter((p) => p.projected && p.date > histDates[histDates.length - 1])
+      // Le jour J s'arrête « en entrant dans la journée » (comme la valeur affichée) : la charge de la
+      // course elle-même ne dessine pas un pic de fatigue au bout de la courbe.
+      .map((p) => (forecast.race_day && p.date === forecast.race_day.date
+        ? { ...p, ...forecast.race_day, load: null, entering: true } : p))
+    : [];
+  const nHist = series.length;
+  const dates = histDates.concat(projected.map((p) => p.date));
+  const histOnly = (key) => series.map((p) => p[key]).concat(projected.map(() => null));
+  // Le dernier point réel ancre le tracé pointillé : il se raccorde à la courbe pleine.
+  const projOnly = (key) => series.map((p, i) => (i === nHist - 1 ? p[key] : null)).concat(projected.map((p) => p[key]));
   const marks = [{ type: "hline", value: 0, cls: "mark mark--zero" }];
   if (form.race_date) marks.push({ type: "vline", date: form.race_date, cls: "mark mark--race", label: "Course" });
-  const chart = timeChart(dates, [
-    { type: "area", values: series.map((p) => p.form), cls: "area area--form" },
-    { type: "line", values: series.map((p) => p.fitness), cls: "line line--fitness" },
-    { type: "line", values: series.map((p) => p.fatigue), cls: "line line--fatigue" },
-  ], marks, { height: 250, label: "Condition, fatigue et forme", yFormat: (v) => F.num(v) });
-  const acwr = timeChart(dates, [
-    { type: "band", lo: dates.map(() => form.acwr_safe[0]), hi: dates.map(() => form.acwr_safe[1]), cls: "band-fill" },
+  const layers = [
+    { type: "area", values: histOnly("form"), cls: "area area--form" },
+    { type: "line", values: histOnly("fitness"), cls: "line line--fitness" },
+    { type: "line", values: histOnly("fatigue"), cls: "line line--fatigue" },
+  ];
+  if (projected.length) {
+    layers.push(
+      { type: "area", values: projOnly("form"), cls: "area area--form area--projected" },
+      { type: "line", values: projOnly("fitness"), cls: "line line--fitness line--projected" },
+      { type: "line", values: projOnly("fatigue"), cls: "line line--fatigue line--projected" },
+    );
+  }
+  const chart = timeChart(dates, layers, marks, { height: 250, label: "Condition, fatigue et forme", yFormat: (v) => F.num(v) });
+  const acwr = timeChart(histDates, [
+    { type: "band", lo: histDates.map(() => form.acwr_safe[0]), hi: histDates.map(() => form.acwr_safe[1]), cls: "band-fill" },
     { type: "line", values: series.map((p) => p.acwr), cls: "line line--acwr" },
   ], [], { height: 140, y: { min: 0, max: Math.max(2, ...series.map((p) => p.acwr || 0)) }, label: "Ratio charge aiguë / chronique", yFormat: (v) => F.num(v, 1) });
 
@@ -858,8 +914,9 @@ async function viewForm(params) {
   main.innerHTML = `${header("Forme & charge", `Charge par séance : TRIMP (fréquence cardiaque), repli sur l'effort perçu. ${hypLink("charge")}`)}
     <div class="toolbar">${periods}</div>
     <section class="band"><h2>Courbe de forme</h2>
-      <p class="legend"><span class="legend__item"><span class="key key--fitness"></span>Condition (42 j)</span> <span class="legend__item"><span class="key key--fatigue"></span>Fatigue (7 j)</span> <span class="legend__item"><span class="key key--form"></span>Forme</span></p>
-      <div class="chart-host" id="c-form">${chart.svg}</div><p class="readout" id="r-form"></p></section>
+      <p class="legend"><span class="legend__item"><span class="key key--fitness"></span>Condition (42 j)</span> <span class="legend__item"><span class="key key--fatigue"></span>Fatigue (7 j)</span> <span class="legend__item"><span class="key key--form"></span>Forme</span>${projected.length ? ` <span class="legend__item"><span class="key key--projected"></span>Projection (pointillés)</span>` : ""}</p>
+      <div class="chart-host" id="c-form">${chart.svg}</div><p class="readout" id="r-form"></p>
+      ${forecastBlock(forecast)}</section>
     <section class="band"><h2>Ratio charge aiguë / chronique</h2><p class="muted">Repère indicatif ${F.num(form.acwr_safe[0], 1)} – ${F.num(form.acwr_safe[1], 1)}, pas un seuil de blessure.</p>
       <div class="chart-host" id="c-acwr">${acwr.svg}</div></section>
     <section class="band"><h2>Volume hebdomadaire</h2>
@@ -870,6 +927,11 @@ async function viewForm(params) {
         durabilité — issus des échantillons FIT ingérés — sont regroupés dans <a href="#/analyse">Analyse</a>.</p></section>`;
 
   attachCursor($("#c-form"), chart, (i) => {
+    if (i >= nHist) {
+      const q = projected[i - nHist];
+      readout($("#r-form"), `<strong>${F.dayLong(q.date)}</strong> · <em>projection (estimation)</em> · ${q.entering ? "en entrant dans la journée (course non comptée)" : `charge ${F.num(q.load)}`} · condition ${F.num(q.fitness, 1)} · fatigue ${F.num(q.fatigue, 1)} · forme ${q.form > 0 ? "+" : ""}${F.num(q.form, 1)}`);
+      return;
+    }
     const p = series[i];
     readout($("#r-form"), `<strong>${F.dayLong(p.date)}</strong> · charge ${F.num(p.load)} · condition ${F.num(p.fitness, 1)} · fatigue ${F.num(p.fatigue, 1)} · forme ${p.form > 0 ? "+" : ""}${F.num(p.form, 1)} · ACWR ${F.num(p.acwr, 2)}`);
   });
@@ -2459,7 +2521,7 @@ async function viewPerformance(params) {
 // regroupement par modèle et les libellés ne vivent qu'ici ; une clé inconnue tombe
 // dans « Autres » avec un libellé dérivé de son nom — jamais masquée.
 const HYP_FAMILIES = [
-  { id: "charge", title: "Charge & forme", keys: ["trimp", "trimp_sex_default", "srpe", "form", "acwr", "monotony", "compliance"] },
+  { id: "charge", title: "Charge & forme", keys: ["trimp", "trimp_sex_default", "srpe", "form", "acwr", "monotony", "compliance", "load_forecast"] },
   { id: "performance", title: "Performance", keys: ["vo2max", "prediction", "trail_equivalence", "records", "effort_km"] },
   { id: "sante", title: "Santé & récupération", keys: ["hrv_baseline", "sleep_debt", "heat_acclimation"] },
   { id: "zones", title: "Zones FC & foulée", keys: ["hr_zones", "gait"] },
@@ -2477,7 +2539,7 @@ const HYP_FAMILIES = [
 const HYP_LABELS = {
   trimp: "TRIMP de Banister", trimp_sex_default: "Sexe non renseigné", srpe: "Charge sans FC (session-RPE)",
   form: "Condition, fatigue et forme", acwr: "Ratio fatigue / condition (ACWR)", monotony: "Monotonie et strain",
-  compliance: "Conformité plan vs réalisé", vo2max: "VO2max effective", prediction: "Prédictions de course",
+  compliance: "Conformité plan vs réalisé", load_forecast: "Projection de charge jusqu'à la course", vo2max: "VO2max effective", prediction: "Prédictions de course",
   trail_equivalence: "Équivalence plat en trail", records: "Records", effort_km: "Km-effort ITRA",
   hrv_baseline: "Ligne de base HRV", sleep_debt: "Dette de sommeil", heat_acclimation: "Acclimatation à la chaleur",
   hr_zones: "Zones FC et polarisation 80/20", gait: "Synthèse « Foulée »",

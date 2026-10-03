@@ -106,6 +106,26 @@ Trois graphiques, sur 3 mois, 6 mois ou un an :
   la forme devient positive : vous êtes frais. Le jour de course est marqué ; on
   voit ici la fatigue bondir à plus de 200 le 13 septembre, puis la forme redevenir
   positive pendant la reprise.
+- **La projection jusqu'à la course** (#172) prolonge ces trois courbes **en
+  pointillés** depuis aujourd'hui jusqu'à la date de l'objectif actif, et affiche
+  trois repères sous le graphique : la **forme prévue le jour J**, la **semaine du
+  pic de fatigue** et l'**ACWR projeté** (maximum sur le bloc). La charge de chaque
+  séance planifiée est **estimée** (durée × intensité prescrite, le même estimateur
+  que les [garde-fous](../guardrails.md)) : c'est une estimation à partir du
+  planifié, **jamais une mesure**. Comme une séance réelle avec fréquence cardiaque
+  pèse souvent plus (ou moins) que son estimation, la charge planifiée est **recalée**
+  sur le rapport réel / estimé de vos séances planifiées des 56 derniers jours (au
+  moins 5 séances appariées) — le recalage, ou son absence, est écrit sous la courbe.
+  La forme prévue le jour J est celle **en entrant dans la journée** : la charge de la
+  course elle-même n'y compte pas. Un jour sans séance compte pour une charge nulle ;
+  les semaines non planifiées sont comptées et signalées, car elles rendent la forme
+  prévue optimiste. Rien n'est tracé — la raison est écrite à la place — sans objectif
+  actif, sans séance planifiée avant la course, ou avec moins de 84 jours d'historique
+  (même plancher que le garde-fou R1). La même projection, hors tableau de bord :
+  `python3 scripts/arc_index.py load-forecast [--until AAAA-MM-JJ] [--text]`
+  (`/api/load-forecast`) ; `--compare <fichier>` oppose le plan actuel à une variante
+  d'affûtage (les semaines de même lundi sont remplacées) et chiffre l'écart de forme
+  le jour J.
 - **Le ratio charge aiguë / chronique** (ACWR) et sa bande 0,8 – 1,3 — un repère
   indicatif, discuté dans la littérature, pas un seuil de blessure. Il n'est pas
   tracé tant que l'historique est trop mince pour avoir un sens.
@@ -129,6 +149,7 @@ six semaines d'historique pour que la condition ait un sens.
 |---|---|
 | `activities/*.md` (durée, FC moyenne, effort perçu) | `scripts/arc_metrics.py` : TRIMP, ou effort perçu sans FC |
 | `planning/Runner_Profile.md` (FC max, FC de repos) | indispensables au TRIMP |
+| `planning/*.md` (séances planifiées), `planning/active_objective.md` (date de course) | projection jusqu'à la course (#172), `scripts/arc_load_forecast.py` |
 
 **Si les courbes sont plates ou bizarres** : renseignez la FC max et la FC de repos
 de référence du profil. Sans elles, la charge vient de l'effort perçu seul.
