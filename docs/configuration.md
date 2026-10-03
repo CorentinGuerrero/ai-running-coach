@@ -114,7 +114,8 @@ n'est exposé et aucun agent n'en parle. `garmin` ajoute à la liste blanche `GA
 les outils `get_menstrual_data_for_date` et `get_menstrual_calendar_data` — **relancez
 `./install.sh`** après le changement (ou installez avec `--cycle-tracking garmin`, qui écrit la
 clé) ; `intervals` lit le champ `menstrualPhase` d'intervals.icu, `manual` la déclaration via
-`/log`. Le cycle n'est qu'un **contexte** de lecture du bilan matinal : jamais une règle, jamais un
+`/log`. Avec `[data].source = "strava"` (#164), seul `manual` a un effet : Strava n'expose
+aucune donnée de cycle. Le cycle n'est qu'un **contexte** de lecture du bilan matinal : jamais une règle, jamais un
 diagnostic, jamais un assouplissement d'un verdict rouge.
 
 !!! warning "Une valeur invalide ne casse rien"
@@ -127,12 +128,13 @@ Détail, vérifications et sources : [Cycle menstruel](cycle-menstruel.md).
 
 ```toml
 [data]
-source = "garmin"   # garmin (défaut) | intervals
+source = "garmin"   # garmin (défaut) | intervals | strava
 ```
 
-Écrite automatiquement par `./install.sh --source garmin|intervals` — voir
-[Configuration Garmin](garmin-setup.md) et
-[Configuration Intervals.icu](intervals-setup.md). Change les outils MCP
+Écrite automatiquement par `./install.sh --source garmin|intervals|strava` — voir
+[Configuration Garmin](garmin-setup.md),
+[Configuration Intervals.icu](intervals-setup.md) et
+[Configuration Strava](strava-setup.md). Change les outils MCP
 appelés par `coach`/`medical`/`garmin-daily-sync` pour les activités, la
 santé et le calendrier planifié (table de correspondance complète dans
 `AGENTS.md`). Sans montre Garmin, `intervals` ouvre le projet aux données
@@ -144,6 +146,13 @@ COROS/Suunto/Polar/Apple synchronisées sur Intervals.icu.
     câblé dans ce projet côté Intervals.icu — l'agent le dit explicitement
     plutôt que d'inventer une valeur. Détail dans
     [Configuration Intervals.icu](intervals-setup.md).
+
+!!! warning "Avec `strava` (#164)"
+    Strava n'expose ni HRV, ni FC de repos, ni sommeil, ni readiness : le bilan matinal
+    (`[health].morning_check`) est dit **indisponible** (jamais simulé), même à `full`, et il
+    n'y a ni calendrier ni push de séances. En revanche les flux par seconde alimentent les KPI
+    du FIT (zones, GAP, découplage, VAM…) via `download_fit.py --source strava`. Prérequis :
+    Node.js 18+. Détail dans [Configuration Strava](strava-setup.md).
 
 ## Le style de coaching — `[coaching]`
 

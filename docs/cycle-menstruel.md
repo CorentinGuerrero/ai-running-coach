@@ -33,7 +33,8 @@ La casse et les espaces sont ignorés (`"Garmin"` vaut `"garmin"`). Une valeur i
 de frappe, type erroné) est traitée comme `off`, avec un avertissement : jamais une erreur,
 jamais un suivi activé par accident. Un mode qui ne
 correspond pas à la source de données (`garmin` avec intervals.icu, par exemple) retombe sur la
-déclaration manuelle.
+déclaration manuelle. Strava (`[data].source = "strava"`, #164) n'expose **aucune** donnée de
+cycle : avec cette source, seul `manual` a un effet (`garmin` et `intervals` y retombent).
 
 ### Comment la liste blanche Garmin est gérée
 
