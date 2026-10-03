@@ -559,6 +559,40 @@ class TestAnalyzeGpxDem(unittest.TestCase):
             self.assertEqual(stub2.urls, [])
             self.assertNotIn("Correction altimétrique", out2)
 
+    def test_km_profile_matches_dem_table_on_a_descending_track(self):
+        """Régression (intégration #176) : sur une trace qui DESCEND, le profil par km comptait
+        l'écart arrivée → départ (`ele[-1]` pour `i = 0`) comme D+ du km 0 — le tableau MNT
+        disait D+ 37 m quand le profil en affichait 472. La somme du profil doit égaler les
+        totaux du rapport, et une descente pure n'a aucun D+."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pts = list(reversed(line(SAFE_LAT, SAFE_LON, 250, step_m=10.0)))  # 2,5 km vers l'ouest
+            body = "".join(f'<trkpt lat="{p["lat"]}" lon="{p["lon"]}"><ele>{1400 - 2 * i}</ele></trkpt>'
+                           for i, p in enumerate(pts))
+            gpx = Path(tmp) / "descente.gpx"
+            gpx.write_text(f'<?xml version="1.0"?><gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}'
+                           "</trkseg></trk></gpx>", encoding="utf-8")
+            ws = Path(tmp) / "ws"
+            (ws / "config").mkdir(parents=True)
+            js = Path(tmp) / "o.json"
+            rc, _, _ = self._run(["--gpx", str(gpx), "--workspace", str(ws), "--dem", "--json", str(js), "--quiet"],
+                                 StubDem(SAFE_LON))
+            self.assertEqual(rc, 0)
+            dump = json.loads(js.read_text(encoding="utf-8"))
+            m, prof, comp = dump["metrics"], dump["km_profile"], dump["dem"]["comparison"]
+            self.assertEqual(comp["dem_gain_m"], 0.0)  # terrain stubbé : rampe montante vers l'est
+            self.assertGreater(comp["dem_loss_m"], 0.0)
+            self.assertEqual((m["elevation_gain_m"], m["elevation_loss_m"]), (comp["dem_gain_m"], comp["dem_loss_m"]))
+            self.assertAlmostEqual(sum(k["dp"] for k in prof), m["elevation_gain_m"], delta=0.5)
+            self.assertAlmostEqual(sum(k["dm"] for k in prof), m["elevation_loss_m"], delta=0.5)
+            self.assertEqual(prof[0]["dp"], 0)
+
+    def test_km_profile_never_wraps_to_the_last_point_without_dem(self):
+        pts = [{"lat": p["lat"], "lon": p["lon"], "ele": 500.0 - 0.5 * i}
+               for i, p in enumerate(line(SAFE_LAT, SAFE_LON, 300, step_m=10.0))]
+        m = AG.compute_metrics(pts, smooth=1, min_step_m=0.0)
+        self.assertEqual(m["km_profile"][0]["dp"], 0)
+        self.assertAlmostEqual(sum(k["dm"] for k in m["km_profile"]), m["elevation_loss_m"], delta=0.5)
+
     def test_dem_and_no_dem_conflict(self):
         with tempfile.TemporaryDirectory() as tmp:
             rc, _, err = self._run(["--gpx", str(self._gpx(tmp)), "--dem", "--no-dem"], StubDem(SAFE_LON))

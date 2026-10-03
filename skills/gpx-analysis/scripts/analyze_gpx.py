@@ -151,8 +151,12 @@ def compute_metrics(pts: list[dict], smooth: int = 3, min_step_m: float = 1.0) -
         if not idx:
             km_profile.append({"km": km, "dp": 0.0, "dm": 0.0, "alt_min": None, "alt_max": None})
             continue
-        kdp = sum(max(0.0, ele[i] - ele[i - 1]) for i in idx if ele[i] is not None and ele[i - 1] is not None and ele[i] > ele[i - 1])
-        kdm = sum(max(0.0, ele[i - 1] - ele[i]) for i in idx if ele[i] is not None and ele[i - 1] is not None and ele[i] < ele[i - 1])
+        # Pas `i - 1 -> i` attribué au km du point `i` ; jamais `i = 0` : `ele[-1]` est le
+        # DERNIER point de la trace en Python — l'écart arrivée/départ était compté à tort
+        # dans le km 0 (relecture #176).
+        steps = [i for i in idx if i > 0 and ele[i] is not None and ele[i - 1] is not None]
+        kdp = sum(ele[i] - ele[i - 1] for i in steps if ele[i] > ele[i - 1])
+        kdm = sum(ele[i - 1] - ele[i] for i in steps if ele[i] < ele[i - 1])
         alts = [ele[i] for i in idx if ele[i] is not None]
         km_profile.append({
             "km": km,
