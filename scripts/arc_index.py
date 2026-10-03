@@ -31,7 +31,7 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py pace-curve [--days N] [--lt-speed-ms V]              # courbe allure-durée GAP, CS/D′ (#169)
     arc_index.py energy --calibration [--weeks N]                     # calibration personnelle (ratio
                                                                         # Garmin/modèle par panier route/trail)
-    arc_index.py plan-templates [--format ID | --distance-km D [--sport S]] [--weeks N] [--json]
+    arc_index.py plan-templates [--format ID | --distance-km D [--sport S]] [--weeks N] [--text]
                                                                         # gabarits de périodisation (#189)
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
@@ -226,8 +226,9 @@ lisible. Lecture seule ; `/api/load-forecast` la sert au tableau de bord.
 (`config/plans/*.json`) ; avec `--format ID` (ou `--distance-km D [--sport trail|road]` pour le
 choisir selon l'objectif), rend le gabarit résolu semaine par semaine (en % de la semaine pic) pour
 `--weeks N` (défaut : celui du gabarit) et le verdict de cohérence avec les garde-fous du workspace
-(`[guardrails]`). Lecture seule, sans index ni base — voir `arc_plan_templates.py`. Texte lisible par
-défaut, `--json` pour les agents. Un point de départ, jamais un plan : le squelette daté est #190.
+(`[guardrails]`). Sans `--sport`, le sport vient de `[sport].primary`. Lecture seule, sans index ni
+base — voir `arc_plan_templates.py`. JSON par défaut (comme les autres sous-commandes), `--text` pour
+un tableau lisible. Un point de départ, jamais un plan : le squelette daté est #190.
 
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
@@ -4759,7 +4760,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commandes « decision-effects » et « load-forecast » : rendu texte lisible (défaut : "
+                        help="commandes « decision-effects », « load-forecast » et « plan-templates » : rendu texte lisible (défaut : "
                              "JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
@@ -4795,23 +4796,30 @@ def plan_templates_cli(args, workspace: Path) -> int:
     """`arc_index.py plan-templates` (#189) — lecture seule, sans index. Les seuils de
     cohérence viennent de `[guardrails]` du workspace (R2/R3/R6), comme `arc_guardrails`."""
     import arc_guardrails as GR   # import tardif : arc_guardrails importe arc_index
-    gset = GR.guardrail_settings(load_config(workspace))
+    config = load_config(workspace)
+    gset = GR.guardrail_settings(config)
     limits = {k: gset[k] for k in PT.GUARDRAIL_DEFAULTS}
     if args.weeks is not None and args.weeks < 1:
         raise ConfigError(f"--weeks : un entier >= 1 attendu, « {args.weeks} » reçu.")
     if args.sport and args.sport not in PT.SPORTS:
         raise ConfigError(f"--sport : « {args.sport} » inconnu pour les gabarits (attendu : {', '.join(PT.SPORTS)}).")
+    # Sans --sport : `[sport].primary` du workspace (route → gabarits route), comme arc_guardrails.
+    sport = args.sport or settings(config)["sport"]
+    if sport not in PT.SPORTS:
+        sport = "trail"
     try:
         report = PT.plan_templates_report(
             template_id=args.plan_format, n_weeks=args.weeks, distance_km=args.distance_km,
-            sport=args.sport, limits=limits)
+            sport=sport, limits=limits)
     except PT.PlanTemplateError as exc:
         raise ConfigError(str(exc))
-    if args.json:
+    if args.json or not args.text:
         print(json.dumps(report, ensure_ascii=False))
         return 0
     if "template" in report:
         print(PT.render_text(report["template"], report["weeks"], report["n_weeks"], report["problems"]))
+        for note in report["notes"]:
+            print("Remarque : " + note)
     elif report.get("matched", True) is None:
         print(report["reason"])
     else:
@@ -4820,6 +4828,8 @@ def plan_templates_cli(args, workspace: Path) -> int:
             print(f"{t['id']:<16} {t['sport']:<5} [{d['min']:g}, {d['max']:g}[ km  "
                   f"{t['weeks']['min']}–{t['weeks']['max']} sem. (défaut {t['weeks']['default']})  {t['label']}")
         print("Vérifications garde-fous : " + ("conforme." if not report["problems"] else "; ".join(report["problems"])))
+        for note in report["notes"]:
+            print("Remarque : " + note)
     return 0
 
 
