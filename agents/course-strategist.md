@@ -159,10 +159,18 @@ calcule seul (sans réseau) lever/coucher et crépuscule civil, la fraction de n
 de chaque section par scénario et applique une pénalité de vitesse dépendant de la
 pente (coefficients = approximations du projet, `assumptions.night`, réglables par
 `--night-penalty-pct`/`--night-descent-extra-max-pct`, `--no-night` pour couper).
-**Demande toujours le fuseau et l'heure de départ à l'athlète** (un ultra de nuit
-sans ces deux informations n'a PAS de pénalité de nuit : `night.status ==
-"unavailable"`, `night.reason` dit laquelle manque — dis-le, ne suppose jamais une
-nuit). Cite `night.scenarios.<scénario>.summary` (« X h de nuit, frontale requise de
+**Fuseau (`--tz`), une seule fois :** reprends `timezone` du plan de course déjà
+persisté s'il existe ; sinon déduis-le du lieu de la course quand il est sans
+ambiguïté (pays à fuseau unique : France métropolitaine → `Europe/Paris`,
+Italie → `Europe/Rome`…) et DIS le fuseau retenu ; demande-le seulement si le
+lieu est ambigu (pays à plusieurs fuseaux, outre-mer, lieu inconnu). Persiste-le
+dans le champ `timezone` du bloc ```arc pour ne jamais le redemander. Si
+`night.timezone_warning` est présent, le fuseau est peu vraisemblable pour la
+longitude du départ : signale-le et vérifie-le avant de citer les heures de nuit.
+**Heure de départ : demande-la** si elle n'est pas connue (règlement, site de la
+course) — jamais devinée. Sans date, heure de départ explicite ou fuseau, il n'y a
+PAS de pénalité de nuit (`night.status == "unavailable"`, `night.reason` dit
+laquelle manque) : dis-le, ne suppose jamais une nuit. Cite `night.scenarios.<scénario>.summary` (« X h de nuit, frontale requise de
 HH:MM à HH:MM ») dans le plan, avec le fait que la pénalité est une approximation.
 `night_fraction`/`night_factor` par section sont persistés dans `segments`, mais
 `night` lui-même est un KPI dérivé : ne le copie pas dans le bloc ```arc. La frontale

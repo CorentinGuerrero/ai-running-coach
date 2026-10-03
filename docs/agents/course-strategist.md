@@ -115,6 +115,17 @@ supposée. Une course entièrement de jour n'ajoute aucun champ par section. Le
 contrôle de la frontale dans le matériel obligatoire reste celui de
 `arc_index.py equipment --race-plan` (#134).
 
+**Fuseau.** La bibliothèque standard n'offre aucune correspondance hors ligne
+lieu → fuseau : le fuseau reste une entrée. L'agent le reprend du champ
+`timezone` d'un plan déjà persisté, sinon le déduit du lieu quand il est sans
+ambiguïté (pays à fuseau unique) en le disant, et ne le demande qu'en cas
+d'ambiguïté ; il le persiste ensuite dans `timezone` du bloc ```arc. Le script
+contrôle grossièrement sa vraisemblance (écart de plus de 3,5 h entre le
+décalage UTC du fuseau et l'heure solaire de la longitude du départ →
+`night.timezone_warning`). Le temps écoulé est compté en UTC : une course qui
+traverse le passage à l'heure d'hiver reste juste, l'affichage suit l'heure
+locale du moment.
+
 ## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,

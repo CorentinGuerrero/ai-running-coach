@@ -963,6 +963,7 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | **`race_date`** | date | |
 | `distance_m`, `elevation_gain_m`, `target_time_s` | nombre | |
 | `start_time` | date-heure | départ |
+| `timezone` | texte | fuseau IANA de la course (ex. `Europe/Paris`, #184) — l'entrée `--tz` de la pénalité de nuit de `arc_race_pacing.py`, persistée pour ne pas la redemander au recalcul |
 | `scenarios` | objet | `{"ambitious": s, "realistic": s, "safe": s}` en secondes |
 | `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement), `stop_s` (nombre, secondes — temps d'arrêt PRÉVU à ce ravito, #61 : repris par `arc_race_pacing.py`/`arc_race_debrief.py` au lieu du défaut générique (90 s) dès qu'il est renseigné ; à ne persister que pour un ravito dont l'arrêt attendu diffère vraiment du défaut, ex. repas chaud ou drop bag) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
@@ -993,7 +994,7 @@ réalisé segment par segment sans recalculer sa propre segmentation.
 {
   "arc": 1, "kind": "race_plan", "date": "2026-09-20", "race_name": "Trail des Collines",
   "race_date": "2026-11-15", "distance_m": 52000, "elevation_gain_m": 2400,
-  "start_time": "2026-11-15T07:30:00+01:00", "target_time_s": 25200,
+  "start_time": "2026-11-15T07:30:00+01:00", "timezone": "Europe/Paris", "target_time_s": 25200,
   "scenarios": {"ambitious": 23400, "realistic": 25200, "safe": 27900},
   "aid_stations": [{"km": 14.5, "name": "Mont-Saint-Aubert", "services": ["eau", "solide"], "cutoff": "10:30"}],
   "water_points": [{"km": 22.0, "source": "osm_drinking_water", "name": "Fontaine du village"}],

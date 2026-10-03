@@ -457,6 +457,9 @@ SCHEMA = {
             "distance_m": "num+",
             "elevation_gain_m": "num+",
             "start_time": "datetime",
+            # Fuseau IANA de la course (#184, ex. "Europe/Paris") : entrée `--tz` de la pénalité
+            # de nuit, persistée pour qu'un recalcul ne redemande pas le fuseau.
+            "timezone": "str",
             "target_time_s": "num+",
             "scenarios": "obj",
             "aid_stations": "[aid_station]",
