@@ -836,11 +836,17 @@ function forecastBlock(fc) {
   const acwr = fc.acwr_max;
   const unplanned = fc.weeks_unplanned
     ? ` ${fc.weeks_unplanned} semaine${fc.weeks_unplanned > 1 ? "s" : ""} non planifiée${fc.weeks_unplanned > 1 ? "s" : ""} : charge supposée nulle, la forme prévue est alors optimiste.` : "";
+  const cal = fc.calibration || {};
+  const scale = cal.applied
+    ? ` Charge planifiée recalée ×${F.num(cal.scale, 2)} sur vos ${cal.pairs} dernières séances planifiées réalisées.`
+    : cal.ratio == null
+      ? " Charge planifiée non recalée (trop peu de séances planifiées réalisées pour mesurer l'écart réel / estimé)."
+      : ` Charge planifiée non recalée (écart réel / estimé ×${F.num(cal.ratio, 2)} jugé aberrant : vérifier FC de repos / max).`;
   return `<dl class="facts facts--inline">
       <div><dt>${fc.race_day ? "Forme prévue le jour J" : "Forme prévue à la date visée"}</dt><dd class="${day.form >= 0 ? "pos" : "neg"}">${day.form > 0 ? "+" : ""}${F.num(day.form, 1)}</dd></div>
       <div><dt>Pic de fatigue</dt><dd>${peak ? `sem. du ${F.dayShort(peak.week_start)}` : "—"}</dd></div>
       <div><dt>ACWR projeté (max)</dt><dd>${acwr ? F.num(acwr.value, 2) : "—"}</dd></div></dl>
-    <p class="muted">Projection = <strong>estimation</strong> à partir du planifié (même modèle de charge que les garde-fous), pas une mesure.${unplanned} ${hypLink("charge")}</p>`;
+    <p class="muted">Projection = <strong>estimation</strong> à partir du planifié (même modèle de charge que les garde-fous), pas une mesure.${scale}${unplanned} ${hypLink("charge")}</p>`;
 }
 
 async function viewForm(params) {
@@ -860,7 +866,12 @@ async function viewForm(params) {
   const histDates = series.map((p) => p.date);
   // Prolongement en pointillés jusqu'à la course (#172) : ESTIMATION à partir du planifié, jamais une mesure.
   const projected = forecast && forecast.status === "ok"
-    ? forecast.series.filter((p) => p.projected && p.date > histDates[histDates.length - 1]) : [];
+    ? forecast.series.filter((p) => p.projected && p.date > histDates[histDates.length - 1])
+      // Le jour J s'arrête « en entrant dans la journée » (comme la valeur affichée) : la charge de la
+      // course elle-même ne dessine pas un pic de fatigue au bout de la courbe.
+      .map((p) => (forecast.race_day && p.date === forecast.race_day.date
+        ? { ...p, ...forecast.race_day, load: null, entering: true } : p))
+    : [];
   const nHist = series.length;
   const dates = histDates.concat(projected.map((p) => p.date));
   const histOnly = (key) => series.map((p) => p[key]).concat(projected.map(() => null));
@@ -918,7 +929,7 @@ async function viewForm(params) {
   attachCursor($("#c-form"), chart, (i) => {
     if (i >= nHist) {
       const q = projected[i - nHist];
-      readout($("#r-form"), `<strong>${F.dayLong(q.date)}</strong> · <em>projection (estimation)</em> · charge ${F.num(q.load)} · condition ${F.num(q.fitness, 1)} · fatigue ${F.num(q.fatigue, 1)} · forme ${q.form > 0 ? "+" : ""}${F.num(q.form, 1)}`);
+      readout($("#r-form"), `<strong>${F.dayLong(q.date)}</strong> · <em>projection (estimation)</em> · ${q.entering ? "en entrant dans la journée (course non comptée)" : `charge ${F.num(q.load)}`} · condition ${F.num(q.fitness, 1)} · fatigue ${F.num(q.fatigue, 1)} · forme ${q.form > 0 ? "+" : ""}${F.num(q.form, 1)}`);
       return;
     }
     const p = series[i];
