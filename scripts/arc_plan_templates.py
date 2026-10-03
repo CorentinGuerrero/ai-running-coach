@@ -40,8 +40,9 @@ profil de l'athlète, le bilan matinal et les garde-fous priment toujours.
 ```
 
 Phases dans l'ordre `base` → `development` → `specific` → `taper` (affûtage) avec la
-semaine de course comme DERNIÈRE semaine de l'affûtage, puis `recovery` (récupération)
-APRÈS la course, hors des semaines du bloc (`post_race: true`).
+semaine de course comme DERNIÈRE semaine de l'affûtage (son `volume_pct` s'entend HORS
+course), puis `recovery` (récupération) APRÈS la course, hors des semaines du bloc
+(`post_race: true`).
 
 ## Règles de résolution (déterministes)
 
@@ -69,9 +70,11 @@ résout le gabarit à `weeks.min`, `weeks.default` et `weeks.max` ET à chaque l
 intermédiaire, et vérifie sur les semaines résolues, avec les seuils des
 garde-fous (`DEFAULT_*`, ou ceux du workspace via `limits=`) :
 
-- R2 : hausse du volume ≤ `r2_volume_increase_max_pct` vs la moyenne des ≤ 4 semaines
-  précédentes (référence `mean4`, défaut du moteur) ET vs la dernière semaine non
-  allégée (contrôle plus strict, indépendant de la référence configurée) ;
+- R2 : hausse du volume ≤ `r2_volume_increase_max_pct` vs la référence configurée
+  (`r2_volume_reference` : `mean4` = moyenne des 4 semaines précédentes divisée par 4,
+  défaut du moteur, ou `previous_week`), calculée par `arc_guardrails._pct_increase`
+  (même arrondi) ; les semaines d'avant le bloc valent la semaine 1 (volume tenu) ;
+  ET vs la dernière semaine non allégée (contrôle du projet, plus strict) ;
 - R3 : idem pour le D+ (trail) ;
 - R6 : part de la sortie longue ≤ `r6_long_run_share_max_pct` ;
 - R7 : ≤ `MAX_QUALITY_SESSIONS` séances de qualité par semaine (le gabarit ne
@@ -82,9 +85,11 @@ garde-fous (`DEFAULT_*`, ou ceux du workspace via `limits=`) :
 Les gabarits ne remplacent JAMAIS les garde-fous : chaque semaine écrite passe
 encore `arc_guardrails.py check` sur l'historique réel de l'athlète.
 
-Bibliothèque standard uniquement (CONTRIBUTING.md). Aucun import d'`arc_index`
-(qui importe ce module pour sa CLI) : les seuils sont copiés ici et un test
-verrouille leur égalité avec `arc_guardrails.DEFAULT_*`.
+Bibliothèque standard uniquement (CONTRIBUTING.md). `arc_index` importe ce module
+pour sa CLI et `arc_guardrails` importe `arc_index` : ce module importe donc
+`arc_guardrails` tardivement (dans la validation) pour réutiliser son calcul ; les
+seuils par défaut sont copiés ici et un test verrouille leur égalité avec
+`arc_guardrails.DEFAULT_*`.
 """
 
 from __future__ import annotations
@@ -114,6 +119,7 @@ GUARDRAIL_DEFAULTS = {
     "r2_volume_increase_max_pct": 10.0,
     "r3_elevation_increase_max_pct": 10.0,
     "r6_long_run_share_max_pct": 35.0,
+    "r2_volume_reference": "mean4",
 }
 # R7 (deux séances de qualité sur deux jours consécutifs) : sans jours dans un gabarit,
 # on plafonne le NOMBRE (approximation du projet) pour que le squelette puisse les espacer.
@@ -140,6 +146,15 @@ ASSUMPTIONS = {
         "déclarée. Elle porte sur les seuils par défaut du moteur (ou ceux du workspace via la "
         "CLI) ; elle ne garantit rien sur l'historique réel de l'athlète, que seul "
         "`arc_guardrails.py check` évalue."),
+    "held_volume": (
+        "Les gabarits démarrent PRÈS du pic (≈ 83–92 % selon le format) : avec R2/R3 à +10 % face à "
+        "la moyenne de 4 semaines et une semaine allégée toutes les 4, la croissance d'un cycle de "
+        "4 semaines est de quelques pourcents seulement — une montée depuis un volume bas ferait "
+        "réagir les garde-fous. Le pic n'est donc PAS une cible absolue : il se DÉDUIT du volume que "
+        "l'athlète tient sur ses 4 dernières semaines (pic = ce volume × `peak_from_current`). Si ce "
+        "pic est trop bas pour l'objectif, la réponse est un bloc de mise en route préalable ou un "
+        "objectif revu, jamais un gabarit étiré. Les semaines d'avant le bloc, inconnues du gabarit, "
+        "valent la semaine 1 dans le calcul de la référence `mean4`."),
     "stretching": (
         "Étirement/compression : minima d'abord, puis une semaine à la fois dans l'ordre de "
         "`stretch_order`, en boucle. Choix de conception du projet, sans fondement physiologique "
@@ -480,15 +495,27 @@ def _structure_errors(t: dict) -> List[str]:
     return errors
 
 
-def _pct_up(new: float, ref: float) -> Optional[float]:
-    return None if ref <= 0 else (new - ref) / ref * 100.0
+def _reference_value(values: List[float], i: int, reference: str) -> float:
+    """Référence R2/R3 de la semaine `i` (0-based), avec la sémantique d'`arc_guardrails`
+    (`_reference_totals`) : `previous_week` = la semaine précédente ; `mean4` = la moyenne
+    des 4 semaines calendaires précédentes, TOUJOURS divisée par 4. Les semaines d'avant le
+    bloc sont inconnues : elles valent la semaine 1 (prémisse du gabarit — le bloc part d'un
+    volume que l'athlète tient déjà, voir `ASSUMPTIONS["held_volume"]`)."""
+    padded = [values[0]] * 4 + list(values)
+    j = i + 4
+    if reference == "previous_week":
+        return padded[j - 1]
+    return sum(padded[j - 4:j]) / 4.0
 
 
 def _consistency_errors(t: dict, limits: dict) -> List[str]:
+    # Import tardif : arc_guardrails importe arc_index, qui importe ce module pour sa CLI.
+    import arc_guardrails as GR
     errors: List[str] = []
     tid = t["id"]
     r2, r3, r6 = (limits["r2_volume_increase_max_pct"], limits["r3_elevation_increase_max_pct"],
                   limits["r6_long_run_share_max_pct"])
+    reference = limits.get("r2_volume_reference", GR.DEFAULT_VOLUME_REFERENCE)
     eps = 1e-6
     every = t["recovery_week"]["every_n_weeks"]
     for n in range(t["weeks"]["min"], t["weeks"]["max"] + 1):
@@ -502,19 +529,28 @@ def _consistency_errors(t: dict, limits: dict) -> List[str]:
         if t["sport"] == "trail":
             metrics.append(("elevation_pct", r3, "R3"))
         for key, limit, rule in metrics:
+            values = [wk[key] for wk in weeks]
             last_build = None
             for i, wk in enumerate(weeks):
                 v = wk[key]
-                if i > 0:
-                    prev = [x[key] for x in weeks[max(0, i - 4):i]]
-                    up = _pct_up(v, sum(prev) / len(prev))
-                    if up is not None and up > limit + eps:
-                        errors.append(f"{tag} : {rule} semaine {wk['week']} : {key} +{up:.1f} % vs moyenne des "
-                                      f"{len(prev)} semaines précédentes (> {limit:g} %).")
+                # Même calcul et même arrondi qu'`arc_guardrails._eval_r2/_eval_r3`
+                # (`_pct_increase` arrondi à 0,1, violation si strictement au-dessus).
+                up = GR._pct_increase(v, _reference_value(values, i, reference))
+                # Avec `previous_week`, la reprise qui suit une semaine allégée dépasse
+                # mécaniquement le seuil (100 / 80 = +25 %) : arc_guardrails l'AVERTIRA bien
+                # sur l'historique réel, mais c'est une propriété de la référence, pas un
+                # défaut du gabarit — signalée une fois par `reference_notes`, pas ici, tant
+                # que la reprise ne dépasse pas aussi la dernière semaine non allégée.
+                rebound = (reference == "previous_week" and i > 0 and weeks[i - 1]["kind"] == "recovery_week"
+                           and last_build is not None
+                           and (GR._pct_increase(v, last_build) or 0.0) <= limit)
+                if up is not None and up > limit and not rebound:
+                    errors.append(f"{tag} : {rule} semaine {wk['week']} : {key} +{up:g} % vs {reference} "
+                                  f"(> {limit:g} %).")
                 if wk["kind"] != "taper":
                     if last_build is not None and wk["kind"] == "build":
-                        up = _pct_up(v, last_build)
-                        if up is not None and up > limit + eps:
+                        up = GR._pct_increase(v, last_build)
+                        if up is not None and up > limit:
                             errors.append(f"{tag} : {rule} semaine {wk['week']} : {key} +{up:.1f} % vs la dernière "
                                           f"semaine non allégée (> {limit:g} %).")
                     if wk["kind"] == "build":
@@ -536,6 +572,16 @@ def _consistency_errors(t: dict, limits: dict) -> List[str]:
         if n >= 2 * every and "recovery_week" not in kinds:
             errors.append(f"{tag} : aucune semaine allégée alors que le bloc compte ≥ {2 * every} semaines.")
     return errors
+
+
+def reference_notes(limits: Optional[dict] = None) -> List[str]:
+    """Remarques (pas des problèmes) liées aux réglages R2/R3 du workspace."""
+    if (limits or {}).get("r2_volume_reference", GUARDRAIL_DEFAULTS["r2_volume_reference"]) != "previous_week":
+        return []
+    return ["`[guardrails].r2_volume_reference = \"previous_week\"` : la semaine qui suit chaque "
+            "semaine allégée dépasse mécaniquement le seuil R2/R3 face à la semaine précédente. "
+            "`arc_guardrails.py check` l'avertira sur l'historique réel ; c'est attendu (la reprise "
+            "reste sous la dernière semaine non allégée + seuil, ce que la validation vérifie)."]
 
 
 def validate_template(template: dict, limits: Optional[dict] = None) -> List[str]:
@@ -594,7 +640,10 @@ def render_text(template: dict, weeks: List[dict], n_weeks: int, problems: List[
     lines = [f"{template['label']} — {n_weeks} semaines avant la course (gabarit `{template['id']}`)",
              f"Pic indicatif : {template['peak_week_indicative']['duration_h']['min']:g}–"
              f"{template['peak_week_indicative']['duration_h']['max']:g} h/semaine.",
-             "Pourcentages du volume (et du D+) de la semaine pic. " + template["caveat"], ""]
+             "Pourcentages du volume (et du D+) de la semaine pic. " + template["caveat"],
+             "Pic = volume tenu sur les 4 dernières semaines × "
+             + " ; D+ × ".join(f"{v:g}" for v in peak_from_current(weeks, template["sport"]).values())
+             + " (jamais plus : la semaine 1 suppose ce volume déjà tenu).", ""]
     trail = template["sport"] == "trail"
     header = "Sem | Phase          | Type          | Vol % |" + (" D+ % |" if trail else "") + " Qualité | Sortie longue | Intensité f/m/d | Renfo"
     lines.append(header)
@@ -624,11 +673,28 @@ def plan_templates_report(directory: Optional[Path] = None, template_id: Optiona
         template_id = chosen["id"]
     if template_id is None:
         return {"templates": [summarize(t) for t in templates],
-                "problems": validate_templates(templates, limits), "assumptions": ASSUMPTIONS}
+                "problems": validate_templates(templates, limits), "notes": reference_notes(limits),
+                "assumptions": ASSUMPTIONS}
     t = get_template(template_id, templates)
     problems = validate_template(t, limits)
     n = n_weeks if n_weeks is not None else t["weeks"]["default"]
     weeks = resolve_weeks(t, n)
     return {"template": t, "n_weeks": n, "phase_weeks": allocate_phase_weeks(t, n), "weeks": weeks,
-            "problems": problems, "guardrail_limits": {**GUARDRAIL_DEFAULTS, **(limits or {})},
+            "peak_from_current": peak_from_current(weeks, t["sport"]),
+            "problems": problems, "notes": reference_notes(limits),
+            "guardrail_limits": {**GUARDRAIL_DEFAULTS, **(limits or {})},
             "assumptions": ASSUMPTIONS}
+
+
+def peak_from_current(weeks: List[dict], sport: str) -> dict:
+    """Multiplicateurs « pic = volume tenu actuellement × facteur » (et D+ en trail).
+
+    Le gabarit est une FORME en % du pic qui démarre à `weeks[0]` : la semaine 1 suppose
+    le volume que l'athlète tient déjà (`ASSUMPTIONS["held_volume"]`). Le pic atteignable
+    sans faire réagir R2/R3 vaut donc ce volume × 100 / `volume_pct` de la semaine 1 —
+    jamais plus. Le squelette (#190) et le coach dérivent le pic d'ici, pas l'inverse."""
+    first = weeks[0]
+    out = {"volume_factor": round(100.0 / first["volume_pct"], 3)}
+    if sport == "trail" and first.get("elevation_pct"):
+        out["elevation_factor"] = round(100.0 / first["elevation_pct"], 3)
+    return out

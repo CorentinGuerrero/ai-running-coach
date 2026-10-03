@@ -113,6 +113,52 @@ class TestGuardrailConsistency(unittest.TestCase):
         phase(t, "specific")["quality_sessions"] = 4
         self.assertTrue(PT.validate_template(t))
 
+    def test_lower_workspace_r2_threshold_is_caught(self):
+        errors = PT.validate_template(SHIPPED["ultra_80_100"], limits={"r2_volume_increase_max_pct": 3.0})
+        self.assertTrue(any("R2" in e for e in errors), errors)
+
+    def test_mean4_reference_matches_arc_guardrails_semantics(self):
+        # `_reference_totals("mean4")` divise TOUJOURS par 4 ; avant le bloc = semaine 1.
+        vals = [80.0, 84.0, 88.0, 92.0, 96.0]
+        self.assertEqual(PT._reference_value(vals, 0, "mean4"), 80.0)
+        self.assertEqual(PT._reference_value(vals, 2, "mean4"), (80 + 80 + 80 + 84) / 4)
+        self.assertEqual(PT._reference_value(vals, 4, "mean4"), (80 + 84 + 88 + 92) / 4)
+        self.assertEqual(PT._reference_value(vals, 3, "previous_week"), 88.0)
+
+    def test_mean4_ramp_is_caught_even_when_each_step_is_small(self):
+        # Chaque pas reste ≤ +10 % vs la dernière semaine non allégée, mais la reprise
+        # après la semaine allégée dépasse la moyenne de 4 semaines (référence d'arc_guardrails).
+        t = broken("trail_court")
+        t["recovery_week"]["volume_factor"] = 0.4
+        errors = PT.validate_template(t)
+        self.assertTrue(any("R2" in e and "mean4" in e for e in errors), errors)
+
+    def test_rounding_matches_arc_guardrails(self):
+        # arc_guardrails arrondit le % à 0,1 avant de comparer : +10,04 % n'est pas > 10 %.
+        self.assertEqual(GR._pct_increase(110.04, 100.0), 10.0)
+
+    def test_previous_week_reference_rebounds_are_notes_not_problems(self):
+        limits = {"r2_volume_reference": "previous_week"}
+        for tid, t in SHIPPED.items():
+            with self.subTest(template=tid):
+                self.assertEqual(PT.validate_template(t, limits), [])
+        self.assertTrue(PT.reference_notes(limits))
+        self.assertEqual(PT.reference_notes(), [])
+
+    def test_previous_week_reference_still_catches_a_real_jump(self):
+        t = broken()
+        phase(t, "base")["volume_pct"] = {"start": 70, "end": 92}
+        errors = PT.validate_template(t, {"r2_volume_reference": "previous_week"})
+        self.assertTrue(any("R2" in e and "previous_week" in e for e in errors), errors)
+
+    def test_peak_from_current_is_the_inverse_of_week_one(self):
+        t = SHIPPED["ultra_80_100"]
+        weeks = PT.resolve_weeks(t, 20)
+        f = PT.peak_from_current(weeks, "trail")
+        self.assertAlmostEqual(f["volume_factor"], round(100 / weeks[0]["volume_pct"], 3))
+        self.assertIn("elevation_factor", f)
+        self.assertNotIn("elevation_factor", PT.peak_from_current(PT.resolve_weeks(SHIPPED["route_semi"], 12), "road"))
+
     def test_missing_recovery_weeks_is_caught(self):
         t = broken()
         t["recovery_week"]["phases"] = ["base"]
@@ -251,6 +297,10 @@ class TestResolution(unittest.TestCase):
         self.assertEqual(PT.match_template(ts, 30, "trail")["id"], "marathon_trail")   # borne basse incluse
         self.assertEqual(PT.match_template(ts, 29.99, "trail")["id"], "trail_court")   # borne haute exclue
         self.assertEqual(PT.match_template(ts, 100, "trail")["id"], "ultra_80_100")
+        self.assertEqual(PT.match_template(ts, 59.9, "trail")["id"], "marathon_trail")
+        self.assertEqual(PT.match_template(ts, 60, "trail")["id"], "ultra_80_100")
+        self.assertEqual(PT.match_template(ts, 130, "trail")["id"], "cent_miles")
+        self.assertEqual(PT.match_template(ts, 21.1, "road")["id"], "route_semi")
         self.assertEqual(PT.match_template(ts, 160, "trail")["id"], "cent_miles")
         self.assertEqual(PT.match_template(ts, 42.2, "road")["id"], "route_marathon")
         self.assertIsNone(PT.match_template(ts, 5, "road"))
@@ -268,18 +318,49 @@ class TestResolution(unittest.TestCase):
 
 
 class TestCli(unittest.TestCase):
-    def run_cli(self, *args, ok=True):
+    def run_cli(self, *args, ok=True, config=None):
         with tempfile.TemporaryDirectory() as ws:
+            before = []
+            if config is not None:
+                (Path(ws) / "config").mkdir()
+                (Path(ws) / "config/workspace.toml").write_text(config, encoding="utf-8")
+                before = sorted(Path(ws).rglob("*"))
             r = subprocess.run([sys.executable, str(REPO / "scripts/arc_index.py"), "plan-templates",
                                 "--workspace", ws, *args], capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode == 0, ok, r.stderr)
-            self.assertEqual(list(Path(ws).iterdir()), [], "la commande ne doit rien écrire dans le workspace")
+            self.assertEqual(sorted(Path(ws).rglob("*")), before, "la commande ne doit rien écrire dans le workspace")
             return r
 
     def test_list(self):
-        r = self.run_cli()
+        r = self.run_cli("--text")
         self.assertIn("marathon_trail", r.stdout)
         self.assertIn("conforme", r.stdout)
+
+    def test_json_is_the_default_like_the_other_subcommands(self):
+        data = json.loads(self.run_cli().stdout)
+        self.assertEqual(data["problems"], [])
+        self.assertIn("marathon_trail", {t["id"] for t in data["templates"]})
+        # --json l'emporte sur --text
+        json.loads(self.run_cli("--format", "trail_court", "--text", "--json").stdout)
+
+    def test_text_detail_shows_the_peak_rule(self):
+        self.assertIn("Pic = volume tenu", self.run_cli("--format", "trail_court", "--text").stdout)
+
+    def test_sport_defaults_to_the_workspace_primary_sport(self):
+        data = json.loads(self.run_cli("--distance-km", "21.1", config='[sport]\nprimary = "road"\n').stdout)
+        self.assertEqual(data["template"]["id"], "route_semi")
+        data = json.loads(self.run_cli("--distance-km", "21.1").stdout)
+        self.assertEqual(data["template"]["id"], "trail_court")
+        data = json.loads(self.run_cli("--distance-km", "21.1", "--sport", "trail",
+                                       config='[sport]\nprimary = "road"\n').stdout)
+        self.assertEqual(data["template"]["id"], "trail_court")
+
+    def test_workspace_previous_week_reference_is_reported_as_a_note(self):
+        data = json.loads(self.run_cli("--format", "marathon_trail",
+                                       config='[guardrails]\nr2_volume_reference = "previous_week"\n').stdout)
+        self.assertEqual(data["problems"], [])
+        self.assertEqual(data["guardrail_limits"]["r2_volume_reference"], "previous_week")
+        self.assertTrue(data["notes"])
 
     def test_json_detail(self):
         data = json.loads(self.run_cli("--format", "cent_miles", "--weeks", "20", "--json").stdout)
