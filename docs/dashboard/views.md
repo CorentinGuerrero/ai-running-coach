@@ -470,13 +470,14 @@ en demander une au coach.
 Une carte sous « Foulée » dans la vue Santé (#185), elle aussi indépendante du bilan matinal. Pour
 les fenêtres de **14 et 28 jours**, le nombre de séances et le temps passés **au-dessus de
 1 500 m et de 2 000 m**, et l'altitude maximale atteinte, d'après les échantillons FIT. Une séance
-compte à un seuil à partir de 5 minutes au-dessus (un col franchi 30 s ne compte pas).
+compte à un seuil à partir de 5 minutes au-dessus (un col franchi 30 s ne compte pas). Seules les séances de terrain
+sont prises en compte (salle, piscine et repos exclus).
 
 **Comment la lire** : c'est un **indicateur d'exposition**, pas un modèle d'acclimatation. L'altitude
 barométrique ou GPS est approximative près d'un seuil. Une séance **sans altitude** (échantillons FIT
 absents, capteur muet) est comptée à part (« sans altitude, non comptée »), jamais comme une
 exposition nulle. Cette exposition réduit légèrement la pénalité d'altitude du plan de course
-(approximation du projet, voir [l'agent Course Strategist](../agents/course-strategist.md#penalite-daltitude-185)).
+quand la course a lieu dans les 14 jours (approximation du projet, voir [l'agent Course Strategist](../agents/course-strategist.md#penalite-daltitude-185)).
 
 **Si c'est vide** : sans séance sur la fenêtre, ou sans aucune altitude dans les séances, la carte
 l'écrit et pointe vers `skills/fit-download` ; rien n'est inventé. Hors tableau de bord :

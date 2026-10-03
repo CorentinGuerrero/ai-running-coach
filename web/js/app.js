@@ -1370,9 +1370,9 @@ function altitudeCard(a) {
     return `<tr><th scope="row">${w.window_days} jours${missing}</th><td class="num">${t15.sessions} séance${t15.sessions > 1 ? "s" : ""} · ${F.duration(t15.duration_s)}</td><td class="num">${t20.sessions} séance${t20.sessions > 1 ? "s" : ""} · ${F.duration(t20.duration_s)}</td><td class="num">${w.max_altitude_m != null ? `${F.num(w.max_altitude_m)}${NB}m` : "—"}</td></tr>`;
   }).join("");
   return `<section class="band" id="altitude">${head}
-    <p class="muted">Temps passé en altitude à l'entraînement d'après les échantillons FIT. ${F.esc(a.note)}.</p>
+    <p class="muted">Temps passé en altitude à l'entraînement d'après les échantillons FIT (séances de terrain) : ${F.esc(a.note)}.</p>
     <div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Fenêtre</th><th scope="col" class="num">≥ 1${NB}500${NB}m</th><th scope="col" class="num">≥ 2${NB}000${NB}m</th><th scope="col" class="num">Max</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="note">Une séance compte au seuil à partir de 5 minutes au-dessus. Altitude barométrique ou GPS approximative près d'un seuil. Cette exposition réduit légèrement la pénalité d'altitude du plan de course (approximation du projet) ; ce n'est pas un modèle d'acclimatation.</p></section>`;
+    <p class="note">Une séance compte au seuil à partir de 5 minutes au-dessus. Altitude barométrique ou GPS approximative près d'un seuil. Cette exposition réduit légèrement la pénalité d'altitude du plan d'une course à 14 jours ou moins (approximation du projet) ; ce n'est pas un modèle d'acclimatation.</p></section>`;
 }
 
 // ---------------------------------------------------------------------------

@@ -202,24 +202,40 @@ La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
 ## Pénalité d'altitude (#185)
 
 Au-dessus d'un seuil de **1 500 m** (choix du projet), `arc_race_pacing.py plan` majore le
-temps de chaque section d'un facteur qui croît avec son **altitude moyenne** (celle du GPX, ou
-celle du MNT quand la correction `elevation_dem` du plan est présente, #176 : `altitude.elevation_source`
-le dit). La pente vient de Wehrlin & Hallén 2006 (*Eur J Appl Physiol* 96:404-412,
-doi:10.1007/s00421-005-0081-9) : la VO2max baisse de **6,3 % par 1 000 m** (plage individuelle
-4,6-7,5 %, linéaire de 300 à 2 800 m, 8 athlètes d'endurance en altitude simulée aiguë).
+temps de chaque section d'un facteur qui croît avec son **excédent moyen au-dessus du seuil**,
+pondéré par la distance (une section qui franchit le seuil, col de 1 200 à 2 800 m, n'est
+pénalisée que pour sa partie haute). Altitudes du GPX, ou du MNT quand la correction
+`elevation_dem` du plan est présente (#176 : `altitude.elevation_source` le dit). La pente vient
+de Wehrlin & Hallén 2006 (*Eur J Appl Physiol* 96:404-412, doi:10.1007/s00421-005-0081-9) : la
+VO2max baisse de **6,3 % par 1 000 m** (plage individuelle 4,6-7,5 %, linéaire de 300 à 2 800 m,
+8 athlètes d'endurance en chambre hypobare, exposition aiguë).
 **La traduction de cette perte de VO2max en perte de vitesse d'ultra est une approximation du
-projet** : on suppose qu'une allure courue à fraction constante de la VO2max perd la même
-fraction relative de vitesse (facteur de temps = 1/(1 − perte)). Le critère de performance de
-l'étude (temps jusqu'à épuisement, −14,5 % par 1 000 m) n'est pas repris : il décrit un effort
-proche du maximum. Au-delà de 2 800 m, hors de la plage mesurée, la pénalité est extrapolée
-(avertissement) et l'altitude est plafonnée à 4 500 m pour le calcul.
+projet**, pas un résultat de l'étude : à fraction constante de la VO2max la vitesse baisserait
+d'autant, mais une allure d'ultra (environ 50-70 % de la VO2max) dépend aussi de la fatigue
+musculaire, de l'alimentation et du terrain. Le modèle **atténue** donc la pente en ne comptant
+la perte qu'au-dessus de 1 500 m (l'étude part de 300 m) : il applique environ 30 % de la perte de
+VO2max de l'étude à 2 000 m, 45 % à 2 500 m, 50 % à 2 800 m — atténuation choisie, non mesurée
+(facteur de temps = 1/(1 − perte)). Le critère de performance de l'étude (temps jusqu'à
+épuisement à 107 % de la VO2max, −14,5 % par 1 000 m) n'est pas repris : effort supra-maximal.
+Au-delà de 2 800 m, hors de la plage mesurée, la pénalité est extrapolée (avertissement) et
+l'altitude est plafonnée à 4 500 m pour le calcul.
 
 **Acclimatation.** Sans information, l'athlète est supposé non acclimaté (pénalité pleine).
 `--altitude-acclimated-days N` (jours déjà passés en altitude) et l'exposition mesurée à
 l'entraînement (`arc_index.py altitude-exposure`, 28 derniers jours, résolue par le script) réduisent la
 perte, jamais à zéro : crédit plafonné à 50 % (déclaré : jusqu'à 14 jours ; entraînement :
 jusqu'à 25 %, à 10 h au-dessus de 1 500 m) — approximations du projet, `assumptions.altitude`.
+L'exposition mesurée n'est créditée que si la course a lieu **14 jours au plus** après la fin de
+la fenêtre mesurée (`--race-date` requis, `altitude.acclimation.training_credited`) : un plan
+calculé des semaines à l'avance est à recalculer dans les deux dernières semaines.
 Réglages : `--altitude-threshold-m`, `--altitude-loss-pct`, `--no-altitude`.
+
+**Changement de comportement pour les plans existants.** La pénalité est active par défaut : un
+plan de course dont une section dépasse 1 500 m, recalculé après #185, donne des temps plus longs
+qu'avant (par exemple environ +8 % sur une section courue autour de 2 700 m, sans acclimatation).
+L'avertissement du plan le dit ; `--no-altitude` redonne exactement l'ancien calcul. Les plans
+déjà persistés ne changent pas tant qu'ils ne sont pas recalculés, et les champs ajoutés
+(`altitude_m`, `altitude_factor`) sont optionnels dans le contrat `race_plan`.
 
 **Composition.** Le facteur (`altitude_m`, `altitude_factor` par section) est identique pour
 les trois scénarios, se compose par multiplication avec la chaleur et la nuit (appliqué avant

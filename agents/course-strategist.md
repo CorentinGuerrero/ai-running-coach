@@ -206,13 +206,18 @@ pas. Cite `technicity.mean_coef` et les sections les plus techniques
 ```arc (`race_plan`), `technicity` (niveau plan) est un KPI dérivé : ne le
 copie pas.
 
-**Altitude (#185).** Au-dessus de 1 500 m (altitude moyenne de section, GPX ou MNT) le script
-majore le temps des sections (VO2max −6,3 % par 1 000 m, Wehrlin & Hallén 2006 ; **la traduction
-en vitesse est une approximation du projet**, `assumptions.altitude`), de façon identique
-pour les trois scénarios. Demande à l'athlète s'il a déjà séjourné en altitude avant la course
+**Altitude (#185).** Au-dessus de 1 500 m (excédent moyen de chaque section au-dessus du seuil,
+GPX ou MNT) le script majore le temps des sections (pente tirée de VO2max −6,3 % par 1 000 m,
+Wehrlin & Hallén 2006, comptée seulement au-dessus de 1 500 m ; **la traduction en vitesse
+d'ultra est une approximation du projet**, `assumptions.altitude`), de façon identique pour les
+trois scénarios. **Pénalité active par défaut** : un plan de montagne recalculé est plus long
+qu'avant #185 — si l'athlète compare avec un ancien plan, dis-le (`--no-altitude` redonne l'ancien
+calcul). Demande à l'athlète s'il a déjà séjourné en altitude avant la course
 et passe `--altitude-acclimated-days N` ; sans réponse, il est supposé NON acclimaté (jamais un
 pari optimiste). Le script lit lui-même l'exposition à l'entraînement
-(`arc_index.py altitude-exposure`) ; cite `altitude.acclimation` et `altitude.time_added_s`, et
+(`arc_index.py altitude-exposure`), créditée seulement si `--race-date` est à 14 jours ou moins
+(`altitude.acclimation.training_credited`, sinon la note le dit : propose de recalculer le plan
+dans les deux dernières semaines) ; cite `altitude.acclimation` et `altitude.time_added_s`, et
 dis que l'effet est une approximation individuelle très variable. `altitude.status ==
 "below_threshold"` ou `"no_elevation"` : aucune pénalité, dis-le. `altitude_m`/`altitude_factor`
 par section sont persistés dans `segments` ; l'objet `altitude` est un KPI dérivé : ne le copie pas
