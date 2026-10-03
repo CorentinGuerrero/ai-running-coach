@@ -3863,7 +3863,8 @@ def activity_dem_check(conn, workspace: Path, ref: Union[int, str], *, http_get=
     `[privacy].dem_for_activities = true`, aucune coordonnée ne part et le rapport le dit
     (`status = "disabled"`). Lecture seule : l'altitude enregistrée n'est JAMAIS remplacée ni
     écrite dans l'index ou le Markdown ; seule la comparaison D+ enregistré / D+ MNT et le biais
-    moyen sont rendus. Début/fin de trace (200 m) non envoyés. Jamais d'exception réseau :
+    moyen sont rendus. Début/fin de trace (`[privacy].dem_trim_m`, 500 m par défaut) non
+    envoyés — protection partielle du domicile, voir `arc_dem.ASSUMPTIONS["privacy"]`. Jamais d'exception réseau :
     `status = "unavailable"` + raison (repli hors ligne)."""
     label = ref_label(ref)
     cfg = DEM.load_settings(workspace)
@@ -3879,7 +3880,7 @@ def activity_dem_check(conn, workspace: Path, ref: Union[int, str], *, http_get=
     if not rows:
         return {**label, "status": "no_samples", "reason": "aucun échantillon FIT ingéré pour cette séance"}
     cache = DEM.DemCache(DEM.cache_path(workspace), enabled=cfg["cache"])
-    result = DEM.activity_check(rows, cache=cache, http_get=http_get)
+    result = DEM.activity_check(rows, cache=cache, http_get=http_get, trim_m=cfg["activity_trim_m"])
     return {**label, **result, "attribution": result.get("report", {}).get("attribution", []),
             "note": "comparaison seulement — l'altitude enregistrée n'est pas modifiée (le baromètre "
                     "reste souvent meilleur sur un FIT récent)"}

@@ -23,7 +23,9 @@ Seules des **coordonnées** (latitude/longitude arrondies) partent vers le fourn
 — jamais d'identifiant, de date, de fréquence cardiaque ni de nom de fichier ; la trace
 est amincie (un point tous les `step_m`). Une trace de séance personnelle révèle
 l'adresse de l'athlète : elle n'est donc interrogée qu'avec `[privacy].dem_for_activities
-= true`, et son début/sa fin (`PRIVACY_TRIM_M`) ne sont jamais envoyés. Voir
+= true`, et son début/sa fin (`[privacy].dem_trim_m`, 500 m par défaut) ne sont jamais
+envoyés — une protection PARTIELLE seulement (la trace restante passe souvent encore près
+du domicile). Voir
 `docs/elevation.md` et `ASSUMPTIONS["privacy"]`.
 
 ## Hors ligne
@@ -78,8 +80,11 @@ COORD_DECIMALS = {"ign": 5, "open-meteo": 4}
 
 DEFAULT_STEP_M = 50.0
 DEFAULT_MAX_POINTS = 3000
-# Début/fin de trace jamais envoyés pour une séance personnelle (domicile).
-PRIVACY_TRIM_M = 200.0
+# Début/fin de trace jamais envoyés pour une séance personnelle (domicile) : défaut et
+# bornes de `[privacy].dem_trim_m`. Protection PARTIELLE (voir ASSUMPTIONS["privacy"]) : le
+# plancher de 200 m empêche seulement de l'affaiblir davantage par configuration.
+PRIVACY_TRIM_M = 500.0
+PRIVACY_TRIM_BOUNDS_M = (200.0, 5000.0)
 # Part minimale de nœuds résolus pour accepter la correction d'une trace.
 MIN_COVERAGE = 0.8
 RETRIES = 3
@@ -91,7 +96,8 @@ ATTRIBUTION = {
     "open-meteo": "Altitudes : Copernicus DEM GLO-90 (ESA, DOI 10.5270/ESA-c5d3d65) via Open-Meteo.com.",
 }
 
-SETTINGS_DEFAULTS = {"dem": "off", "step_m": DEFAULT_STEP_M, "cache": True, "activities": False}
+SETTINGS_DEFAULTS = {"dem": "off", "step_m": DEFAULT_STEP_M, "cache": True, "activities": False,
+                     "activity_trim_m": PRIVACY_TRIM_M}
 
 ASSUMPTIONS = {
     "resolution": (
@@ -104,8 +110,14 @@ ASSUMPTIONS = {
     ),
     "horizontal_error": (
         "Une erreur horizontale du GPS de 5 à 10 m décale le point dans la maille : sur une pente "
-        "raide (30 %) elle vaut 1,5 à 3 m d'altitude avec un MNT à 1 m. Une trace amincie à "
-        "`step_m` limite le bruit cumulé, sans l'annuler."
+        "raide (30 %) elle vaut 1,5 à 3 m d'altitude avec un MNT à 1 m. Le D+ MNT n'ayant pas de "
+        "seuil, ce décalage peut le SURESTIMER sur une traversée à flanc de pente (sentier en "
+        "balcon, lacets) : simulation du projet (relecture #176, 10 km, nœuds à 50 m, 500 m de vrai "
+        "D+) — erreur GPS corrélée sur ~200 m (cas habituel), σ = 5 m, dévers 30 % : +0 à +1 % ; "
+        "dévers 60 % ou σ = 10 m : environ +4 % ; erreur NON corrélée d'un nœud à l'autre (pire "
+        "cas, trace très bruitée) : +5 à +30 %. Une trace amincie à `step_m` limite ce bruit "
+        "cumulé, sans l'annuler ; un seuil anti-bruit n'y change presque rien (+20 % restants à "
+        "3 m de seuil dans le pire cas) et coûterait les vraies petites bosses."
     ),
     "gain_reference": (
         "Pour un parcours de COURSE (GPX publié), le D+ MNT est la référence du plan "
@@ -118,7 +130,13 @@ ASSUMPTIONS = {
         "La trace est amincie (un nœud tous les `step_m`, 50 m par défaut, plafonné à "
         f"{DEFAULT_MAX_POINTS} nœuds en agrandissant le pas) puis l'altitude est interpolée "
         "linéairement ENTRE les nœuds par distance cumulée : une ondulation plus courte que le pas "
-        "n'est pas comptée (voir `arc_elevation.ASSUMPTIONS['dem_series']`)."
+        "n'est pas comptée (voir `arc_elevation.ASSUMPTIONS['dem_series']`) : l'interpolation "
+        "linéaire entre altitudes vraies ne peut que SOUS-estimer le D+ du terrain — simulation du "
+        "projet (relecture #176) : ondulations de 300 m de long et plus, écart < 2,5 % ; bosses de "
+        "3 m tous les 100 m, -24 % au pas de 50 m. Le pas réel s'élargit au-delà de 150 km "
+        f"({DEFAULT_MAX_POINTS} nœuds au plus). Une trace qui passe d'un fournisseur à l'autre "
+        "(frontière, trou de couverture IGN) peut montrer une marche de quelques mètres à la "
+        "transition (MNT de terrain contre MNT de surface)."
     ),
     "privacy": (
         "Seules des coordonnées arrondies (5 décimales IGN, 4 Open-Meteo) sont envoyées, par lots, "
@@ -126,7 +144,12 @@ ASSUMPTIONS = {
         "machine est évidemment visible du fournisseur. Les GPX de course (itinéraires publics) "
         "peuvent être interrogés sur demande (`--dem`) ou avec `[elevation].dem = \"auto\"` ; les "
         "traces de séances ne le sont qu'avec `[privacy].dem_for_activities = true`, début et fin "
-        f"({PRIVACY_TRIM_M:.0f} m) exclus. Aucun envoi par défaut."
+        f"exclus (`[privacy].dem_trim_m`, {PRIVACY_TRIM_M:.0f} m par défaut, "
+        f"{PRIVACY_TRIM_BOUNDS_M[0]:.0f} à {PRIVACY_TRIM_BOUNDS_M[1]:.0f} m). Ce rognage est une "
+        "protection PARTIELLE : une sortie qui part de chez soi suit ensuite sa rue et son "
+        "quartier, et plusieurs séances superposées désignent le même point de départ à quelques "
+        "centaines de mètres près ; il ne masque pas non plus un lieu fréquent au milieu de la "
+        "trace (travail, club). Aucun envoi par défaut."
     ),
     "cache": (
         "Chaque altitude obtenue est mémorisée localement (`<workspace>/.arc/dem-cache.json`, "
@@ -135,11 +158,14 @@ ASSUMPTIONS = {
         "(supprimer le fichier pour le vider, `[elevation].cache = false` pour l'ignorer)."
     ),
     "rate_limits": (
-        "IGN : 5 requêtes par seconde par adresse IP (documentation de la Géoplateforme) — le "
-        "module espace ses appels de 0,25 s. Open-Meteo : lots de 100 coordonnées maximum ; "
-        "aucune limite de débit n'est précisée par la page de documentation consultée (à vérifier "
-        "avant un usage intensif ; l'API gratuite est destinée à un usage non commercial). En cas "
-        "de HTTP 429/5xx, `RETRIES` essais avec attente exponentielle puis repli hors ligne."
+        "IGN : 5 requêtes par seconde par adresse IP, 5000 points par requête (documentation de "
+        "la Géoplateforme) — le module espace ses appels de 0,25 s. Open-Meteo : 100 coordonnées "
+        "par requête (au-delà, HTTP 400) ; l'API GRATUITE est réservée à un usage NON COMMERCIAL "
+        "(conditions d'utilisation d'Open-Meteo : moins de 10 000 appels par jour, 5 000 par heure, "
+        "600 par minute ; données sous CC BY 4.0) — un usage commercial exige un abonnement "
+        "Open-Meteo (clé d'API), que ce module ne gère pas. Un parcours de 3000 nœuds coûte 30 "
+        "appels. En cas de HTTP 429/5xx, `RETRIES` essais avec attente exponentielle puis repli "
+        "hors ligne."
     ),
 }
 
@@ -288,6 +314,13 @@ def load_settings(workspace: Optional[Path], *, warn: Callable[[str], None] = No
         out["step_m"] = float(step)
     else:
         warn(f"[elevation].step_m = {step!r} invalide (5 à 500 m) — {DEFAULT_STEP_M:.0f} m retenu.")
+    trim = priv.get("dem_trim_m", out["activity_trim_m"])
+    lo, hi = PRIVACY_TRIM_BOUNDS_M
+    if isinstance(trim, (int, float)) and not isinstance(trim, bool) and lo <= trim <= hi:
+        out["activity_trim_m"] = float(trim)
+    else:
+        warn(f"[privacy].dem_trim_m = {trim!r} invalide ({lo:.0f} à {hi:.0f} m) — "
+             f"{PRIVACY_TRIM_M:.0f} m retenu.")
     for key, section, name in (("cache", elev, "[elevation].cache"),
                                ("activities", priv, "[privacy].dem_for_activities")):
         raw = section.get("cache" if key == "cache" else "dem_for_activities", out[key])
@@ -567,19 +600,20 @@ def trim_for_privacy(pts: Sequence[dict], trim_m: float = PRIVACY_TRIM_M) -> Tup
 
 def activity_check(samples: Sequence[dict], *, step_m: float = 100.0, cache: Optional[DemCache] = None,
                    http_get: Optional[Callable[[str], dict]] = None,
-                   sleep: Callable[[float], None] = time.sleep) -> dict:
+                   sleep: Callable[[float], None] = time.sleep, trim_m: float = PRIVACY_TRIM_M) -> dict:
     """Compare l'altitude enregistrée d'une séance (échantillons `lat_deg`/`lon_deg`/
     `altitude_m`) au MNT — **lecture seule**, l'altitude enregistrée n'est jamais remplacée.
     L'appelant a déjà vérifié l'opt-in `[privacy].dem_for_activities`. Début et fin de trace
-    (`PRIVACY_TRIM_M`) ne sont ni envoyés ni comparés. Rend `{"status", "reason"?, ...}`."""
+    (`trim_m`, `[privacy].dem_trim_m`) ne sont ni envoyés ni comparés. Rend `{"status", "reason"?, ...}`."""
     gps = [s for s in samples if s.get("lat_deg") is not None and s.get("lon_deg") is not None]
     if len(gps) < 2:
         return {"status": "no_gps", "reason": "aucune coordonnée GPS exploitable dans les échantillons"}
     pts = [{"lat": s["lat_deg"], "lon": s["lon_deg"], "ele": s.get("altitude_m")} for s in gps]
-    lo, hi = trim_for_privacy(pts)
+    trim_m = max(float(trim_m), PRIVACY_TRIM_BOUNDS_M[0])  # jamais en deçà du plancher
+    lo, hi = trim_for_privacy(pts, trim_m)
     if hi - lo < 2:
         return {"status": "too_short",
-                "reason": f"trace trop courte une fois les {PRIVACY_TRIM_M:.0f} premiers/derniers mètres "
+                "reason": f"trace trop courte une fois les {trim_m:.0f} premiers/derniers mètres "
                           "retirés (vie privée)"}
     core = pts[lo:hi]
     res = resample_track(core, step_m=step_m, cache=cache, http_get=http_get, sleep=sleep)
@@ -595,7 +629,7 @@ def activity_check(samples: Sequence[dict], *, step_m: float = 100.0, cache: Opt
     comp.update({
         "status": res["status"],
         "mean_offset_m": round(sum(diffs) / len(diffs), 1),  # MNT - enregistré : biais moyen du capteur
-        "trimmed_m": PRIVACY_TRIM_M,
+        "trimmed_m": trim_m,
         "points_compared": len(core),
         "report": res["report"],
     })

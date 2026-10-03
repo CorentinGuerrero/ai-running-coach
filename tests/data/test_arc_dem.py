@@ -198,6 +198,17 @@ class TestLookupAndCache(unittest.TestCase):
             path.write_text("{pas du json", encoding="utf-8")
             self.assertEqual(D.DemCache(path).data, {})
 
+    def test_cache_file_is_private_and_holds_no_track_order(self):
+        import os
+        import stat
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".arc" / "dem-cache.json"
+            coords = [(p["lat"], p["lon"]) for p in line(SAFE_LAT, SAFE_LON, 5)]
+            D.lookup(coords, cache=D.DemCache(path), http_get=StubDem(SAFE_LON), sleep=lambda s: None)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(all(k.startswith("open-meteo:") for k in data))
+
     def test_calls_are_spaced_to_respect_rate_limit(self):
         coords = [(p["lat"], p["lon"]) for p in line(SAFE_LAT, SAFE_LON, 250, step_m=100.0)]
         sleeps = []
@@ -306,6 +317,23 @@ class TestResampleAndGain(unittest.TestCase):
     def test_compare_gain_loss_zero_file_gain_has_no_pct(self):
         self.assertIsNone(D.compare_gain_loss([100.0] * 5, [100.0, 105.0, 110.0, 115.0, 120.0])["delta_gain_pct"])
 
+    def test_dem_gain_never_exceeds_true_terrain_gain(self):
+        """Interpolation linéaire entre altitudes VRAIES : le D+ ne peut que sous-estimer le
+        terrain (inégalité triangulaire) — proche pour une longue ondulation, nettement en
+        deçà pour des bosses plus courtes que deux pas (ASSUMPTIONS["thinning"])."""
+        def true_gain(f, length, ds=0.5):
+            return EL.gain_loss([f(i * ds) for i in range(int(length / ds) + 1)])[0]
+
+        length, step = 10000.0, 50.0
+        node_d = [i * step for i in range(int(length / step) + 1)]
+        dists = [i * 5.0 for i in range(int(length / 5.0) + 1)]
+        for wavelength, amp, max_under_pct in ((2000.0, 200.0, 1.0), (600.0, 30.0, 3.0), (100.0, 3.0, 30.0)):
+            f = lambda s, w=wavelength, a=amp: a * math.sin(2 * math.pi * s / w) + 0.08 * s
+            ref = true_gain(f, length)
+            dem = EL.gain_loss(D.interpolate_by_distance(node_d, [f(d) for d in node_d], dists))[0]
+            self.assertLessEqual(dem, ref + 1e-6, wavelength)
+            self.assertLess((ref - dem) / ref * 100.0, max_under_pct, wavelength)
+
     def test_gain_loss_pure(self):
         self.assertEqual(EL.gain_loss([0, 10, 5, 15]), (20.0, 5.0))
         self.assertEqual(EL.gain_loss([0, 0.5, 0.2], min_step_m=1.0), (0.0, 0.0))
@@ -325,7 +353,8 @@ class TestSettings(unittest.TestCase):
 
     def test_defaults_are_conservative(self):
         s = D.load_settings(self._ws())
-        self.assertEqual(s, {"dem": "off", "step_m": 50.0, "cache": True, "activities": False})
+        self.assertEqual(s, {"dem": "off", "step_m": 50.0, "cache": True, "activities": False,
+                             "activity_trim_m": 500.0})
         self.assertEqual(D.load_settings(None)["dem"], "off")
 
     def test_shipped_workspace_toml_defaults_to_off(self):
@@ -343,6 +372,20 @@ class TestSettings(unittest.TestCase):
         s = D.load_settings(bad, warn=warnings.append)
         self.assertEqual((s["dem"], s["step_m"], s["activities"]), ("off", 50.0, False))
         self.assertEqual(len(warnings), 3)
+
+    def test_activity_trim_is_configurable_within_bounds(self):
+        warnings = []
+        ws = self._ws('[privacy]\ndem_trim_m = 1500\n')
+        self.assertEqual(D.load_settings(ws, warn=warnings.append)["activity_trim_m"], 1500.0)
+        self.assertEqual(warnings, [])
+        for bad in ("50", "100000", '"loin"', "true"):
+            warnings = []
+            s = D.load_settings(self._ws(f"[privacy]\ndem_trim_m = {bad}\n"), warn=warnings.append)
+            self.assertEqual(s["activity_trim_m"], D.PRIVACY_TRIM_M, bad)
+            self.assertEqual(len(warnings), 1, bad)
+
+    def test_shipped_trim_default_is_500_m(self):
+        self.assertEqual(D.load_settings(REPO)["activity_trim_m"], 500.0)
 
     def test_cache_lives_in_workspace_arc_dir(self):
         with mock.patch.dict("os.environ", {}, clear=False):
@@ -376,6 +419,20 @@ class TestActivityPrivacy(unittest.TestCase):
         # Seules des coordonnées partent : aucun autre paramètre que latitude/longitude.
         for url in stub.urls:
             self.assertEqual(sorted(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)), ["latitude", "longitude"])
+
+    def test_larger_trim_is_honoured_and_floor_cannot_be_lowered(self):
+        samples = self._samples(n=600)  # ~6 km
+        for asked, expected in ((1500.0, 1500.0), (10.0, D.PRIVACY_TRIM_BOUNDS_M[0])):
+            stub = StubDem(SAFE_LON)
+            res = D.activity_check(samples, step_m=100.0, http_get=stub, sleep=lambda s: None, trim_m=asked)
+            self.assertEqual(res["trimmed_m"], expected)
+            sent = []
+            for url in stub.urls:
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+                sent += [float(v) for v in q["longitude"][0].split(",")]
+            trim_deg = expected / M_PER_DEG_LON
+            self.assertGreaterEqual(min(sent), samples[0]["lon_deg"] + trim_deg - 1e-4)
+            self.assertLessEqual(max(sent), samples[-1]["lon_deg"] - trim_deg + 1e-4)
 
     def test_noisy_recorded_altitude_vs_dem(self):
         res = D.activity_check(self._samples(), step_m=100.0, http_get=StubDem(SAFE_LON), sleep=lambda s: None)
@@ -440,10 +497,15 @@ class TestAnalyzeGpxDem(unittest.TestCase):
             stub = StubDem(SAFE_LON)
             ws = Path(tmp) / "ws"
             (ws / "config").mkdir(parents=True)
-            rc, out, _ = self._run(["--gpx", str(self._gpx(tmp)), "--workspace", str(ws)], stub)
+            js = Path(tmp) / "o.json"
+            rc, out, _ = self._run(["--gpx", str(self._gpx(tmp)), "--workspace", str(ws), "--json", str(js)], stub)
             self.assertEqual(rc, 0)
             self.assertEqual(stub.urls, [])
             self.assertNotIn("Correction altimétrique", out)
+            # Sortie JSON inchangée par rapport à avant #176 : ni `dem` ni `elevation_source`.
+            dump = json.loads(js.read_text(encoding="utf-8"))
+            self.assertNotIn("dem", dump)
+            self.assertNotIn("elevation_source", dump["metrics"])
 
     def test_dem_flag_corrects_and_shows_both_gains(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -502,6 +564,57 @@ class TestAnalyzeGpxDem(unittest.TestCase):
             rc, _, err = self._run(["--gpx", str(self._gpx(tmp)), "--dem", "--no-dem"], StubDem(SAFE_LON))
             self.assertEqual(rc, 1)
             self.assertIn("incompatibles", err)
+
+
+class TestRacePacingDem(unittest.TestCase):
+    """`arc_race_pacing.py plan` : aucun appel réseau par défaut ; `--dem` corrige (stub)."""
+
+    def _run(self, extra, http, user_toml=None):
+        import arc_race_pacing as RP
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            (ws / "config").mkdir(parents=True)
+            if user_toml:
+                (ws / "config/workspace.user.toml").write_text(user_toml, encoding="utf-8")
+            gpx = TestAnalyzeGpxDem()._gpx(tmp, n=300)
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(D, "default_http_get", http), mock.patch.object(D.time, "sleep", lambda s: None), \
+                    redirect_stdout(out), redirect_stderr(err):
+                rc = RP.main(["plan", "--workspace", str(ws), "--memory", "--gpx", str(gpx),
+                              "--race-date", "2030-06-01", "--start", "08:00", "--today", "2030-05-01", *extra])
+            return rc, out.getvalue(), err.getvalue()
+
+    def test_default_plan_makes_no_network_call(self):
+        def forbidden(url):
+            raise AssertionError("appel réseau interdit par défaut")
+
+        rc, out, _ = self._run([], forbidden)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("elevation_dem", json.loads(out))
+        rc, out, _ = self._run(["--no-dem"], forbidden, user_toml='[elevation]\ndem = "auto"\n')
+        self.assertEqual(rc, 0)
+        self.assertNotIn("elevation_dem", json.loads(out))
+
+    def test_dem_plan_uses_dem_and_cites_attribution(self):
+        stub = StubDem(SAFE_LON)
+        rc, out, _ = self._run(["--dem"], stub)
+        self.assertEqual(rc, 0)
+        self.assertGreater(len(stub.urls), 0)
+        plan = json.loads(out)
+        dem = plan["elevation_dem"]
+        self.assertIn(dem["status"], ("ok", "partial"))
+        # Fichier en dents de scie (±3 m) : son D+ (mesuré comme le plan sans --dem) dépasse le MNT.
+        self.assertGreater(dem["file_gain_m"], dem["dem_gain_m"])
+        self.assertTrue(any("Copernicus" in w for w in plan.get("warnings", [])))
+
+    def test_dem_plan_offline_keeps_file_elevation(self):
+        def down(url):
+            raise urllib.error.URLError("hors ligne")
+
+        rc, out, err = self._run(["--dem"], down)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["elevation_dem"]["status"], "unavailable")
+        self.assertIn("altitudes du fichier conservées", err)
 
 
 class TestAssumptions(unittest.TestCase):

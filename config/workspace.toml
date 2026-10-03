@@ -359,5 +359,8 @@ cache = true
 # Séances personnelles (`arc_index.py dem-check <séance>`) : une trace d'activité révèle votre
 # domicile. Tant que `false` (défaut), AUCUNE trace de séance n'est envoyée à un service
 # d'altimétrie. `true` = autorise la comparaison altitude enregistrée / MNT (jamais un
-# remplacement), début et fin de trace (200 m) exclus. Indépendant de [elevation].dem.
+# remplacement), début et fin de trace exclus (`dem_trim_m`). Indépendant de [elevation].dem.
 dem_for_activities = false
+# Mètres retirés au début ET à la fin de chaque trace de séance avant envoi (200 à 5000).
+# Protection PARTIELLE : la trace restante passe souvent encore près de chez vous.
+dem_trim_m = 500
