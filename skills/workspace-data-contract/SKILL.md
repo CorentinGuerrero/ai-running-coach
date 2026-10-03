@@ -735,8 +735,10 @@ Chaque séance : **`date`** (date), **`sport`** (comme `activity`), **`title`**
 `heat_adjustment` (#171, objet optionnel : trace de l'ajustement des cibles à
 la chaleur, à recopier telle que produite par `arc_workout_targets.py targets
 --heat` → `trace.heat_adjustment` — `factor` (facteur sur l'allure, FC
-inchangée) et `temp_c` obligatoires ; `action`, `category`, `acclimated`,
-`slot`, `dew_point_c`, `reason` facultatifs). Jamais calculé à la main.
+inchangée) obligatoire ; `temp_c` (omis si aucune température connue, ex. 🔴
+dû au seul vent/orage), `temp_basis` (`temperature` `feels_like`), `action`,
+`category`, `acclimated`, `slot`, `dew_point_c`, `reason` facultatifs). Jamais
+calculé à la main.
 
 Tenez `status` à jour quand une séance est réalisée, manquée ou déplacée.
 

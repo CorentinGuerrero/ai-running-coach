@@ -70,6 +70,12 @@ WEATHER_ORDER = ("green", "yellow", "orange", "red")
 WEATHER_YELLOW_C = 22.0   # > 22 °C : 🟡
 WEATHER_ORANGE_C = 28.0   # > 28 °C : 🟠
 WEATHER_RED_C = 32.0      # > 32 °C : 🔴
+# Composantes non thermiques du même tableau, bornes (🟡, 🟠, 🔴) au sens « valeur > borne ».
+# Le tableau du skill doit rester ÉGAL à ces constantes : vérifié par
+# `tests/lint/test_heat_lint.py` (palier B), qui le relit — une seule source effective.
+WEATHER_WIND_KMH = (20.0, 35.0, 50.0)
+WEATHER_PRECIP_MM = (1.0, 5.0, 15.0)
+WEATHER_UV = (6.0, 8.0)     # > 6 : 🟡, > 8 : 🟠 (le tableau n'a pas de seuil UV 🔴)
 
 # Règles d'hydratation déjà énoncées par le skill `weather-forecast` (« 🟠 ->
 # hydratation × 1.2 » ; « chaleur 🟠 + séance longue (> 90 min) -> ≥ 1 L/h »).
@@ -104,7 +110,10 @@ ASSUMPTIONS = {
         "ralentit de toute façon l'allure. Température retenue : celle du créneau (`--temp-c`), sinon "
         "`temp_min_c` du jour pour le créneau `morning` et `temp_max_c` pour les autres (borne "
         "prudente : le bloc météo n'a pas de température horaire) ; le ressenti (`feels_like_c`), "
-        "quand il est fourni, remplace la température s'il est plus élevé (il intègre déjà l'humidité). "
+        "quand il est fourni, remplace la température s'il est plus élevé (il intègre déjà l'humidité) ; "
+        "en CLI, le ressenti du FICHIER météo (valeur journalière, proche du pic) n'est pas appliqué au "
+        "créneau `morning` évalué sur `temp_min_c` (il en annulerait le bénéfice ; `--feels-like-c` reste "
+        "possible). "
         "Le point de rosée est calculé (Magnus) à titre INFORMATIF quand l'humidité est présente : "
         "aucun seuil de point de rosée n'est vérifiable ici, donc AUCUNE correction supplémentaire "
         "n'en découle (repli sur la température seule, dit explicitement). Catégories 🟢/🟡/🟠/🔴 : "
@@ -225,11 +234,11 @@ def category_from_other(weather: Optional[dict]) -> Optional[str]:
                 levels.append(level)
                 return
 
-    bump(weather.get("wind_kmh"), (50, 35, 20))
-    bump(weather.get("precip_mm"), (15, 5, 1))
+    bump(weather.get("wind_kmh"), tuple(reversed(WEATHER_WIND_KMH)))
+    bump(weather.get("precip_mm"), tuple(reversed(WEATHER_PRECIP_MM)))
     uv = weather.get("uv_index")
     if uv is not None:
-        levels.append("orange" if uv > 8 else "yellow" if uv > 6 else "green")
+        levels.append("orange" if uv > WEATHER_UV[1] else "yellow" if uv > WEATHER_UV[0] else "green")
     if weather.get("thunderstorm"):
         levels.append("red")
     return worst_category(*levels)
@@ -299,7 +308,9 @@ def heat_adjustment(session_type: str, *, temp_c: Optional[float], feels_like_c:
         effective, basis = feels_like_c, "feels_like"
     out["temp_c"], out["temp_basis"] = effective, basis if effective is not None else None
     out["dew_point_c"] = dew_point_c(temp_c, humidity_pct)
-    if humidity_pct is None:
+    if effective is None:
+        pass  # aucune température : la note « aucune température » ci-dessous suffit
+    elif humidity_pct is None:
         notes.append("humidité absente du bloc météo : ajustement sur la température seule")
     elif out["dew_point_c"] is not None:
         notes.append(f"point de rosée ≈ {out['dew_point_c']:g} °C (informatif : aucune correction "

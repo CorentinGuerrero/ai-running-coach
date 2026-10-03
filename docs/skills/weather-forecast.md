@@ -28,7 +28,7 @@ Un jour chaud (> 25 °C) ou 🔴, `python3 scripts/arc_workout_targets.py target
 | qualité / allure course | créneau frais d'abord ; sinon allures abaissées ou séance déplacée ; jamais d'intensité maintenue en 🔴 |
 | renforcement, indoor | aucun changement |
 
-Température retenue : `temp_min_c` pour le créneau matin, `temp_max_c` sinon (pas de température horaire dans le bloc) ; le ressenti la remplace s'il est plus élevé ; humidité absente → repli sur la température seule. Les coefficients sont des approximations du projet (voir `ASSUMPTIONS` de `arc_heat.py`), pas des mesures individuelles.
+Température retenue : `temp_min_c` pour le créneau matin, `temp_max_c` sinon (pas de température horaire dans le bloc) ; le ressenti la remplace s'il est plus élevé (sauf au créneau matin : le ressenti du fichier est une valeur journalière) ; humidité absente → repli sur la température seule. Les coefficients sont des approximations du projet (voir `ASSUMPTIONS` de `arc_heat.py`), pas des mesures individuelles.
 
 ## Contexte du cycle (opt-in, #166)
 

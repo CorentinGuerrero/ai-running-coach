@@ -453,9 +453,11 @@ def apply_heat(result: dict, session: dict, *, temp_c: Optional[float], feels_li
             "factor": factor if keep else None,
         }
     if adj["applies"]:
-        trace = {"factor": adj["factor"], "temp_c": adj["temp_c"] if adj["temp_c"] is not None else 0.0,
-                 "action": adj["action"], "category": adj["category"], "reason": adj["reason"]}
-        for key in ("acclimated", "slot", "dew_point_c"):
+        # Mesure absente = clé omise (contrat `arc`) : jamais de `temp_c` fictif quand le 🔴 vient
+        # du vent/de la pluie/de l'orage sans température connue.
+        trace = {"factor": adj["factor"], "action": adj["action"], "category": adj["category"],
+                 "reason": adj["reason"]}
+        for key in ("temp_c", "temp_basis", "acclimated", "slot", "dew_point_c"):
             if adj.get(key) is not None:
                 trace[key] = adj[key]
         result["trace"] = {"heat_adjustment": trace}
@@ -849,7 +851,15 @@ def _heat_from_cli(args, conn, conf: dict, session: dict, result: dict) -> None:
         temp_c, tnote = args.temp_c, "température fournie par --temp-c"
     else:
         temp_c, tnote = slot_temperature(weather, slot)
-    feels = args.feels_like_c if args.feels_like_c is not None else (weather or {}).get("feels_like_c")
+    feels = args.feels_like_c
+    fnote = None
+    if feels is None and (weather or {}).get("feels_like_c") is not None:
+        if args.temp_c is None and slot == "morning" and (weather or {}).get("temp_min_c") is not None:
+            # Le ressenti du fichier est une valeur JOURNALIÈRE (proche du pic de chaleur) : l'appliquer
+            # au créneau matin, évalué sur `temp_min_c`, annulerait le bénéfice du créneau frais.
+            fnote = "ressenti du jour non appliqué au créneau matin (valeur journalière, pas celle du créneau)"
+        else:
+            feels = weather["feels_like_c"]
     humidity = args.humidity_pct if args.humidity_pct is not None else (weather or {}).get("humidity_pct")
     # Catégorie : --category (créneau retenu, évalué par le coach) ; sinon composantes NON thermiques du
     # fichier météo (vent/pluie/UV/orage) — jamais la catégorie « du jour », calculée sur la température
@@ -863,7 +873,7 @@ def _heat_from_cli(args, conn, conf: dict, session: dict, result: dict) -> None:
     apply_heat(result, session, temp_c=temp_c, feels_like_c=feels, humidity_pct=humidity, category=category,
                acclimated=acclimated, slot=slot, sweat_rate_l_h=sweat, declared_pace_s_km=args.pace_s_km)
     notes = result["heat_adjustment"]["notes"]
-    for extra in (wnote, tnote, anote):
+    for extra in (wnote, tnote, fnote, anote):
         if extra:
             notes.append(extra)
 

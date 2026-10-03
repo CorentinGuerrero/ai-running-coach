@@ -344,6 +344,46 @@ class TestCliHeat(unittest.TestCase):
             self.assertEqual(base["heat_adjustment"]["action"], "slow_pace")
             self.assertAlmostEqual(base["heat_adjustment"]["factor"], 1.10)
 
+    def _weather(self, ws: Path, **fields) -> None:
+        block = {"arc": 1, "kind": "weather", "date": "2026-09-30", "location": "Tournai", "category": "orange"}
+        block.update(fields)
+        (ws / "medical" / "2026-09-30_meteo.md").write_text(
+            "# Météo\n\n```arc\n" + json.dumps(block) + "\n```\n", encoding="utf-8")
+
+    def test_daily_feels_like_not_applied_to_morning_slot(self):
+        """Revue de code #171 : le ressenti du fichier est journalier (proche du pic) — l'appliquer au
+        créneau matin (évalué sur `temp_min_c`) annulerait le bénéfice du créneau frais."""
+        session = json.dumps({"date": "2026-09-30", "sport": "running", "title": "Footing",
+                              "intensity": "endurance", "outdoor": True})
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._workspace(tmp)
+            self._weather(ws, temp_min_c=18, temp_max_c=30, feels_like_c=33)
+            morning = self._run(ws, "--slot", "morning", "--session", session)["heat_adjustment"]
+            self.assertEqual(morning["temp_c"], 18.0)
+            self.assertFalse(morning["applies"])
+            self.assertTrue(any("ressenti du jour non appliqué" in n for n in morning["notes"]))
+            midday = self._run(ws, "--slot", "midday", "--session", session)["heat_adjustment"]
+            self.assertEqual((midday["temp_c"], midday["temp_basis"]), (33.0, "feels_like"))
+            explicit = self._run(ws, "--slot", "morning", "--feels-like-c", "27", "--session", session)
+            self.assertEqual(explicit["heat_adjustment"]["temp_c"], 27.0)   # option explicite : appliquée
+
+    def test_trace_omits_unknown_temperature(self):
+        """🔴 dû au seul orage, sans température : `temp_c` omis de la trace (jamais 0 fictif)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = self._workspace(tmp)
+            self._weather(ws, category="red", thunderstorm=True)
+            res = self._run(ws, "--session", json.dumps(
+                {"date": "2026-09-30", "sport": "running", "title": "VMA", "intensity": "vo2max", "outdoor": True}))
+            trace = res["trace"]["heat_adjustment"]
+            self.assertNotIn("temp_c", trace)
+            self.assertEqual(trace["action"], "reschedule_or_lighten")
+            week = {"arc": 1, "kind": "week", "week_start": "2026-09-28", "location": "Tournai",
+                    "sessions": [{"date": "2026-09-30", "sport": "running", "title": "VMA",
+                                  "intensity": "vo2max", "heat_adjustment": trace}]}
+            self.assertEqual(C.validate(week)[0], [])
+            notes = res["heat_adjustment"]["notes"]
+            self.assertFalse(any("humidité absente" in n for n in notes), notes)
+
     def test_without_heat_flag_output_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws = self._workspace(tmp)

@@ -58,6 +58,8 @@ SLOT = ("morning", "midday", "evening", "none")
 # Action recommandée par l'ajustement chaleur d'une séance (#171, `scripts/arc_heat.py`).
 HEAT_ACTION = ("none", "slow_pace", "prefer_cool_slot", "lower_pace_targets",
                "reschedule_or_lighten", "reschedule_or_indoor")
+# Base de `heat_adjustment.temp_c` : température du créneau ou ressenti (s'il est plus élevé).
+HEAT_TEMP_BASIS = ("temperature", "feels_like")
 INTENSITY = (
     "rest", "recovery", "endurance", "tempo", "threshold", "vo2max", "race", "strength",
 )
@@ -563,8 +565,10 @@ SUBSCHEMA = {
     # produite par `arc_workout_targets.py targets --heat` (champ `trace`). `factor` = facteur
     # sur l'ALLURE (>= 1, FC cible inchangée) ; `reason` = motif cité à l'athlète.
     "heat_adjustment": {
-        "required": {"factor": "num+", "temp_c": "num"},
+        "required": {"factor": "num+"},
         "optional": {
+            "temp_c": "num",
+            "temp_basis": _enum(HEAT_TEMP_BASIS),
             "action": _enum(HEAT_ACTION),
             "category": _enum(WEATHER_CATEGORY),
             "acclimated": "bool",
