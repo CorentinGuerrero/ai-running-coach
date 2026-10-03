@@ -804,7 +804,11 @@ resolve_cycle_tracking() {
             GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_CYCLE_TOOLS"
             log "Suivi du cycle (opt-in) : outils get_menstrual_* ajoutés à la liste blanche garmin"
         else
-            warn "cycle_tracking = garmin sans source Garmin : aucun outil à exposer — utilisez « intervals » (champ menstrualPhase) ou « manual » (voir docs/configuration.md)."
+            if [[ "$SOURCE" == "strava" ]]; then
+                warn "cycle_tracking = garmin avec la source Strava : Strava n'expose aucune donnée de cycle — les agents retomberont sur « manual » (voir docs/cycle-menstruel.md)."
+            else
+                warn "cycle_tracking = garmin sans source Garmin : aucun outil à exposer — utilisez « intervals » (champ menstrualPhase) ou « manual » (voir docs/configuration.md)."
+            fi
         fi
     elif [[ "$CYCLE_TRACKING" == "intervals" && "$SOURCE" != "intervals" ]]; then
         warn "cycle_tracking = intervals sans source intervals.icu : les agents retomberont sur la déclaration manuelle (voir docs/configuration.md)."

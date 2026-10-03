@@ -60,6 +60,16 @@ class TestSourceStrava(InstallAsserts):
             self.assertNotIn("garmin_mcp", log)
             self.assertNotIn("intervals-icu-mcp", log)
 
+    def test_cycle_tracking_garmin_with_strava_exposes_no_tool_and_says_why(self):
+        """#166 × #164 : Strava n'a aucune donnée de cycle — pas de serveur garmin, pas d'outil
+        get_menstrual_*, un avertissement propre à Strava (pas un conseil « intervals »)."""
+        with Sandbox() as sb:
+            result = sb.install("--source", "strava", "--cycle-tracking", "garmin", "--no-auth", "--ide", "claude")
+            self.assertSucceeded(result)
+            self.assertEqual(set(_mcp_servers(sb)), {"strava"})
+            self.assertNotIn("get_menstrual", (sb.repo / ".mcp.json").read_text(encoding="utf-8"))
+            self.assertIn("Strava n'expose aucune donnée de cycle", result.stdout + result.stderr)
+
     def test_leanproxy_rejected_with_strava_source(self):
         with Sandbox() as sb:
             proc = sb.install("--source", "strava", "--use-leanproxy", "--no-auth", "--dry-run")

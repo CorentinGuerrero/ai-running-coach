@@ -116,6 +116,15 @@ class TestActivityRef(unittest.TestCase):
             VM.segment_seed("s")
 
 
+class TestCycleWithStravaSource(unittest.TestCase):
+    """#166 × #164 : Strava n'expose aucune donnée de cycle — tout mode source retombe sur manual."""
+
+    def test_source_modes_fall_back_to_manual(self):
+        import arc_cycle
+        for mode in ("garmin", "intervals", "manual"):
+            self.assertEqual(arc_cycle.effective_source(mode, "strava"), "manual", mode)
+
+
 class TestParityWithGarmin(Workspace):
     """Séance Garmin vs séance Strava dont les flux sont dérivés des mêmes échantillons."""
 

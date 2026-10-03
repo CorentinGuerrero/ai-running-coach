@@ -68,7 +68,10 @@ claude mcp add --transport http strava-mcp https://mcp.strava.com/mcp
     applique donc pas ; l'agent lit la liste d'outils de la session et n'invente rien. Il
     n'est pas utilisable pour la synchronisation headless ni pour `download_fit.py` (qui
     s'authentifie avec les jetons du serveur communautaire). `install.sh` ne l'installe pas
-    et ne supprime jamais une entrée `strava` que vous avez ajoutée à la main.
+    et ne supprime jamais une entrée `strava` que vous avez ajoutée à la main en changeant de
+    source. Gardez-lui un nom **différent** de `strava` (par exemple `strava-mcp`, comme
+    ci-dessus) : `./install.sh --source strava` réécrit l'entrée nommée `strava` avec son
+    propre serveur, comme il le fait pour `garmin` et `intervals`.
 
 ## Installation
 

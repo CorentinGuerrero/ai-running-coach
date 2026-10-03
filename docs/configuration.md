@@ -114,7 +114,8 @@ n'est exposé et aucun agent n'en parle. `garmin` ajoute à la liste blanche `GA
 les outils `get_menstrual_data_for_date` et `get_menstrual_calendar_data` — **relancez
 `./install.sh`** après le changement (ou installez avec `--cycle-tracking garmin`, qui écrit la
 clé) ; `intervals` lit le champ `menstrualPhase` d'intervals.icu, `manual` la déclaration via
-`/log`. Le cycle n'est qu'un **contexte** de lecture du bilan matinal : jamais une règle, jamais un
+`/log`. Avec `[data].source = "strava"` (#164), seul `manual` a un effet : Strava n'expose
+aucune donnée de cycle. Le cycle n'est qu'un **contexte** de lecture du bilan matinal : jamais une règle, jamais un
 diagnostic, jamais un assouplissement d'un verdict rouge.
 
 !!! warning "Une valeur invalide ne casse rien"
