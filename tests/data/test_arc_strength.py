@@ -67,6 +67,15 @@ class TestShippedLibrary(unittest.TestCase):
         listed = {(c, x) for c, xs in SG.GARMIN_VERIFIED.items() for x in xs}
         self.assertEqual(used, listed)   # pas de couple mort, pas de couple non vérifié
 
+    def test_garmin_whitelist_is_frozen(self):
+        # Empreinte de la liste vérifiée le 2026-10-04 contre le catalogue Garmin (42 couples). Ajouter un
+        # couple = le vérifier d'abord dans Exercises.json, puis mettre à jour cette empreinte, sciemment.
+        import hashlib
+        pairs = sorted(f"{c}/{x}" for c, xs in SG.GARMIN_VERIFIED.items() for x in xs)
+        self.assertEqual(len(pairs), 42)
+        self.assertEqual(hashlib.sha256("\n".join(pairs).encode()).hexdigest(),
+                         "179480b71de95267a48f8f7b11a3d490cc68c3c7b8488bcdb1c222d38322abc2")
+
     def test_some_exercises_have_no_garmin_mapping(self):
         self.assertTrue(any(e["garmin"] is None for e in EXERCISES.values()))
 
