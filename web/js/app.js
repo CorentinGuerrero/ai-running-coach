@@ -2323,7 +2323,7 @@ function paceCurveSection(data) {
   if (!data) return { html: `<section class="band">${title}${note("Courbe indisponible.")}</section>` };
   const w90 = data.windows.find((w) => w.window_days === data.trend_window_days) || data.windows[0];
   if (!data.n_activities || !w90 || !w90.curve.length) {
-    return { html: `<section class="band">${title}${note(F.esc(data.reason || "Données insuffisantes : aucune séance de course avec échantillons FIT (altitude) sur la période."))}</section>` };
+    return { html: `<section class="band">${title}${note(`Données insuffisantes : ${F.esc(data.reason || "aucune séance de course avec échantillons FIT (altitude) sur la période")}.`)}</section>` };
   }
   const durs = data.durations_s;
   // Seules quelques durées sont étiquetées sur l'axe (lisibilité mobile) ; le survol nomme chacune.
