@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -246,6 +247,111 @@ class TestNightUnavailableOrDaylight(unittest.TestCase):
         with self.assertRaises(ValueError):
             RP._validate_night_pct(float("nan"), 5.0, "--night-penalty-pct")
         self.assertEqual(RP._validate_night_pct(None, 5.0, "x"), 5.0)
+
+
+class _RollingProfile:
+    """Montées/descentes à 6 % sur 10 km, en boucle (ultra de ~30 h)."""
+
+    def __init__(self, total_m):
+        self.total_m = total_m
+
+    def __call__(self, d):
+        x = d % 20000.0
+        return 1000.0 + (x * 0.06 if x <= 10000.0 else 600.0 - (x - 10000.0) * 0.06)
+
+
+def _alpine_pts(total_m, lat=45.92, lon=6.87, step_m=100.0):
+    """Trace rectiligne fictive à la latitude/longitude données (pas un parcours réel)."""
+    m_per_deg = 111320.0 * math.cos(math.radians(lat))
+    prof = _RollingProfile(total_m)
+    return [{"lat": lat, "lon": lon + i * step_m / m_per_deg, "ele": prof(min(i * step_m, total_m))}
+            for i in range(int(total_m / step_m) + 1)]
+
+
+def _alpine_kwargs(total_km, **over):
+    kw = dict(aid_stations=[{"km": float(k), "name": f"R{k}", "stop_s": 600} for k in range(20, total_km, 20)],
+              fade_pct=4.0, temp_max_c=None, acclimated=None, intensity_factor=1.0,
+              intensity_source="riegel", segment_m=750.0)
+    kw.update(over)
+    return kw
+
+
+class TestNightClockMultiDayAndDst(unittest.TestCase):
+    """Revue #184 : horloge absolue (UTC) à travers minuit, deux nuits et le changement d'heure."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.pts = _alpine_pts(250000.0)
+        # Départ 18:00 la veille du passage à l'heure d'hiver (25/10/2026 03:00 CEST -> 02:00 CET).
+        cls.paris = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
+                                       tz="Europe/Paris", **_alpine_kwargs(250))
+        # Même instant de départ, fuseau FIXE UTC+2 : le temps écoulé doit être identique.
+        cls.fixed = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
+                                       tz="Etc/GMT-2", **_alpine_kwargs(250))
+
+    def test_dst_change_does_not_shift_the_elapsed_clock(self):
+        for key in ("segments", "totals", "segment_passages"):
+            self.assertEqual(self.paris[key], self.fixed[key], key)
+        for s in RP.SCENARIOS:
+            self.assertEqual(self.paris["night"]["scenarios"][s]["night_duration_s"],
+                             self.fixed["night"]["scenarios"][s]["night_duration_s"])
+
+    def test_local_display_follows_the_dst_offset(self):
+        safe_paris = self.paris["night"]["scenarios"]["safe"]
+        safe_fixed = self.fixed["night"]["scenarios"]["safe"]
+        # Fin de la 1re nuit : même instant, affiché 06:3x en CET et 07:3x en UTC+2.
+        self.assertIn("à 06:3", safe_paris["summary"])
+        self.assertIn("à 07:3", safe_fixed["summary"])
+        self.assertTrue(safe_paris["lamp_until"].endswith("+01:00"))
+        self.assertTrue(safe_paris["lamp_from"].endswith("+02:00"))
+
+    def test_thirty_hour_race_crosses_two_nights(self):
+        safe = self.paris["night"]["scenarios"]["safe"]
+        self.assertGreater(self.paris["totals"]["time_s"]["safe"], 26 * 3600)
+        self.assertEqual(safe["summary"].count(" à "), 2, safe["summary"])  # deux fenêtres de nuit
+        self.assertIn("(J+1); ", safe["summary"])
+        fractions = [seg["night_fraction"]["safe"] for seg in self.paris["segments"]]
+        states = []
+        for f in fractions:  # jour -> nuit -> jour -> nuit
+            st = "N" if f > 0.99 else ("D" if f < 0.01 else None)
+            if st and (not states or states[-1] != st):
+                states.append(st)
+        self.assertEqual(states[:4], ["D", "N", "D", "N"])
+        self.assertTrue(self.paris["night"]["converged"])
+        for seg in self.paris["segments"]:
+            t = seg["predicted_time_s"]
+            self.assertGreaterEqual(t["safe"], t["realistic"])
+            self.assertGreaterEqual(t["realistic"], t["ambitious"])
+
+    def test_no_timezone_warning_for_a_plausible_zone(self):
+        self.assertNotIn("timezone_warning", self.paris["night"])
+
+
+class TestTimezonePlausibility(unittest.TestCase):
+    def test_far_off_zone_warns_without_refusing(self):
+        pts = _alpine_pts(20000.0)
+        plan = RP.build_race_plan(pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
+                                  tz="America/New_York", **_alpine_kwargs(20))
+        self.assertIn("timezone_warning", plan["night"])
+        self.assertIn("America/New_York", plan["night"]["timezone_warning"])
+        self.assertIn(plan["night"]["timezone_warning"], plan["warnings"])
+
+    def test_wraparound_near_the_date_line(self):
+        start = datetime(2026, 6, 20, 8, 0, tzinfo=S.resolve_timezone("Pacific/Kiritimati"))  # UTC+14
+        self.assertIsNone(RP.timezone_plausibility_warning(start, -157.4, "Pacific/Kiritimati"))
+        start = datetime(2026, 6, 20, 8, 0, tzinfo=S.resolve_timezone("Europe/Paris"))
+        self.assertIsNotNone(RP.timezone_plausibility_warning(start, -61.0, "Europe/Paris"))  # Antilles
+
+    def test_short_night_is_summarised_in_minutes(self):
+        start = datetime(2026, 6, 20, 16, 0, tzinfo=timezone.utc)
+        mask = S.NightMask(start, start + timedelta(hours=2), -40.0, -140.0)
+        ref = mask.night_windows(start, start + timedelta(hours=2))
+        if not ref:  # garde : ce cas doit bien contenir une courte nuit
+            self.skipTest("pas de nuit dans la fenêtre de référence")
+        first = ref[0][0]
+        end_s = (first - start).total_seconds() + 120.0
+        info = RP.night_scenario_summary(mask, start, end_s, timezone.utc)
+        self.assertIn("2 min de nuit", info["summary"])
 
 
 class TestByteIdenticalWithoutNight(unittest.TestCase):

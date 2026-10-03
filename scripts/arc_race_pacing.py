@@ -162,7 +162,7 @@ import math
 import statistics
 import sys
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -330,6 +330,12 @@ NIGHT_PENALTY_PCT_MAX = 30.0
 # suivantes, donc leur fraction de nuit ; critère d'arrêt sur le facteur (écart absolu max).
 NIGHT_MAX_ITERATIONS = 8
 NIGHT_CONVERGENCE_TOL = 1e-4
+# Contrôle de vraisemblance du fuseau (`--tz`) : écart (heures) au-delà duquel le décalage UTC
+# du fuseau au départ s'éloigne trop de l'heure solaire de la longitude du départ (lon / 15).
+# Les fuseaux réels s'en écartent de 0 à ~3 h (Espagne l'été ≈ +2 h, ouest de la Chine ≈ +3 h) :
+# au-delà, le fuseau est probablement faux (course sur un autre continent). Approximation du projet,
+# simple AVERTISSEMENT, jamais un refus.
+NIGHT_TZ_SUSPECT_OFFSET_H = 3.5
 
 
 def _round_passage(seconds: float) -> int:
@@ -716,7 +722,16 @@ ASSUMPTIONS = {
         "`night_*` par section (`night.status = \"daylight\"`). Le contrôle de la frontale dans le "
         "matériel obligatoire reste celui de `arc_index.py equipment --race-plan` (#134) : "
         "`night.gear_hint` y renvoie, rien n'est dupliqué ici. Cas polaire : nuit blanche = zéro nuit, "
-        "nuit polaire = nuit continue (masque calculé sur l'altitude du soleil minute par minute)."
+        "nuit polaire = nuit continue (masque calculé sur l'altitude du soleil minute par minute).\n\n"
+        "**Horloge** : le temps écoulé est compté en UTC (une course qui traverse le passage à l'heure "
+        "d'hiver ne glisse pas d'une heure) ; seul l'affichage (`lamp_from`, `summary`) est en heure "
+        "locale du fuseau, décalage du moment compris. Une section dont l'ordre des scénarios a été "
+        "forcé porte un `night_factor` qui inclut ce forçage (multiplicateur réellement appliqué), pas "
+        "seulement la nuit. **Fuseau** : aucune base hors-ligne lieu → fuseau dans la bibliothèque "
+        "standard, le fuseau est donc une ENTRÉE ; contrôle grossier de vraisemblance seulement "
+        "(`NIGHT_TZ_SUSPECT_OFFSET_H` = 3,5 h d'écart entre le décalage UTC du fuseau et l'heure "
+        "solaire de la longitude du départ → `night.timezone_warning` et avertissement, jamais un "
+        "refus ; une erreur d'une heure passe inaperçue)."
     ),
 }
 
@@ -1683,7 +1698,8 @@ def build_night_mask(segments: Sequence[dict], aid_stations: Sequence[dict], sta
     slowest = max((sum(seg["predicted_time_s"][s] or 0 for seg in segments) for s in SCENARIOS), default=0)
     stops, beyond = _stops_after_segments(segments, aid_stations)
     horizon_s = slowest * (1.0 + (base_pct + descent_extra_max_pct) / 100.0) + sum(stops) + beyond + 3600.0
-    return SOLAR.NightMask(start_dt, start_dt + timedelta(seconds=horizon_s), lat, lon)
+    start_utc = start_dt.astimezone(timezone.utc)
+    return SOLAR.NightMask(start_utc, start_utc + timedelta(seconds=horizon_s), lat, lon)
 
 
 def apply_night_penalty(segments: Sequence[dict], aid_stations: Sequence[dict], start_dt: datetime, mask, *,
@@ -1714,10 +1730,15 @@ def apply_night_penalty(segments: Sequence[dict], aid_stations: Sequence[dict], 
                     clamped.add(i)
         return t, clamped
 
+    # Horloge en UTC : `datetime` conscient + `timedelta` ajoute du temps MURAL dans le fuseau
+    # (zoneinfo), faux d'une heure après un changement d'heure en pleine course (dernier
+    # dimanche d'octobre en Europe) — le temps écoulé, lui, est absolu.
+    start_utc = start_dt.astimezone(timezone.utc)
+
     def walk(t):
         fractions = {s: [0.0] * n for s in SCENARIOS}
         for s in SCENARIOS:
-            clock = start_dt
+            clock = start_utc
             for i in range(n):
                 dur = t[s][i]
                 if dur is None:
@@ -1781,20 +1802,24 @@ def night_scenario_summary(mask, start_dt: datetime, total_s: Optional[float], t
     """Résumé de nuit d'un scénario sur la course entière, départ -> arrivée (arrêts compris)."""
     if total_s is None:
         return {"night_duration_s": None, "summary": "temps de course indisponible : pas de résumé de nuit"}
-    end = start_dt + timedelta(seconds=total_s)
-    windows = mask.night_windows(start_dt, end)
-    night_s = round(mask.night_seconds(start_dt, end))
+    start_utc = start_dt.astimezone(timezone.utc)  # temps écoulé absolu (changement d'heure)
+    end = start_utc + timedelta(seconds=total_s)
+    windows = mask.night_windows(start_utc, end)
+    night_s = round(mask.night_seconds(start_utc, end))
     if not windows:
         return {"night_duration_s": 0, "summary": "aucune nuit pendant la course, frontale non requise"}
     local = [(a.astimezone(tz), b.astimezone(tz)) for a, b in windows]
     ref = start_dt.astimezone(tz)
     spans = "; ".join(f"{_fmt_local(a, ref)} à {_fmt_local(b, ref)}" for a, b in local)
-    hours = f"{night_s / 3600.0:.1f}".replace(".", ",")
+    if night_s >= 3600:
+        amount = f"{night_s / 3600.0:.1f}".replace(".", ",") + " h"
+    else:  # « 0,0 h de nuit » pour 2 min de crépuscule serait trompeur
+        amount = f"{max(1, round(night_s / 60.0))} min"
     return {
         "night_duration_s": night_s,
         "lamp_from": local[0][0].isoformat(timespec="minutes"),
         "lamp_until": local[-1][1].isoformat(timespec="minutes"),
-        "summary": f"{hours} h de nuit, frontale requise de {spans}",
+        "summary": f"{amount} de nuit, frontale requise de {spans}",
     }
 
 
@@ -1805,6 +1830,20 @@ NIGHT_GEAR_HINT = (
 
 def night_unavailable(status: str, reason: str, note: str) -> dict:
     return {"status": status, "reason": reason, "note": note}
+
+
+def timezone_plausibility_warning(start_dt: datetime, lon: float, tz_name: str) -> Optional[str]:
+    """Avertissement (français) si le décalage UTC du fuseau au départ s'écarte de plus de
+    `NIGHT_TZ_SUSPECT_OFFSET_H` de l'heure solaire de la longitude `lon` (lon / 15 h), écart
+    ramené dans [-12, 12[ h ; `None` sinon. Contrôle grossier : il attrape un fuseau d'un autre
+    continent, pas une erreur d'une heure."""
+    offset_h = start_dt.utcoffset().total_seconds() / 3600.0
+    diff = (offset_h - lon / 15.0 + 12.0) % 24.0 - 12.0
+    if abs(diff) <= NIGHT_TZ_SUSPECT_OFFSET_H:
+        return None
+    return (f"fuseau « {tz_name} » (UTC{offset_h:+g} h au départ) peu vraisemblable pour la longitude "
+            f"{lon:.2f}° du départ (heure solaire ≈ UTC{lon / 15.0:+.1f} h) : vérifier --tz, les heures "
+            "de nuit en dépendent")
 
 
 def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_known, enabled,
@@ -1833,6 +1872,7 @@ def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_
     base_date = date.fromisoformat(race_date)
     start_dt = datetime(base_date.year, base_date.month, base_date.day, hh, mm, tzinfo=zone)
     lat, lon = pts[0]["lat"], pts[0]["lon"]
+    tz_warning = timezone_plausibility_warning(start_dt, lon, tz)
     mask = build_night_mask(segments, aid_stations, start_dt, lat, lon, base_pct=base_pct,
                             descent_extra_max_pct=descent_extra_max_pct)
     new_segments, info = apply_night_penalty(segments, aid_stations, start_dt, mask, base_pct=base_pct,
@@ -1855,6 +1895,8 @@ def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_
         "scenarios": {},
         "gear_hint": NIGHT_GEAR_HINT,
     }
+    if tz_warning:
+        night["timezone_warning"] = tz_warning
     if info["has_night"]:
         night["_apply"] = True
         night["_segments"] = new_segments
@@ -1976,6 +2018,8 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         night_penalty_pct, night_descent_extra_max_pct)
     if night.pop("_apply", None) is not None:
         segments = night.pop("_segments")
+    if night.get("timezone_warning"):
+        warnings.append(night["timezone_warning"])
 
     passages = compute_passages(segments, aid_stations)
     if night_mask is not None:
