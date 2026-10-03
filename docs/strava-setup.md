@@ -17,8 +17,8 @@ vers Strava, et beaucoup d'athlètes l'ont déjà). Elle est installée par
 |---|---|
 | Activités récentes ou par période, détail d'une activité | **HRV, FC de repos, sommeil, readiness** : `[health].morning_check` se dégrade explicitement |
 | **Flux par seconde** (temps, distance, altitude, FC, vitesse lissée, cadence, GPS) → les KPI du FIT : zones, GAP, découplage, VAM, descente, durabilité, énergie modèle | **Push de séances au calendrier**, upload de parcours (Strava n'a pas de calendrier d'entraînement) |
-| Zones FC de l'athlète, chaussures (inventaire) | FC de récupération (HRR), splits par km, dénivelé négatif, dynamique de course |
-| Aucune dépendance Python (stdlib) | Identifiant de matériel par séance (seul le **nom** est exposé) |
+| Zones FC de l'athlète | FC de récupération (HRR), splits par km, dénivelé négatif, dynamique de course |
+| Aucune dépendance Python (stdlib) | Inventaire du matériel, identifiant de matériel par séance (seul le **nom** est exposé) |
 
 Le bilan matinal est donc toujours dit « indisponible — source Strava » : l'agent
 planifie sur la charge, l'historique et **votre ressenti déclaré**. Une séance
@@ -34,15 +34,17 @@ dans le chat du tableau de bord.
 - Paquet npm [`@r-huijts/strava-mcp-server`](https://github.com/r-huijts/strava-mcp),
   **épinglé à la version 1.2.1** (`STRAVA_MCP_PKG` dans `install.sh`), lancé par
   `npx` via un petit wrapper `~/.config/ai-running-coach/strava-mcp/run.sh`.
-  Le code lu pour vérifier les noms d'outils est celui du commit
-  `ac43cc7b0aad2f218b9c42bd639aee696dbee531` ; l'identité exacte entre ce commit et le
-  tarball npm n'a **pas** été vérifiée octet pour octet : relisez avant de relever la version.
+  La version 1.2.1 a été publiée depuis le commit `a68112aa12a88909593db0f4b1ac0f6aebed6e3a`
+  (`gitHead` du registre npm) ; les noms d'outils ont été relevés dans le `dist/` du tarball
+  npm et dans le code de ce commit. La branche `main` du dépôt a, depuis, des outils **non
+  publiés** (`get-athlete-shoes`, `get-segment-leaderboard`…) : ils ne sont pas disponibles ici.
+  Relisez le tarball avant de relever la version.
 - **Prérequis : Node.js 18 ou plus.**
 - Il utilise **votre propre application API Strava** (client id + secret) : un
   accès OAuth à votre compte, pour vous seul.
 - Outils vérifiés dans son code source : `get-recent-activities`, `get-all-activities`,
   `get-activity-details`, `get-activity-streams`, `get-activity-laps`, `get-athlete-zones`,
-  `get-athlete-shoes`, `get-athlete-profile`, `get-athlete-stats`, plus des outils de
+  `get-athlete-profile`, `get-athlete-stats`, plus des outils de
   segments/itinéraires, et trois outils qui **agissent** : `connect-strava`,
   `disconnect-strava`, `star-segment` (écriture). La table de correspondance
   Garmin ↔ Strava est dans `AGENTS.md`.

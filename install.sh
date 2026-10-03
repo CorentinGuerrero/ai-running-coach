@@ -68,9 +68,9 @@ INTERVALS_MCP_REF="git+https://github.com/eddmann/intervals-icu-mcp@cb91d4a0f3b4
 INTERVALS_ENV_DIR="$HOME/.config/ai-running-coach/intervals-icu-mcp"
 # Source Strava (#164) : serveur MCP communautaire r-huijts/strava-mcp, publié sur npm
 # (`@r-huijts/strava-mcp-server`, bin `strava-mcp-server`, stdio). Épinglé à la version 1.2.1,
-# vérifiée contre le commit ac43cc7b0aad2f218b9c42bd639aee696dbee531 du dépôt (package.json,
-# src/server.ts, src/config.ts) — l'identité entre ce commit et le tarball npm n'est PAS vérifiée
-# octet pour octet (à relire avant de relever la version). Documenté dans docs/strava-setup.md ;
+# publiée depuis le commit a68112aa12a88909593db0f4b1ac0f6aebed6e3a (`gitHead` du registre npm) :
+# noms d'outils et fichier de jetons vérifiés dans le dist/ du tarball et dans ce commit (la tête de
+# `main` a des outils non publiés — à relire avant de relever la version). Documenté dans docs/strava-setup.md ;
 # mettre à jour les deux ensemble. Ce serveur reçoit le client secret de l'application Strava de
 # l'athlète et tourne à chaque synchronisation : ne jamais le laisser flotter sur `latest`.
 STRAVA_MCP_PKG="@r-huijts/strava-mcp-server@1.2.1"

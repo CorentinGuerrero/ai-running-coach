@@ -48,7 +48,7 @@ manual daily value, not a computed score — for it) per `AGENTS.md` →
 **When `[data].source = "strava"` (#164):** Strava exposes **no HRV, no resting HR, no sleep and
 no readiness** — there is nothing to call. Say it explicitly ("HRV / FC de repos / sommeil /
 readiness indisponibles — source Strava"), never present an activity metric (average HR of a run,
-`suffer_score`) as a recovery signal, and gate availability on the athlete's declared feeling,
+perceived exertion) as a recovery signal, and gate availability on the athlete's declared feeling,
 pain reports and the training load in `activities/` instead. A reported injury or pain ≥ 7/10
 keeps its protocol: the missing data never turns an amber/red verdict green.
 
