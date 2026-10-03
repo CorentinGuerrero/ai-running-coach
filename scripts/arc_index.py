@@ -210,14 +210,15 @@ asymétrie des inspections photo, `confidence` (effectifs) et `contradictions` (
 l'usure). Jamais un diagnostic, aucune modification de charge — voir `arc_gait.ASSUMPTIONS` et
 `arc_metrics.ASSUMPTIONS["gait"]`. Lecture seule ; `/api/gait` la sert au tableau de bord.
 
-`load-forecast [--until DATE] [--compare FICHIER] [--json]` (#172) projette condition / fatigue / forme jour
+`load-forecast [--until DATE] [--compare FICHIER] [--text]` (#172) projette condition / fatigue / forme jour
 par jour de l'état réel d'aujourd'hui jusqu'à la date de l'objectif actif (ou `--until`), à partir de la
 charge ESTIMÉE des séances planifiées (même estimateur que le garde-fou R1, jamais un second modèle) :
 forme prévue le jour J, semaine de pic de fatigue, ACWR projeté sur le bloc. Jour sans séance = charge nulle,
 semaines non planifiées comptées ; états honnêtes `no_objective` / `no_plan` / `insufficient_history`
 (même plancher que R1) / `target_past`. `--compare` oppose le plan actuel à un plan modifié (les semaines de
 même lundi sont remplacées) et chiffre les écarts. Estimation, jamais une mesure — voir
-`arc_metrics.ASSUMPTIONS["load_forecast"]`. Lecture seule ; `/api/load-forecast` la sert au tableau de bord.
+`arc_metrics.ASSUMPTIONS["load_forecast"]`. Sortie JSON comme les autres commandes ; `--text` pour un résumé
+lisible. Lecture seule ; `/api/load-forecast` la sert au tableau de bord.
 
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
@@ -4220,8 +4221,8 @@ def load_forecast(conn, today: date, until: Optional[str] = None, compare: Optio
     if compare is not None:
         try:
             alternative = LF.alternative_weeks_from_block(GR._read_week_argument(compare))
-        except (ValueError, OSError) as exc:
-            raise ConfigError(f"--compare : {exc}")
+        except (ValueError, OSError, ConfigError) as exc:
+            raise ConfigError(f"--compare : {str(exc).removeprefix('--week : ')}")
     return LF.load_forecast(conn, today, until_date, alternative)
 
 
@@ -4748,8 +4749,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commande « decision-effects » : rendu texte lisible (défaut : JSON, comme les "
-                             "autres sous-commandes)")
+                        help="commandes « decision-effects » et « load-forecast » : rendu texte lisible (défaut : "
+                             "JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
                              "(journal courant, voir DECISION_INACTIVE_OUTCOMES)")
@@ -4855,11 +4856,11 @@ def main(argv=None) -> int:
     if args.command == "load-forecast":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         report = load_forecast(conn, today_date, args.until, args.compare)
-        if args.json:
-            print(json.dumps(report, ensure_ascii=False))
-        else:
+        if args.text:
             import arc_load_forecast as LF
             print(LF.render_text(report))
+        else:
+            print(json.dumps(report, ensure_ascii=False))
         return 0
     if args.command == "gear-career":
         if not args.gear:
