@@ -18,6 +18,10 @@
   4. Sinon → demander à l'utilisateur
 - **Recommandation d'heure optimale** : 🌅 matin tôt / ☀️ midi / 🌇 soir
 
+## Contexte du cycle (opt-in, #166)
+
+Seulement si `[health].cycle_tracking` n'est pas `off` et qu'une phase lutéale est enregistrée pour le jour : au plus une ligne de contexte hydratation/chaleur dans la section météo ; aucune catégorie ni seuil modifié. Voir [Cycle menstruel](../cycle-menstruel.md).
+
 ## Catégories météo
 
 | Catégorie | Signification |

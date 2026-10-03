@@ -141,6 +141,13 @@ qu'elles ne sont pas disponibles :
 - **Upload de parcours** (`course-strategist`) — reste limité à l'analyse GPX
   locale (skill `gpx-analysis`).
 
+## Cycle menstruel (opt-in, #166)
+
+Avec `[health].cycle_tracking = "intervals"`, la phase vient du champ wellness `menstrualPhase`,
+exposé par `get_wellness_for_date` sous `other.menstrual_phase` (vérifié dans le serveur épinglé ;
+valeurs possibles non définies par le serveur, à vérifier). Aucune installation à refaire. Voir
+[Cycle menstruel](cycle-menstruel.md).
+
 ## Fichiers FIT
 
 Intervals.icu garde le fichier d'origine de chaque activité importée depuis une

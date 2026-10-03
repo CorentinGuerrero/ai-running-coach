@@ -193,6 +193,10 @@ l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 - **La readiness est un score dérivé, pas une mesure** : fortement pondérée par le sommeil. Vérifier la fenêtre de sommeil enregistrée face à l'heure de coucher déclarée — une montre qui démarre en retard déprime mécaniquement le score de sommeil et la readiness, alors que HRV et FC de repos restent valides.
 - **Moyenne hebdomadaire ≠ nuit dernière** : le statut `UNBALANCED` porte sur la moyenne 7 jours. Rapporter les deux valeurs.
 
+### Contexte du cycle menstruel (opt-in, #166)
+
+Seulement si `[health].cycle_tracking` n'est pas `off` (défaut : **aucune mention, aucun appel**). La phase du jour (Garmin, intervals.icu ou déclarée via `/log`) est ajoutée en **une ligne de contexte** à côté d'une HRV/FC de repos décalée et persistée (`cycle_phase`, `cycle_day`, `cycle_source`) ; elle n'est jamais une règle, jamais un diagnostic, et ne relâche jamais un verdict rouge, un garde-fou ou un signal de blessure. Voir [Cycle menstruel](../cycle-menstruel.md).
+
 ### Récupération cardiaque (HRR)
 
 - **Obligatoire** : chaque analyse de séance doit inclure le `recovery_hr_bpm` extrait de l'activité Garmin

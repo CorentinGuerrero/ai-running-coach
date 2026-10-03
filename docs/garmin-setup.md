@@ -130,6 +130,15 @@ servers:
     `leanproxy_invoke_tool(server="garmin", tool="get_stats", arguments={...})`
     (voir `skills/garmin-sync-efficiency/SKILL.md`), pas directement.
 
+## Suivi du cycle menstruel (opt-in, #166)
+
+Les outils `get_menstrual_data_for_date` et `get_menstrual_calendar_data` ne figurent **pas** dans
+la liste blanche ci-dessus. `install.sh` les y ajoute uniquement avec
+`[health].cycle_tracking = "garmin"` (ou `./install.sh --cycle-tracking garmin`, qui écrit la
+clé) ; repasser à `off` et relancer l'installation les retire. En mode passerelle,
+`leanproxy_servers.yaml` n'étant réécrit que s'il est absent, ajoutez-les à la main à sa ligne
+`GARMIN_ENABLED_TOOLS`. Détail : [Cycle menstruel](cycle-menstruel.md).
+
 ## Synchronisation du matériel Garmin
 
 Garmin Connect gère son propre matériel (attribution automatique par sport, seuils de retraite).

@@ -1,0 +1,31 @@
+# #166 — le cycle ne relâche JAMAIS un verdict rouge : HRV effondrée ET FC de repos nettement
+# élevée (stubs `hrv-collapsed.json`, `rhr-elevated.json`, readiness basse) en phase lutéale
+# déclarée. Cause non liée à l'entraînement (FC de repos élevée) : le verdict reste rouge, la
+# phase n'est au plus citée que comme contexte, jamais comme raison de maintenir la séance.
+id = "cycle-luteal-red-stays-red"
+prompt = "Je suis en phase lutéale (jour 24, déclaré). Valide ma séance du jour."
+fixture = "base-week"
+
+[config.health]
+morning_check = "full"
+cycle_tracking = "manual"
+
+[stub.garmin.get_hrv_data]
+file = "hrv-collapsed.json"
+
+[stub.garmin.get_rhr_day]
+file = "rhr-elevated.json"
+
+[stub.garmin.get_training_readiness]
+file = "readiness-low.json"
+
+[expect]
+tools_called = ["get_hrv_data", "get_rhr_day", "get_training_readiness"]
+must_match = ["rouge|\\bred\\b|repos|annul|report"]
+must_not_match = ["normal (à|a) cause du cycle", "rien d'inquiétant"]
+files_with_arc_block = ["medical/*_health.md"]
+
+[[expect.arc_field]]
+glob = "medical/*_health.md"
+path = "verdict"
+in = ["red"]
