@@ -276,6 +276,18 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(gym["available"], ["box", "dumbbell", "none", "step"])
         self.assertFalse(SG.equipment_from_profile("- **Équipement** : tapis\n")["known"])   # rien de reconnu
 
+    def test_equipment_from_profile_is_robust(self):
+        def avail(text):
+            return SG.equipment_from_profile(f"- **Équipement** : {text}\n")["available"]
+        for none_only in ("aucun", "Aucun matériel", "rien", "poids du corps uniquement",
+                          "sans élastique ni haltères, poids du corps"):
+            self.assertEqual(avail(none_only), ["none"], none_only)
+        self.assertEqual(avail("pas d'haltères, juste un élastique"), ["elastic", "none"])     # négation
+        self.assertEqual(avail("pas d’haltères, juste un élastique"), ["elastic", "none"])
+        self.assertEqual(avail("élastiques (mini-bands), box, marches"), ["box", "elastic", "none", "step"])
+        for not_equipment in ("boxe", "bandeau", "marche à pied", "ballon suisse"):         # mots entiers
+            self.assertIsNone(avail(not_equipment), not_equipment)
+
     def test_placement_rules_and_check(self):
         high = SG.placement_rules(DOC, "high")
         self.assertFalse(SG.check_placement(high, hours_to_quality=24)["ok"])      # veille d'une VMA
@@ -419,6 +431,15 @@ class TestCli(unittest.TestCase):
         sel = json.loads(cli("strength", "--workspace", self.ws, "--phase", "base"))
         self.assertEqual(sel["equipment"]["source"], "profile")
         self.assertEqual(sel["equipment"]["available"], ["dumbbell", "none", "step"])
+
+    def test_equipment_follows_the_configured_profile_path(self):
+        (Path(self.ws) / "config").mkdir()
+        (Path(self.ws) / "config/workspace.user.toml").write_text('[athlete]\nprofile = "moi/profil.md"\n',
+                                                                  encoding="utf-8")
+        (Path(self.ws) / "moi").mkdir()
+        (Path(self.ws) / "moi/profil.md").write_text("- **Équipement** : élastique\n", encoding="utf-8")
+        sel = json.loads(cli("strength", "--workspace", self.ws, "--phase", "base"))
+        self.assertEqual(sel["equipment"]["available"], ["elastic", "none"])
 
     def test_missing_profile_means_unknown_equipment(self):
         sel = json.loads(cli("strength", "--workspace", self.ws, "--phase", "base"))

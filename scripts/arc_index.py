@@ -4859,7 +4859,8 @@ def strength_cli(args, workspace: Path) -> int:
     (`config/strength/`). JSON par défaut, `--text` lisible, `--garmin-json` pour la charge utile Garmin."""
     fmt = "garmin" if args.garmin_json else ("text" if args.text and not args.json else "json")
     try:
-        print(SG.run(args.phase, args.use, args.equipment, workspace, fmt))
+        profile = settings(load_config(workspace))["profile"]     # `[athlete].profile`, comme coach_doctor
+        print(SG.run(args.phase, args.use, args.equipment, workspace, fmt, profile))
     except SG.StrengthError as exc:
         raise ConfigError(str(exc))
     return 0

@@ -29,7 +29,10 @@ python3 scripts/arc_index.py strength --use hanches --garmin-json       # charge
 - `--use` : `descente`, `cheville`, `hanches`, `pied`.
 - `--equipment` : `none`, `elastic`, `dumbbell`, `step`, `box` (liste séparée par des
   virgules ; `none` — le poids du corps — est toujours disponible). Sans cette option, la
-  commande lit la puce **Équipement** de votre profil (`planning/Runner_Profile.md`). Si elle
+  commande lit la puce **Équipement** de votre profil (`[athlete].profile`, par défaut
+  `planning/Runner_Profile.md`) : mots entiers, accents et pluriels tolérés (« haltères »,
+  « élastiques », « marche », « banc », « salle de sport »…), négations simples écartées
+  (« pas d'haltères ») ; « aucun », « rien » ou « poids du corps » seuls = poids du corps. Si elle
   est vide ou n'a pas de mot reconnu, le matériel est dit **inconnu** : aucun repli n'est
   appliqué et la sortie contient une `question` — le coach vous la pose, il ne devine pas.
 - Sortie : JSON par défaut ; `--text` pour une version lisible (celle qui sert de

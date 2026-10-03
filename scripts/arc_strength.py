@@ -346,22 +346,42 @@ _PROFILE_EQUIPMENT_RE = re.compile(r"^\s*-\s*\*\*Équipement\*\*\s*:\s*(.*)$", r
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _KEYWORDS = (
     ("dumbbell", ("haltere", "dumbbell", "kettlebell", "salle")),
-    ("elastic", ("elastique", "bande", "band")),
+    ("elastic", ("elastique", "bande", "band", "miniband")),
     ("step", ("marche", "step", "escalier", "salle")),
     ("box", ("box", "caisse", "banc", "chaise", "salle")),
 )
+# Mots entiers seulement (« boxe » n'est pas une box, « bandeau » pas un élastique), au singulier
+# ou au pluriel (s/x/es).
+_WORD_RE = re.compile(r"[a-z0-9]+")
+# Activités, pas du matériel : « marche à pied », « marche nordique »…
+_NOT_EQUIPMENT_RE = re.compile(r"\bmarche\s+(?:a\s+pied|nordique|rapide|active)\b")
+# Négation simple : « pas d'haltères », « sans élastique », « ni marche » → le mot suivant est retiré.
+_NEGATION_RE = re.compile(r"\b(?:pas\s+(?:de\s+|d\s*'\s*|d\s+)|sans\s+|ni\s+|aucune?\s+|no\s+)"
+                          r"(?:une?\s+|des?\s+)?[a-z0-9]+")
+# Déclaration explicite « rien que le poids du corps » → matériel connu : `none`.
+_BODYWEIGHT_ONLY_RE = re.compile(r"\b(?:aucune?|rien|neant|poids\s+du\s+corps|sans\s+materiel|"
+                                 r"pas\s+de\s+materiel|none)\b")
+
+
+def _has_keyword(words: set, kw: str) -> bool:
+    return any(w in words for w in (kw, kw + "s", kw + "x", kw + "es"))
 
 
 def equipment_from_profile(text: str) -> Dict[str, Any]:
     """Lit la puce « Équipement » du profil (`templates/Runner_Profile.template.md`). Texte libre :
-    mots-clés reconnus → matériel ; vide, gabarit non rempli ou rien de reconnu → `known: false`
-    (on ne devine pas : le coach demande à l'athlète)."""
+    mots-clés reconnus (mots entiers, accents et pluriels tolérés, négations simples « pas de » /
+    « sans » écartées) → matériel ; « aucun », « rien », « poids du corps » seuls → poids du corps
+    (`none`) ; vide, gabarit non rempli ou rien de reconnu → `known: false` (on ne devine pas : le
+    coach demande à l'athlète)."""
     m = _PROFILE_EQUIPMENT_RE.search(text or "")
     declared = _HTML_COMMENT_RE.sub("", m.group(1)).strip() if m else ""
     if not declared:
         return {"known": False, "available": None, "declared": ""}
-    folded = _fold(declared)
-    found = {eq for eq, kws in _KEYWORDS if any(k in folded for k in kws)}
+    folded = _NOT_EQUIPMENT_RE.sub(" ", _fold(declared).replace("’", "'"))
+    words = set(_WORD_RE.findall(_NEGATION_RE.sub(" ", folded)))
+    found = {eq for eq, kws in _KEYWORDS if any(_has_keyword(words, k) for k in kws)}
+    if not found and _BODYWEIGHT_ONLY_RE.search(folded):
+        return {"known": True, "available": ["none"], "declared": declared}
     if not found:
         return {"known": False, "available": None, "declared": declared}
     return {"known": True, "available": sorted(found | {"none"}), "declared": declared}
@@ -666,15 +686,16 @@ def catalogue(exercises: Dict[str, dict], doc: dict) -> dict:
 
 
 def run(phase: Optional[str], use: Optional[str], equipment: Optional[str], workspace: Optional[Path],
-        fmt: str = "json") -> str:
-    """Point d'entrée de `arc_index.py strength`. `fmt` : json | text | garmin."""
+        fmt: str = "json", profile: str = "planning/Runner_Profile.md") -> str:
+    """Point d'entrée de `arc_index.py strength`. `fmt` : json | text | garmin. `profile` : chemin du
+    profil relatif au workspace (`[athlete].profile`, résolu par `arc_index.settings`)."""
     exercises, doc = load_library()
     if not phase and not use:
         return json.dumps(catalogue(exercises, doc), ensure_ascii=False)
     if equipment is not None:
         available, src = parse_equipment(equipment), "cli"
     else:
-        prof = Path(workspace) / "planning" / "Runner_Profile.md" if workspace else None
+        prof = Path(workspace) / (profile or "planning/Runner_Profile.md") if workspace else None
         text = prof.read_text(encoding="utf-8") if prof is not None and prof.is_file() else ""
         info = equipment_from_profile(text)
         available, src = info["available"], ("profile" if info["known"] else "unknown")
