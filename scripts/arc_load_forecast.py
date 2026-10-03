@@ -133,7 +133,7 @@ def forecast(real_loads: Dict[str, float], today: date, race_date: Optional[str]
     target = until or race
     base = {"status": None, "today": today.isoformat(), "race_date": race.isoformat() if race else None,
             "target_date": target.isoformat() if target else None, "is_estimate": True,
-            "assumptions": M.ASSUMPTIONS["load_forecast"]}
+            "assumptions_ref": "arc_metrics.ASSUMPTIONS[\"load_forecast\"] (/api/assumptions)"}
     if target is None:
         return {**base, "status": STATUS_NO_OBJECTIVE,
                 "reason": "Aucun objectif actif (planning/active_objective.md sans date de course) et pas de "
