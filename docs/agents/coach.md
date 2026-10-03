@@ -75,6 +75,15 @@ Pour chaque séance, le coach fournit :
 - **`warn`/`info` (code 0)** : écriture/push autorisés, la violation est mentionnée brièvement.
 - **Traçabilité obligatoire** : toute séance changée, remplacée ou annulée (garde-fou, bilan matinal, donnée médicale) devient un fichier `planning/YYYY-MM-DD_decision_<slug>.md` — la semaine modifiée est réécrite d'abord, la décision qui la référence ensuite, les deux validés avec `scripts/arc_index.py --validate`.
 
+### Bilan personnel des décisions (#175)
+
+Le coach peut citer ce qui s'est passé après les décisions passées de l'athlète
+(`python3 scripts/arc_index.py decision-effects`, par déclencheur : « allègement après bilan
+matinal : 7 fois, 5 améliorées »). Effets **dérivés**, jamais stockés ni écrits dans les fichiers
+de décision. Règles dures : **corrélation, pas causalité** (dit explicitement) ; aucune
+« tendance » sous 5 cas évaluables ; ce bilan n'assouplit **jamais** un garde-fou `block`, une
+décision médicale ni un verdict rouge ; le coach ne recalcule jamais un effet lui-même.
+
 ### Cibles personnelles d'une séance (#60)
 
 Avant de construire le `workout_data` d'un push Garmin, le coach lance

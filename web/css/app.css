@@ -295,6 +295,11 @@ select { font: inherit; color: var(--ink); background: var(--surface); border: 1
 .chip--outcome-proposed { color: var(--warn); background: var(--warn-bg); }
 .chip--outcome-rejected_by_athlete { color: var(--bad); background: var(--bad-bg); }
 .chip--outcome-superseded { color: var(--ink-faint); background: var(--surface-2); }
+/* Effet des décisions (#175) : évolution APRÈS la décision (corrélation) — mêmes variables de thème. */
+.chip--effect-improved { color: var(--ok); background: var(--ok-bg); }
+.chip--effect-neutral { color: var(--ink-soft); background: var(--surface-2); }
+.chip--effect-worsened { color: var(--bad); background: var(--bad-bg); }
+.chip--effect-insufficient_data { color: var(--ink-faint); background: var(--surface-2); }
 /* Inspection photo des chaussures (#135) : mêmes teintes que la météo 🟢🟡🟠🔴 */
 .chip--gearcond-green { color: var(--ok); background: var(--ok-bg); }
 .chip--gearcond-yellow { color: var(--yellow); background: var(--warn-bg); }

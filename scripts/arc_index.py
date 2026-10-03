@@ -24,6 +24,8 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py climb-history [--segment ID | --activity GARMIN_ID]  # identité de montée entre séances (#49)
     arc_index.py decisions [--date D | --days N] [--trigger T] [--outcome O] [--active]
                                                                         # journal des décisions, en JSON (#54)
+    arc_index.py decision-effects [--trigger T] [--days N] [--json]
+                                                                        # ce qui s'est passé après chaque décision (#175)
     arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
                                                                         # dépense modèle vs Garmin, en JSON
     arc_index.py pace-curve [--days N] [--lt-speed-ms V]              # courbe allure-durée GAP, CS/D′ (#169)
@@ -239,6 +241,7 @@ import arc_climb_match as VM  # noqa: E402
 import arc_contract as C  # noqa: E402
 import arc_cs as CS  # noqa: E402
 import arc_cycle as CY  # noqa: E402
+import arc_decision_effects as DE  # noqa: E402
 import arc_decoupling as DC  # noqa: E402
 import arc_descent as DS  # noqa: E402
 import arc_durability as DU  # noqa: E402
@@ -4550,6 +4553,74 @@ def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
     return report
 
 
+DECISION_EFFECTS_DEFAULT_DAYS = 180
+
+
+def _decision_effect_data(conn) -> dict:
+    """Séries lues dans l'index pour `arc_decision_effects` (aucune imputation : un jour sans mesure est
+    simplement absent). Douleur = pire `score` de `health.pain` du jour ; `pain: []` explicite = 0, clé
+    absente = pas de mesure."""
+    health: Dict[str, dict] = {}
+    for r in conn.execute("SELECT date, hrv_overnight_ms, resting_hr_bpm, readiness_score, data_json "
+                          "FROM health_day ORDER BY date, source_path"):
+        row = health.setdefault(r["date"], {})
+        for key, col in (("hrv_ms", "hrv_overnight_ms"), ("rhr_bpm", "resting_hr_bpm"),
+                         ("readiness", "readiness_score")):
+            if row.get(key) is None and r[col] is not None:
+                row[key] = r[col]
+        try:
+            pain = (json.loads(r["data_json"] or "{}") or {}).get("pain")
+        except (TypeError, ValueError):
+            pain = None
+        if isinstance(pain, list):
+            scores = [p.get("score") for p in pain if isinstance(p, dict)
+                      and isinstance(p.get("score"), (int, float)) and not isinstance(p.get("score"), bool)]
+            row["pain_max"] = max(scores) if scores else 0.0
+    acwr = {r["date"]: r["acwr"] for r in conn.execute("SELECT date, acwr FROM metric_day") if r["acwr"] is not None}
+    sessions = [dict(r) for r in conn.execute("SELECT date, rpe, decoupling_pct FROM activity")]
+    planned = [dict(r) for r in conn.execute(
+        "SELECT date, status FROM planned_session WHERE COALESCE(shadowed, 0) = 0")]
+    return {"health": health, "acwr": acwr, "sessions": sessions, "planned": planned}
+
+
+def decision_effects(conn, today: Optional[date] = None, days: Optional[int] = None,
+                     trigger: Optional[str] = None) -> dict:
+    """Effet des décisions (#175) — commande « decision-effects » et `/api/decision-effects`.
+
+    Évalue (fonctions pures de `arc_decision_effects`) les décisions de la fenêtre (`days`, défaut
+    `DECISION_EFFECTS_DEFAULT_DAYS`, se terminant à `today`) ; synthèse par déclencheur × issue avec
+    avertissement de petit effectif. DÉRIVÉ, jamais stocké : voir `arc_decision_effects.ASSUMPTIONS`."""
+    today = today or date.today()
+    days = DECISION_EFFECTS_DEFAULT_DAYS if days is None else days
+    rows = decisions_query(conn, today=today, days=days, trigger=trigger)
+    for d in rows:
+        d["id"] = Path(d["source_path"]).stem
+    data = _decision_effect_data(conn)
+    evaluations = DE.evaluate_all(rows, data, today)
+    for ev, d in zip(evaluations, rows):
+        ev["summary"] = d.get("summary")
+    return {"today": today.isoformat(), "days": days, "trigger": trigger, "effects": evaluations,
+            "synthesis": DE.synthesize(evaluations), "min_sample_for_trend": DE.MIN_SAMPLE_FOR_TREND,
+            "caveat": DE.CAVEAT}
+
+
+def decision_effects_text(report: dict) -> str:
+    """Rendu lisible de `decision_effects` (CLI sans `--json`)."""
+    lines = [f"Effet des décisions — {report['days']} derniers jours (au {report['today']})", ""]
+    if not report["effects"]:
+        lines.append("Aucune décision sur cette période.")
+    for g in report["synthesis"]:
+        lines.append(f"• {g['statement']}")
+        lines.append(f"    {g['warning']}" if g.get("warning") else f"    tendance : {g['trend']}")
+    if report["effects"]:
+        lines.append("")
+    for ev in report["effects"]:
+        why = f" ({ev['reason']})" if ev.get("reason") else ""
+        lines.append(f"- {ev['date']} {ev['trigger']}/{ev['outcome']} → {ev['effect']}{why}")
+    lines += ["", report["caveat"]]
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
@@ -4557,7 +4628,8 @@ def build_parser() -> argparse.ArgumentParser:
                                  "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
-                                 "inspections", "gear-career", "gait-summary", "pace-curve"))
+                                 "inspections", "gear-career", "gait-summary", "pace-curve",
+                                 "decision-effects"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4649,7 +4721,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « pace-curve » (#169) : vitesse (m/s) au seuil lactique Garmin, "
                              "pour le contrôle de cohérence avec la CS (signalé, jamais arbitré)")
     parser.add_argument("--json", action="store_true",
-                        help="commande « pace-curve » : sortie JSON (déjà le défaut, accepté pour la clarté)")
+                        help="commandes « pace-curve » (JSON déjà le défaut, accepté pour la clarté) et "
+                             "« decision-effects » (sortie JSON complète)")
     parser.add_argument("--band", choices=SL.BANDS, default="endurance",
                         help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
                              "arc_slope_model.ASSUMPTIONS['population'])")
@@ -4721,6 +4794,13 @@ def main(argv=None) -> int:
             report.update(gear_photo_dropbox(conn, workspace))
         print(json.dumps(report, ensure_ascii=False))
         return 1 if "error" in report else 0
+    if args.command == "decision-effects":
+        if args.days is not None and args.days < 1:
+            raise ConfigError(f"--days : un entier >= 1 attendu, « {args.days} » reçu.")
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        report = decision_effects(conn, today_date, args.days, args.trigger)
+        print(json.dumps(report, ensure_ascii=False) if args.json else decision_effects_text(report))
+        return 0
     if args.command == "gait-summary":
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         print(json.dumps(gait_summary(conn, today_date, args.weeks or GAIT_DEFAULT_WEEKS), ensure_ascii=False))

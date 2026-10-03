@@ -20,6 +20,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | 👟 **Suivi du matériel** | kilométrage par paire depuis Garmin, prévision de retraite, équipement et kits, inspection photo (`/inspection`), contrôle du matériel de course |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
 | 🎯 **Vitesse critique** | courbe allure-durée en GAP, vitesse critique et réserve anaérobie D′ estimées sur vos meilleurs efforts (refus explicite si les données manquent), cibles d'intervalles en % de la vitesse critique — voir [Vitesse critique](docs/vitesse-critique.md) |
+| 🔁 **Effet des décisions** | ce qui s'est passé après chaque décision du coach (HRV, douleur, charge, RPE… avant / après), même quand l'athlète ne l'a pas suivie — synthèse par déclencheur dans la vue « Décisions » ; corrélation, pas causalité, jamais utilisé pour assouplir un garde-fou |
 | 📱 **Le coach dans la poche** | synchronisation Garmin automatique + notification push, et dialogue avec le coach depuis le téléphone (Claude Code Remote Control) — sans renoncer à votre abonnement |
 | 🌙 **Cycle menstruel (opt-in)** | contexte facultatif du bilan matinal (phase du cycle), désactivé par défaut : jamais une règle ni un diagnostic, veille RED-S — voir [Cycle menstruel](docs/cycle-menstruel.md) |
 | 🍽️ **Apports vers Garmin (opt-in)** | le coach propose de pousser ce que vous déclarez (`/log`, rapports) vers le journal alimentaire et l'hydratation de Garmin Connect, désactivé par défaut, jamais sans votre « oui » — voir [Apports vers Garmin](docs/nutrition-garmin.md) |
@@ -125,7 +126,7 @@ deux IDE, voir [IDE supportés](docs/ides.md)) :
 | Commande | Répond |
 |---|---|
 | `/today` | La séance du jour, le bilan matinal (au niveau configuré), le créneau météo si la séance est en extérieur |
-| `/why` | Pourquoi la dernière décision du coach (ou une décision nommée) a été prise — jamais une raison inventée |
+| `/why` | Pourquoi la dernière décision du coach (ou une décision nommée) a été prise — jamais une raison inventée ; peut citer le bilan personnel « ce qui s'est passé ensuite » (corrélation, pas causalité) |
 | `/week` | Le statut compact de la semaine en cours : réalisé/prévu, garde-fous |
 | `/race` | Le compte à rebours de votre objectif, le score Trail Shape, votre plan de course s'il existe |
 | `/log` | Saisie libre en une phrase — ravitaillement, douleur, RPE — convertis en données du contrat sans jamais inventer une valeur |
