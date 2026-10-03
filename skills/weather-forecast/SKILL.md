@@ -84,7 +84,7 @@ Garder les autres champs en mémoire seulement si utile (visibilité, pression).
 
 ## Cibles de séance ajustées à la chaleur (#171)
 
-Les seuils du tableau « Catégories & seuils » (température, vent, pluie, UV) sont repris par `scripts/arc_heat.py` (`WEATHER_*`) — **toute modification du tableau doit y être reportée** : le palier B (`tests/lint/test_heat_lint.py`) échoue si les deux divergent. L'ajustement des cibles d'entraînement est **déterministe, dans le script**, jamais dans le prompt. Pour une séance de course à pied en extérieur un jour chaud (> 25 °C) ou 🔴 : `python3 scripts/arc_workout_targets.py targets --heat --session …` (lit ce fichier météo du jour). Il renvoie `heat_adjustment` (facteur sur l'allure, action, motif, rappels hydratation/sodium reliés au taux de sudation) :
+Les seuils du tableau « Catégories & seuils » (température, vent, pluie, UV) sont repris par `scripts/arc_heat.py` (`WEATHER_*`) — **toute modification du tableau doit y être reportée** : un test du dépôt (palier B) échoue si les deux divergent. L'ajustement des cibles d'entraînement est **déterministe, dans le script**, jamais dans le prompt. Pour une séance de course à pied en extérieur un jour chaud (> 25 °C) ou 🔴 : `python3 scripts/arc_workout_targets.py targets --heat --session …` (lit ce fichier météo du jour). Il renvoie `heat_adjustment` (facteur sur l'allure, action, motif, rappels hydratation/sodium reliés au taux de sudation) :
 
 - endurance / sortie longue : durée conservée, **allure** ralentie, **FC inchangée** ;
 - qualité / allure course : créneau frais d'abord (cette section), sinon allures abaissées ou séance déplacée ; **jamais d'intensité maintenue en 🔴** ;

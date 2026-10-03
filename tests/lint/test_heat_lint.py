@@ -74,7 +74,7 @@ class TestWeatherThresholdsSingleSourced(unittest.TestCase):
     def test_skill_points_to_the_script(self):
         text = (REPO / "skills/weather-forecast/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("scripts/arc_heat.py", text)
-        self.assertIn("tests/lint/test_heat_lint.py", text)
+        self.assertIn("toute modification du tableau doit y être reportée", text)
 
 
 if __name__ == "__main__":
