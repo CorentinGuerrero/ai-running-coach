@@ -128,7 +128,7 @@ deux IDE, voir [IDE supportés](docs/ides.md)) :
 | `/today` | La séance du jour, le bilan matinal (au niveau configuré), le créneau météo si la séance est en extérieur |
 | `/why` | Pourquoi la dernière décision du coach (ou une décision nommée) a été prise — jamais une raison inventée ; peut citer le bilan personnel « ce qui s'est passé ensuite » (corrélation, pas causalité) |
 | `/week` | Le statut compact de la semaine en cours : réalisé/prévu, garde-fous |
-| `/race` | Le compte à rebours de votre objectif, le score Trail Shape, votre plan de course s'il existe |
+| `/race` | Le compte à rebours de votre objectif, le score Trail Shape, la forme prévue le jour J (estimation), votre plan de course s'il existe |
 | `/log` | Saisie libre en une phrase — ravitaillement, douleur, RPE — convertis en données du contrat sans jamais inventer une valeur |
 | `/inspection` | Lancer l'inspection photo d'une paire de chaussures : désigner la paire, protocole photo, où déposer les photos (`gear/photos/`) |
 

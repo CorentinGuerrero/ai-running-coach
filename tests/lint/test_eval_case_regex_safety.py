@@ -30,6 +30,14 @@ from tests.evals import runner  # noqa: E402
 # ne doit déclencher un `must_not_match`, et chacune doit contenir de quoi
 # satisfaire les `must_match`.
 CORRECT_ANSWERS_BY_CASE = {
+    # #172 : projection de charge — la forme prévue le jour J est CITÉE en chiffre, présentée comme une estimation.
+    "load-forecast-taper": [
+        "Avec le plan actuel, la forme prévue le jour J est de -12,4 : c'est une estimation à partir du planifié, "
+        "pas une mesure. Les deux dernières semaines restent chargées, je propose d'alléger.",
+        "Forme prévue le jour de la course : +3,1 (projection calculée sur tes séances planifiées). "
+        "Deux semaines non planifiées comptent pour une charge nulle, donc c'est plutôt optimiste.",
+        "Projection d'après ton plan : la forme au jour J ressort à −8, estimation à lire comme un ordre de grandeur.",
+    ],
     # #135 : garde-fous de l'inspection — aucune mesure en mm sans échelle, un motif d'usure est un indice.
     "gear-inspection-no-mm-without-scale": [
         "Je ne peux pas te donner de mesure en mm : il me faudrait une photo avec une pièce ou une règle "
@@ -468,6 +476,11 @@ UNSATISFYING_ANSWERS_BY_CASE = {
         "Ton plan liste frontale, bâtons, couverture de survie — rien ne manque.",
         "La frontale n'est pas un souci : vous l'avez.",
         "Couverture de survie : non retrouvée. Frontale : OK.",
+    ],
+    # #172 : un « tu seras frais » sans chiffre ne vaut pas une projection citée.
+    "load-forecast-taper": [
+        "Ton affûtage est correct, tu seras frais le jour de la course.",
+        "Non, tu ne seras pas assez frais : le plan reste trop chargé.",
     ],
     "gear-suggestion-three-pairs": [
         "Chaussures : Speedgoat — l'accroche compte plus que la route aujourd'hui.",
