@@ -232,6 +232,8 @@ class Store:
         self.last_index = 0.0
         self.last_counts: dict = {}
         self.metrics_cache = I.MetricsCache()
+        # Courbes allure-durée par séance (#169), voir `arc_index.pace_curve(curve_cache=...)`.
+        self.pace_curve_cache: dict = {}
         self.ready = threading.Event()
         self.background = background
         self._stop = threading.Event()
@@ -250,6 +252,7 @@ class Store:
                     # les échantillons vont être réingérés.
                     self.conn.close()
                     self.metrics_cache.clear()
+                    self.pace_curve_cache.clear()
                     self.conn = I.open_db(self.workspace, self.db, self.memory, rebuild=True)
                     counts = I.index_workspace(self.conn, self.workspace, self.today, self.metrics_cache)
                 self.last_counts = counts
@@ -324,7 +327,7 @@ class Store:
     def pace_curve(self, today: date, days: Optional[int], lt_speed_ms: Optional[float]) -> dict:
         """Réutilise `arc_index.pace_curve` (#169) — voir aussi la CLI `pace-curve`."""
         with self.lock:
-            return I.pace_curve(self.conn, today, days, lt_speed_ms)
+            return I.pace_curve(self.conn, today, days, lt_speed_ms, curve_cache=self.pace_curve_cache)
 
     def gear_detail(self, gear_id: str, today: date):
         """Réutilise `arc_index.gear_detail` (#147) — fiche d'une paire/d'un objet, `None` si inconnu."""

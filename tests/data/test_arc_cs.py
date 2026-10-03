@@ -413,6 +413,41 @@ class TestPaceCurveIndex(unittest.TestCase):
         cli = json.loads(buf.getvalue())
         self.assertEqual(cli["current"]["cs_ms"], fit["cs_ms"])
 
+    def test_curve_cache_gives_identical_report_and_follows_sample_changes(self):
+        for i, t in enumerate((180, 300, 480, 720, 1200)):
+            day = (date.fromisoformat(self.TODAY) - timedelta(days=4 + 5 * i)).isoformat()
+            self._activity(910000020 + i, day, t)
+        self._index()
+        today = date.fromisoformat(self.TODAY)
+        cache = {}
+        plain = I.pace_curve(self.conn, today)
+        cold = I.pace_curve(self.conn, today, curve_cache=cache)
+        self.assertEqual(len(cache), 5)
+        warm = I.pace_curve(self.conn, today, curve_cache=cache)
+        self.assertEqual(json.dumps(plain, sort_keys=True), json.dumps(cold, sort_keys=True))
+        self.assertEqual(json.dumps(plain, sort_keys=True), json.dumps(warm, sort_keys=True))
+        # échantillons modifiés (FIT re-téléchargé) : nouvelle empreinte, courbe recalculée — jamais périmée
+        self._activity(910000020, (today - timedelta(days=4)).isoformat(), 180)
+        fit_path = self.ws / "activities" / "fit" / "910000020.json"
+        data = json.loads(fit_path.read_text(encoding="utf-8"))
+        for r in data["records"]:
+            r["speed_ms"] = r["speed_ms"] * 1.1
+            r["distance_m"] = r["distance_m"] * 1.1
+        fit_path.write_text(json.dumps(data), encoding="utf-8")
+        self._index()
+        fresh = I.pace_curve(self.conn, today)
+        cached = I.pace_curve(self.conn, today, curve_cache=cache)
+        self.assertEqual(json.dumps(fresh, sort_keys=True), json.dumps(cached, sort_keys=True))
+        self.assertNotEqual(fresh["windows"][1]["curve"][3]["speed_ms"], plain["windows"][1]["curve"][3]["speed_ms"])
+        # séance retirée : l'entrée est oubliée (taille bornée)
+        fit_path.unlink()
+        for md in (self.ws / "activities").glob("*.md"):
+            if "910000020" in md.read_text(encoding="utf-8"):
+                md.unlink()
+        self._index()
+        I.pace_curve(self.conn, today, curve_cache=cache)
+        self.assertNotIn(910000020, cache)
+
     def test_no_activities(self):
         self._index()
         rep = I.pace_curve(self.conn, date.fromisoformat(self.TODAY))

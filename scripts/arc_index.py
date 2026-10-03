@@ -4483,7 +4483,7 @@ PACE_CURVE_LOOKBACK_DAYS = 365 + CS.TREND_WINDOW_DAYS   # fenêtre 365 j + profo
 
 
 def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
-               lt_speed_ms: Optional[float] = None) -> dict:
+               lt_speed_ms: Optional[float] = None, curve_cache: Optional[dict] = None) -> dict:
     """Courbe allure-durée en GAP, vitesse critique CS et réserve anaérobie D′ (#169) — commande
     « pace-curve » et `/api/pace-curve`.
 
@@ -4492,7 +4492,13 @@ def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
     glissantes sur temps écoulé, couverture, refus explicites, qualité) : `arc_cs.ASSUMPTIONS`.
     `days` : profondeur de la tendance (défaut 365). `lt_speed_ms` : vitesse au seuil lactique
     fournie par l'appelant (agent), pour le contrôle de cohérence — jamais lue ici.
-    N'est pas soumis à `[health].morning_check` : aucune donnée de santé."""
+    N'est pas soumis à `[health].morning_check` : aucune donnée de santé.
+
+    `curve_cache` (tableau de bord, `arc_serve.Store`, revue de code #169) : dict EN MÉMOIRE
+    `ref -> (empreinte, résultat de arc_cs.activity_curve)`. L'empreinte est celle du CONTENU
+    des échantillons (`_sample_stats`, comme `MetricsCache`) : des échantillons modifiés donnent
+    une autre empreinte, jamais une courbe périmée. Sans lui (CLI, tests) : recalcul intégral.
+    Mesuré sur 450 séances de 1 à 2 h : ~1,3 s sans cache, ~0,2 s avec."""
     today = today or date.today()
     depth = days if days and days > 0 else CS.TREND_DEFAULT_DAYS
     lookback = max(PACE_CURVE_LOOKBACK_DAYS, depth + CS.TREND_WINDOW_DAYS)
@@ -4504,21 +4510,41 @@ def pace_curve(conn, today: Optional[date] = None, days: Optional[int] = None,
         (*M.RUNNING_SPORTS, since, today.isoformat())).fetchall()
     curves = []
     skipped_no_grade = 0
+    stats = _sample_stats(conn) if curve_cache is not None else {}
+    seen = set()
     for row in rows:
         ref = activity_ref(row)
         if ref is None:
             continue
-        samples_rows = conn.execute(
-            "SELECT t_s, distance_m, altitude_m, speed_ms, covered_s "
-            f"FROM activity_sample WHERE {ref_column(ref)} = ? ORDER BY t_s", (ref,)).fetchall()
-        if not samples_rows:
-            continue
-        result = CS.activity_curve([dict(r) for r in samples_rows])
+        if curve_cache is not None:
+            if ref not in stats:
+                continue   # aucun échantillon : même effet que la requête vide ci-dessous
+            fingerprint = _digest(stats[ref])
+            seen.add(ref)
+            hit = curve_cache.get(ref)
+            if hit is not None and hit[0] == fingerprint:
+                result = hit[1]
+            else:
+                result = None
+        else:
+            result = None
+        if result is None:
+            samples_rows = conn.execute(
+                "SELECT t_s, distance_m, altitude_m, speed_ms, covered_s "
+                f"FROM activity_sample WHERE {ref_column(ref)} = ? ORDER BY t_s", (ref,)).fetchall()
+            if not samples_rows:
+                continue
+            result = CS.activity_curve([dict(r) for r in samples_rows])
+            if curve_cache is not None:
+                curve_cache[ref] = (fingerprint, result)
         if result["reason_code"] == "no_grade":
             skipped_no_grade += 1
             continue
         if result["curve"]:
             curves.append({"date": row["date"], "ref": ref, "curve": result["curve"]})
+    if curve_cache is not None:
+        for stale in [k for k in curve_cache if k not in seen]:
+            del curve_cache[stale]   # taille bornée par le nombre de séances de la période
     report = CS.build_report(curves, today, days=depth, skipped_no_grade=skipped_no_grade)
     report["threshold_check"] = CS.compare_threshold(report["current"], lt_speed_ms)
     return report
