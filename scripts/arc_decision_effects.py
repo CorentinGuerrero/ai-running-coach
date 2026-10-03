@@ -190,7 +190,8 @@ ASSUMPTIONS = {
         "Deux décisions (hors `proposed`) dont les fenêtres se chevauchent — même jour, ou une "
         "décision prise pendant la fenêtre AVANT/APRÈS d'une autre — sont signalées (`overlaps`) : "
         "leurs effets se confondent et ne peuvent pas être attribués à l'une plutôt qu'à l'autre. "
-        "Elles restent comptées, avec ce signalement dans la synthèse."
+        "Elles restent comptées, avec ce signalement dans la synthèse. Une décision et celle qu'elle "
+        "remplace (`supersedes`) forment un seul fil de réévaluation : jamais un chevauchement."
     ),
     "signal_reading": (
         "Sens des signaux : HRV en hausse, FC de repos en baisse, readiness en hausse, douleur en "
@@ -391,15 +392,19 @@ def evaluate_all(decisions: Iterable[dict], data: dict, today: date,
     défaut : les mêmes) datées dans la fenêtre AVANT/APRÈS de celle-ci — ASSUMPTIONS["overlap"]."""
     decisions = list(decisions)
     data = _indexed(data)
-    others = [(c.get("id"), _d(c.get("date"))) for c in (decisions if context is None else context)
-              if c.get("outcome") != "proposed"]
+    others = [c for c in (decisions if context is None else context) if c.get("outcome") != "proposed"]
     out = []
     for d in decisions:
         ev = evaluate_decision(d, data, today)
         span = _span(d)
         if span and ev["outcome"] in ("applied", "rejected_by_athlete"):
-            ev["overlaps"] = sorted(str(i) for i, day in others
-                                    if i != d.get("id") and day and span[0] <= day <= span[1])
+            # Une décision et celle qu'elle remplace (`supersedes`, dans un sens ou l'autre) sont le
+            # MÊME fil de réévaluation, pas deux décisions concurrentes : jamais comptées en chevauchement.
+            ev["overlaps"] = sorted(
+                str(c.get("id")) for c in others
+                if c.get("id") != d.get("id") and _d(c.get("date")) and span[0] <= _d(c.get("date")) <= span[1]
+                and not (d.get("supersedes") and d.get("supersedes") == c.get("source_path"))
+                and not (c.get("supersedes") and c.get("supersedes") == d.get("source_path")))
         out.append(ev)
     return out
 

@@ -182,6 +182,12 @@ class TestReviewFindings(unittest.TestCase):
         self.assertEqual(g["overlapping"], 1)
         self.assertIn("effets confondus", g["statement"])
 
+    def test_supersedes_chain_is_not_an_overlap(self):
+        old = {**dec(iso(-21), outcome="superseded"), "id": "old"}
+        new = {**dec(self.DAY), "supersedes": old["source_path"]}
+        evs = DE.evaluate_all([new], {"health": {}}, TODAY, context=[old, new])
+        self.assertEqual(evs[0]["overlaps"], [])
+
     def test_proposed_neighbour_does_not_count_as_overlap(self):
         a = dec(self.DAY)
         b = {**dec(self.DAY, outcome="proposed"), "id": "b"}
