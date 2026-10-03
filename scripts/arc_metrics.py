@@ -2718,6 +2718,21 @@ ASSUMPTIONS["gait"] = (
 )
 
 
+ASSUMPTIONS["decision_effects"] = (
+    "Effet des décisions (#175, `arc_index.py decision-effects`, `/api/decision-effects`) : pour chaque décision "
+    "`applied` ou `rejected_by_athlete` du journal, comparaison d'une fenêtre AVANT (3 jours se terminant au jour "
+    "de la décision pour les séries quotidiennes ; 14 jours pour les séances) et d'une fenêtre APRÈS (J+1 à J+N, "
+    "N = 3 pour bilan matinal/météo, 7 pour blessure/garde-fou/demande/course/autre) sur les signaux du "
+    "déclencheur (HRV, FC de repos, readiness ; douleur ; écart d'ACWR à la zone 0,8–1,3 ; RPE, découplage, "
+    "conformité). Tolérances « neutre » : HRV ±5 %, FC de repos ±2 bpm, readiness ±5, douleur ±1, ACWR ±0,1, RPE "
+    "±1, découplage ±2 points, conformité ±15 points — APPROXIMATIONS DU PROJET, pas des normes. Un signal "
+    "absent est sauté, jamais imputé ; fenêtre non écoulée ou aucun signal → `insufficient_data`. Synthèse par "
+    "déclencheur × nature de l'action (dérivée de `before`/`after`) × issue, décisions aux fenêtres chevauchantes signalées ; sous 5 cas évaluables, comptes bruts sans « tendance ». CORRÉLATION, PAS CAUSALITÉ : "
+    "jamais utilisé pour assouplir un garde-fou `block`, une décision médicale ni un verdict rouge. Effets "
+    "dérivés, jamais stockés ; méthode détaillée : `arc_decision_effects.ASSUMPTIONS`."
+)
+
+
 def gear_inspection_status(shoes: List[dict], inspections: List[dict],
                            interval_m: float = GEAR_INSPECTION_INTERVAL_M,
                            ignored: Optional[Dict[str, str]] = None) -> List[dict]:

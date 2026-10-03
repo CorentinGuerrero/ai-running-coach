@@ -329,6 +329,11 @@ class Store:
         with self.lock:
             return I.pace_curve(self.conn, today, days, lt_speed_ms, curve_cache=self.pace_curve_cache)
 
+    def decision_effects(self, today: date, days: Optional[int], trigger: Optional[str]) -> dict:
+        """Réutilise `arc_index.decision_effects` (#175) — voir aussi la CLI `decision-effects`."""
+        with self.lock:
+            return I.decision_effects(self.conn, today, days, trigger)
+
     def gear_detail(self, gear_id: str, today: date):
         """Réutilise `arc_index.gear_detail` (#147) — fiche d'une paire/d'un objet, `None` si inconnu."""
         with self.lock:
@@ -490,6 +495,18 @@ def api_gait(store: Store, q: dict) -> dict:
     weeks_raw = q.get("weeks", [""])[0]
     weeks = int(weeks_raw) if weeks_raw.isdigit() else I.GAIT_DEFAULT_WEEKS
     return store.gait(_today(store), max(1, min(104, weeks)))
+
+
+def api_decision_effects(store: Store, q: dict) -> dict:
+    """Effet des décisions (#175) : `/api/decision-effects?days=N&trigger=T` (défaut 180 j, 1 à 3650).
+    Additive. Délègue à `arc_index.decision_effects` (mêmes chiffres que la CLI) — effets DÉRIVÉS, jamais
+    stockés ; corrélation, pas causalité (`caveat`)."""
+    days_raw = q.get("days", [""])[0]
+    days = max(1, min(3650, int(days_raw))) if days_raw.isdigit() else None
+    trigger = q.get("trigger", [""])[0] or None
+    if trigger and trigger not in I.C.DECISION_TRIGGER:
+        trigger = None
+    return store.decision_effects(_today(store), days, trigger)
 
 
 def api_assumptions(store: Store, q: dict) -> dict:
@@ -1495,6 +1512,7 @@ ROUTES = {
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
     "/api/gait": api_gait, "/api/pace-curve": api_pace_curve,
+    "/api/decision-effects": api_decision_effects,
 }
 
 # ---------------------------------------------------------------------------

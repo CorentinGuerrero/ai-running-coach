@@ -973,6 +973,22 @@ en favori. Chaque ligne ouvre le détail de la décision :
 - pour une décision remplacée par une réévaluation plus récente (`supersedes`) : un lien
   vers l'ancienne décision, et réciproquement vers la nouvelle.
 
+**Ce qui s'est passé ensuite (#175).** Une carte de synthèse en tête de liste (par déclencheur,
+nature de l'action et issue : « Allègement après bilan matinal — décisions appliquées : 7
+évaluée(s) (5 améliorée(s), …) » ; la nature — allègement, annulation, report, renforcement,
+remplacement — est déduite des champs `before`/`after` de la décision, jamais du texte ; deux
+décisions dont les fenêtres se chevauchent sont signalées, leurs effets étant confondus),
+une pastille d'évolution sur chaque ligne et, dans le détail, les signaux utilisés (HRV, FC de
+repos, readiness, douleur, ACWR, RPE, découplage, conformité) avec leurs fenêtres avant / après
+et les chiffres. Les décisions refusées par l'athlète sont évaluées aussi (que se passe-t-il quand
+le conseil n'est pas suivi). Garde-fous de lecture : **corrélation, pas causalité** ; sous 5 cas
+évaluables, comptes bruts et avertissement de petit effectif, jamais de « tendance » ; jamais
+utilisé pour assouplir un garde-fou `block`, une décision médicale ni un verdict rouge. Les effets
+sont **dérivés** (recalculés à chaque lecture depuis l'index, rien n'est écrit dans les fichiers de
+décision) ; sans donnée suffisante, l'état vide le dit (« Données insuffisantes », fenêtre pas
+encore écoulée). API : `/api/decision-effects` ; CLI :
+`python3 scripts/arc_index.py decision-effects [--trigger T] [--days N] [--text]` (JSON par défaut).
+
 Une décision **proposée** (`outcome: "proposed"`) porte la mention « en attente de ta
 confirmation » : rien n'a encore été réécrit dans le plan ni poussé au calendrier Garmin.
 

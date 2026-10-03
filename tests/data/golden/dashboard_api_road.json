@@ -1407,6 +1407,7 @@
           "cs_targets": "Cibles d'intervalles en % de la CS (arc_workout_targets) : seuil 95-100 %, tempo 88-95 %, VO2max 102-110 % de la CS, UNIQUEMENT quand l'ajustement est valide. Ces pourcentages sont une approximation du projet (pas des valeurs publiées) : au-dessus de la CS, la durée tenable est bornée par D′ (D′ / (v − CS)) ; une cible ne doit jamais dépasser ce budget. Elles complètent les zones de fréquence cardiaque, jamais ne les remplacent. Par la chaleur (targets --heat, #171), elles sont ralenties du même facteur que les autres cibles d'allure (cs_target.adjusted) ; le budget D′ n'est pas recalculé (effet de la chaleur sur D′ non modélisé).",
           "cs_trend": "Tendance de la CS : un ajustement indépendant tous les 28 jours, chacun sur le meilleur de 90 jours se terminant à ce point (une fenêtre de 42 jours contient rarement assez d'efforts de 3 à 20 min). Un point sans ajustement valide rend son motif de refus, jamais une valeur reportée du point précédent.",
           "cs_windows_and_gaps": "Fenêtres glissantes sur le temps ÉCOULÉ, grille régulière à la résolution des échantillons (5 s) : une fenêtre n'est retenue que si les échantillons couvrent au moins 95 % de sa durée (covered_s) ; un trou de signal ou une pause non enregistrée (pause automatique de la montre) la disqualifie, jamais interpolé. Un arrêt enregistré (vitesse nulle, ex. ravitaillement en trail) compte comme du temps couvert à vitesse nulle : un meilleur effort qui enjambe un ravitaillement est donc pénalisé. Compromis assumé : des fenêtres sur le temps de MOUVEMENT recolleraient les morceaux de part et d'autre de l'arrêt, alors que D′ se reconstitue pendant l'arrêt — un effort intermittent passerait pour un effort continu et gonflerait CS et D′. Sur le temps écoulé, l'erreur va dans le sens prudent (CS basse). Résolution de 5 s : la fenêtre de 30 s est la plus courte exploitable ; un pic de vitesse GPS isolé peut gonfler les durées très courtes (hors ajustement CS/D′, qui part de 3 min).",
+          "decision_effects": "Effet des décisions (#175, `arc_index.py decision-effects`, `/api/decision-effects`) : pour chaque décision `applied` ou `rejected_by_athlete` du journal, comparaison d'une fenêtre AVANT (3 jours se terminant au jour de la décision pour les séries quotidiennes ; 14 jours pour les séances) et d'une fenêtre APRÈS (J+1 à J+N, N = 3 pour bilan matinal/météo, 7 pour blessure/garde-fou/demande/course/autre) sur les signaux du déclencheur (HRV, FC de repos, readiness ; douleur ; écart d'ACWR à la zone 0,8–1,3 ; RPE, découplage, conformité). Tolérances « neutre » : HRV ±5 %, FC de repos ±2 bpm, readiness ±5, douleur ±1, ACWR ±0,1, RPE ±1, découplage ±2 points, conformité ±15 points — APPROXIMATIONS DU PROJET, pas des normes. Un signal absent est sauté, jamais imputé ; fenêtre non écoulée ou aucun signal → `insufficient_data`. Synthèse par déclencheur × nature de l'action (dérivée de `before`/`after`) × issue, décisions aux fenêtres chevauchantes signalées ; sous 5 cas évaluables, comptes bruts sans « tendance ». CORRÉLATION, PAS CAUSALITÉ : jamais utilisé pour assouplir un garde-fou `block`, une décision médicale ni un verdict rouge. Effets dérivés, jamais stockés ; méthode détaillée : `arc_decision_effects.ASSUMPTIONS`.",
           "decoupling_grade_asymmetry": "Si la pente moyenne (pondérée par le temps, sur les échantillons utilisés pour l'EF) diffère de plus de 3 points entre les deux moitiés (ex. un aller-retour avec la montée dans une moitié et la descente dans l'autre), l'activité est jugée inéligible : le GAP corrige l'effet de la pente sur l'allure, mais pas parfaitement (biais connu du modèle de Minetti en forte descente, arc_gap.ASSUMPTIONS) — un profil trop différent entre les deux moitiés peut donc produire un découplage mesuré qui reflète surtout le relief, pas une vraie dérive cardiaque.",
           "decoupling_halves": "Les deux moitiés (post-échauffement) sont découpées sur le TEMPS DE MOUVEMENT cumulé, jamais la distance ni le temps écoulé : une moitié plus lente (fatigue, montée) couvrirait sinon moins de distance mais devrait rester comparable en durée réelle d'effort. Chaque moitié doit conserver au moins 10 minutes de mouvement, sinon l'activité est jugée inéligible (durée exploitable insuffisante après exclusion de l'échauffement).",
           "decoupling_hr_coverage": "Chaque moitié doit avoir au moins 80 % de son temps de mouvement couvert par une FC présente — TOUT terrain confondu, pente forte et marche COMPRISES : sous ce seuil (capteur FC décroché sur une longue portion), la moyenne de cette moitié porterait sur une fraction non représentative de son temps réel, ce qui peut fausser le découplage mesuré dans un sens ou dans l'autre selon ce qui manque. Distinct d'une absence totale de FC (séance sans capteur), qui a sa propre raison plus tôt dans le pipeline, ET distinct de la couverture RÉELLEMENT UTILISABLE pour l'EF (voir ASSUMPTIONS['usable_running']) : une sortie en montagne peut avoir une FC complète (100 % de couverture ici) tout en manquant de portions courues exploitables (beaucoup de pente forte/marche) — mélanger les deux critères en un seul (revue de code #45, correction apportée) rejetait à tort la plupart des sorties de montagne réelles avec une FC pourtant complète (ex. mesuré sur des profils synthétiques : vallonné ±12 % à 64-86 % de « couverture » avant correction, ±15-25 % à 13-51 %, répétitions à allure adaptée ±10 % à 33 %, alors que la FC y était mesurée à 100 % du temps).",
@@ -1854,6 +1855,83 @@
     "/api/climb-segments": {
       "body": {
         "segments": []
+      },
+      "status": 200
+    },
+    "/api/decision-effects": {
+      "body": {
+        "caveat": "Corrélation, pas causalité : ce bilan décrit ce qui s'est passé après les décisions, pas ce qu'elles ont causé. Il n'assouplit jamais un garde-fou `block`, une décision médicale ni un verdict rouge.",
+        "days": 180,
+        "effects": [
+          {
+            "action": "move",
+            "date": "2026-09-22",
+            "effect": "insufficient_data",
+            "horizon_days": 7,
+            "id": "2026-09-22_decision_qualite-deplacee",
+            "outcome": "proposed",
+            "reason": "décision seulement proposée : rien n'a été appliqué, aucun effet à mesurer",
+            "reason_code": "proposed",
+            "signals": [],
+            "skipped": [],
+            "source_path": "planning/2026-09-22_decision_qualite-deplacee.md",
+            "summary": "Séance de qualité déplacée à la demande de l'athlète : réunion professionnelle.",
+            "trigger": "athlete_request"
+          },
+          {
+            "action": "lighten",
+            "date": "2026-09-19",
+            "effect": "insufficient_data",
+            "horizon_days": 7,
+            "id": "2026-09-19_decision_acwr-ajuste",
+            "mature_on": "2026-09-26",
+            "outcome": "applied",
+            "overlaps": [],
+            "reason": "fenêtre d'observation pas encore écoulée",
+            "reason_code": "window_open",
+            "signals": [],
+            "skipped": [],
+            "source_path": "planning/2026-09-19_decision_acwr-ajuste.md",
+            "summary": "ACWR projeté ramené sous le seuil après raccourcissement de la sortie longue.",
+            "trigger": "guardrail"
+          },
+          {
+            "action": "lighten",
+            "date": "2026-09-18",
+            "effect": "insufficient_data",
+            "horizon_days": 7,
+            "id": "2026-09-18_decision_acwr-projete",
+            "outcome": "superseded",
+            "reason": "décision remplacée par une réévaluation plus récente : l'effet est porté par la suivante",
+            "reason_code": "superseded",
+            "signals": [],
+            "skipped": [],
+            "source_path": "planning/2026-09-18_decision_acwr-projete.md",
+            "summary": "ACWR projeté au-delà du seuil : sortie longue raccourcie.",
+            "trigger": "guardrail"
+          }
+        ],
+        "min_sample_for_trend": 5,
+        "synthesis": [
+          {
+            "action": "lighten",
+            "improved": 0,
+            "insufficient_data": 1,
+            "n": 0,
+            "neutral": 0,
+            "outcome": "applied",
+            "overlapping": 0,
+            "statement": "Allègement après garde-fou — décisions appliquées : 0 évaluée(s) ; 1 sans données suffisantes",
+            "total": 1,
+            "trend": null,
+            "trend_allowed": false,
+            "trigger": "guardrail",
+            "warning": "aucune décision évaluable pour l'instant",
+            "worsened": 0
+          }
+        ],
+        "today": "2026-09-23",
+        "trigger": null
       },
       "status": 200
     },

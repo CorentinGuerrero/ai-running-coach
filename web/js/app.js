@@ -32,6 +32,23 @@ const weatherChip = (w) => (w ? chip("weather", w, F.WEATHER[w] || w) : "");
 const statusChip = (s) => (s ? chip("status", s, F.STATUS[s] || s) : "");
 const triggerChip = (t) => (t ? chip("trigger", t, F.TRIGGER[t] || t) : "");
 const outcomeChip = (o) => (o ? chip("outcome", o, F.DECISION_OUTCOME[o] || o) : "");
+const effectChip = (e) => (e ? chip("effect", e, F.DECISION_EFFECT[e] || e) : "");
+
+// Effet des décisions (#175) : détail d'une évaluation (signaux, fenêtres, chiffres).
+// Valeurs arrondies à l'affichage (moyennes de fenêtre : 3 décimales côté API) ; conformité en %.
+const effectValue = (signal, v) => (signal === "compliance" ? `${F.num(v * 100)} %` : F.num(v, 1));
+function effectDetailHtml(ev) {
+  if (!ev) return "";
+  const rows = (ev.signals || []).map((s) => `<tr><th scope="row">${F.esc(s.label)}</th>
+      <td>${F.dayShort(s.pre.from)} → ${F.dayShort(s.pre.to)} (${s.pre.n})</td><td>${F.dayShort(s.post.from)} → ${F.dayShort(s.post.to)} (${s.post.n})</td>
+      <td>${effectValue(s.signal, s.pre_value)} → ${effectValue(s.signal, s.post_value)}</td><td>${F.esc(F.DECISION_EFFECT[s.verdict] || s.verdict)}</td></tr>`).join("");
+  const skipped = (ev.skipped || []).map((s) => `<li>${F.esc(s.label)} : ${F.esc(s.reason)}</li>`).join("");
+  return `${ev.reason ? `<p class="muted">${F.esc(ev.reason)}${ev.mature_on ? ` (au plus tôt le ${F.dayLong(ev.mature_on)})` : ""}</p>` : ""}
+    ${ev.action && F.DECISION_ACTION[ev.action] ? `<p class="muted">Nature de l'action (déduite de l'avant / après) : ${F.esc(F.DECISION_ACTION[ev.action])}</p>` : ""}
+    ${(ev.overlaps || []).length ? `<p class="muted">Autre(s) décision(s) dans la même fenêtre : effets confondus.</p>` : ""}
+    ${rows ? `<div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Signal</th><th scope="col">Avant (n)</th><th scope="col">Après (n)</th><th scope="col">Valeurs</th><th scope="col">Lecture</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    ${skipped ? `<p class="muted">Signaux non évalués :</p><ul>${skipped}</ul>` : ""}`;
+}
 
 // Journal des décisions (#55) : lien de la documentation des garde-fous (#52),
 // cité depuis « Décisions » et depuis l'encart « Pourquoi aujourd'hui ? ».
@@ -3447,6 +3464,22 @@ async function viewDecisions(params) {
   if (outcome) qs.set("outcome", outcome);
   const data = await api(`decisions?${qs}`);
   const list = data.decisions || [];
+  // Effet des décisions (#175) : même fenêtre/déclencheur ; une indisponibilité ne casse jamais le journal.
+  let effects = null;
+  try {
+    const eq = new URLSearchParams({ days: String(showAll ? 3650 : days) });
+    if (trigger) eq.set("trigger", trigger);
+    effects = await api(`decision-effects?${eq}`);
+  } catch { effects = null; }
+  const effectById = new Map(((effects && effects.effects) || []).map((e) => [e.id, e]));
+  // Journal vide : l'état vide ci-dessous suffit, pas de carte de synthèse redondante au-dessus.
+  const synthesisHtml = !effects || !list.length ? "" : `<section class="band" aria-labelledby="effets-title">
+      <h2 id="effets-title">Ce qui s'est passé ensuite</h2>
+      ${(effects.synthesis || []).length
+        ? `<ul>${effects.synthesis.map((g) => `<li>${F.esc(g.statement)}${g.trend ? ` — tendance ${F.esc(g.trend)}` : ""}${g.warning ? ` <span class="muted">(${F.esc(g.warning)})</span>` : ""}</li>`).join("")}</ul>`
+        : `<p class="muted">Pas encore de décision évaluable : il faut qu'une décision appliquée (ou refusée) soit suivie de quelques jours de données pour être comparée avant / après.</p>`}
+      ${note(F.esc(effects.caveat))}
+    </section>`;
   const periods = [[30, "1 mois"], [90, "3 mois"], [365, "1 an"], ["tout", "Tout"]];
   const toolbarPeriods = periods.map(([value, label]) => {
     const on = value === "tout" ? showAll : value === days;
@@ -3458,7 +3491,7 @@ async function viewDecisions(params) {
     const ruleTxt = (d.rules || []).map((r) => F.esc(r.label || r.rule_id)).join(", ");
     return `<li>
       <a href="#/decision?id=${encodeURIComponent(d.id)}"><strong>${F.esc(d.summary)}</strong></a>
-      <span class="list__meta">${F.dayLong(d.date)} · ${triggerChip(d.trigger)} ${outcomeChip(d.outcome)}${ruleTxt ? ` · ${ruleTxt}` : ""}${d.supersedes ? " · remplace une décision précédente" : ""}</span>
+      <span class="list__meta">${F.dayLong(d.date)} · ${triggerChip(d.trigger)} ${outcomeChip(d.outcome)}${ruleTxt ? ` · ${ruleTxt}` : ""}${d.supersedes ? " · remplace une décision précédente" : ""}${effectById.get(d.id) ? ` · ${effectChip(effectById.get(d.id).effect)}` : ""}</span>
     </li>`;
   }).join("");
   const currentHashDays = showAll ? "tout" : days;
@@ -3467,6 +3500,7 @@ async function viewDecisions(params) {
       <label class="select">Déclencheur : <select id="f-declencheur"><option value="">Tous</option>${triggerOptions}</select></label>
       <label class="select">Résultat : <select id="f-resultat"><option value="">Tous</option>${outcomeOptions}</select></label>
     </div>
+    ${synthesisHtml}
     ${list.length ? `<ul class="list">${items}</ul>`
       : empty("Aucune décision sur cette période", "Le coach écrit une décision quand il ajuste, allège ou reporte une séance — bilan matinal, garde-fou, ou demande de l'athlète.")}`;
   $("#f-declencheur").addEventListener("change", (e) => { location.hash = decisionFilterHash({ trigger: e.target.value, outcome, days: currentHashDays }); });
@@ -3486,6 +3520,12 @@ async function viewDecision(params) {
     main.innerHTML = header("Décision introuvable") + empty("Décision introuvable", `Aucune décision ne correspond à cet identifiant. <a href="#/decisions">Retour au journal</a>.`);
     return;
   }
+  let effectHtml = "";
+  try {
+    const eff = await api(`decision-effects?days=3650`);
+    const ev = (eff.effects || []).find((e) => e.id === id);
+    if (ev) effectHtml = `<section class="band"><h2>Ce qui s'est passé ensuite ${effectChip(ev.effect)}</h2>${effectDetailHtml(ev)}${note(F.esc(eff.caveat))}</section>`;
+  } catch { effectHtml = ""; }
   const before = d.before || {}, after = d.after || {};
   // Diff avant/après (revue de code #55, should-fix 1) : une clé ABSENTE de
   // `after` (le contrat n'y recopie que les champs qui CHANGENT — voir
@@ -3519,6 +3559,7 @@ async function viewDecision(params) {
     ${d.outcome === "proposed" ? note("En attente de ta confirmation.") : ""}
     ${diffHtml ? `<section class="band"><h2>Avant / après</h2>${diffHtml}</section>` : ""}
     ${inputsHtml ? `<section class="band"><h2>Données</h2>${inputsHtml}</section>` : ""}
+    ${effectHtml}
     ${rulesHtml ? `<section class="band"><h2>Règles</h2>${rulesHtml}</section>` : ""}
     ${sourcesHtml ? `<section class="band"><h2>Sources</h2>${sourcesHtml}</section>` : ""}
     ${d.session_ref_route ? `<p><a href="${d.session_ref_route}">Voir la semaine concernée</a></p>` : ""}
