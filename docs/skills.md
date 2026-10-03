@@ -121,7 +121,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `slope-model` | Modèle personnel pente → allure (#58) |
 | `trail-shape` | Score Trail Shape (#63) |
 | `load-forecast` | Projection de charge jusqu'à la course : forme prévue le jour J, `--compare` (#172) |
-| `plan-templates` | Gabarits de périodisation : liste, choix par distance (`--distance-km`), détail résolu (`--format`, `--weeks`), `--json` (#189) |
+| `plan-templates` | Gabarits de périodisation : liste, choix par distance (`--distance-km`), détail résolu (`--format`, `--weeks`) ; JSON par défaut, `--text` pour un tableau lisible (#189) |
 
 `python3 scripts/arc_index.py --help` liste toutes les options associées à
 chaque commande.

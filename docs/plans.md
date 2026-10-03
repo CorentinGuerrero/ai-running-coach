@@ -26,10 +26,16 @@ au lieu de se fier à de la prose.
 | `route_marathon` | route | 30 à 60 km (~42 km) | 12 à 20 semaines (défaut 16) | 4–9 h |
 
 Les bandes de distance ne se chevauchent pas pour un même sport (vérifié) : la
-distance de l'objectif actif désigne au plus un gabarit. Une course de 50 km
-tombe dans le gabarit « marathon trail », la plus proche : à adapter, et le
-coach le dit. Les gabarits route sont utilisables quand `[sport].primary =
-road` ; ils n'ont pas de D+.
+distance de l'objectif actif désigne au plus un gabarit (borne basse incluse,
+borne haute exclue : 60 km → `ultra_80_100`, 59,9 km → `marathon_trail`). Une
+course de 50 km tombe dans le gabarit « marathon trail », la plus proche : à
+adapter, et le coach le dit. Le choix ne regarde que la distance : pour une
+course très dénivelée en haut de bande (par exemple 55 km et 3 500 m D+), le
+coach peut prendre le gabarit suivant avec `--format` et dit pourquoi. Sans
+`--sport`, la commande prend `[sport].primary` du workspace : les gabarits
+route servent donc d'eux-mêmes quand `[sport].primary = road` ; ils n'ont pas
+de D+. Aucun gabarit sous 15 km sur route (10 km) : la commande le dit
+(`matched: null`).
 
 ## Ce que contient un gabarit
 
@@ -56,16 +62,16 @@ et, pour le gabarit entier, une **semaine allégée** toutes les N semaines
 Voir ce qu'un gabarit donne, semaine par semaine :
 
 ```bash
-python3 scripts/arc_index.py plan-templates                       # liste
-python3 scripts/arc_index.py plan-templates --distance-km 90      # choisi d'après l'objectif
-python3 scripts/arc_index.py plan-templates --format marathon_trail --weeks 14
-python3 scripts/arc_index.py plan-templates --format route_semi --json
+python3 scripts/arc_index.py plan-templates --text                # liste lisible
+python3 scripts/arc_index.py plan-templates --distance-km 90      # choisi d'après l'objectif (JSON)
+python3 scripts/arc_index.py plan-templates --format marathon_trail --weeks 14 --text
+python3 scripts/arc_index.py plan-templates --format route_semi
 ```
 
-La sortie par défaut est un tableau lisible ; `--json` rend la même chose pour
-les agents (gabarit, répartition des semaines par phase, semaines résolues,
-problèmes de validation, seuils utilisés, hypothèses). Lecture seule : aucun
-index ni fichier n'est créé.
+La sortie par défaut est du JSON, comme les autres sous-commandes (gabarit,
+répartition des semaines par phase, semaines résolues, `peak_from_current`,
+problèmes de validation, remarques, seuils utilisés, hypothèses) ; `--text`
+rend un tableau lisible. Lecture seule : aucun index ni fichier n'est créé.
 
 ## Étirer ou comprimer : règles déterministes
 
@@ -98,8 +104,16 @@ vérifie chaque gabarit, pas seulement sa forme :
 - **garde-fous**, sur les semaines **résolues pour chaque longueur possible** du
   bloc, avec les seuils du workspace (`[guardrails]`) :
     - [R2](guardrails.md) : hausse du volume ≤ le seuil (10 % par défaut) face à
-      la moyenne des 4 semaines précédentes (référence `mean4`, défaut du
-      moteur) **et** face à la dernière semaine non allégée ;
+      la référence configurée (`r2_volume_reference` : `mean4`, défaut du
+      moteur, somme des 4 semaines précédentes divisée par 4 ; ou
+      `previous_week`), calculée par la fonction même d'`arc_guardrails` (même
+      arrondi) — les semaines d'avant le bloc valent la semaine 1, le volume
+      que l'athlète tient déjà — **et** face à la dernière semaine non allégée
+      (contrôle du projet, plus strict) ; avec `previous_week`, la reprise qui
+      suit chaque semaine allégée dépasse forcément le seuil face à la semaine
+      précédente : ce n'est pas compté comme un problème du gabarit, mais la
+      commande le signale dans ses `notes` (`arc_guardrails.py check`
+      avertira sur ces semaines-là) ;
     - R3 : la même chose pour le D+ ;
     - R6 : part de la sortie longue ≤ le seuil (35 % par défaut) ;
     - R7 : pas plus de 3 séances de qualité par semaine (le gabarit ne place pas
@@ -110,15 +124,29 @@ vérifie chaque gabarit, pas seulement sa forme :
 - **cohérence entre gabarits** : identifiants uniques, bandes de distance sans
   chevauchement.
 
-!!! warning "Ce que la validation implique : démarrer proche du pic"
+!!! warning "Le pic se déduit du volume tenu, il ne se choisit pas"
     Avec le seuil R2 par défaut (+10 % face à la moyenne de 4 semaines, creusée
-    par les semaines allégées), une montée de charge raide fait déclencher le
-    garde-fou. Les gabarits livrés démarrent donc à environ 80–90 % de la
-    semaine pic (plus bas pour les blocs longs) et progressent de quelques
-    pourcents par semaine : **ils décrivent la forme d'un bloc à partir du
-    volume que l'athlète tient déjà**, pas une reprise depuis zéro. Si
-    l'athlète est loin du pic visé, le coach baisse le pic ou prévoit un bloc
-    de mise en route au lieu d'étirer le gabarit.
+    par une semaine allégée toutes les 4), un cycle de 4 semaines ne gagne que
+    quelques pourcents : une montée depuis un volume bas fait réagir le
+    garde-fou. Les gabarits livrés démarrent donc à environ 83–92 % de la
+    semaine pic (plus bas pour les blocs longs) : **ils décrivent la forme d'un
+    bloc à partir du volume que l'athlète tient déjà**, pas une reprise depuis
+    un volume bas.
+
+    D'où la règle, calculée par la commande (`peak_from_current`, aussi
+    affichée par `--text`) : **pic = volume hebdomadaire moyen des 4 dernières
+    semaines × `volume_factor`** (et D+ × `elevation_factor` en trail), jamais
+    plus ; la semaine *n* vaut ensuite pic × `volume_pct` / 100. Si ce pic est
+    trop bas pour l'objectif, le coach le dit et propose un bloc de mise en
+    route préalable (ou un objectif revu) au lieu d'étirer le gabarit. Ce choix
+    garde les gabarits cohérents avec les garde-fous tels qu'ils sont et donne
+    au futur générateur de squelette ([#190](https://github.com/mmornati/ai-running-coach/issues/190))
+    une règle déterministe : il partira de l'historique réel et de ce facteur.
+
+!!! note "La semaine de course"
+    Le `volume_pct` de la dernière semaine d'affûtage s'entend **hors course** :
+    la course elle-même n'entre pas dans ce pourcentage (pour un 100 miles, elle
+    dépasse à elle seule la semaine pic).
 
 La validation porte sur les seuils, pas sur l'athlète : elle ne dit rien de
 l'historique réel, que seul `arc_guardrails.py check` évalue.
