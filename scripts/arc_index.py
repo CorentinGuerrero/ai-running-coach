@@ -236,6 +236,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_climb as VC  # noqa: E402
 import arc_climb_match as VM  # noqa: E402
 import arc_contract as C  # noqa: E402
+import arc_cycle as CY  # noqa: E402
 import arc_decoupling as DC  # noqa: E402
 import arc_descent as DS  # noqa: E402
 import arc_durability as DU  # noqa: E402
@@ -307,7 +308,10 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # capteur ne les fournit pas — `arc_samples.ASSUMPTIONS["running_dynamics"]`) — sans ce bump, une base déjà
 # construite n'a pas les colonnes (« no such column »). Version 32 (31 = #68 FIT Intervals.icu). Les
 # `activities/fit/*.json` existants n'en portent pas : les re-extraire avec `download_fit.py --refresh-dynamics`.
-SCHEMA_VERSION = 32
+# #166 : `health_day` gagne `cycle_phase`/`cycle_day`/`cycle_source` (contexte du cycle, opt-in
+# `[health].cycle_tracking`, NULL par défaut) — version 33, sans ce bump l'ingestion d'un fichier santé
+# portant ces clés échouerait avec « no such column » sur une base déjà construite.
+SCHEMA_VERSION = 33
 DEFAULT_DB = ".arc/coach.db"
 DATA_DIRS = ("activities", "medical", "nutrition", "planning", "rapports", "gear")
 
@@ -469,6 +473,9 @@ def settings(config: Dict[str, dict]) -> dict:
         "sport": config.get("sport", {}).get("primary", "trail") or "trail",
         "morning_check": config.get("health", {}).get("morning_check", "full") or "full",
         "heat_threshold_c": _heat_threshold_c(config),
+        # Contexte du cycle menstruel (#166) : "off" (défaut) | "garmin" | "manual" ; toute autre
+        # valeur → "off" avec avertissement (scripts/arc_cycle.py), jamais une exception.
+        "cycle_tracking": CY.cycle_tracking_mode(config),
         "agents": list(agents),
         "units": config.get("athlete", {}).get("units", "metric") or "metric",
         "profile": config.get("athlete", {}).get("profile", "planning/Runner_Profile.md"),
@@ -617,7 +624,8 @@ CREATE TABLE health_day (
     hrv_overnight_ms REAL, hrv_baseline_low_ms REAL, hrv_baseline_high_ms REAL, hrv_status TEXT,
     hrv_personal_low_ms REAL, hrv_personal_high_ms REAL, hrv_personal_status TEXT,
     resting_hr_bpm REAL, readiness_score REAL, body_battery_high REAL, body_battery_low REAL,
-    stress_avg REAL, weight_kg REAL, verdict TEXT, verdict_reason TEXT, body_md TEXT, data_json TEXT
+    stress_avg REAL, weight_kg REAL, verdict TEXT, verdict_reason TEXT,
+    cycle_phase TEXT, cycle_day INTEGER, cycle_source TEXT, body_md TEXT, data_json TEXT
 );
 CREATE INDEX health_date ON health_day(date);
 CREATE TABLE weather_day (

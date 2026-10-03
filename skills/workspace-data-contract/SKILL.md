@@ -609,6 +609,9 @@ mm ÷ 1000), pourcentages inchangés. Toutes optionnelles :
 | `verdict_reason` | texte | obligatoire avec `verdict` |
 | `missing_reason` | objet | |
 | `pain` | liste d'objets | douleur STRUCTURÉE déclarée ce jour-là (#57) — voir ci-dessous |
+| `cycle_phase` | `menstrual` `follicular` `ovulation` `luteal` | **opt-in** (#166) : phase du cycle du jour, voir « Contexte du cycle » ci-dessous |
+| `cycle_day` | entier 1-60 | jour du cycle, si la source le donne |
+| `cycle_source` | `garmin` `intervals` `manual` | d'où vient la phase (`manual` = déclarée par l'athlète via `/log`) |
 
 **Douleur déclarée (`pain`, #57).** Une liste d'objets, un par zone douloureuse
 signalée le jour du fichier (`health.date` fait foi comme date — pas de `date`
@@ -631,6 +634,23 @@ n'existe que pour l'agent qui écrit le fichier. Plus de
 {"arc": 1, "kind": "health", "date": "2026-09-24", "morning_check": "full",
  "pain": [{"location": "genou droit", "score": 6}],
  "verdict": "amber", "verdict_reason": "Douleur au genou signalée : séance de qualité annulée par prudence."}
+```
+
+**Contexte du cycle (`cycle_phase`, `cycle_day`, `cycle_source`, #166).** Ces
+trois clés n'existent QUE si `[health].cycle_tracking` n'est pas `"off"`
+(défaut) : à `"off"`, ne jamais les écrire ni les demander — zéro mention. Elles
+portent un CONTEXTE de lecture du bilan matinal (HRV, FC de repos), jamais une
+règle de décision ni un diagnostic. Phase/jour absents (source muette, pas
+d'entrée du jour) = clés omises, jamais devinées ni reportées de la veille.
+Valeurs d'une source ou dites par l'athlète : normalisées par
+`scripts/arc_cycle.py` (`normalize_phase`/`normalize_day`) ou, pour une saisie
+`/log`, par `scripts/arc_log.py`.
+
+```arc
+{"arc": 1, "kind": "health", "date": "2026-09-23", "morning_check": "full",
+ "hrv_overnight_ms": 41, "resting_hr_bpm": 52,
+ "cycle_phase": "luteal", "cycle_day": 22, "cycle_source": "manual",
+ "verdict": "green", "verdict_reason": "HRV un peu basse, cohérente avec la phase lutéale (contexte) ; aucun autre signal : séance maintenue."}
 ```
 
 ```arc

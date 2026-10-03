@@ -24,7 +24,8 @@
 #   ./install.sh --ide claude       # installe pour un IDE précis
 #   ./install.sh --ide copilot      # GitHub Copilot (CLI, VS Code, agent cloud)
 #   ./install.sh --source intervals # Intervals.icu au lieu de Garmin (#68)
-#   ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
+#   ./install.sh --cycle-tracking MODE # off (défaut) | garmin | intervals | manual — contexte du cycle menstruel, opt-in (#166)
+  ./install.sh --workspace DIR    # données + config IDE dans DIR (dépôt privé), moteur lié
 #   ./install.sh --agents LISTE     # staff à installer, ex. coach,nutritionist
 #   ./install.sh --no-medical       # tous les agents sauf le médecin
 #   ./install.sh --no-auth          # saute l'authentification Garmin
@@ -74,6 +75,11 @@ LEANPROXY_SERVERS="$HOME/.config/leanproxy_servers.yaml"
 # Réduit la taxe de contexte (~151 outils → ~30) en mode direct.
 # Noms réels des outils garmin-mcp (sans préfixe garmin_).
 GARMIN_TOOL_WHITELIST="get_activities,get_activities_by_date,get_activity,get_activity_fit_data,get_activity_splits,get_activity_typed_splits,get_activity_split_summaries,get_sleep_data,get_hrv_data,get_rhr_day,get_training_readiness,get_calendar_events,get_courses,get_workouts,get_workout_by_id,get_scheduled_workouts,schedule_workouts,schedule_week,upload_workout,upload_course,create_strength_workout,delete_workout,unschedule_workout,unschedule_workouts,download_activity_file,get_stats,get_lactate_threshold,get_training_status,get_gear,get_activity_gear,add_gear_to_activity"
+# Outils de cycle menstruel (#166) : JAMAIS dans la liste blanche par défaut — ajoutés par
+# resolve_cycle_tracking() uniquement quand [health].cycle_tracking = "garmin" (opt-in) et que la
+# source est Garmin. Noms vérifiés dans src/garmin_mcp/womens_health.py du commit épinglé ci-dessus.
+# `get_pregnancy_summary` (même module) n'est volontairement PAS ajouté : hors périmètre.
+GARMIN_CYCLE_TOOLS="get_menstrual_data_for_date,get_menstrual_calendar_data"
 
 # Chat avec le coach et sync sur une API (--llm) : modèles par défaut, UNE constante
 # chacun. Identifiant OpenRouter « deepseek/deepseek-v4.1-flash » vérifié dans le catalogue
@@ -127,6 +133,7 @@ AGENTS_ARG=""      # --agents coach,medical,… (défaut : la config, sinon tous
 ENABLED_AGENTS=""  # résolu par resolve_agents()
 PRESET=""          # --preset laptop|coach-server|docker (défaut : aucun)
 SOURCE="garmin"    # --source garmin|intervals (#68) — source de données primaire
+CYCLE_TRACKING="off" # --cycle-tracking off|garmin|manual (#166) — contexte du cycle, opt-in
 LLM_PROVIDER=""    # --llm openrouter|anthropic|openai — chat + sync sur une API
 LLM_MODEL_ARG=""   # --model ID (avec --llm)
 LLM_BASE_URL_ARG="" # --base-url URL (avec --llm openai : API compatible OpenAI)
@@ -148,6 +155,7 @@ EXPLICIT_DAILY_SYNC=0
 EXPLICIT_REMOTE_CONTROL=0
 EXPLICIT_AGENTS=0
 EXPLICIT_SOURCE=0
+EXPLICIT_CYCLE=0   # --cycle-tracking passé (#166) : seul cas où [health].cycle_tracking est écrit
 # Vrai (1) uniquement quand --source a été passé explicitement ET que la
 # valeur résolue diffère de celle DÉJÀ en config (resolve_source()) — jamais
 # sur un simple rerun sans --source. C'est ce qui protège un serveur MCP
@@ -328,6 +336,7 @@ while [[ $# -gt 0 ]]; do
         --preset) need_value "$@"; shift 2 ;;  # déjà résolu ci-dessus
         --ide) need_value "$@"; IDE="$2"; EXPLICIT_IDE=1; shift 2 ;;
         --source) need_value "$@"; SOURCE="$2"; EXPLICIT_SOURCE=1; shift 2 ;;
+        --cycle-tracking) need_value "$@"; CYCLE_TRACKING="$2"; EXPLICIT_CYCLE=1; shift 2 ;;
         --no-auth) DO_AUTH=0; EXPLICIT_DO_AUTH=1; shift ;;
         --auth) DO_AUTH=1; EXPLICIT_DO_AUTH=1; shift ;;  # annule --no-auth composé par un préréglage
         --use-leanproxy) USE_LEANPROXY=1; EXPLICIT_LEANPROXY=1; shift ;;
@@ -370,6 +379,17 @@ if [[ -n "$LLM_PROVIDER" ]]; then
     fi
 elif [[ -n "$LLM_MODEL_ARG" || -n "$LLM_BASE_URL_ARG" ]]; then
     die "--model et --base-url s'utilisent avec --llm (voir --help)."
+fi
+
+# Valide $CYCLE_TRACKING (même principe que validate_source).
+validate_cycle_tracking() {
+    case "$CYCLE_TRACKING" in
+        off|garmin|intervals|manual) ;;
+        *) die "Mode de suivi du cycle inconnu : « $CYCLE_TRACKING ». Valides : off, garmin, intervals, manual (voir --help)." ;;
+    esac
+}
+if [[ "$EXPLICIT_CYCLE" -eq 1 ]]; then
+    validate_cycle_tracking
 fi
 
 # Valide $SOURCE (défini ici pour être appelable dès l'analyse des arguments
@@ -736,6 +756,54 @@ resolve_source() {
         SOURCE_CHANGED=1
     fi
     log "Source de données : $SOURCE"
+}
+
+# Détermine le mode de suivi du cycle (#166) : --cycle-tracking (explicite), sinon
+# [health].cycle_tracking de la configuration EXISTANTE, sinon "off". Une valeur invalide
+# EN CONFIG est traitée comme "off" avec un avertissement (jamais un échec : l'installation
+# d'un athlète qui n'a rien demandé ne doit pas casser). Seul le mode "garmin" (avec la
+# source Garmin) ajoute les outils get_menstrual_* à la liste blanche ; tout autre cas
+# laisse GARMIN_TOOL_WHITELIST strictement inchangée — un rerun avec "off" en config la
+# ramène donc à la liste par défaut (l'opt-in se retire comme il s'active).
+resolve_cycle_tracking() {
+    if [[ "$EXPLICIT_CYCLE" -eq 0 ]]; then
+        CYCLE_TRACKING="off"
+        if have python3; then
+            local previous
+            previous="$(python3 "$PROJECT_ROOT/scripts/coach_config.py" get \
+                --workspace "$WORKSPACE_ROOT" --section health --key cycle_tracking --default off 2>/dev/null)" \
+                || previous="off"
+            case "$previous" in
+                off|garmin|intervals|manual) CYCLE_TRACKING="$previous" ;;
+                "") ;;
+                *) warn "[health].cycle_tracking = « $previous » invalide (off, garmin, intervals, manual) — traité comme « off »." ;;
+            esac
+        fi
+    fi
+    if [[ "$CYCLE_TRACKING" == "garmin" ]]; then
+        if [[ "$SOURCE" == "garmin" ]]; then
+            GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_CYCLE_TOOLS"
+            log "Suivi du cycle (opt-in) : outils get_menstrual_* ajoutés à la liste blanche garmin"
+        else
+            warn "cycle_tracking = garmin sans source Garmin : aucun outil à exposer — utilisez « intervals » (champ menstrualPhase) ou « manual » (voir docs/configuration.md)."
+        fi
+    elif [[ "$CYCLE_TRACKING" == "intervals" && "$SOURCE" != "intervals" ]]; then
+        warn "cycle_tracking = intervals sans source intervals.icu : les agents retomberont sur la déclaration manuelle (voir docs/configuration.md)."
+    fi
+}
+
+# Enregistre le mode de suivi du cycle — UNIQUEMENT si --cycle-tracking a été passé
+# explicitement (un rerun, ou une installation par défaut, n'écrit jamais cette clé).
+persist_cycle_tracking() {
+    [[ "$EXPLICIT_CYCLE" -eq 1 ]] || return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} [health].cycle_tracking = $CYCLE_TRACKING"
+        return 0
+    fi
+    have python3 || return 0
+    python3 "$PROJECT_ROOT/scripts/coach_config.py" set \
+        --workspace "$WORKSPACE_ROOT" --section health --key cycle_tracking --value "$CYCLE_TRACKING" >/dev/null \
+        || warn "Impossible d'écrire [health].cycle_tracking — vérifiez config/workspace.user.toml."
 }
 
 # Enregistre le staff retenu dans la config personnelle.
@@ -1925,6 +1993,7 @@ main() {
     workspace_is_separate && log "Workspace : $WORKSPACE_ROOT (--workspace)"
     resolve_agents
     resolve_source
+    resolve_cycle_tracking
     print_config_recap
     [[ "$DRY_RUN" -eq 1 ]] && warn "Mode dry-run : aucune modification ne sera effectuée."
     echo
@@ -1946,6 +2015,7 @@ main() {
     create_workspace_config
     persist_agents
     persist_source
+    persist_cycle_tracking
     persist_llm
     persist_budgets
     if [[ "$DAILY_SYNC" -eq 1 || "$REMOTE_CONTROL" -eq 1 ]]; then

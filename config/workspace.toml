@@ -144,6 +144,18 @@ morning_check = "full"
 # d'acclimatation à la chaleur (#38, `temp_max_c` du jour ≥ ce seuil, borne incluse).
 # Indépendant de `morning_check` (jointure activité/météo, pas du bilan matinal).
 heat_threshold_c = 25.0
+# Contexte du cycle menstruel (#166) — OPT-IN STRICT, jamais présumé.
+#   "off"    — défaut : aucune donnée de cycle récupérée, aucun outil exposé,
+#              aucune mention par les agents
+#   "garmin" — phase lue sur Garmin Connect (outils get_menstrual_* de garmin-mcp,
+#              ajoutés à la liste blanche SEULEMENT dans ce mode : relancer
+#              `./install.sh` après le changement, voir docs/configuration.md).
+#   "intervals" — [data].source = "intervals" : champ wellness menstrualPhase
+#              d'intervals.icu, lu avec le bilan matinal (aucune installation à refaire)
+#   "manual" — phase déclarée par vous-même via /log
+# Le cycle est un CONTEXTE de lecture (HRV, FC de repos, hydratation, chaleur),
+# jamais une règle automatique ni un diagnostic. Valeur invalide = "off" + avertissement.
+cycle_tracking = "off"
 
 [data]
 # Source de données primaire des agents (#68).
