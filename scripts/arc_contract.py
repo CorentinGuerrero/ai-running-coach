@@ -53,6 +53,10 @@ VERDICT = ("green", "amber", "red")
 CYCLE_PHASE = ("menstrual", "follicular", "ovulation", "luteal")
 CYCLE_SOURCE = ("garmin", "intervals", "manual")
 CYCLE_DAY_PLAUSIBLE = (1, 60)
+# Apports poussés vers Garmin Connect (#167, opt-in `[nutrition].garmin_sync`) — voir
+# scripts/arc_nutrition_sync.py : source du jour et nature des écritures tracées.
+INTAKE_SOURCE = ("manual", "garmin")
+GARMIN_PUSH_KIND = ("create_custom_food", "log_custom_food", "log_food", "add_hydration_data")
 WEATHER_CATEGORY = ("green", "yellow", "orange", "red")
 SLOT = ("morning", "midday", "evening", "none")
 # Action recommandée par l'ajustement chaleur d'une séance (#171, `scripts/arc_heat.py`).
@@ -282,6 +286,9 @@ SCHEMA = {
             # LA chaussure). Absent = aucun objet attribué, jamais « aucun » écrit en liste vide
             # (une liste vide est acceptée mais sans effet). Ancien fichier sans `gear_ids` : valide.
             "gear_ids": "gear_id_list",
+            # #167 : apport en cours d'effort (`/log`) poussé vers Garmin Connect, après un « oui »
+            # explicite — trace d'idempotence (voir SUBSCHEMA["garmin_push"]), jamais écrite en headless.
+            "garmin_pushed": "[garmin_push]",
             "missing_reason": "obj",
             # KPI FIT (#51, épopée #21) : snapshot narratif écrit par le coach APRÈS
             # avoir lu la sortie des CLI dédiées (`scripts/arc_index.py gap/decoupling/
@@ -420,6 +427,10 @@ SCHEMA = {
             "burned_kcal": "num+",
             "weight_kg": "num+",
             "target_weight_kg": "num+",
+            # #167 : source de vérité de l'apport du jour (une seule par jour, jamais deux) et
+            # trace de ce qui a été poussé vers Garmin — voir SUBSCHEMA["garmin_push"].
+            "intake_source": _enum(INTAKE_SOURCE),
+            "garmin_pushed": "[garmin_push]",
         },
     },
     "report": {
@@ -533,6 +544,22 @@ SUBSCHEMA = {
     "pain": {
         "required": {"location": "str", "score": "pain_score"},
         "optional": {},
+    },
+    # `nutrition.garmin_pushed` / `activity.garmin_pushed` (#167) : une entrée par écriture
+    # confirmée par l'athlète vers Garmin Connect. `key` (empreinte déterministe de
+    # scripts/arc_nutrition_sync.py) rend une relance idempotente : une clé déjà présente
+    # n'est jamais re-poussée. `log_id` n'est posé que s'il a été relu sans ambiguïté.
+    "garmin_push": {
+        "required": {"key": "str", "kind": _enum(GARMIN_PUSH_KIND)},
+        "optional": {
+            "name": "str",
+            "qty": "num+",
+            "ml": "num+",
+            "food_id": "str",
+            "serving_id": "str",
+            "log_id": "str",
+            "at": "datetime",
+        },
     },
     # `week.weeks[]` (#69, plan multi-semaines) : exactement la forme d'une semaine
     # unique historique (`SCHEMA["week"]` avant #69) — `week_start`/`location`/

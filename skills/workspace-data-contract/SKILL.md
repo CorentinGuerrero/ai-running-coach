@@ -126,6 +126,7 @@ Types de valeurs ci-dessous : *entier*, *nombre* (≥ 0 sauf mention), *texte*,
 | `fluid_intake_ml` | nombre | liquide ingéré pendant l'effort, 0-10 000 ml |
 | `weight_pre_kg`, `weight_post_kg` | nombre | pesée avant / après effort, 30-200 kg |
 | `gear_ids` | liste de textes | matériel hors chaussures porté sur la séance (slugs, mêmes règles que `gear_id`, 30 max, sans doublon) — voir « Matériel hors chaussures » ci-dessous |
+| `garmin_pushed` | liste d'objets | apport `/log` poussé vers Garmin Connect après un « oui » (#167, opt-in `[nutrition].garmin_sync`) — mêmes entrées que `nutrition.garmin_pushed` (section `nutrition`) ; sert l'idempotence, jamais écrite en headless |
 | `missing_reason` | objet | clé absente → cause |
 | `gap_pace_s_km` | nombre | GAP global de la séance, s/km — voir « Champs KPI FIT » |
 | `decoupling_pct` | nombre (signe libre) | découplage aérobie Pa:HR, % — voir « Champs KPI FIT » |
@@ -871,10 +872,19 @@ ordinaire.
 | `carbs_g`, `protein_g`, `fat_g` | nombre |
 | `hydration_ml` | nombre |
 | `weight_kg`, `target_weight_kg` | nombre |
+| `intake_source` | `manual` (défaut implicite : déclaré par l'athlète) `garmin` (journal alimentaire Garmin importé, #167) — une seule source de vérité par jour |
+| `garmin_pushed` | liste `{key, kind, name?, qty?, ml?, food_id?, serving_id?, log_id?, at?}` — écritures confirmées vers Garmin Connect (#167) ; `key` = empreinte de `scripts/arc_nutrition_sync.py`, une clé déjà présente n'est jamais repoussée ; `kind` = `create_custom_food` `log_custom_food` `log_food` `add_hydration_data`. Même clé acceptée sur `activity` pour un apport `/log` en cours d'effort |
 
 ```arc
 {"arc": 1, "kind": "nutrition", "date": "2026-09-20", "intake_kcal": 2650, "burned_kcal": 2900, "carbs_g": 360, "protein_g": 120, "fat_g": 80, "hydration_ml": 2500, "weight_kg": 68.4, "target_weight_kg": 67.5}
 ```
+
+#### Entrée de `garmin_pushed` (#167)
+
+Une entrée par écriture confirmée vers Garmin Connect, produite par `scripts/arc_nutrition_sync.py record`
+(jamais composée à la main) : **`key`** (empreinte, ce qui rend la relance idempotente), **`kind`**,
+et selon la nature `name`, `qty` (portions), `ml` (hydratation), `food_id`, `serving_id`, `log_id`
+(seulement s'il a été relu sans ambiguïté), `at` (horodatage ISO de la poussée).
 
 ### `report`
 

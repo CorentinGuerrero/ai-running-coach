@@ -244,6 +244,11 @@ class TestGarminStubFraming(StubProcessTestCase):
         match = re.search(r'GARMIN_TOOL_WHITELIST="([^"]+)"', install_sh)
         self.assertIsNotNone(match, "GARMIN_TOOL_WHITELIST introuvable dans install.sh")
         whitelist = set(match.group(1).split(","))
+        # Extension opt-in (#167) : le stub connaît aussi les outils de nutrition, jamais dans la
+        # liste par défaut mais ajoutés par `resolve_nutrition_sync` — noms réels, pas inventés.
+        extra = re.search(r'GARMIN_NUTRITION_TOOLS="([^"]+)"', install_sh)
+        self.assertIsNotNone(extra, "GARMIN_NUTRITION_TOOLS introuvable dans install.sh")
+        whitelist |= set(extra.group(1).split(","))
 
         proc = self.start()
         self.initialize(proc)
