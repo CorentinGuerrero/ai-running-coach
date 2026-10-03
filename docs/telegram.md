@@ -119,11 +119,13 @@ au calendrier Garmin), le bot envoie la proposition avec **✅ Appliquer / ✖ R
 
 ## Confidentialité, sécurité et coûts
 
-- **Considérez que Telegram peut lire ces messages.** Le chiffrement de bout en bout de Telegram
-  ne concerne que les « discussions secrètes » entre deux participants
-  ([documentation](https://core.telegram.org/api/end-to-end)) ; la documentation officielle ne dit rien
-  de leur usage avec un bot (à vérifier de votre côté). Le résumé du daily-sync (charge, sommeil,
-  état de forme) transite donc par les serveurs de Telegram.
+- **Les échanges avec le bot ne sont PAS chiffrés de bout en bout : Telegram peut les lire.** Selon
+  la [FAQ de Telegram](https://telegram.org/faq), seules les « discussions secrètes » sont chiffrées de
+  bout en bout ; les discussions ordinaires (*cloud chats*) sont chiffrées entre l'appli et les serveurs
+  de Telegram, qui les stockent. Une conversation avec un bot en est une : la
+  [Bot API](https://core.telegram.org/bots/api) remet au service le texte de vos messages, en clair,
+  depuis les serveurs de Telegram. Le résumé du daily-sync (charge, sommeil, état de forme), vos RPE
+  et vos douleurs transitent donc par Telegram.
   N'activez `send_summary` que si cela vous convient (`send_summary = false` coupe l'envoi du résumé
   tout en gardant `/rpe`, `/douleur`, `/statut`).
 - **Aucune adresse publique à exposer** : le service interroge l'API Telegram (*long polling*,
