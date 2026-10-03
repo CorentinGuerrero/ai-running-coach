@@ -20,6 +20,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 | 🚀 **Installation automatisée** | un script pour installer et configurer tout (uv, Garmin, IDE) |
 | 👟 **Suivi du matériel** | kilométrage par paire depuis Garmin, prévision de retraite, équipement et kits, inspection photo (`/inspection`), contrôle du matériel de course |
 | 📊 **Tableau de bord local** | courbe de forme (condition / fatigue / forme), bilan santé du matin, semaine, séances et splits, prédictions — à côté du texte du coach (`scripts/dashboard.sh`, lecture seule, 127.0.0.1) |
+| 🗓️ **Gabarits de périodisation** | base / développement / spécifique / affûtage / récupération par format (trail court, marathon trail, ultra 80–100 km, 100 miles, semi et marathon route), en données vérifiées par un script contre les garde-fous — point de départ du bloc, jamais un plan imposé — voir [Gabarits de périodisation](docs/plans.md) |
 | 🎯 **Vitesse critique** | courbe allure-durée en GAP, vitesse critique et réserve anaérobie D′ estimées sur vos meilleurs efforts (refus explicite si les données manquent), cibles d'intervalles en % de la vitesse critique — voir [Vitesse critique](docs/vitesse-critique.md) |
 | 🔁 **Effet des décisions** | ce qui s'est passé après chaque décision du coach (HRV, douleur, charge, RPE… avant / après), même quand l'athlète ne l'a pas suivie — synthèse par déclencheur dans la vue « Décisions » ; corrélation, pas causalité, jamais utilisé pour assouplir un garde-fou |
 | 📱 **Le coach dans la poche** | synchronisation Garmin automatique + notification push, et dialogue avec le coach depuis le téléphone (Claude Code Remote Control) — sans renoncer à votre abonnement |
@@ -163,6 +164,7 @@ ai-running-coach/
 │   ├── coaching-styles.md   # Catalogue des styles de coaching
 │   ├── setup-questions.toml # Questions du premier démarrage
 │   ├── sports/              # Profils de sport (trail, route)
+│   ├── plans/               # Gabarits de périodisation (JSON, vérifiés par arc_plan_templates.py)
 │   └── gemini/commands/     # Commandes Gemini CLI (générées depuis agents/)
 ├── templates/               # Modèles installés dans votre workspace
 ├── tests/                   # Suite de tests (voir tests/README.md)
@@ -188,6 +190,7 @@ La documentation complète est disponible sur [GitHub Pages](https://mmornati.gi
 - [Tableau de bord](docs/dashboard/index.md) · [Les vues](docs/dashboard/views.md) · [Migrer vos fichiers](docs/dashboard/migration.md) · [Mode headless](docs/dashboard/headless.md) · [Docker](docs/dashboard/docker.md)
 - [Les agents](docs/agents.md)
 - [Les skills](docs/skills.md)
+- [Gabarits de périodisation](docs/plans.md)
 - [Vitesse critique et courbe allure-durée](docs/vitesse-critique.md)
 - [Base de connaissances (resources)](docs/resources.md)
 - [Dépannage](docs/troubleshooting.md)
