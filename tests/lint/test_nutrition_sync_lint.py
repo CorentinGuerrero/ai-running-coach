@@ -49,6 +49,8 @@ class TestDefaultsStayOff(unittest.TestCase):
         body = install[install.index("resolve_nutrition_sync() {"):].split("persist_nutrition_sync")[0]
         self.assertIn('[[ "$NUTRITION_SYNC" == "ask" ]]', body)
         self.assertIn('[[ "$SOURCE" == "garmin" ]]', body)
+        # La passerelle leanproxy est vérifiée AVANT l'extension (écritures non filtrables en headless).
+        self.assertLess(body.index('"$USE_LEANPROXY" -eq 1'), body.index("$GARMIN_NUTRITION_TOOLS"))
 
     def test_shared_config_default_is_off(self):
         text = read("config/workspace.toml")

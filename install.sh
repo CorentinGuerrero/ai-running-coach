@@ -877,6 +877,16 @@ resolve_nutrition_sync() {
         fi
     fi
     if [[ "$NUTRITION_SYNC" == "ask" ]]; then
+        # Mode passerelle : `invoke_tool` est un outil unique, `scripts/daily-sync.sh` ne peut pas en
+        # retirer les écritures nutrition par nom — seule une consigne protégerait alors le run
+        # headless. On refuse donc d'exposer ces écritures derrière leanproxy (mode direct requis).
+        if [[ "$USE_LEANPROXY" -eq 1 ]]; then
+            if [[ "$EXPLICIT_NUTRITION" -eq 1 ]]; then
+                die "--nutrition-sync ask est incompatible avec --use-leanproxy : les écritures Garmin ne peuvent pas y être interdites en headless. Utilisez le mode direct (voir docs/nutrition-garmin.md)."
+            fi
+            warn "[nutrition].garmin_sync = « ask » ignoré en mode passerelle leanproxy (écritures non filtrables en headless) — aucun outil nutrition exposé ; mode direct requis."
+            return 0
+        fi
         if [[ "$SOURCE" == "garmin" ]]; then
             GARMIN_TOOL_WHITELIST="$GARMIN_TOOL_WHITELIST,$GARMIN_NUTRITION_TOOLS"
             log "Synchronisation nutrition (opt-in) : outils de journal alimentaire et d'hydratation ajoutés à la liste blanche garmin"

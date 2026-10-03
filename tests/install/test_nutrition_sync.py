@@ -105,3 +105,30 @@ class TestNutritionSyncInstall(InstallAsserts):
                                             "--nutrition-sync", "ask", **DARWIN))
             self.assertIn("get_menstrual_data_for_date", _tools(sb))
             self.assertIn("log_food", _tools(sb))
+
+
+class TestNutritionSyncRefusedBehindLeanproxy(InstallAsserts):
+    """La passerelle ne permet pas d'interdire les écritures en headless (outil unique `invoke_tool`) :
+    `ask` n'y expose jamais les outils nutrition."""
+
+    def _leanproxy_yaml(self, sb) -> str:
+        path = sb.home / ".config/leanproxy_servers.yaml"
+        return path.read_text() if path.exists() else ""
+
+    def test_explicit_ask_with_leanproxy_is_refused_before_any_write(self):
+        with Sandbox() as sb:
+            proc = sb.install("--preset", "laptop", "--use-leanproxy", "--nutrition-sync", "ask", **DARWIN)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("leanproxy", proc.stdout + proc.stderr)
+            self.assertNotIn("garmin_sync", _user_toml(sb))
+            self.assertNotIn("log_food", self._leanproxy_yaml(sb))
+
+    def test_config_ask_with_leanproxy_exposes_nothing_and_succeeds(self):
+        with Sandbox() as sb:
+            (sb.repo / "config/workspace.user.toml").write_text('[nutrition]\ngarmin_sync = "ask"\n')
+            proc = sb.install("--preset", "laptop", "--use-leanproxy", **DARWIN)
+            self.assertSucceeded(proc)
+            yaml = self._leanproxy_yaml(sb)
+            self.assertIn("GARMIN_ENABLED_TOOLS", yaml)
+            for tool in NUTRITION_TOOLS:
+                self.assertNotIn(tool, yaml)

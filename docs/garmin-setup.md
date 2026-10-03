@@ -146,8 +146,9 @@ Les outils `get_custom_foods`, `get_custom_food_serving_units`, `get_nutrition_d
 `log_custom_food`, `log_food`, `add_hydration_data` (écriture, « oui » explicite, jamais en
 headless) ne figurent **pas** dans la liste blanche ci-dessus. `install.sh` les y ajoute uniquement
 avec `[nutrition].garmin_sync = "ask"` (ou `./install.sh --nutrition-sync ask`, qui écrit la clé) ;
-repasser à `off` et relancer l'installation les retire. En mode passerelle, ajoutez-les à la main à
-`GARMIN_ENABLED_TOOLS` de `leanproxy_servers.yaml`. Détail : [Apports vers Garmin](nutrition-garmin.md).
+repasser à `off` et relancer l'installation les retire. Mode direct uniquement : refusé avec
+`--use-leanproxy` (écritures non filtrables en headless) — ne les ajoutez pas à la main à
+`leanproxy_servers.yaml`. Détail : [Apports vers Garmin](nutrition-garmin.md).
 
 ## Synchronisation du matériel Garmin
 
