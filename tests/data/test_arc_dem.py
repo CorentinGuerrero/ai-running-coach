@@ -641,6 +641,15 @@ class TestRacePacingDem(unittest.TestCase):
         self.assertGreater(dem["file_gain_m"], dem["dem_gain_m"])
         self.assertTrue(any("Copernicus" in w for w in plan.get("warnings", [])))
 
+    def test_dem_composes_with_the_night_pipeline(self):
+        """#184 × #176 : la pénalité de nuit tourne sur l'altitude MNT ; `elevation_dem` est posé
+        après `build_race_plan`, juste avant l'impression finale."""
+        rc, out, _ = self._run(["--dem", "--tz", "Pacific/Pitcairn", "--start", "02:00"], StubDem(SAFE_LON))
+        self.assertEqual(rc, 0)
+        plan = json.loads(out)
+        self.assertIn(plan["elevation_dem"]["status"], ("ok", "partial"))
+        self.assertIn(plan["night"]["status"], ("night", "daylight"))
+
     def test_dem_plan_offline_keeps_file_elevation(self):
         def down(url):
             raise urllib.error.URLError("hors ligne")
