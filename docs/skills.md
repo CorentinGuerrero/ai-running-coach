@@ -103,6 +103,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `hrv-baseline` | Baseline HRV personnelle (moyenne glissante 7 j de ln(HRV) vs référence 60 j ± 0,5 ET) |
 | `sleep-debt` | Dette de sommeil sur 7 jours (#37) |
 | `heat-acclimation` | Séances « chaudes » sur 14 jours vs `[health].heat_threshold_c` (#38) |
+| `altitude-exposure` | Séances et temps au-dessus de 1 500 / 2 000 m sur 14 et 28 jours (`--days N`), d'après les échantillons FIT ; altitude manquante dite, jamais comptée comme nulle (#185) |
 | `gear` | Kilométrage des chaussures et seuils d'alerte (#40) |
 | `gear-attribution` | Priorité d'attribution du matériel d'une séance : déclaration de l'athlète > Garmin > défaut (`--garmin-gear`, `--chat-gear`, #133) |
 | `equipment` | Matériel hors chaussures : usage (km, h, séances, jours), déclencheurs typés, kits (`--kit`), alerte unique (`--activities`, `--since`), contrôle du matériel d'un plan de course (`--race-plan`) (#134) |

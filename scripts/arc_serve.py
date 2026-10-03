@@ -326,6 +326,11 @@ class Store:
         with self.lock:
             return I.gait_summary(self.conn, today, weeks)
 
+    def altitude_exposure(self, today: date, days: Optional[int]) -> dict:
+        """Réutilise `arc_index.altitude_exposure` (#185) — voir aussi la CLI `altitude-exposure`."""
+        with self.lock:
+            return I.altitude_exposure(self.conn, today, days)
+
     def pace_curve(self, today: date, days: Optional[int], lt_speed_ms: Optional[float]) -> dict:
         """Réutilise `arc_index.pace_curve` (#169) — voir aussi la CLI `pace-curve`."""
         with self.lock:
@@ -509,6 +514,14 @@ def api_decision_effects(store: Store, q: dict) -> dict:
     if trigger and trigger not in I.C.DECISION_TRIGGER:
         trigger = None
     return store.decision_effects(_today(store), days, trigger)
+
+
+def api_altitude_exposure(store: Store, q: dict) -> dict:
+    """Exposition à l'altitude (#185) : `/api/altitude-exposure[?days=N]` (défaut : fenêtres 14 et
+    28 j). Additive. Délègue à `arc_index.altitude_exposure` (mêmes chiffres que la CLI) ; aucune
+    coordonnée GPS ni donnée de santé."""
+    raw = q.get("days", [""])[0]
+    return store.altitude_exposure(_today(store), max(1, min(365, int(raw))) if raw.isdigit() else None)
 
 
 def api_assumptions(store: Store, q: dict) -> dict:
@@ -1583,7 +1596,7 @@ ROUTES = {
     "/api/trail-shape": api_trail_shape, "/api/energy-trend": api_energy_trend,
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
-    "/api/gait": api_gait, "/api/pace-curve": api_pace_curve,
+    "/api/gait": api_gait, "/api/altitude-exposure": api_altitude_exposure, "/api/pace-curve": api_pace_curve,
     "/api/decision-effects": api_decision_effects, "/api/load-forecast": api_load_forecast,
     "/api/roadbook": api_roadbook,
 }

@@ -998,6 +998,7 @@ réalisé segment par segment sans recalculer sa propre segmentation.
 | `pace_s_km` | objet | allure prédite par scénario, s/km, mêmes clés |
 | `night_fraction`, `night_factor` | objet | pénalité de nuit (#184) : part du temps de la section courue de nuit, et multiplicateur de temps appliqué, par scénario (mêmes clés) — présents seulement si le plan comporte de la nuit (`--race-date`, `--start` et `--tz` fournis) |
 | `technicity` | objet | coefficient de technicité du terrain (#186) : `{coef, effective_factor, source (declared/osm/none), tags, coverage_pct, osm_coef?}` — présent seulement si `--technicity` a été demandé ; `effective_factor` est le multiplicateur de temps réellement appliqué (même pour les trois scénarios) |
+| `altitude_m`, `altitude_factor` | nombre | pénalité d'altitude (#185) : altitude moyenne de la section (m) et multiplicateur de temps appliqué (le même pour les trois scénarios) — présents seulement si une section dépasse le seuil (1 500 m) |
 | `notes` | liste | avertissements courts (ex. extrapolation hors plage du modèle, altitude GPX manquante) |
 
 ```arc

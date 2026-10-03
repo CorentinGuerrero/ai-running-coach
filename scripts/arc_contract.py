@@ -704,6 +704,11 @@ SUBSCHEMA = {
             # Technicité du terrain (#186, `arc_technicity`) : `{coef, effective_factor, source, tags,
             # coverage_pct, osm_coef?}`. Absent si `--technicity` n'a pas été demandé.
             "technicity": "obj",
+            # Pénalité d'altitude (#185, `arc_race_pacing.apply_altitude_penalty`) : altitude
+            # moyenne (m) de la section et multiplicateur de temps (identique aux trois
+            # scénarios). Absents si aucune section ne dépasse le seuil.
+            "altitude_m": "num",
+            "altitude_factor": "num+",
             "notes": "list",
         },
     },

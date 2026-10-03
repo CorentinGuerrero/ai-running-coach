@@ -1356,6 +1356,25 @@ function gaitCard(g) {
   };
 }
 
+/** Carte « Exposition à l'altitude » de la vue Santé (#185) : séances et temps au-dessus de 1 500 / 2 000 m
+ * sur 14 et 28 jours (échantillons FIT). Indicateur d'exposition, pas un modèle d'acclimatation. */
+function altitudeCard(a) {
+  const head = `<h2>Exposition à l'altitude</h2>`;
+  if (!a) return "";
+  if (a.status === "no_activity" || a.status === "no_altitude") {
+    return `<section class="band" id="altitude">${head}${empty(a.status === "no_altitude" ? "Pas d'altitude dans les séances" : "Pas de séance récente", a.status === "no_altitude" ? `Des séances existent, mais aucune n'a d'échantillon d'altitude : échantillons FIT absents ou capteur muet (<code>skills/fit-download</code>). Ce n'est pas une exposition nulle.` : `Aucune séance indexée sur la fenêtre : rien à mesurer.`)}</section>`;
+  }
+  const rows = Object.values(a.windows).map((w) => {
+    const t15 = w.thresholds["1500"], t20 = w.thresholds["2000"];
+    const missing = w.sessions_without_altitude ? `<small class="muted"> · ${w.sessions_without_altitude} sans altitude (non comptée${w.sessions_without_altitude > 1 ? "s" : ""})</small>` : "";
+    return `<tr><th scope="row">${w.window_days} jours${missing}</th><td class="num">${t15.sessions} séance${t15.sessions > 1 ? "s" : ""} · ${F.duration(t15.duration_s)}</td><td class="num">${t20.sessions} séance${t20.sessions > 1 ? "s" : ""} · ${F.duration(t20.duration_s)}</td><td class="num">${w.max_altitude_m != null ? `${F.num(w.max_altitude_m)}${NB}m` : "—"}</td></tr>`;
+  }).join("");
+  return `<section class="band" id="altitude">${head}
+    <p class="muted">Temps passé en altitude à l'entraînement d'après les échantillons FIT. ${F.esc(a.note)}.</p>
+    <div class="table-wrap"><table class="data data--compact"><thead><tr><th scope="col">Fenêtre</th><th scope="col" class="num">≥ 1${NB}500${NB}m</th><th scope="col" class="num">≥ 2${NB}000${NB}m</th><th scope="col" class="num">Max</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="note">Une séance compte au seuil à partir de 5 minutes au-dessus. Altitude barométrique ou GPS approximative près d'un seuil. Cette exposition réduit légèrement la pénalité d'altitude du plan de course (approximation du projet) ; ce n'est pas un modèle d'acclimatation.</p></section>`;
+}
+
 // ---------------------------------------------------------------------------
 // Vue : Santé
 // ---------------------------------------------------------------------------
@@ -1364,18 +1383,19 @@ async function viewHealth(params) {
   const days = Number(params.get("jours")) || 90;
   // La carte « Foulée » (#151) ne dépend pas du bilan matinal : elle est montrée même quand celui-ci est
   // désactivé ou vide. Son échec ne doit jamais masquer la vue Santé.
-  const [data, gaitData] = await Promise.all([api(`health?days=${days}`), api("gait").catch(() => null)]);
+  const [data, gaitData, altData] = await Promise.all([api(`health?days=${days}`), api("gait").catch(() => null), api("altitude-exposure").catch(() => null)]);
   const gait = gaitCard(gaitData);
+  const altitude = altitudeCard(altData);   // idem : un échec n'empêche jamais la vue Santé
   const mode = data.morning_check;
   if (mode === "off") {
-    main.innerHTML = header("Santé") + empty("Bilan matinal désactivé", "Avec <code>[health].morning_check = \"off\"</code>, le coach ne récupère ni HRV, ni FC de repos, ni readiness : leur absence ici n'est pas un manque. Passez à <code>minimal</code> ou <code>full</code> pour suivre ces courbes.") + gait.html;
+    main.innerHTML = header("Santé") + empty("Bilan matinal désactivé", "Avec <code>[health].morning_check = \"off\"</code>, le coach ne récupère ni HRV, ni FC de repos, ni readiness : leur absence ici n'est pas un manque. Passez à <code>minimal</code> ou <code>full</code> pour suivre ces courbes.") + gait.html + altitude;
     gait.mount();
     return;
   }
   const s = data.series;
   const dates = s.map((p) => p.date);
   if (!s.some((p) => p.readiness_score != null || p.hrv_overnight_ms != null || p.resting_hr_bpm != null)) {
-    main.innerHTML = header("Santé") + empty("Pas encore de données de santé", "Les fichiers <code>medical/AAAA-MM-JJ_health.md</code> écrits par la synchronisation alimentent ces courbes.") + gait.html;
+    main.innerHTML = header("Santé") + empty("Pas encore de données de santé", "Les fichiers <code>medical/AAAA-MM-JJ_health.md</code> écrits par la synchronisation alimentent ces courbes.") + gait.html + altitude;
     gait.mount();
     return;
   }
@@ -1430,7 +1450,7 @@ async function viewHealth(params) {
   main.innerHTML = `${header("Santé", mode === "minimal" ? "Bilan minimal : readiness seule." : "Triade du matin : HRV, FC de repos, readiness — et le verdict du coach, jour par jour.")}
     <div class="toolbar">${periods}</div>
     <p class="readout readout--sticky" id="r-health"></p>
-    ${charts.map(([id, title, sub, c, strip]) => `<section class="band"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="chart-host" id="c-${id}">${c.svg}</div>${strip ? `<div class="strip-host">${verdictStrip(dates, s.map((p) => p.verdict))}<p class="legend legend--small"><span class="legend__item"><span class="key key--green"></span>Maintenir</span> <span class="legend__item"><span class="key key--amber"></span>Alléger</span> <span class="legend__item"><span class="key key--red"></span>Repos</span> — verdicts du coach</p></div>` : ""}</section>`).join("")}${gait.html}`;
+    ${charts.map(([id, title, sub, c, strip]) => `<section class="band"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="chart-host" id="c-${id}">${c.svg}</div>${strip ? `<div class="strip-host">${verdictStrip(dates, s.map((p) => p.verdict))}<p class="legend legend--small"><span class="legend__item"><span class="key key--green"></span>Maintenir</span> <span class="legend__item"><span class="key key--amber"></span>Alléger</span> <span class="legend__item"><span class="key key--red"></span>Repos</span> — verdicts du coach</p></div>` : ""}</section>`).join("")}${gait.html}${altitude}`;
   const show = (i) => {
     const p = s[i];
     const bits = [`<strong>${F.dayLong(p.date)}</strong>`];

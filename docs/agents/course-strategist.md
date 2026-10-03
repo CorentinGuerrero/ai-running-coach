@@ -74,7 +74,7 @@ analysé, jamais sur `planning/active_objective.md`. Fade de fin de course
 depuis la durabilité récente (`scripts/arc_durability.py`, #48, rendu NEUTRE
 en temps total quand Riegel/VDOT s'applique déjà — jamais une double
 dégradation d'endurance — ou un repli générique signalé comme tel, échelonné à
-la durée réelle de la course), ajustement chaleur/acclimatation (#38), pénalité de nuit (#184, voir ci-dessous) et
+la durée réelle de la course), ajustement chaleur/acclimatation (#38), pénalité de nuit (#184) et d'altitude (#185), voir ci-dessous, et
 vérification des barrières
 horaires (formats `HH:MM`, `+HH:MM` élapsé ou date-heure ISO 8601 pour un
 ultra multi-jours). Chaque segment porte sa **provenance**
@@ -198,6 +198,34 @@ espacées, puis « indisponible » ; le cache `.arc/overpass/` n'expire pas
 
 La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
 `tags`) et un résumé au niveau du plan. Sans `--technicity`, rien ne change.
+
+## Pénalité d'altitude (#185)
+
+Au-dessus d'un seuil de **1 500 m** (choix du projet), `arc_race_pacing.py plan` majore le
+temps de chaque section d'un facteur qui croît avec son **altitude moyenne** (celle du GPX, ou
+celle du MNT quand la correction `elevation_dem` du plan est présente, #176 : `altitude.elevation_source`
+le dit). La pente vient de Wehrlin & Hallén 2006 (*Eur J Appl Physiol* 96:404-412,
+doi:10.1007/s00421-005-0081-9) : la VO2max baisse de **6,3 % par 1 000 m** (plage individuelle
+4,6-7,5 %, linéaire de 300 à 2 800 m, 8 athlètes d'endurance en altitude simulée aiguë).
+**La traduction de cette perte de VO2max en perte de vitesse d'ultra est une approximation du
+projet** : on suppose qu'une allure courue à fraction constante de la VO2max perd la même
+fraction relative de vitesse (facteur de temps = 1/(1 − perte)). Le critère de performance de
+l'étude (temps jusqu'à épuisement, −14,5 % par 1 000 m) n'est pas repris : il décrit un effort
+proche du maximum. Au-delà de 2 800 m, hors de la plage mesurée, la pénalité est extrapolée
+(avertissement) et l'altitude est plafonnée à 4 500 m pour le calcul.
+
+**Acclimatation.** Sans information, l'athlète est supposé non acclimaté (pénalité pleine).
+`--altitude-acclimated-days N` (jours déjà passés en altitude) et l'exposition mesurée à
+l'entraînement (`arc_index.py altitude-exposure`, 28 derniers jours, résolue par le script) réduisent la
+perte, jamais à zéro : crédit plafonné à 50 % (déclaré : jusqu'à 14 jours ; entraînement :
+jusqu'à 25 %, à 10 h au-dessus de 1 500 m) — approximations du projet, `assumptions.altitude`.
+Réglages : `--altitude-threshold-m`, `--altitude-loss-pct`, `--no-altitude`.
+
+**Composition.** Le facteur (`altitude_m`, `altitude_factor` par section) est identique pour
+les trois scénarios, se compose par multiplication avec la chaleur et la nuit (appliqué avant
+la nuit, une seule étape du calcul) et conserve `prudent ≥ réaliste ≥ ambitieux`. **Si aucune
+section ne dépasse le seuil, les temps et les sections sont identiques à ceux d'avant** : seul
+l'objet `altitude` (`status` : `applied`, `below_threshold`, `no_elevation`, `disabled`) s'ajoute.
 
 ## Recalibrage des coefficients au débrief (#188)
 
