@@ -578,6 +578,18 @@ def api_load(store: Store, q: dict) -> dict:
             "polarisation_weeks": polarisation, "hr_zones_reason": hr_zones_reason}
 
 
+def api_load_forecast(store: Store, q: dict) -> dict:
+    """Projection de charge sur le bloc (#172) : `/api/load-forecast`. Délègue à `arc_index.load_forecast`
+    (même fonction que la CLI) ; `until=AAAA-MM-JJ` optionnel. Estimation à partir du planifié, jamais une mesure."""
+    until = q.get("until", [""])[0] or None
+    today = _today(store)
+    try:
+        with store.lock:
+            return I.load_forecast(store.conn, today, until)
+    except I.ConfigError as exc:
+        return {"status": "invalid_until", "reason": str(exc)}
+
+
 def api_health(store: Store, q: dict) -> dict:
     today = _today(store)
     days = _days(q, 90)
@@ -1512,7 +1524,7 @@ ROUTES = {
     "/api/climb-segments": api_climb_segments, "/api/decisions": api_decisions,
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
     "/api/gait": api_gait, "/api/pace-curve": api_pace_curve,
-    "/api/decision-effects": api_decision_effects,
+    "/api/decision-effects": api_decision_effects, "/api/load-forecast": api_load_forecast,
 }
 
 # ---------------------------------------------------------------------------

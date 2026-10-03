@@ -2717,6 +2717,33 @@ ASSUMPTIONS["gait"] = (
     "`arc_gait.ASSUMPTIONS`."
 )
 
+# ---------------------------------------------------------------------------
+# Projection de charge sur le bloc (#172) — `scripts/arc_load_forecast.py`
+# ---------------------------------------------------------------------------
+
+ASSUMPTIONS["load_forecast"] = (
+    "Projection de charge sur le bloc (#172, `arc_index.py load-forecast`, `/api/load-forecast`) : ESTIMATION "
+    "à partir du planifié, jamais une mesure. Point de départ = l'état réel d'aujourd'hui (condition 42 j, "
+    "fatigue 7 j, `daily_series`) ; chaque jour planifié jusqu'à la date de l'objectif reçoit la charge estimée "
+    "de ses séances — EXACTEMENT l'estimateur de R1 (`ASSUMPTIONS[\"projected_load\"]` : minutes planifiées × "
+    "RPE attendu par intensité × `RPE_TO_TRIMP`, durée estimée depuis la distance à l'allure récente), jamais un "
+    "second modèle. Réserves : (1) le RPE attendu par intensité est une approximation maison, et une séance réelle "
+    "avec FC (TRIMP de Banister) peut peser sensiblement plus ou moins que son estimation — l'écart se cumule sur "
+    "des semaines ; (2) un jour sans séance planifiée compte 0 de charge (repos supposé, jamais une moyenne récente "
+    "extrapolée) : une semaine non planifiée est comptée (`weeks_unplanned`) et rend la forme prévue trop optimiste "
+    "si l'athlète s'entraîne en réalité ; (3) une séance planifiée sans durée ni distance exploitable pèse 0 "
+    "(`unresolved_duration_dates`) ; (4) la forme prévue le jour J est la valeur « en entrant dans la journée » "
+    "(condition − fatigue de la veille, comme la courbe réelle) : la charge de la course elle-même n'y entre pas ; "
+    "(5) condition et ACWR héritent du démarrage à froid de la moyenne exponentielle : sous "
+    "`arc_guardrails.MIN_HISTORY_DAYS_FOR_PROJECTION` (84 j d'historique réel) aucune projection n'est rendue "
+    "(`insufficient_history`) ; (6) l'ACWR projeté (maximum sur tout le bloc, et par semaine) reprend le seuil "
+    "prudent de R1, dont les réserves scientifiques restent celles de `ASSUMPTIONS[\"acwr_projection\"]` ; "
+    "(7) aucune donnée de santé (HRV, sommeil, blessure) n'entre dans la projection — un bilan matinal rouge "
+    "annule une séance quel que soit ce que la projection indique. La comparaison de plans remplace les semaines "
+    "de même lundi et ne chiffre que l'écart d'estimations : à lire comme un ordre de grandeur pour justifier "
+    "un affûtage, pas comme une prédiction de performance."
+)
+
 
 ASSUMPTIONS["decision_effects"] = (
     "Effet des décisions (#175, `arc_index.py decision-effects`, `/api/decision-effects`) : pour chaque décision "
