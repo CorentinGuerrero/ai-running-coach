@@ -137,7 +137,7 @@ pousser l'apport vers le journal alimentaire et l'hydratation de Garmin Connect 
 exige un « oui » explicite, n'a jamais lieu en headless (`/garmin-daily-sync`) et reste idempotente.
 Les outils ne sont ajoutés à la liste blanche qu'à l'installation : **relancez `./install.sh`**
 après le changement (ou installez avec `--nutrition-sync ask`, qui écrit la clé). Indisponible avec
-`[data].source = "intervals"`, et en mode passerelle `--use-leanproxy` (refusé : les écritures n'y
+`[data].source = "intervals"` ou `"strava"`, et en mode passerelle `--use-leanproxy` (refusé : les écritures n'y
 sont pas filtrables en headless). Une seule source de vérité par jour (fichiers du dépôt **ou** journal
 Garmin, jamais les deux) : voir [Apports vers Garmin](nutrition-garmin.md).
 

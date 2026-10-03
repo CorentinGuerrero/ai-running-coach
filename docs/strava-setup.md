@@ -19,6 +19,7 @@ vers Strava, et beaucoup d'athlètes l'ont déjà). Elle est installée par
 | **Flux par seconde** (temps, distance, altitude, FC, vitesse lissée, cadence, GPS) → les KPI du FIT : zones, GAP, découplage, VAM, descente, durabilité, énergie modèle | **Push de séances au calendrier**, upload de parcours (Strava n'a pas de calendrier d'entraînement) |
 | Zones FC de l'athlète | FC de récupération (HRR), splits par km, dénivelé négatif, dynamique de course |
 | Aucune dépendance Python (stdlib) | Inventaire du matériel, identifiant de matériel par séance (seul le **nom** est exposé) |
+| | Poussée des apports vers le journal alimentaire / l'hydratation Garmin (`[nutrition].garmin_sync`, #167) : aucun outil exposé, voir [Apports vers Garmin](nutrition-garmin.md) |
 
 Le bilan matinal est donc toujours dit « indisponible — source Strava » : l'agent
 planifie sur la charge, l'historique et **votre ressenti déclaré**. Une séance

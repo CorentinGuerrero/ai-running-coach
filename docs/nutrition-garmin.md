@@ -72,8 +72,9 @@ référence de dépense, inchangées.
 
 ## Limites et points à vérifier
 
-- **Indisponible avec `[data].source = "intervals"`** : intervals.icu n'a pas de journal
-  alimentaire ni d'hydratation équivalents ; le coach le dit, il ne simule rien.
+- **Indisponible avec `[data].source = "intervals"` ou `"strava"`** : ni intervals.icu ni Strava
+  n'ont de journal alimentaire ni d'hydratation équivalents ; `install.sh` n'expose aucun outil,
+  le coach le dit, il ne simule rien.
 - Jamais en headless : `scripts/daily-sync.sh` retire explicitement ces outils d'écriture (mode
   direct ; la passerelle `leanproxy` est refusée, voir plus haut).
 - Calories d'un produit sans colonne d'énergie : approximation de 4 kcal/g de glucides, seulement

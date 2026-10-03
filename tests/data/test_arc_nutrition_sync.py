@@ -76,6 +76,13 @@ class TestAvailability(unittest.TestCase):
         self.assertEqual(out["reason"], "source_intervals")
         self.assertIn("intervals", out["message"])
 
+    def test_strava_source_is_unavailable_and_says_so(self):
+        out = N.build_plan({"date": DAY, "mode": "ask", "source": "strava", "fluids": [{"ml": 500}]})
+        self.assertEqual(out["status"], "disabled")
+        self.assertEqual(out["reason"], "source_strava")
+        self.assertIn("Strava", out["message"])
+        self.assertFalse(N.availability("ask", "strava")["available"])
+
     def test_config_is_read_when_not_overridden(self):
         out = N.build_plan({"date": DAY}, {"nutrition": {"garmin_sync": "ask"}, "data": {"source": "intervals"}})
         self.assertEqual(out["reason"], "source_intervals")

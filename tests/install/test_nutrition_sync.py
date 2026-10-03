@@ -99,6 +99,17 @@ class TestNutritionSyncInstall(InstallAsserts):
             self.assertSucceeded(sb.install("--preset", "laptop", "--source", "intervals", "--nutrition-sync", "ask", **DARWIN))
             self.assertNotIn("create_custom_food", (sb.repo / ".mcp.json").read_text())
 
+    def test_strava_source_exposes_nothing_says_why_and_succeeds(self):
+        """#164 : Strava n'a ni journal alimentaire ni hydratation — rien d'exposé, et l'installeur le dit."""
+        with Sandbox() as sb:
+            proc = sb.install("--source", "strava", "--nutrition-sync", "ask", "--no-auth", "--ide", "claude")
+            self.assertSucceeded(proc)
+            mcp = (sb.repo / ".mcp.json").read_text()
+            for tool in NUTRITION_TOOLS:
+                self.assertNotIn(tool, mcp)
+            self.assertIn("indisponible avec [data].source = « strava »", proc.stdout + proc.stderr)
+            self.assertIn('garmin_sync = "ask"', _user_toml(sb))
+
     def test_composes_with_cycle_tracking(self):
         with Sandbox() as sb:
             self.assertSucceeded(sb.install("--preset", "laptop", "--cycle-tracking", "garmin",

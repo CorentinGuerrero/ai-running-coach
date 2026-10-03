@@ -167,7 +167,7 @@ cycle_tracking = "off"
 #           (trace `garmin_pushed`). Les outils ne sont ajoutés à la liste blanche qu'à
 #           l'installation : relancer `./install.sh` après le changement (ou
 #           `./install.sh --nutrition-sync ask`).
-# Indisponible avec [data].source = "intervals" (dit explicitement). Valeur invalide = "off".
+# Indisponible avec [data].source = "intervals" ou "strava" (dit explicitement). Valeur invalide = "off".
 # Une seule source de vérité par jour : voir docs/configuration.md.
 garmin_sync = "off"
 
