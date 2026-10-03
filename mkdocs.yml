@@ -82,6 +82,7 @@ nav:
       - IDE supportés: ides.md
       - Votre workspace privé: workspace.md
       - Le coach dans la poche: mobile.md
+      - Le bot Telegram: telegram.md
       - Mettre à jour: update.md
   - Tableau de bord:
       - Prise en main: dashboard/index.md

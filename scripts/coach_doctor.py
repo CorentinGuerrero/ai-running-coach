@@ -9,7 +9,8 @@ fraîcheur de l'index dérivé `.arc/coach.db`, nombre de fichiers hors contrat,
 planification du daily-sync (cron/launchd), configuration ntfy, lecteur FIT
 (`fitparse` dans l'environnement MCP de `[data].source`), et — chat avec
 le coach / sync sur une API — cohérence runner/backend/modèle/clé (`llm_config`),
-service du chat (`chat_service`), présence d'OpenCode (`opencode_cli`).
+service du chat (`chat_service`), présence d'OpenCode (`opencode_cli`), bot Telegram
+(`telegram` : liste blanche, jeton hors dépôt en mode 600, service vivant — jamais le jeton affiché).
 
 Usage :
     scripts/coach_doctor.py                 # tableau ✅/⚠️/❌ en français
@@ -42,7 +43,8 @@ avant expiration des tokens, qui appelle ce script avec `--json`, éventuellemen
           "id": "garmin_token" | "garmin_mcp" | "config_files"
                 | "athlete_profile" | "index_freshness" | "out_of_contract"
                 | "daily_sync_scheduled" | "ntfy_configured" | "gear_sync"
-                | "gear_history" | "fit_reader" | "llm_config" | "chat_service" | "opencode_cli",
+                | "gear_history" | "fit_reader" | "llm_config" | "chat_service" | "opencode_cli"
+                | "telegram",
           "status": "ok" | "warning" | "error" | "info",
           "message": "<texte français>",
           "fix": "<commande de correction>" | null
@@ -167,7 +169,7 @@ CHECK_IDS = (
     "garmin_token", "garmin_mcp", "config_files", "athlete_profile",
     "index_freshness", "out_of_contract", "daily_sync_scheduled", "ntfy_configured",
     "gear_sync", "gear_history", "fit_reader", "llm_config", "chat_service", "opencode_cli",
-    "strava_connection",
+    "strava_connection", "telegram",
 )
 
 CHAT_SYSTEMD_UNIT_REL = ".config/systemd/user/ai-running-coach-chat.service"
@@ -1108,6 +1110,76 @@ def check_chat_service(home: Path, config: dict) -> dict:
     )
 
 
+# ---------------------------------------------------------------------------
+# telegram — bot Telegram (#174)
+# ---------------------------------------------------------------------------
+
+TELEGRAM_SYSTEMD_UNIT_REL = ".config/systemd/user/ai-running-coach-telegram.service"
+TELEGRAM_LAUNCHD_PLIST_REL = "Library/LaunchAgents/com.ai-running-coach.telegram.plist"
+TELEGRAM_DEFAULT_TOKEN_FILE = "~/.config/ai-running-coach/telegram.env"
+TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
+# Le service écrit un battement à chaque interrogation (≤ poll_timeout_s + marge) : au-delà, il est mort.
+TELEGRAM_HEARTBEAT_MAX_AGE_S = 300
+
+
+def check_telegram(workspace: Path, home: Path, config: dict, now: datetime) -> dict:
+    """`info`/`warning` uniquement : un bot arrêté est une dégradation de confort. Ne lit le jeton
+    que pour en tester le FORMAT et n'affiche jamais sa valeur."""
+    check_id = "telegram"
+    tg = config.get("telegram") or {}
+    if not tg.get("enabled"):
+        return build_check(check_id, "info", "Bot Telegram désactivé ([telegram].enabled = false).",
+                           fix="./install.sh --telegram")
+    problems: list = []
+    ids = tg.get("allowed_chat_ids")
+    if not isinstance(ids, list) or not [i for i in ids if str(i).strip()]:
+        problems.append("[telegram].allowed_chat_ids est vide (tout est refusé ; python3 scripts/arc_telegram.py whoami)")
+    token_path = Path(os.path.expanduser(str(tg.get("token_file") or TELEGRAM_DEFAULT_TOKEN_FILE)))
+    if not token_path.is_file():
+        problems.append(f"fichier du jeton absent ({token_path})")
+    else:
+        try:
+            mode = token_path.stat().st_mode & 0o777
+            text = token_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            mode, text = 0o600, ""
+        if mode & 0o077:
+            problems.append(f"{token_path} est lisible par d'autres utilisateurs (mode {oct(mode)[2:]}, attendu 600)")
+        values = [m.group(1).strip().strip("\"'") for m in
+                  (re.match(r"^\s*(?:export\s+)?TELEGRAM_BOT_TOKEN=(.*)$", line) for line in text.splitlines()) if m]
+        values = [v for v in values if v]
+        if not values:
+            problems.append("TELEGRAM_BOT_TOKEN non défini dans le fichier du jeton")
+        elif not TELEGRAM_TOKEN_RE.match(values[-1]):
+            problems.append("TELEGRAM_BOT_TOKEN : format inattendu (valeur non affichée)")
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        problems.append("TELEGRAM_BOT_TOKEN est exporté dans l'environnement : à garder dans le fichier du jeton seulement")
+    if tg.get("chat_bridge"):
+        chat = config.get("chat") or {}
+        if not chat.get("enabled"):
+            problems.append("chat_bridge = true mais [chat].enabled = false (la conversation libre répondra qu'elle est indisponible)")
+        elif str(chat.get("auth") or "local") != "local":
+            problems.append("chat_bridge exige [chat].auth = \"local\"")
+    darwin = _uname() == "Darwin"
+    unit = home / (TELEGRAM_LAUNCHD_PLIST_REL if darwin else TELEGRAM_SYSTEMD_UNIT_REL)
+    beat = workspace / ".arc/telegram/heartbeat"
+    alive = False
+    try:
+        alive = (now.timestamp() - beat.stat().st_mtime) <= TELEGRAM_HEARTBEAT_MAX_AGE_S
+    except OSError:
+        pass
+    if not alive:
+        if not unit.is_file():
+            problems.append("aucun service installé et aucun signe de vie du bot")
+        else:
+            problems.append("service installé mais sans signe de vie récent (scripts/coach-telegram.sh logs)")
+    if problems:
+        fix = "scripts/coach-telegram.sh restart && scripts/coach-telegram.sh logs" if unit.is_file() else "./install.sh --telegram"
+        return build_check(check_id, "warning", "Bot Telegram à revoir : " + " ; ".join(problems) + ".", fix=fix)
+    bridge = "conversation libre activée" if tg.get("chat_bridge") else "retours en un geste seulement"
+    return build_check(check_id, "ok", f"Bot Telegram actif ({bridge} ; jeton non affiché).", fix=None)
+
+
 def _find_opencode() -> Optional[str]:
     extra = [str(Path.home() / ".local/bin"), str(Path.home() / ".opencode/bin"),
              "/opt/homebrew/bin", "/usr/local/bin"]
@@ -1369,6 +1441,8 @@ def run_single_check(check_id: str, workspace: Path, now: datetime, tokens_dir: 
         return check_opencode_cli(config)
     if check_id == "strava_connection":
         return check_strava_connection(workspace, config, Path.home())
+    if check_id == "telegram":
+        return check_telegram(workspace, Path.home(), config, now)
     raise ValueError(f"vérification inconnue : {check_id!r}")
 
 

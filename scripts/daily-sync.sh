@@ -555,6 +555,22 @@ notify() {
     "$NOTIFY" --title "$title" --priority "$priority" --tags "$tags" "$*" || warn "Notification non envoyée."
 }
 
+# Telegram (#174) : résumé du run + boutons de retour en un geste (séance faite, RPE, douleur).
+# ADDITIF à ntfy (les deux peuvent être actifs) et jamais bloquant : un échec Telegram ne doit
+# ni faire échouer la synchronisation ni masquer le push ntfy. Sans modèle ni clé d'API.
+telegram_summary() {
+    local title="$1" priority="$2"
+    shift 2
+    [[ "$(toml_get telegram enabled false)" == "true" && "$(toml_get telegram send_summary true)" == "true" ]] || return 0
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '%s\n' "${C_YELLOW}[dry-run]${C_RESET} arc_telegram.py send-summary --title \"$title\" — $*"
+        return 0
+    fi
+    printf '%s' "$*" | python3 "$ARC_ENGINE_ROOT/scripts/arc_telegram.py" send-summary \
+        --workspace "$ARC_WORKSPACE" --title "$title" --priority "$priority" >>"$LOG_FILE" 2>&1 \
+        || warn "Résumé Telegram non envoyé (voir $LOG_FILE)."
+}
+
 # =============================================================================
 # Alerte d'expiration des tokens Garmin (#32)
 #
@@ -1003,6 +1019,7 @@ main() {
         priority=4
     fi
     notify "$title" "$priority" "$tags" "$resume"
+    telegram_summary "$title" "$priority" "$resume"
 }
 
 main "$@"

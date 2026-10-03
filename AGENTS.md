@@ -27,6 +27,7 @@ héritage.
 | `[health].cycle_tracking` | `off` (défaut) \| `garmin` \| `intervals` \| `manual` — contexte du cycle menstruel, **opt-in strict** (#166). À `off` (ou absent/invalide) : aucune donnée lue, aucun outil `get_menstrual_*` exposé, **aucune mention par aucun agent**. Actif : la phase (`cycle_phase`/`cycle_day`/`cycle_source` du bloc santé) n'est qu'un **contexte** à côté d'une HRV/FC de repos décalée, jamais une règle ni un diagnostic, jamais un assouplissement d'un verdict rouge ; `medical` signale une absence prolongée de règles comme signal de vigilance RED-S (consultation, sans diagnostic). `garmin` n'ajoute les deux outils à la liste blanche qu'à l'installation (`./install.sh --cycle-tracking garmin`, ou relance après le choix en config) ; `intervals` lit `other.menstrual_phase` de `get_wellness_for_date`. Saisie `manual` via `/log`. Voir `docs/cycle-menstruel.md`. |
 | `[nutrition].garmin_sync` | `off` (défaut) \| `ask` — poussée des apports vers Garmin Connect, **opt-in strict** (#167). À `off` (ou absent/invalide) : aucun outil exposé, **aucune mention par aucun agent**. `ask` : après un `/log` ou un rapport nutrition, l'agent **propose** (jamais automatique, **jamais en headless**, « oui » explicite par poussée) de pousser vers le journal alimentaire et l'hydratation Garmin ; plan, doublons et idempotence décidés par `scripts/arc_nutrition_sync.py`, trace `garmin_pushed` dans le bloc `arc`. **Une seule source de vérité par jour** : fichiers du dépôt (miroir Garmin) **ou** journal Garmin importé (`intake_source: "garmin"`), jamais les deux — pas de double comptage. Indisponible avec `[data].source = "intervals"` ou `"strava"` (dit explicitement). Outils ajoutés à l'installation (`./install.sh --nutrition-sync ask`). Voir `docs/nutrition-garmin.md`. |
 | `[health].heat_threshold_c` | Seuil (°C, borne incluse) « séance chaude » pour le KPI d'acclimatation à la chaleur (#38, `scripts/arc_index.py heat-acclimation`). Défaut `25.0`. Indépendant de `morning_check` ; une valeur invalide n'interrompt jamais l'index (repli sur le défaut, avertissement). |
+| `[telegram].*` | Bot Telegram (#174, `docs/telegram.md`) : `enabled`, `allowed_chat_ids` (liste blanche, vide = tout refusé), `token_file` (hors dépôt, mode 600), `send_summary`, `chat_bridge` (conversation libre opt-in vers le service `arc_chat`). Canal de l'**athlète** : les agents n'y écrivent rien eux-mêmes. |
 | `[athlete].profile` | Profil de l'athlète, défaut `planning/Runner_Profile.md`. |
 | `[athlete].units` | `metric` \| `imperial`. |
 
@@ -272,6 +273,19 @@ jamais devinés ou simulés :**
   `course-strategist` reste limité à l'analyse GPX locale (skill
   `gpx-analysis`) — pas d'envoi du parcours vers la montre/l'app tierce.
 - **Score de readiness Garmin** : voir la table ci-dessus.
+
+## Telegram (#174, opt-in)
+
+`scripts/arc_telegram.py` (service `scripts/coach-telegram.sh`, `./install.sh --telegram`) est un
+canal de l'**athlète**, pas un outil des agents. Niveau 1, **sans modèle ni clé d'API** : le résumé
+du daily-sync part avec des boutons (séance faite / pas faite / décalée, RPE, douleur) et les appuis
+écrivent dans les blocs `arc` (`rpe` de l'activité, `pain` du fichier santé, `status` de la séance
+planifiée) par la logique de `scripts/arc_log.py`, puis réindexent ; idempotent ; une douleur au
+seuil `[injury_risk].pain_consult_threshold` recommande une consultation. Niveau 2 (`chat_bridge`) :
+le texte libre est relayé au service `arc_chat` (même politique, approbations, plafond de dépense) —
+aucun second moteur de chat. **Jamais d'écriture Garmin depuis ce canal** sans l'approbation
+explicite du chat, et jamais en headless. Liste blanche d'identifiants de chat obligatoire ; ne
+jamais afficher ni écrire le jeton du bot.
 
 ## Règles de fraîcheur des données
 

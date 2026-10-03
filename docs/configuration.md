@@ -447,6 +447,24 @@ d'OpenCode — contenu des échanges compris : diagnostic seulement, fichier à 
 `./install.sh --chat-budget EUR` écrit `daily_budget_eur`. Le diagnostic :
 `python3 scripts/coach_doctor.py --check llm_config` (et `chat_service`, `opencode_cli`).
 
+## Le bot Telegram — `[telegram]` (#174)
+
+Canal optionnel, désactivé par défaut ([page dédiée](telegram.md)). Installé par
+`./install.sh --telegram` (`scripts/coach-telegram.sh`).
+
+| Clé | Effet |
+|---|---|
+| `enabled` | `false` (défaut) \| `true`. |
+| `token_file` | Fichier du jeton du bot (`TELEGRAM_BOT_TOKEN=…`), hors dépôt, mode 600 (défaut `~/.config/ai-running-coach/telegram.env`). Le jeton n'est jamais dans le TOML. |
+| `allowed_chat_ids` | Liste blanche des identifiants de chat. **Vide = tout est refusé.** Un chat inconnu ne reçoit aucune réponse. |
+| `send_summary` | `true` (défaut) : le résumé du daily-sync part aussi sur Telegram, avec ses boutons (en plus de ntfy s'il est configuré). |
+| `chat_bridge` | `false` (défaut). `true` : le texte libre est relayé au service du chat (`[chat]`), avec sa politique, ses approbations et son plafond ; exige `[chat].enabled = true`, `auth = "local"` et une clé d'API facturée. |
+| `poll_timeout_s` | Durée d'une interrogation longue `getUpdates` (30 s). |
+
+Les retours en un geste ne demandent aucune clé d'API. Variable d'environnement de test :
+`ARC_TELEGRAM_API_BASE` (https, ou http en boucle locale seulement). Le diagnostic :
+`python3 scripts/coach_doctor.py --check telegram`.
+
 ## Notifications et synchronisation
 
 `[notifications]` et `[sync]` sont décrits dans
