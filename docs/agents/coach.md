@@ -228,6 +228,7 @@ pourquoi, ou rien du tout en réponse brève.
   3. `planning/Runner_Profile.md` → lieu par défaut
   4. Sinon → demander à l'utilisateur
 - **Sortie par séance** : catégorie météo (🟢/🟡/🟠/🔴), heure optimale, ajustements concrets
+- **Cibles ajustées à la chaleur (#171)** : un jour chaud (> 25 °C) ou 🔴, le coach lance `python3 scripts/arc_workout_targets.py targets --heat --session …` — l'ajustement est déterministe (script, mêmes coefficients que le pacing de course, source unique `scripts/arc_heat.py`), jamais calculé dans le prompt. Endurance / sortie longue : durée conservée, **allure** cible ralentie, **FC inchangée** (la FC prime). Qualité / allure course : créneau frais d'abord, sinon allures abaissées ou séance déplacée ; **jamais d'intensité maintenue en 🔴** (déplacement ou allègement en endurance à la FC proposé, séance d'origine non poussée). Rappel hydratation/sodium relié au taux de sudation (`arc_index.py fueling`). Le motif est cité, tracé dans le bloc `arc` de la semaine (`heat_adjustment`) et dans la séance poussée (allure ajustée + note de chaleur dans la description). Renforcement/indoor : inchangés. Le froid reste hors périmètre à l'entraînement. Sans humidité dans la météo, repli sur la température seule (dit explicitement). Indépendant de `[health].morning_check`.
 
 ### Indices de performance (ITRA / UTMB)
 

@@ -266,17 +266,14 @@ FADE_LAST_THIRD_MEAN_FACTOR = 4.0 / 3.0
 # extrême — approximation du projet, pas une mesure.
 FADE_MIN_SPEED_FACTOR = 0.05
 
-# Seuils météo — repris TELS QUELS de `agents/course-strategist.md` (ÉTAPE 6),
-# approximation du projet documentée là, jamais une source physiologique
-# vérifiable pour ces pourcentages précis.
-HEAT_HOT_C = 25.0
-HEAT_COLD_C = 5.0
-HEAT_HOT_TIME_FACTOR = 1.10
-HEAT_COLD_TIME_FACTOR = 1.05
-# Supplément si la course est prévue chaude ET que l'athlète a peu été exposé
-# à la chaleur récemment (#38) — approximation du projet, pas une mesure.
-HEAT_UNACCLIMATED_EXTRA_FACTOR = 1.05
-HEAT_ACCLIMATION_MIN_HOT_SESSIONS = 2
+# Seuils/facteurs de chaleur : SOURCE UNIQUE dans `arc_heat.py` (#171), partagée avec
+# l'ajustement des séances d'entraînement ; ré-exportés ici sous leurs noms historiques
+# (valeurs reprises TELLES QUELLES de `agents/course-strategist.md`, ÉTAPE 6 — approximation
+# du projet, voir `ASSUMPTIONS["heat"]`).
+from arc_heat import (  # noqa: E402,F401
+    HEAT_ACCLIMATION_MIN_HOT_SESSIONS, HEAT_COLD_C, HEAT_COLD_TIME_FACTOR, HEAT_HOT_C,
+    HEAT_HOT_TIME_FACTOR, HEAT_UNACCLIMATED_EXTRA_FACTOR, heat_time_factor, resolve_acclimated,
+)
 
 # Ravitaillement : temps d'arrêt par défaut si non précisé par station (#59) —
 # approximation du projet (un ravito simple, ni drop bag ni repas chaud).
@@ -961,31 +958,6 @@ def scale_fade_to_duration(fade_pct: float, predicted_duration_s: Optional[float
         return fade_pct
     scale = min(1.0, max(0.0, predicted_duration_s / M.LONG_RUN_MIN_DURATION_S))
     return fade_pct * scale
-
-
-def heat_time_factor(temp_max_c: Optional[float], *, acclimated: Optional[bool] = None) -> Tuple[float, List[str]]:
-    """Facteur multiplicatif sur le TEMPS (>= 1.0) pour la météo prévue — voir
-    `ASSUMPTIONS["heat"]`. `acclimated=False` ajoute le supplément
-    `HEAT_UNACCLIMATED_EXTRA_FACTOR` si `temp_max_c` dépasse `HEAT_HOT_C`.
-    Rend `(facteur, notes)`."""
-    if temp_max_c is None:
-        return 1.0, ["aucune prévision météo fournie : aucun ajustement chaleur/froid appliqué"]
-    notes = []
-    factor = 1.0
-    if temp_max_c > HEAT_HOT_C:
-        factor *= HEAT_HOT_TIME_FACTOR
-        notes.append(f"chaleur prévue ({temp_max_c:g} °C > {HEAT_HOT_C:g} °C) : temps × {HEAT_HOT_TIME_FACTOR:g} "
-                     "(approximation du projet)")
-        if acclimated is False:
-            factor *= HEAT_UNACCLIMATED_EXTRA_FACTOR
-            notes.append(f"faible acclimatation chaleur récente (#38) : supplément × "
-                         f"{HEAT_UNACCLIMATED_EXTRA_FACTOR:g} (approximation du projet, évaluée sur les 14 "
-                         "jours précédant --today)")
-    elif temp_max_c < HEAT_COLD_C:
-        factor *= HEAT_COLD_TIME_FACTOR
-        notes.append(f"froid prévu ({temp_max_c:g} °C < {HEAT_COLD_C:g} °C) : temps × {HEAT_COLD_TIME_FACTOR:g} "
-                     "(approximation du projet)")
-    return factor, notes
 
 
 def _scale_prediction_speeds(prediction: dict, factor: float) -> dict:
@@ -1782,21 +1754,9 @@ def _resolve_model_bins(conn, conf: dict, args) -> Tuple[List[dict], Optional[fl
 
 def _resolve_acclimated(conn, conf: dict, today_date: date,
                          temp_max_c: Optional[float]) -> Tuple[Optional[bool], Optional[str]]:
-    """`(acclimated, note)` — voir `ASSUMPTIONS["heat"]` : `None` (statut
-    inconnu, jamais assimilé à une non-acclimatation) dès que la fenêtre de 14
-    jours n'a AUCUNE séance exploitable (`sessions_considered == 0`), pas
-    seulement aucune séance chaude."""
-    if temp_max_c is None or temp_max_c <= HEAT_HOT_C:
-        return None, None
-    import arc_index as IDX  # noqa: E402
-    report = IDX.heat_acclimation_today(conn, conf, today_date)
-    if not report.get("sessions_considered"):
-        return None, None
-    hot_sessions = report.get("hot_sessions")
-    if hot_sessions is None:
-        return None, None
-    note = f"acclimatation chaleur évaluée sur les 14 jours précédant {today_date.isoformat()} (#38)"
-    return hot_sessions >= HEAT_ACCLIMATION_MIN_HOT_SESSIONS, note
+    """`(acclimated, note)` — voir `ASSUMPTIONS["heat"]` ; logique partagée dans
+    `arc_heat.resolve_acclimated` (#171)."""
+    return resolve_acclimated(conn, conf, today_date, temp_max_c)
 
 
 def _flat_equivalent_m(distance_m: Optional[float], elevation_gain_m: Optional[float], primary: str) -> float:

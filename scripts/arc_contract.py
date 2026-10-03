@@ -55,6 +55,9 @@ CYCLE_SOURCE = ("garmin", "intervals", "manual")
 CYCLE_DAY_PLAUSIBLE = (1, 60)
 WEATHER_CATEGORY = ("green", "yellow", "orange", "red")
 SLOT = ("morning", "midday", "evening", "none")
+# Action recommandée par l'ajustement chaleur d'une séance (#171, `scripts/arc_heat.py`).
+HEAT_ACTION = ("none", "slow_pace", "prefer_cool_slot", "lower_pace_targets",
+               "reschedule_or_lighten", "reschedule_or_indoor")
 INTENSITY = (
     "rest", "recovery", "endurance", "tempo", "threshold", "vo2max", "race", "strength",
 )
@@ -553,6 +556,21 @@ SUBSCHEMA = {
             "status": _enum(SESSION_STATUS),
             "weather_category": _enum(WEATHER_CATEGORY),
             "best_slot": _enum(SLOT),
+            "heat_adjustment": "{heat_adjustment}",
+        },
+    },
+    # `session.heat_adjustment` (#171) : trace de l'ajustement des cibles à la chaleur prévue,
+    # produite par `arc_workout_targets.py targets --heat` (champ `trace`). `factor` = facteur
+    # sur l'ALLURE (>= 1, FC cible inchangée) ; `reason` = motif cité à l'athlète.
+    "heat_adjustment": {
+        "required": {"factor": "num+", "temp_c": "num"},
+        "optional": {
+            "action": _enum(HEAT_ACTION),
+            "category": _enum(WEATHER_CATEGORY),
+            "acclimated": "bool",
+            "slot": _enum(SLOT),
+            "dew_point_c": "num",
+            "reason": "str",
         },
     },
     # `gear_inspection.wear_zones[]` (#135) : une zone d'usure constatée sur UNE semelle.

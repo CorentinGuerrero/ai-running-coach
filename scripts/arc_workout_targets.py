@@ -125,6 +125,18 @@ tout simplement INATTEIGNABLE par ce module (revue de code #107, point 7).
   existent) : c'est une information de PROVENANCE/PRÉVISION à afficher dans
   la description du pas ou au coureur, jamais un champ du DTO.
 
+## Ajustement à la chaleur prévue — `targets --heat` (#171)
+
+`apply_heat(result, session, …)` (logique pure dans `arc_heat.py`, mêmes
+coefficients que le pacing de course) ajoute au résultat : `heat_adjustment`
+(facteur, action, motif, rappels hydratation), un `pace_target.adjusted` (m/s,
+bornes ralenties) quand une allure plate existe, un `declared_pace` ralenti
+quand `--pace-s-km` est fourni, et `trace` = le fragment `heat_adjustment` du
+contrat `arc` (clé optionnelle d'une séance de semaine). La cible FC
+(`hr_target`) n'est JAMAIS modifiée (la FC prime). C'est `pace_target.adjusted`
+(et non `pace_target`) qu'il faut pousser dans le DTO quand
+`heat_adjustment.applies` est vrai. Voir `arc_heat.ASSUMPTIONS`.
+
 Stdlib uniquement (CONTRIBUTING.md).
 """
 
@@ -135,6 +147,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import arc_heat as H  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
 from coach_setup import workspace_root  # noqa: E402 (même résolution que arc_index.py/arc_guardrails.py)
@@ -411,6 +424,56 @@ def build_session_targets(session: dict, *, athlete: dict, bins: Sequence[dict],
         "hr_target": hr_target, "pace_target": flat_pace_target_for_intensity(intensity, bins),
         "hill_repeats": None,
     }
+
+
+def apply_heat(result: dict, session: dict, *, temp_c: Optional[float], feels_like_c: Optional[float] = None,
+               humidity_pct: Optional[float] = None, category: Optional[str] = None,
+               acclimated: Optional[bool] = None, slot: Optional[str] = None,
+               sweat_rate_l_h: Optional[float] = None, declared_pace_s_km: Optional[float] = None) -> dict:
+    """Complète `result` (sortie de `build_session_targets`) avec l'ajustement
+    chaleur (#171) — voir docstring du module. Ne touche jamais `hr_target`."""
+    adj = H.heat_adjustment(H.classify_session(session), temp_c=temp_c, feels_like_c=feels_like_c,
+                            humidity_pct=humidity_pct, category=category, acclimated=acclimated,
+                            slot=slot, sweat_rate_l_h=sweat_rate_l_h)
+    result["heat_adjustment"] = adj
+    keep = adj["applies"] and adj["intensity_maintained"]
+    factor = adj["factor"] if keep else 1.0
+    pace = result.get("pace_target")
+    if keep and pace and pace.get("speed_low_ms") is not None:
+        low, high = H.slow_speed_ms(pace["speed_low_ms"], factor), H.slow_speed_ms(pace["speed_high_ms"], factor)
+        pace["adjusted"] = {
+            "speed_low_ms": low, "speed_high_ms": high,
+            "pace_low_s_km": speed_ms_to_pace_s_km(high), "pace_high_s_km": speed_ms_to_pace_s_km(low),
+            "factor": factor,
+        }
+    if declared_pace_s_km is not None:
+        result["declared_pace"] = {
+            "pace_s_km": declared_pace_s_km,
+            "adjusted_pace_s_km": H.slow_pace_s_km(declared_pace_s_km, factor) if keep else None,
+            "factor": factor if keep else None,
+        }
+    if adj["applies"]:
+        trace = {"factor": adj["factor"], "temp_c": adj["temp_c"] if adj["temp_c"] is not None else 0.0,
+                 "action": adj["action"], "category": adj["category"], "reason": adj["reason"]}
+        for key in ("acclimated", "slot", "dew_point_c"):
+            if adj.get(key) is not None:
+                trace[key] = adj[key]
+        result["trace"] = {"heat_adjustment": trace}
+    return result
+
+
+def slot_temperature(weather: Optional[dict], slot: Optional[str]) -> Tuple[Optional[float], Optional[str]]:
+    """Température du créneau depuis un bloc météo : `temp_min_c` pour `morning`,
+    `temp_max_c` sinon (borne prudente, voir `arc_heat.ASSUMPTIONS`). Rend
+    `(température, note)`."""
+    if not weather:
+        return None, "aucun fichier météo indexé pour ce jour : fournir --temp-c ou persister la météo"
+    tmin, tmax = weather.get("temp_min_c"), weather.get("temp_max_c")
+    if slot == "morning" and tmin is not None:
+        return tmin, "température du créneau matin = temp_min_c du jour"
+    if tmax is not None:
+        return tmax, "température = temp_max_c du jour (borne prudente, pas de température horaire)"
+    return tmin, "température = temp_min_c du jour (temp_max_c absent)"
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +800,72 @@ def build_arg_parser():
     ap.add_argument("--band", choices=SL.BANDS, default=DEFAULT_BAND,
                      help="bande du modèle pente -> allure (défaut : endurance)")
     ap.add_argument("--today", metavar="AAAA-MM-JJ")
+    ap.add_argument("--heat", action="store_true",
+                     help="ajuster les cibles d'allure à la chaleur prévue (#171) : météo du jour de la séance "
+                          "lue dans l'index, ou --temp-c")
+    ap.add_argument("--temp-c", dest="temp_c", type=float, help="température du créneau (°C), prime sur la météo indexée")
+    ap.add_argument("--feels-like-c", dest="feels_like_c", type=float, help="ressenti (°C)")
+    ap.add_argument("--humidity-pct", dest="humidity_pct", type=float, help="humidité relative (%%)")
+    ap.add_argument("--category", choices=H.WEATHER_ORDER,
+                     help="catégorie météo du créneau retenu (green/yellow/orange/red) ; défaut : composantes non thermiques "
+                          "(vent/pluie/UV/orage) du fichier météo, la chaleur étant déduite de la température du créneau")
+    ap.add_argument("--slot", choices=("morning", "midday", "evening", "none"),
+                     help="créneau retenu (défaut : best_slot de la séance, sinon du fichier météo)")
+    ap.add_argument("--pace-s-km", dest="pace_s_km", type=float,
+                     help="allure cible déclarée (s/km) à ralentir selon la chaleur (séances de qualité)")
     return ap
+
+
+def _load_weather(conn, day: Optional[str]) -> Tuple[Optional[dict], Optional[str]]:
+    """Fichier météo indexé du jour (`weather_day`) ; plusieurs lieux le même
+    jour -> `None` + note (jamais un choix arbitraire : fournir --temp-c)."""
+    import json
+    if not day:
+        return None, "séance sans date : météo introuvable"
+    rows = [dict(r) for r in conn.execute("SELECT * FROM weather_day WHERE date = ?", (day,)).fetchall()]
+    if not rows:
+        return None, None
+    if len(rows) > 1:
+        return None, f"plusieurs fichiers météo le {day} (lieux différents) : fournir --temp-c"
+    row = rows[0]
+    try:
+        extra = json.loads(row.get("data_json") or "{}")
+    except ValueError:
+        extra = {}
+    row["humidity_pct"] = extra.get("humidity_pct")
+    row["thunderstorm"] = extra.get("thunderstorm")
+    return row, None
+
+
+def _heat_from_cli(args, conn, conf: dict, session: dict, result: dict) -> None:
+    """Résout les entrées de `apply_heat` depuis les options et l'index (météo
+    du jour, acclimatation #38, taux de sudation `fueling`)."""
+    from datetime import date as _date
+    import arc_index as IDX  # noqa: E402
+    today = _date.fromisoformat(args.today) if args.today else _date.today()
+    weather, wnote = _load_weather(conn, session.get("date"))
+    slot = args.slot or session.get("best_slot") or (weather or {}).get("best_slot")
+    if args.temp_c is not None:
+        temp_c, tnote = args.temp_c, "température fournie par --temp-c"
+    else:
+        temp_c, tnote = slot_temperature(weather, slot)
+    feels = args.feels_like_c if args.feels_like_c is not None else (weather or {}).get("feels_like_c")
+    humidity = args.humidity_pct if args.humidity_pct is not None else (weather or {}).get("humidity_pct")
+    # Catégorie : --category (créneau retenu, évalué par le coach) ; sinon composantes NON thermiques du
+    # fichier météo (vent/pluie/UV/orage) — jamais la catégorie « du jour », calculée sur la température
+    # max, qui s'appliquerait à tort à un créneau frais (la chaleur est déduite de la température du créneau).
+    category = H.worst_category(args.category, H.category_from_other(weather))
+    if category is None:
+        category = session.get("weather_category")
+    temps = [t for t in (temp_c, feels) if t is not None]
+    acclimated, anote = H.resolve_acclimated(conn, conf, today, max(temps) if temps else None)
+    sweat = IDX.fueling_trend(conn, today).get("median_sweat_rate_l_h")
+    apply_heat(result, session, temp_c=temp_c, feels_like_c=feels, humidity_pct=humidity, category=category,
+               acclimated=acclimated, slot=slot, sweat_rate_l_h=sweat, declared_pace_s_km=args.pace_s_km)
+    notes = result["heat_adjustment"]["notes"]
+    for extra in (wnote, tnote, anote):
+        if extra:
+            notes.append(extra)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -781,6 +909,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     result = build_session_targets(session, athlete=athlete, bins=bins,
                                     hr_zones_method=conf.get("hr_zones"), band=args.band,
                                     structure_text=args.structure_text)
+    if args.heat:
+        _heat_from_cli(args, conn, conf, session, result)
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

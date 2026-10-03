@@ -731,7 +731,12 @@ Chaque séance : **`date`** (date), **`sport`** (comme `activity`), **`title`**
 (nombres), `intensity` (`rest` `recovery` `endurance` `tempo` `threshold`
 `vo2max` `race` `strength`), `outdoor` (booléen), `garmin_workout_id`
 (entier, après le push), `status` (`planned` `done` `missed` `moved`
-`cancelled`), `weather_category` et `best_slot` (comme `weather`).
+`cancelled`), `weather_category` et `best_slot` (comme `weather`), et
+`heat_adjustment` (#171, objet optionnel : trace de l'ajustement des cibles à
+la chaleur, à recopier telle que produite par `arc_workout_targets.py targets
+--heat` → `trace.heat_adjustment` — `factor` (facteur sur l'allure, FC
+inchangée) et `temp_c` obligatoires ; `action`, `category`, `acclimated`,
+`slot`, `dew_point_c`, `reason` facultatifs). Jamais calculé à la main.
 
 Tenez `status` à jour quand une séance est réalisée, manquée ou déplacée.
 
