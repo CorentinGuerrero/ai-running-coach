@@ -161,8 +161,8 @@ pente (coefficients = approximations du projet, `assumptions.night`, réglables 
 `--night-penalty-pct`/`--night-descent-extra-max-pct`, `--no-night` pour couper).
 **Fuseau (`--tz`), une seule fois :** reprends `timezone` du plan de course déjà
 persisté s'il existe ; sinon déduis-le du lieu de la course quand il est sans
-ambiguïté (pays à fuseau unique : France métropolitaine → `Europe/Paris`,
-Italie → `Europe/Rome`…) et DIS le fuseau retenu ; demande-le seulement si le
+ambiguïté (pays à fuseau unique : France métropolitaine → Europe/Paris,
+Italie → Europe/Rome…) et DIS le fuseau retenu ; demande-le seulement si le
 lieu est ambigu (pays à plusieurs fuseaux, outre-mer, lieu inconnu). Persiste-le
 dans le champ `timezone` du bloc ```arc pour ne jamais le redemander. Si
 `night.timezone_warning` est présent, le fuseau est peu vraisemblable pour la

@@ -32,7 +32,8 @@ GOLDEN_NO_NIGHT_SHA256 = "d038f4096dcab4bb88529fbe1b22579d1646d7b28a6d39a14e2008
 
 # Zone fictive du dépôt (Pacifique sud, lat -40 / lon -140) : fuseau fixe UTC-9, sans heure d'été.
 TZ = "Etc/GMT+9"
-RACE_DATE = "2026-06-20"  # hiver austral : coucher civil ≈ 17:32 locale, aube civile ≈ 07:11
+RACE_DATE = "2026-06-20"
+DST_TZ = "America/Anchorage"  # changement d'heure, décalage plausible pour lon -140 (contrôle du fuseau)  # hiver austral : coucher civil ≈ 17:32 locale, aube civile ≈ 07:11
 
 
 def _ultra_pts():
@@ -260,15 +261,15 @@ class _RollingProfile:
         return 1000.0 + (x * 0.06 if x <= 10000.0 else 600.0 - (x - 10000.0) * 0.06)
 
 
-def _alpine_pts(total_m, lat=45.92, lon=6.87, step_m=100.0):
-    """Trace rectiligne fictive à la latitude/longitude données (pas un parcours réel)."""
+def _long_pts(total_m, lat=-40.0, lon=-140.0, step_m=100.0):
+    """Trace rectiligne fictive (zone conventionnelle du dépôt, jamais un parcours réel)."""
     m_per_deg = 111320.0 * math.cos(math.radians(lat))
     prof = _RollingProfile(total_m)
     return [{"lat": lat, "lon": lon + i * step_m / m_per_deg, "ele": prof(min(i * step_m, total_m))}
             for i in range(int(total_m / step_m) + 1)]
 
 
-def _alpine_kwargs(total_km, **over):
+def _long_kwargs(total_km, **over):
     kw = dict(aid_stations=[{"km": float(k), "name": f"R{k}", "stop_s": 600} for k in range(20, total_km, 20)],
               fade_pct=4.0, temp_max_c=None, acclimated=None, intensity_factor=1.0,
               intensity_source="riegel", segment_m=750.0)
@@ -281,57 +282,59 @@ class TestNightClockMultiDayAndDst(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.pts = _alpine_pts(250000.0)
-        # Départ 18:00 la veille du passage à l'heure d'hiver (25/10/2026 03:00 CEST -> 02:00 CET).
-        cls.paris = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
-                                       tz="Europe/Paris", **_alpine_kwargs(250))
-        # Même instant de départ, fuseau FIXE UTC+2 : le temps écoulé doit être identique.
-        cls.fixed = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
-                                       tz="Etc/GMT-2", **_alpine_kwargs(250))
+        cls.pts = _long_pts(250000.0)
+        # Zone fictive (lon -140 ≈ UTC-9,3 solaire) : fuseau à changement d'heure plausible pour
+        # cette longitude = America/Anchorage (01/11/2026 02:00 AKDT UTC-8 -> 01:00 AKST UTC-9).
+        # Départ 18:00 la veille au soir : la course traverse le changement d'heure.
+        cls.dst = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-31",
+                                       tz=DST_TZ, **_long_kwargs(250))
+        # Même instant de départ, fuseau FIXE UTC-8 : le temps écoulé doit être identique.
+        cls.fixed = RP.build_race_plan(cls.pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-31",
+                                       tz="Etc/GMT+8", **_long_kwargs(250))
 
     def test_dst_change_does_not_shift_the_elapsed_clock(self):
         for key in ("segments", "totals", "segment_passages"):
-            self.assertEqual(self.paris[key], self.fixed[key], key)
+            self.assertEqual(self.dst[key], self.fixed[key], key)
         for s in RP.SCENARIOS:
-            self.assertEqual(self.paris["night"]["scenarios"][s]["night_duration_s"],
+            self.assertEqual(self.dst["night"]["scenarios"][s]["night_duration_s"],
                              self.fixed["night"]["scenarios"][s]["night_duration_s"])
 
     def test_local_display_follows_the_dst_offset(self):
-        safe_paris = self.paris["night"]["scenarios"]["safe"]
+        safe_dst = self.dst["night"]["scenarios"]["safe"]
         safe_fixed = self.fixed["night"]["scenarios"]["safe"]
-        # Fin de la 1re nuit : même instant, affiché 06:3x en CET et 07:3x en UTC+2.
-        self.assertIn("à 06:3", safe_paris["summary"])
-        self.assertIn("à 07:3", safe_fixed["summary"])
-        self.assertTrue(safe_paris["lamp_until"].endswith("+01:00"))
-        self.assertTrue(safe_paris["lamp_from"].endswith("+02:00"))
+        # Fin de la 1re nuit : même instant, affiché 04:3x en AKST (UTC-9) et 05:3x en UTC-8.
+        self.assertIn("à 04:3", safe_dst["summary"])
+        self.assertIn("à 05:3", safe_fixed["summary"])
+        self.assertTrue(safe_dst["lamp_from"].endswith("-08:00"))
+        self.assertTrue(safe_dst["lamp_until"].endswith("-09:00"))
 
     def test_thirty_hour_race_crosses_two_nights(self):
-        safe = self.paris["night"]["scenarios"]["safe"]
-        self.assertGreater(self.paris["totals"]["time_s"]["safe"], 26 * 3600)
+        safe = self.dst["night"]["scenarios"]["safe"]
+        self.assertGreater(self.dst["totals"]["time_s"]["safe"], 26 * 3600)
         self.assertEqual(safe["summary"].count(" à "), 2, safe["summary"])  # deux fenêtres de nuit
         self.assertIn("(J+1); ", safe["summary"])
-        fractions = [seg["night_fraction"]["safe"] for seg in self.paris["segments"]]
+        fractions = [seg["night_fraction"]["safe"] for seg in self.dst["segments"]]
         states = []
         for f in fractions:  # jour -> nuit -> jour -> nuit
             st = "N" if f > 0.99 else ("D" if f < 0.01 else None)
             if st and (not states or states[-1] != st):
                 states.append(st)
         self.assertEqual(states[:4], ["D", "N", "D", "N"])
-        self.assertTrue(self.paris["night"]["converged"])
-        for seg in self.paris["segments"]:
+        self.assertTrue(self.dst["night"]["converged"])
+        for seg in self.dst["segments"]:
             t = seg["predicted_time_s"]
             self.assertGreaterEqual(t["safe"], t["realistic"])
             self.assertGreaterEqual(t["realistic"], t["ambitious"])
 
     def test_no_timezone_warning_for_a_plausible_zone(self):
-        self.assertNotIn("timezone_warning", self.paris["night"])
+        self.assertNotIn("timezone_warning", self.dst["night"])
 
 
 class TestTimezonePlausibility(unittest.TestCase):
     def test_far_off_zone_warns_without_refusing(self):
-        pts = _alpine_pts(20000.0)
+        pts = _long_pts(20000.0)
         plan = RP.build_race_plan(pts, PERSONAL_BINS, start_time="18:00", race_date="2026-10-24",
-                                  tz="America/New_York", **_alpine_kwargs(20))
+                                  tz="America/New_York", **_long_kwargs(20))  # UTC-4 pour lon -140
         self.assertIn("timezone_warning", plan["night"])
         self.assertIn("America/New_York", plan["night"]["timezone_warning"])
         self.assertIn(plan["night"]["timezone_warning"], plan["warnings"])
