@@ -362,6 +362,18 @@ class TestGarminPayload(unittest.TestCase):
                 self.assertEqual(work["endCondition"]["conditionTypeKey"], "reps")
                 self.assertEqual(work["endConditionValue"], b["reps"])
 
+    def test_timed_each_side_exercise_gets_one_step_per_side(self):
+        p = self.payload(use="hanches")
+        groups = p["workout_data"]["workoutSegments"][0]["workoutSteps"]
+        side = [g for g in groups if g["workoutSteps"][0]["description"].startswith("Planche latérale (chaque côté)")]
+        self.assertEqual(len(side), 1)
+        inner = side[0]["workoutSteps"]
+        self.assertEqual([s["stepOrder"] for s in inner], [1, 2, 3])
+        self.assertEqual([s["endCondition"]["conditionTypeKey"] for s in inner], ["time", "time", "time"])
+        self.assertEqual([s["stepType"]["stepTypeKey"] for s in inner], ["interval", "interval", "rest"])
+        self.assertTrue(inner[0]["description"].endswith("côté 1/2") and inner[1]["description"].endswith("côté 2/2"))
+        self.assertEqual(inner[0]["category"], "PLANK")
+
     def test_single_set_is_a_plain_step_not_a_group(self):
         p = self.payload(phase="taper", use="pied")        # 3 séances -> 2 séries ; force 1 série ci-dessous
         ex, doc = copy.deepcopy(EXERCISES), copy.deepcopy(DOC)

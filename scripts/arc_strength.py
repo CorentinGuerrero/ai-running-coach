@@ -571,8 +571,8 @@ def garmin_payload(selection: dict) -> dict:
     """Charges utiles Garmin d'un programme résolu.
 
     - `workout_data` : DTO structuré du skill `garmin-workout-scheduling` (« Strength circuit WITH FULL
-      DETAIL », TESTÉ) — RepeatGroupDTO par exercice, étapes reps (endCondition 10) ou temps (2), repos
-      stepTypeId 5 ; `category`/`exerciseName` seulement pour un couple vérifié. À pousser via
+      DETAIL », TESTÉ) — RepeatGroupDTO par exercice, étapes reps (endCondition 10) ou temps (2 ; une
+      étape par côté pour un exercice chronométré « chaque côté »), repos stepTypeId 5 ; `category`/`exerciseName` seulement pour un couple vérifié. À pousser via
       `schedule_workouts` (une entrée `{calendar_date, workout_data}`).
     - `create_strength_workout` : arguments de l'outil simplifié (`name`, `exercises`) ; il ne peut pas
       porter la clé d'exercice Garmin (son `name` sert aussi d'`exerciseName`) : `category` seulement,
@@ -600,6 +600,11 @@ def garmin_payload(selection: dict) -> dict:
         if g:
             work["category"] = g["category"]
             work["exerciseName"] = g["exercise"]
+        # Exercice chronométré « chaque côté » : une étape temps par côté (sinon la montre arrête le
+        # chrono après le premier côté) ; en répétitions, la valeur reste par côté (description).
+        works = [work]
+        if timed and b.get("each_side"):
+            works = [{**work, "stepOrder": i + 1, "description": f"{desc} — côté {i + 1}/2"} for i in range(2)]
         rest = {
             "type": "ExecutableStepDTO", "stepOrder": 2,
             "stepType": {"stepTypeId": 5, "stepTypeKey": "rest"},
@@ -607,7 +612,7 @@ def garmin_payload(selection: dict) -> dict:
             "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
             "endConditionValue": b["rest_s"], "targetType": _no_target(),
         }
-        inner = [work] + ([rest] if b["rest_s"] > 0 else [])
+        inner = works + ([{**rest, "stepOrder": len(works) + 1}] if b["rest_s"] > 0 else [])
         if b["sets"] > 1:
             steps.append({"type": "RepeatGroupDTO", "stepOrder": order, "numberOfIterations": b["sets"],
                           "endCondition": {"conditionTypeId": 7, "conditionTypeKey": "iterations"},
