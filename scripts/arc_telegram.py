@@ -404,7 +404,7 @@ def apply_rpe(workspace: Path, day: str, rpe, idx: Optional[int] = None) -> Resu
     shown = value
     if data.get("rpe") == value:
         return Result(True, f"RPE {shown}/10 déjà noté pour {_label(path)}.")
-    data.update(out["activity_merge"])
+    data.update(out["activity_merge"], rpe=value)       # 7 et non 7.0 dans le bloc
     prov = arc_log.provenance_line(f"Telegram : RPE {shown}/10")
     err = commit_file(path, text, data, prov)
     if err:

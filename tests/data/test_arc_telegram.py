@@ -142,6 +142,7 @@ class TestRpe(Case):
         self.bot().handle_update(cb(f"rp:{DAY}:7"))
         _, data = T.read_arc_file(path)
         self.assertEqual(data["rpe"], 7)
+        self.assertIsInstance(data["rpe"], int)
         self.assertEqual(data["duration_s"], 3600)
         self.validate(path)
         self.assertIn("Texte libre.", path.read_text(encoding="utf-8"))
