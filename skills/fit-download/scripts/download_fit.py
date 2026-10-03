@@ -577,8 +577,8 @@ def _strava_get(path: str, tokens: StravaTokens, opener=None, _retry: bool = Tru
                               "athlète ; reconnecter le compte avec les bonnes portées") from exc
         if exc.code == 429:
             raise StravaError(f"HTTP 429 sur {path} : limite de requêtes de l'API Strava atteinte (par défaut "
-                              "200 requêtes / 15 min et 2000 / jour par application — à vérifier pour la "
-                              "vôtre) ; deux requêtes par séance : réessayer plus tard, par petits lots") from exc
+                              "100 requêtes de lecture / 15 min et 1000 / jour par application, partagées avec "
+                              "le serveur MCP) ; deux requêtes par séance : réessayer plus tard, par petits lots") from exc
         if exc.code == 404:
             raise StravaUnavailable(f"HTTP 404 sur {path} : activité introuvable, ou sans flux "
                                     "(saisie manuelle)") from exc

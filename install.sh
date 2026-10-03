@@ -1205,11 +1205,23 @@ write_strava_wrapper() {
         return 0
     fi
     mkdir -p "$STRAVA_MCP_DIR"
+    # cron/launchd (garmin-daily-sync) démarrent avec un PATH minimal, sans les Node.js
+    # installés par nvm/fnm/asdf : le dossier de `npx` trouvé ICI est figé dans le wrapper
+    # (devant le PATH hérité), sinon le serveur ne démarrerait qu'en session interactive.
+    local node_dir="" node_path_line=""
+    if have npx; then
+        node_dir="$(cd "$(dirname "$(command -v npx)")" && pwd)"
+        node_path_line="export PATH=$(printf '%q' "$node_dir"):\"\$PATH\""
+    fi
     cat > "$wrapper" <<WRAPPER
 #!/usr/bin/env bash
 # Généré par install.sh (--source strava, #164). Les jetons Strava ne sont JAMAIS ici :
 # le serveur les lit/écrit dans ~/.config/strava-mcp/config.json.
+# npx -y télécharge la version épinglée depuis le registre npm au premier lancement (puis
+# cache npm) : pas de vérification d'intégrité au-delà de celle de npm — voir docs/strava-setup.md.
 set -euo pipefail
+$node_path_line
+cd "\$(dirname "\${BASH_SOURCE[0]}")"
 exec npx -y $STRAVA_MCP_PKG "\$@"
 WRAPPER
     chmod +x "$wrapper"

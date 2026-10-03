@@ -81,6 +81,16 @@ dans `.mcp.json` (et les autres IDE), écrit `[data].source = "strava"` dans
 `config/workspace.user.toml`. Il n'installe pas `uv`/`garmin-mcp` et ne fait aucune
 authentification (voir ci-dessous). Relancé, il est idempotent.
 
+!!! note "Wrapper, Node.js et chaîne d'approvisionnement"
+    Le wrapper fige le dossier de `npx` trouvé à l'installation (devant le `PATH`) : la
+    synchronisation planifiée (cron/launchd, `PATH` minimal) trouve ainsi un Node.js installé par
+    nvm/fnm/asdf. Si vous changez de version de Node.js, relancez `./install.sh --source strava`.
+    `npx -y` télécharge la version **épinglée** depuis le registre npm au premier lancement, puis
+    la sert depuis le cache npm ; npm vérifie l'empreinte publiée par le registre, rien de plus.
+    Empreinte de référence de la 1.2.1 :
+    `sha512-hvHi0vDHjT7emiqZBhrvzlYcPllIspTBNeiNKZeUWkSYf2L2cjWN7wkIfw2v2MpQ2hUmny4Hva2hfernv6JCtg==`
+    (`npm view @r-huijts/strava-mcp-server@1.2.1 dist.integrity`).
+
 ### Connecter votre compte (une seule fois)
 
 1. Créez votre application API sur <https://www.strava.com/settings/api> avec
@@ -98,6 +108,14 @@ authentification (voir ci-dessous). Relancé, il est idempotent.
     d'écriture. Le serveur écrit ce fichier avec les droits par défaut : `coach-doctor`
     signale (⚠️) un fichier lisible par d'autres utilisateurs — corrigez avec
     `chmod 600 ~/.config/strava-mcp/config.json`. Ne committez jamais ce fichier.
+
+!!! info "Variables d'environnement et sessions longues"
+    Le serveur donne la priorité aux variables `STRAVA_ACCESS_TOKEN`, `STRAVA_REFRESH_TOKEN`,
+    `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` sur ce fichier ; `download_fit.py` ne lit que le
+    fichier (et les deux dernières variables) : ne les définissez pas, laissez `connect-strava`
+    remplir le fichier. Le serveur charge les jetons **au démarrage** : si `download_fit.py` a
+    rafraîchi le jeton pendant qu'une session interactive est ouverte depuis plus de 6 h,
+    redémarrez la session en cas d'erreur « Failed to refresh Strava access token ».
 
 Diagnostic : `python3 scripts/coach_doctor.py --check strava_connection` (Node.js, wrapper,
 serveur déclaré, jetons présents — les valeurs ne sont jamais lues ni affichées ; aucun appel
@@ -123,9 +141,12 @@ seul.
 - **Hypothèse à vérifier** : la cadence est doublée pour les sports à pied (convention du FIT) ;
   la référence de l'API Strava documente `cadence` en RPM sans préciser un ou deux pieds. À
   confirmer sur une vraie séance ; sans effet sur les autres KPI.
-- **Limites d'API** (valeurs par défaut de Strava, à vérifier pour votre application) :
-  200 requêtes / 15 min, 2000 / jour. Le script fait 2 requêtes par séance ; un `HTTP 429`
-  est expliqué, pas contourné — relancez plus tard.
+- **Limites d'API** ([valeurs par défaut de Strava](https://developers.strava.com/docs/rate-limits/),
+  par application) : 200 requêtes / 15 min et 2 000 / jour au total, dont **100 / 15 min et
+  1 000 / jour pour les lectures** (`GET`, donc tout ce que fait ce projet). Le quota est
+  partagé entre le serveur MCP et ce script (même application) ; la fenêtre de 15 min repart à
+  :00/:15/:30/:45, le quota journalier à minuit UTC. Le script fait 2 requêtes par séance ; un
+  `HTTP 429` est expliqué, pas contourné — relancez plus tard.
 - Une activité saisie à la main n'a pas de flux : `INDISPONIBLE`, la séance reste valide.
 
 ## Conditions d'usage de l'API Strava

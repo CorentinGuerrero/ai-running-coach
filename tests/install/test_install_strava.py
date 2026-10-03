@@ -9,9 +9,10 @@ installations garmin / intervals existantes restent strictement inchangées.
 from __future__ import annotations
 
 import json
+import subprocess
 
 from tests.lib.asserts import InstallAsserts
-from tests.lib.sandbox import Sandbox
+from tests.lib.sandbox import STUBS_DIR, Sandbox
 from tests.install.test_install_source import _mcp_servers, _source
 
 
@@ -31,6 +32,12 @@ class TestSourceStrava(InstallAsserts):
             text = wrapper.read_text(encoding="utf-8")
             self.assertIn("exec npx -y @r-huijts/strava-mcp-server@1.2.1", text)
             self.assertIn('"$@"', text)
+            # cron/launchd (PATH minimal, Node.js de nvm absent) : le dossier de npx est figé.
+            stubs = STUBS_DIR.resolve()
+            self.assertIn("export PATH=", text)
+            self.assertIn(str(stubs), text.replace("\\", ""))
+            check = subprocess.run(["bash", "-n", str(wrapper)], capture_output=True, text=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_persists_source_and_rerun_is_idempotent(self):
         with Sandbox() as sb:

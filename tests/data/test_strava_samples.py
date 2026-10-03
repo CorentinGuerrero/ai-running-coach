@@ -338,7 +338,7 @@ class TestStravaDownload(StravaDownloadCase):
 
     def test_http_errors_have_dedicated_messages(self):
         self.write_cfg()
-        for code, needle in ((403, "activity:read_all"), (429, "200 requêtes")):
+        for code, needle in ((403, "activity:read_all"), (429, "100 requêtes de lecture")):
             with self.subTest(code=code):
                 with self.assertRaises(D.StravaError) as cm:
                     D._download_one_strava("s1", self.root, self.tokens(), opener=_router({
