@@ -129,6 +129,26 @@ class TestLogManualEntry(unittest.TestCase):
         self.assertTrue(out["duplicate"])
         self.assertNotIn("health_merge", out)
 
+    def test_invalid_override_never_enables_tracking(self):
+        # Revue #166 : un forçage `cycle_tracking` illisible passe par la même résolution que la
+        # configuration — « oui », « true », un booléen : "off", jamais un suivi activé.
+        for raw in ("oui", "true", True, "on"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                out = L.process({"cycle": {"phase": "luteal"}, "cycle_tracking": raw})
+            self.assertEqual(out["cycle"], {"ignored": "tracking_off"}, raw)
+            self.assertNotIn("health_merge", out, raw)
+
+    def test_config_driven_manual_mode_is_honoured(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ws:
+            (Path(ws) / "config").mkdir()
+            (Path(ws) / "config/workspace.user.toml").write_text('[health]\ncycle_tracking = "manual"\n')
+            out = L.process({"cycle": {"phase": "phase lutéale", "day": "22"},
+                             "existing_log_entries": []}, workspace=Path(ws))
+        self.assertEqual(out["health_merge"],
+                         {"cycle_source": "manual", "cycle_phase": "luteal", "cycle_day": 22})
+
     def test_without_cycle_key_nothing_changes(self):
         out = L.process({"rpe": "7"})
         self.assertNotIn("cycle", out)
@@ -146,6 +166,42 @@ class TestIndexColumns(unittest.TestCase):
         self.assertGreaterEqual(I.SCHEMA_VERSION, 33)
         for col in ("cycle_phase", "cycle_day", "cycle_source"):
             self.assertIn(col, I.DDL)
+
+
+class TestIngestionAndApi(unittest.TestCase):
+    """Revue #166 : un fichier santé portant les clés du cycle est réellement ingéré dans les
+    colonnes de `health_day`, et `/api/summary` ne les expose jamais (aucune carte ne les lit)."""
+
+    TODAY = "2026-09-23"
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="arc-cycle-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        for d in ("activities", "medical", "nutrition", "planning", "rapports"):
+            (self.tmp / d).mkdir(parents=True)
+        block = ('{"arc": 1, "kind": "health", "date": "2026-09-23", "morning_check": "full", '
+                 '"hrv_overnight_ms": 41, "cycle_phase": "luteal", "cycle_day": 22, "cycle_source": "manual"}')
+        (self.tmp / "medical/2026-09-23_health.md").write_text(
+            f"# Santé\n\n```arc\n{block}\n```\n\nTexte.\n", encoding="utf-8")
+
+    def _store(self):
+        import arc_serve as S
+        return S, S.Store(self.tmp, memory=True, today=self.TODAY)
+
+    def test_cycle_keys_land_in_health_day_columns(self):
+        _S, store = self._store()
+        row = store.one("SELECT cycle_phase, cycle_day, cycle_source FROM health_day WHERE date = ?",
+                        (self.TODAY,))
+        self.assertEqual(dict(row), {"cycle_phase": "luteal", "cycle_day": 22, "cycle_source": "manual"})
+
+    def test_summary_api_never_exposes_the_cycle(self):
+        S, store = self._store()
+        health = S.api_summary(store, {})["health"]
+        self.assertEqual(health["hrv_overnight_ms"], 41)
+        for key in ("cycle_phase", "cycle_day", "cycle_source"):
+            self.assertNotIn(key, health)
 
 
 if __name__ == "__main__":

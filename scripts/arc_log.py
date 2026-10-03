@@ -697,7 +697,14 @@ def process(payload: dict, workspace: Optional[Path] = None) -> dict:
     cycle_entry = payload.get("cycle")
     cycle = None
     if cycle_entry:
-        mode = payload.get("cycle_tracking") or resolve_cycle_tracking(workspace)
+        # Forçage `cycle_tracking` de l'entrée (tests) : passé par la MÊME résolution que la
+        # configuration (`arc_cycle.cycle_tracking_mode`) — une valeur invalide vaut "off", jamais
+        # un suivi activé par une chaîne quelconque (revue de code #166).
+        if payload.get("cycle_tracking") not in (None, ""):
+            mode = (_arc_cycle.cycle_tracking_mode({"health": {"cycle_tracking": payload["cycle_tracking"]}})
+                    if _arc_cycle is not None else "off")
+        else:
+            mode = resolve_cycle_tracking(workspace)
         cycle = compute_cycle(cycle_entry, mode)
         out["cycle"] = cycle
         if cycle.get("ignored"):
