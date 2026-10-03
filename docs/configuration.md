@@ -102,6 +102,27 @@ avec `morning_check = "off"`.
     booléen) ne fait planter ni `scripts/arc_index.py`, ni le tableau de bord :
     un avertissement est affiché et le défaut (25 °C) s'applique à la place.
 
+## Le cycle menstruel — `[health].cycle_tracking` (#166)
+
+```toml
+[health]
+cycle_tracking = "off"   # off (défaut) | garmin | intervals | manual
+```
+
+**Opt-in strict.** À `off` (défaut, ou clé absente), aucune donnée de cycle n'est lue, aucun outil
+n'est exposé et aucun agent n'en parle. `garmin` ajoute à la liste blanche `GARMIN_ENABLED_TOOLS`
+les outils `get_menstrual_data_for_date` et `get_menstrual_calendar_data` — **relancez
+`./install.sh`** après le changement (ou installez avec `--cycle-tracking garmin`, qui écrit la
+clé) ; `intervals` lit le champ `menstrualPhase` d'intervals.icu, `manual` la déclaration via
+`/log`. Le cycle n'est qu'un **contexte** de lecture du bilan matinal : jamais une règle, jamais un
+diagnostic, jamais un assouplissement d'un verdict rouge.
+
+!!! warning "Une valeur invalide ne casse rien"
+    Une valeur hors de `off`/`garmin`/`intervals`/`manual` est traitée comme `off`, avec un
+    avertissement : jamais d'exception, jamais de suivi activé par accident.
+
+Détail, vérifications et sources : [Cycle menstruel](cycle-menstruel.md).
+
 ## La source de données — `[data].source` (#68)
 
 ```toml

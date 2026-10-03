@@ -43,6 +43,10 @@ L'agent **medical** est le spécialiste de la récupération et de la santé. Il
 - **Facteur sauté ≠ facteur rassurant** : historique insuffisant, bilan matinal désactivé (`[health].morning_check`)… chaque saut porte sa raison, jamais traité comme un signal favorable.
 - Détail complet (facteurs, poids, seuils réglables) : [Les garde-fous](../guardrails.md#drapeau-composite-de-risque-de-blessure-57).
 
+### Contexte du cycle et veille RED-S (opt-in, #166)
+
+Seulement si `[health].cycle_tracking` n'est pas `off` : une ligne de contexte (phase) à côté de la HRV/FC de repos, jamais un assouplissement d'un verdict rouge. Une absence prolongée de règles (environ 3 mois, `scripts/arc_cycle.py gap`) ou de données de cycle est signalée comme **signal de vigilance RED-S**, avec recommandation de consulter un professionnel de santé — jamais un diagnostic. Voir [Cycle menstruel](../cycle-menstruel.md).
+
 ### Coordination (délégation)
 
 - **Vers le Coach** : contraintes médicales spécifiques (ex. « éviter le dénivelé, réduire l'intensité 3 jours »)

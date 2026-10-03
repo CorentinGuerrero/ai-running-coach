@@ -114,6 +114,10 @@ Garder les autres champs en mémoire seulement si utile (visibilité, pression).
 
 **Ne PAS refetcher** un jour qui a déjà son fichier < 24 h (règle d'idempotence).
 
+## Contexte du cycle (opt-in, #166) — chaleur et hydratation
+
+**Seulement si** `[health].cycle_tracking` n'est pas `off` (défaut `off` ; absent, vide ou invalide = `off`) **et** qu'une `cycle_phase` est enregistrée pour le jour dans `medical/YYYY-MM-DD_health.md` : en phase lutéale, une séance 🟡/🟠 par temps chaud peut être ressentie comme plus difficile — ajoutez au plus UNE ligne de contexte à la section météo (« chaleur : prévoir hydratation et électrolytes plutôt généreux »). Jamais une catégorie recalculée, jamais un seuil modifié, jamais un diagnostic. À `off`, ou sans phase enregistrée : aucune mention.
+
 ## Workflow coach (référence)
 
 1. **Trigger** : demande "valide la semaine" OU "valide aujourd'hui/demain".

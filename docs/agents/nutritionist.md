@@ -60,6 +60,10 @@ Voir [Dépense énergétique modèle](../energie.md) pour une explication compl�
 !!! note "Pas de MyFitnessPal"
     Il n'y a **pas** de serveur MCP MyFitnessPal dans cet environnement. Les apports quotidiens proviennent des **rapports manuels** de l'utilisateur en conversation.
 
+### Contexte du cycle menstruel (opt-in, #166)
+
+Seulement si `[health].cycle_tracking` n'est pas `off` et qu'une phase est enregistrée : un mot de contexte sur l'hydratation (côté généreux en phase lutéale par temps chaud), jamais une restriction calorique justifiée par le cycle ; signes de faible disponibilité énergétique → renvoi vers `medical` / un professionnel de santé. Voir [Cycle menstruel](../cycle-menstruel.md).
+
 ### Catalogues de produits (optionnels)
 
 - Si l'utilisateur fournit des catalogues produits dans `resources/nutrition/`, l'agent utilise leurs valeurs par produit (calories, glucides, sucres, sodium, électrolytes, BCAA)

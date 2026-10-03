@@ -8325,6 +8325,7 @@
           "chat_enabled": false,
           "climb_min_gain_m": 50.0,
           "climb_min_grade": 0.05,
+          "cycle_tracking": "off",
           "heat_threshold_c": 25.0,
           "hr_zones": "auto",
           "language": "fr",

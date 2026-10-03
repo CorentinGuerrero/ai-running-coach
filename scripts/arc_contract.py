@@ -49,6 +49,10 @@ HRV_STATUS = ("balanced", "unbalanced", "low", "poor", "no_status")
 # depuis ce fichier (le tableau de bord, lui, recalcule toujours en direct).
 HRV_PERSONAL_STATUS = ("sous", "dans_la_norme", "au_dessus", "en_construction")
 VERDICT = ("green", "amber", "red")
+# Contexte du cycle menstruel (#166, opt-in `[health].cycle_tracking`) — voir scripts/arc_cycle.py.
+CYCLE_PHASE = ("menstrual", "follicular", "ovulation", "luteal")
+CYCLE_SOURCE = ("garmin", "intervals", "manual")
+CYCLE_DAY_PLAUSIBLE = (1, 60)
 WEATHER_CATEGORY = ("green", "yellow", "orange", "red")
 SLOT = ("morning", "midday", "evening", "none")
 INTENSITY = (
@@ -331,6 +335,11 @@ SCHEMA = {
             "missing_reason": "obj",
             # #57 : douleur structurée déclarée le jour du fichier — voir SUBSCHEMA["pain"].
             "pain": "[pain]",
+            # #166 : contexte du cycle (opt-in `[health].cycle_tracking`, jamais écrit à "off") —
+            # un CONTEXTE de lecture du bilan matinal, jamais une règle ni un diagnostic.
+            "cycle_phase": _enum(CYCLE_PHASE),
+            "cycle_day": "cycle_day",
+            "cycle_source": _enum(CYCLE_SOURCE),
         },
     },
     "weather": {
@@ -767,6 +776,11 @@ def _check_value(spec: str, value, where: str, errors: list, warnings: list) -> 
         # Pourcentage de dynamique de course (#151) : balance du temps de contact, ratio vertical.
         if not _is_number(value) or not 0 < value < 100:
             fail("un pourcentage strictement entre 0 et 100")
+        return
+    if spec == "cycle_day":
+        lo, hi = CYCLE_DAY_PLAUSIBLE
+        if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
+            fail(f"un jour de cycle entier de {lo} à {hi}")
         return
     if spec == "hr":
         if not _is_number(value) or not 20 <= value <= 250:

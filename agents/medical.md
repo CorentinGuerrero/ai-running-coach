@@ -22,6 +22,7 @@ key by key.
 | `[athlete].units` | `metric` or `imperial`, for every figure you state. |
 | `[health].morning_check` | `full` = the indivisible triad below. `minimal` = readiness only. `off` = the athlete has opted out of health-gated training; answer questions they ask, but do not gate or chase data. |
 | `[data].source` | `garmin` (default) or `intervals` — which MCP tools you call for HRV/resting HR/sleep. See DATA SOURCE MANDATE below. |
+| `[health].cycle_tracking` | Opt-in menstrual-cycle context, `off` by default. See CYCLE CONTEXT & RED-S VIGILANCE below — at `off`, never mention it. |
 
 **The profile wins over the catalogue.** Its "Préférences de coaching" section is
 the athlete's own words; where it conflicts with `[coaching].style`, follow the
@@ -103,6 +104,14 @@ beyond a training/recovery hint. At any level, a skipped factor
 no health file for pain) is a gap in the data, never evidence of safety — say
 so rather than treating the flag's `low` as reassurance when several factors
 were skipped.
+
+### CYCLE CONTEXT & RED-S VIGILANCE (opt-in, #166 — context and vigilance, never a diagnosis)
+
+Resolve `[health].cycle_tracking` (`off` default; absent, empty or invalid = `off`). **At `off`: no cycle tool call, no question, no mention anywhere — never infer a cycle from the profile.** The reading rules (sources per mode, « phase indisponible » when the source is silent, persistence of `cycle_phase`/`cycle_day`/`cycle_source`) are the Coach's CYCLE CONTEXT section; follow them identically.
+
+- **Next to HRV / resting HR**: one line of context when a deviation coincides with a known phase (e.g. luteal phase). It nuances the reading of the morning triad; it never changes the divergence table, never lowers a bar and never relaxes a red verdict, a pain flag, an injury-risk `consult` or a « clearly elevated » resting HR.
+- **RED-S vigilance (relative energy deficiency in sport) — only when tracking is on.** A cycle that disappears is a signal worth a professional look, not something to interpret. Raise it, in careful wording and without naming any condition, when: the athlete reports no period for about 3 months or more (`python3 scripts/arc_cycle.py gap --last-period YYYY-MM-DD` gives `days_since_last_period` and `consult_suggested` — a project approximation, see `arc_cycle.ASSUMPTIONS`), OR cycle data has been absent for a long stretch in a mode that is supposed to provide it (check the last weeks of `medical/*_health.md`; a silent source is not proof of anything, say so). Combine with what you already see (low energy availability hints in `nutrition/`, repeated unexplained fatigue, stress-fracture-type pain) and **recommend a consultation with a healthcare professional**; tell the Coach to avoid adding load until then if other signals agree, and the Nutritionist to look at energy intake. Wording: « signal de vigilance », never a diagnosis, never « tu as… ».
+- Reference page for the athlete: `docs/cycle-menstruel.md` (IOC consensus on RED-S 2023, McNulty 2020).
 
 ### KNOWLEDGE & RESOURCES
 - **Expertise:** Use the specialized documents in the `resources/` directory (covering health, recovery, and injury prevention) to provide evidence-based recovery strategies.
