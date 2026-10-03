@@ -142,6 +142,79 @@ class TestEvaluateDecision(unittest.TestCase):
         self.assertIn("pain", [s["signal"] for s in ev["skipped"]])
 
 
+class TestReviewFindings(unittest.TestCase):
+    """Revue #175 : nature de l'action, chevauchements, douleur sans biais de fenêtre, volumétrie."""
+    DAY = iso(-20)
+
+    def test_action_kind_from_before_after(self):
+        cases = [
+            ({}, "unspecified"),
+            ({"after": {"status": "cancelled"}}, "cancel"),
+            ({"before": {"date": iso(-3)}, "after": {"date": iso(-1)}}, "move"),
+            ({"before": {"intensity": "vo2max"}, "after": {"intensity": "recovery"}}, "lighten"),
+            ({"before": {"planned_duration_s": 5400}, "after": {"planned_duration_s": 3600}}, "lighten"),
+            ({"before": {"intensity": "endurance"}, "after": {"intensity": "threshold"}}, "intensify"),
+            ({"before": {"intensity": "vo2max", "planned_duration_s": 3000},
+              "after": {"intensity": "endurance", "planned_duration_s": 6000}}, "other"),
+            ({"before": {"sport": "trail"}, "after": {"sport": "indoor_cycling"}}, "replace"),
+            ({"before": {"intensity": "strength"}, "after": {"intensity": "recovery"}}, "replace"),
+        ]
+        for extra, expected in cases:
+            self.assertEqual(DE.action_kind(extra), expected, extra)
+        self.assertEqual(set(DE.ACTION_LABEL), set(DE.ACTION_KINDS))
+
+    def test_synthesis_groups_by_action_with_french_labels(self):
+        evals = ([{"trigger": "morning_check", "action": "lighten", "outcome": "applied", "effect": "improved"}] * 7
+                 + [{"trigger": "morning_check", "action": "cancel", "outcome": "applied", "effect": "neutral"}])
+        groups = DE.synthesize(evals)
+        self.assertEqual(len(groups), 2)
+        self.assertTrue(groups[0]["statement"].startswith("Allègement après bilan matinal"))
+        self.assertEqual((groups[0]["n"], groups[0]["improved"]), (7, 7))
+
+    def test_overlapping_decisions_are_flagged(self):
+        data = {"health": health_series(self.DAY, {"hrv_ms": 45, "rhr_bpm": 50}, {"hrv_ms": 56, "rhr_bpm": 50})}
+        a = dec(self.DAY)
+        b = {**dec(iso(-19), "weather"), "id": "b"}
+        far = {**dec(iso(-60)), "id": "far"}
+        evs = DE.evaluate_all([a], data, TODAY, context=[a, b, far])
+        self.assertEqual(evs[0]["overlaps"], ["b"])
+        g = DE.synthesize(evs)[0]
+        self.assertEqual(g["overlapping"], 1)
+        self.assertIn("effets confondus", g["statement"])
+
+    def test_proposed_neighbour_does_not_count_as_overlap(self):
+        a = dec(self.DAY)
+        b = {**dec(self.DAY, outcome="proposed"), "id": "b"}
+        evs = DE.evaluate_all([a], {"health": {}}, TODAY, context=[a, b])
+        self.assertEqual(evs[0].get("overlaps"), [])
+
+    def test_pain_uses_mean_not_max_over_unequal_windows(self):
+        """Un pic isolé dans une fenêtre APRÈS plus longue ne fait plus pencher vers « aggravée »."""
+        d0 = date.fromisoformat(self.DAY)
+        health = {(d0 + timedelta(days=o)).isoformat(): {"pain_max": 4.0} for o in range(-2, 1)}
+        for o, v in zip(range(1, 8), (3, 3, 5, 3, 3, 3, 3)):
+            health[(d0 + timedelta(days=o)).isoformat()] = {"pain_max": float(v)}
+        ev = DE.evaluate_decision(dec(self.DAY, "medical"), {"health": health}, TODAY)
+        pain = next(s for s in ev["signals"] if s["signal"] == "pain")
+        self.assertLess(pain["post_value"], 4.0)
+        self.assertNotEqual(pain["verdict"], "worsened")
+
+    def test_five_hundred_decisions_stay_fast(self):
+        import time
+        decisions, health, sessions = [], {}, []
+        for i in range(500):
+            day = (TODAY - timedelta(days=5 + i)).isoformat()
+            decisions.append({**dec(day, ("morning_check", "medical", "athlete_request")[i % 3]),
+                              "id": f"d{i}"})
+            health[day] = {"hrv_ms": 50 + i % 7, "rhr_bpm": 48 + i % 3, "readiness": 60, "pain_max": i % 4}
+            sessions.append({"date": day, "rpe": 5 + i % 3, "decoupling_pct": 3.0})
+        t0 = time.perf_counter()
+        evs = DE.evaluate_all(decisions, {"health": health, "sessions": sessions, "planned": []}, TODAY)
+        DE.synthesize(evs)
+        self.assertEqual(len(evs), 500)
+        self.assertLess(time.perf_counter() - t0, 5.0)
+
+
 class TestSynthesis(unittest.TestCase):
     def _evals(self, trigger, outcome, effects):
         return [{"trigger": trigger, "outcome": outcome, "effect": e} for e in effects]
@@ -281,6 +354,11 @@ class TestEndToEnd(IndexedWorkspace):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(I.main(argv), 0)
+        self.assertEqual(len(json.loads(buf.getvalue())["effects"]), 1)   # JSON par défaut (convention)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(I.main([*argv, "--text"]), 0)
+        self.assertTrue(buf.getvalue().startswith("Effet des décisions"))
         self.assertIn("Corrélation, pas causalité", buf.getvalue())
 
     def test_api_route(self):

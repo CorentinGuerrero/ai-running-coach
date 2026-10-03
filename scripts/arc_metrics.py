@@ -2727,7 +2727,7 @@ ASSUMPTIONS["decision_effects"] = (
     "conformité). Tolérances « neutre » : HRV ±5 %, FC de repos ±2 bpm, readiness ±5, douleur ±1, ACWR ±0,1, RPE "
     "±1, découplage ±2 points, conformité ±15 points — APPROXIMATIONS DU PROJET, pas des normes. Un signal "
     "absent est sauté, jamais imputé ; fenêtre non écoulée ou aucun signal → `insufficient_data`. Synthèse par "
-    "déclencheur × issue ; sous 5 cas évaluables, comptes bruts sans « tendance ». CORRÉLATION, PAS CAUSALITÉ : "
+    "déclencheur × nature de l'action (dérivée de `before`/`after`) × issue, décisions aux fenêtres chevauchantes signalées ; sous 5 cas évaluables, comptes bruts sans « tendance ». CORRÉLATION, PAS CAUSALITÉ : "
     "jamais utilisé pour assouplir un garde-fou `block`, une décision médicale ni un verdict rouge. Effets "
     "dérivés, jamais stockés ; méthode détaillée : `arc_decision_effects.ASSUMPTIONS`."
 )

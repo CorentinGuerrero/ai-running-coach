@@ -24,8 +24,8 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py climb-history [--segment ID | --activity GARMIN_ID]  # identité de montée entre séances (#49)
     arc_index.py decisions [--date D | --days N] [--trigger T] [--outcome O] [--active]
                                                                         # journal des décisions, en JSON (#54)
-    arc_index.py decision-effects [--trigger T] [--days N] [--json]
-                                                                        # ce qui s'est passé après chaque décision (#175)
+    arc_index.py decision-effects [--trigger T] [--days N] [--text]
+                                                                        # ce qui s'est passé après chaque décision, en JSON (#175)
     arc_index.py energy [--activity GARMIN_ID | --date D | --since D] [--limit N] [--assumptions]
                                                                         # dépense modèle vs Garmin, en JSON
     arc_index.py pace-curve [--days N] [--lt-speed-ms V]              # courbe allure-durée GAP, CS/D′ (#169)
@@ -4588,15 +4588,21 @@ def decision_effects(conn, today: Optional[date] = None, days: Optional[int] = N
     """Effet des décisions (#175) — commande « decision-effects » et `/api/decision-effects`.
 
     Évalue (fonctions pures de `arc_decision_effects`) les décisions de la fenêtre (`days`, défaut
-    `DECISION_EFFECTS_DEFAULT_DAYS`, se terminant à `today`) ; synthèse par déclencheur × issue avec
-    avertissement de petit effectif. DÉRIVÉ, jamais stocké : voir `arc_decision_effects.ASSUMPTIONS`."""
+    `DECISION_EFFECTS_DEFAULT_DAYS`, se terminant à `today`) ; synthèse par déclencheur × action × issue
+    avec avertissement de petit effectif. Le chevauchement (`overlaps`) se lit contre TOUTES les
+    décisions connues, quel que soit le filtre `trigger`/`days` : une décision d'un autre déclencheur
+    prise dans la même fenêtre confond tout autant l'effet. DÉRIVÉ, jamais stocké : voir
+    `arc_decision_effects.ASSUMPTIONS`."""
     today = today or date.today()
     days = DECISION_EFFECTS_DEFAULT_DAYS if days is None else days
-    rows = decisions_query(conn, today=today, days=days, trigger=trigger)
-    for d in rows:
+    every = decisions_query(conn)
+    for d in every:
         d["id"] = Path(d["source_path"]).stem
+    start = (today - timedelta(days=days - 1)).isoformat()
+    rows = [d for d in every if start <= str(d.get("date") or "") <= today.isoformat()
+            and (not trigger or d.get("trigger") == trigger)]
     data = _decision_effect_data(conn)
-    evaluations = DE.evaluate_all(rows, data, today)
+    evaluations = DE.evaluate_all(rows, data, today, context=every)
     for ev, d in zip(evaluations, rows):
         ev["summary"] = d.get("summary")
     return {"today": today.isoformat(), "days": days, "trigger": trigger, "effects": evaluations,
@@ -4605,7 +4611,7 @@ def decision_effects(conn, today: Optional[date] = None, days: Optional[int] = N
 
 
 def decision_effects_text(report: dict) -> str:
-    """Rendu lisible de `decision_effects` (CLI sans `--json`)."""
+    """Rendu lisible de `decision_effects` (CLI avec `--text`)."""
     lines = [f"Effet des décisions — {report['days']} derniers jours (au {report['today']})", ""]
     if not report["effects"]:
         lines.append("Aucune décision sur cette période.")
@@ -4616,7 +4622,7 @@ def decision_effects_text(report: dict) -> str:
         lines.append("")
     for ev in report["effects"]:
         why = f" ({ev['reason']})" if ev.get("reason") else ""
-        lines.append(f"- {ev['date']} {ev['trigger']}/{ev['outcome']} → {ev['effect']}{why}")
+        lines.append(f"- {ev['date']} {ev['trigger']}/{ev['action']}/{ev['outcome']} → {ev['effect']}{why}")
     lines += ["", report["caveat"]]
     return "\n".join(lines)
 
@@ -4710,6 +4716,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « decisions » : ne garde que les décisions de ce déclencheur")
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
+    parser.add_argument("--text", action="store_true",
+                        help="commande « decision-effects » : rendu texte lisible (défaut : JSON, comme les "
+                             "autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
                              "(journal courant, voir DECISION_INACTIVE_OUTCOMES)")
@@ -4721,8 +4730,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « pace-curve » (#169) : vitesse (m/s) au seuil lactique Garmin, "
                              "pour le contrôle de cohérence avec la CS (signalé, jamais arbitré)")
     parser.add_argument("--json", action="store_true",
-                        help="commandes « pace-curve » (JSON déjà le défaut, accepté pour la clarté) et "
-                             "« decision-effects » (sortie JSON complète)")
+                        help="commandes « pace-curve » et « decision-effects » : sortie JSON (déjà le "
+                             "défaut, accepté pour la clarté)")
     parser.add_argument("--band", choices=SL.BANDS, default="endurance",
                         help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
                              "arc_slope_model.ASSUMPTIONS['population'])")
@@ -4799,7 +4808,7 @@ def main(argv=None) -> int:
             raise ConfigError(f"--days : un entier >= 1 attendu, « {args.days} » reçu.")
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         report = decision_effects(conn, today_date, args.days, args.trigger)
-        print(json.dumps(report, ensure_ascii=False) if args.json else decision_effects_text(report))
+        print(decision_effects_text(report) if args.text and not args.json else json.dumps(report, ensure_ascii=False))
         return 0
     if args.command == "gait-summary":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

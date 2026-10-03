@@ -78,8 +78,9 @@ Pour chaque séance, le coach fournit :
 ### Bilan personnel des décisions (#175)
 
 Le coach peut citer ce qui s'est passé après les décisions passées de l'athlète
-(`python3 scripts/arc_index.py decision-effects`, par déclencheur : « allègement après bilan
-matinal : 7 fois, 5 améliorées »). Effets **dérivés**, jamais stockés ni écrits dans les fichiers
+(`python3 scripts/arc_index.py decision-effects`, par déclencheur × nature de l'action déduite de
+`before`/`after` × issue : « allègement après bilan matinal : 7 fois, 5 améliorées » ; décisions aux
+fenêtres chevauchantes signalées). Effets **dérivés**, jamais stockés ni écrits dans les fichiers
 de décision. Règles dures : **corrélation, pas causalité** (dit explicitement) ; aucune
 « tendance » sous 5 cas évaluables ; ce bilan n'assouplit **jamais** un garde-fou `block`, une
 décision médicale ni un verdict rouge ; le coach ne recalcule jamais un effet lui-même.

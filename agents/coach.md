@@ -203,8 +203,10 @@ python3 scripts/arc_index.py --validate <week-file> <decision-file>
 
 **Personal outcome synthesis (#175, optional, read-only).** To say what
 usually happened after this athlete's past decisions of the same kind, run
-`python3 scripts/arc_index.py decision-effects [--trigger T] --json` and quote
-ONLY its `synthesis[].statement` figures. Hard rules: always state that
+`python3 scripts/arc_index.py decision-effects [--trigger T]` (JSON; groups are
+trigger x action kind x outcome, the action kind being derived from the
+decision's `before`/`after`) and quote ONLY its `synthesis[].statement` figures
+(they already flag decisions whose windows overlap). Hard rules: always state that
 correlation is not causation (use its `caveat`); cite a trend ONLY when
 `trend_allowed` is true (n >= 5) — otherwise give the raw counts and the
 `warning` (small sample); NEVER use it to relax a `block` guardrail, a medical
