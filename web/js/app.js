@@ -1495,10 +1495,11 @@ async function friseSection(selected = null) {
   const raceTxt = race ? (race.in_block ? `course le ${F.dateLong(race.date)}${race.days_left >= 0 ? ` (dans ${race.days_left} j)` : ""}` : `course le ${F.dateLong(race.date)}, hors des semaines planifiées`) : "";
   const pos = idx >= 0 ? `Semaine ${idx + 1} sur ${b.weeks.length} du bloc` : (b.weeks[0].status === "future" ? `Bloc de ${b.weeks.length} semaines à venir` : `Bloc de ${b.weeks.length} semaines terminé`);
   const unknownTxt = b.unknown_weeks ? ` · ${b.unknown_weeks} semaine${b.unknown_weeks > 1 ? "s" : ""} sans phase renseignée (plan antérieur au squelette de bloc ?)` : "";
+  const missingTxt = b.missing_weeks ? ` · ${b.missing_weeks} semaine sans fichier dans le bloc` : "";
   const html = `<section class="band band--frise" aria-labelledby="frise-title"><h2 id="frise-title">Frise du bloc</h2>
     <p class="legend">${keys.join("")}<span class="legend__item"><span class="key key--frise-light"></span>Semaine allégée</span><span class="legend__item"><span class="key key--frise-done"></span>Réalisé</span></p>
     <div class="chart-host chart-host--frise" id="frise-host">${blockFrise(items, "Phases du bloc planifié, une colonne par semaine")}</div>
-    <p class="readout" id="frise-readout" aria-live="polite">${F.esc(pos)}${raceTxt ? ` · ${F.esc(raceTxt)}` : ""}${F.esc(unknownTxt)}</p></section>`;
+    <p class="readout" id="frise-readout" aria-live="polite">${F.esc(pos)}${raceTxt ? ` · ${F.esc(raceTxt)}` : ""}${F.esc(unknownTxt)}${F.esc(missingTxt)}</p></section>`;
   const mount = () => {
     const host = $("#frise-host");
     const readout = $("#frise-readout");
