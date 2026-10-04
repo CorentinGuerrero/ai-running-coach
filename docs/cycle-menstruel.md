@@ -16,7 +16,7 @@ Cette fonctionnalité permet au coach de **nuancer** une lecture, rien de plus.
 |---|---|
 | `off` (défaut) | Rien. Zéro mention. |
 | `garmin` | Phase lue sur Garmin Connect (`[data].source = "garmin"`). Demande de relancer `./install.sh` : les deux outils `get_menstrual_data_for_date` et `get_menstrual_calendar_data` ne sont ajoutés à la liste blanche `GARMIN_ENABLED_TOOLS` **que dans ce mode**. |
-| `intervals` | Phase lue dans le champ wellness `menstrualPhase` d'intervals.icu (`[data].source = "intervals"`), avec l'appel `get_wellness_for_date` déjà fait pour la HRV et la FC de repos. Aucune installation à refaire. |
+| `intervals` | Phase lue dans le champ wellness `menstrualPhase` d'intervals.icu (`[data].source = "intervals"`), avec l'appel `icu_get_wellness_for_date` déjà fait pour la HRV et la FC de repos. Aucune installation à refaire. |
 | `manual` | Phase déclarée par vous-même avec `/log` (« phase lutéale, jour 21 »). |
 
 Dans `config/workspace.user.toml` :
@@ -64,8 +64,9 @@ de votre configuration, sinon `off`.
   (le jeu d'essai de `garmin-mcp` est une simulation, pas une capture). Les agents ne retiennent
   donc une phase que si un champ la donne explicitement, et disent « phase indisponible »
   sinon — la forme réelle est à vérifier à la première utilisation.
-- **intervals.icu : vérifié** dans le serveur MCP épinglé (`models.py`, `tools/wellness.py`) : le
-  champ `menstrualPhase` du modèle wellness ressort dans `get_wellness_for_date`, sous
+- **intervals.icu : vérifié** dans le serveur MCP épinglé (fork `hhopke/intervals-icu-mcp` au
+  commit `5cd7e1a`, #165 : `models.py`, `tools/wellness.py`) : le champ `menstrualPhase` du
+  modèle wellness ressort dans `icu_get_wellness_for_date`, sous
   `other.menstrual_phase` (chaîne). Les valeurs possibles de cette chaîne ne sont pas définies
   par le serveur : à vérifier ; une valeur non reconnue est traitée comme inconnue.
 

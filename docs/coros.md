@@ -54,7 +54,8 @@ repos ; la HRV n'arrive pas chez tous les utilisateurs selon le
 puis `./install.sh --source intervals`
 installe le serveur MCP épinglé `intervals-icu-mcp`. Limites déjà documentées :
 pas de score de readiness (HRV + FC de repos uniquement), pas de FC de
-récupération ni de `splits` par km, séances poussées en texte libre. Détail :
+récupération ni de `splits` par km ; séances poussées dans la syntaxe native
+d'Intervals.icu (étapes structurées, repli en texte libre si l'analyse échoue, #165). Détail :
 [Configuration Intervals.icu](intervals-setup.md#fonctionnalites-et-champs-indisponibles-avec-cette-source).
 Le FIT d'une activité s'obtient par l'API REST d'Intervals.icu
 ([Fichiers FIT](intervals-setup.md#fichiers-fit)).

@@ -88,6 +88,8 @@ class TestStravaChatPolicy(unittest.TestCase):
         self.assertEqual(self.policy.decide("mcp:garmin.get_rhr_day", {}), "allow")
         self.assertEqual(self.policy.decide("mcp:garmin.schedule_workouts", {}), "ask")
         self.assertEqual(self.policy.decide("mcp:intervals.get_wellness_for_date", {}), "allow")
+        # #165 : noms du fork hhopke (préfixe icu_), lecture → autorisée sans approbation.
+        self.assertEqual(self.policy.decide("mcp:intervals.icu_get_wellness_for_date", {}), "allow")
 
 
 if __name__ == "__main__":

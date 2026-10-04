@@ -242,8 +242,10 @@ class TestDataSourceDocumented(unittest.TestCase):
     def test_intervals_column_uses_prefixed_tool_names(self):
         """La colonne `intervals` de la table de correspondance (AGENTS.md) ne cite plus que des
         outils préfixés `icu_` — l'ancien nom nu n'est plus un outil du serveur (#165)."""
-        start = AGENTS_MD.index("### Correspondance des outils")
-        end = AGENTS_MD.index("**Téléchargement FIT")
+        start = AGENTS_MD.index("### Correspondance des outils — Garmin ↔ intervals.icu")
+        # Fin : la section suivante (table Strava, #164) ou, à défaut, le paragraphe FIT.
+        nxt = AGENTS_MD.find("\n### ", start + 1)
+        end = nxt if nxt != -1 else AGENTS_MD.index("**Téléchargement FIT")
         for line in AGENTS_MD[start:end].splitlines():
             if not line.startswith("|") or line.startswith("|---") or line.startswith("| Besoin"):
                 continue
@@ -255,6 +257,33 @@ class TestDataSourceDocumented(unittest.TestCase):
                     re.search(rf"(?<![A-Za-z_]){legacy}\b", cells[2]),
                     f"colonne intervals : `{legacy}` sans préfixe icu_ — {line[:90]}",
                 )
+
+    def test_no_legacy_intervals_read_tool_outside_migration_notes(self):
+        """Aucun prompt/doc/script ne cite un ancien nom de LECTURE intervals (serveur eddmann,
+        sans préfixe `icu_`) comme outil à appeler — y compris les fonctionnalités arrivées
+        après le fork (cycle menstruel #166 : `other.menstrual_phase` de
+        `icu_get_wellness_for_date`). Ces noms n'existent pas côté Garmin ni Strava (tirets),
+        donc toute occurrence nue est une régression. Seules les notes de migration, qui
+        expliquent l'ancien nom, sont exemptées."""
+        legacy_reads = ("get_wellness_for_date", "get_wellness_data", "get_recent_activities",
+                        "get_activity_details", "get_upcoming_workouts", "get_fitness_summary",
+                        "get_gear_list")
+        exempt = {"docs/update.md", "docs/troubleshooting.md",
+                  "skills/intervals-icu-best-practices/SKILL.md"}
+        files = [REPO / "AGENTS.md", *sorted((REPO / "agents").glob("*.md")),
+                 *sorted((REPO / "skills").glob("*/SKILL.md")),
+                 *sorted((REPO / "docs").glob("*.md")), *sorted((REPO / "docs/skills").glob("*.md")),
+                 *sorted((REPO / "scripts").glob("*.py")), *sorted((REPO / "config").rglob("*.toml"))]
+        found = []
+        for path in files:
+            rel = path.relative_to(REPO).as_posix()
+            if rel in exempt:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for legacy in legacy_reads:
+                for m in re.finditer(rf"(?<![A-Za-z0-9_-]){legacy}\b", text):
+                    found.append(f"{rel}:{text.count(chr(10), 0, m.start()) + 1} {legacy}")
+        self.assertFalse(found, f"ancien nom intervals sans préfixe icu_ : {found}")
 
     def test_best_practices_skill_documents_the_structured_form_and_fallback(self):
         skill = (REPO / "skills/intervals-icu-best-practices/SKILL.md").read_text(encoding="utf-8")
