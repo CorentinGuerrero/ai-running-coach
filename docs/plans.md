@@ -182,14 +182,16 @@ renforcement et des **créneaux de séance** (`placeholder: true`) posés sur le
 jours disponibles — pas des séances : le coach les habille.
 
 - **Pic** = volume tenu × `peak_from_current`, jamais inventé ; si le pic
-  dérivé est sous le pic indicatif du gabarit, un avertissement le dit (mise en
-  route plus longue ou objectif revu — jamais un gabarit étiré). Un plafond
+  dérivé est sous le pic indicatif du gabarit, un avertissement le dit (d'abord
+  une mise en route qui fait réellement monter le volume tenu, puis relancer
+  `plan-skeleton`, ou un objectif revu — jamais un gabarit étiré). Un plafond
   d'heures du profil ramène le pic à ce plafond, et le dit.
 - **Trop court** (moins de semaines que le minimum du gabarit) :
   `status: "too_short"`, aucune semaine, options explicites (format plus court,
   date de course au plus tôt, bloc sans gabarit). **Trop long** (plus que le
   maximum) : des semaines de mise en route (`lead_in`) au volume tenu, avec une
-  semaine allégée tous les N, avant le gabarit.
+  semaine allégée tous les N, avant le gabarit. Elles ne font **pas** monter le
+  volume : le pic reste volume tenu × `peak_from_current`.
 - **Pas d'historique** (moins d'1 h par semaine) : `status: "no_history"` — le
   coach demande le volume actuel de l'athlète, jamais inventé.
 - **Départ** : le lundi de la semaine en cours si c'est aujourd'hui, sinon le
@@ -200,6 +202,22 @@ jours disponibles — pas des séances : le coach les habille.
   s'il persiste, la semaine n'est **pas** émise (`unresolved`, statut
   `needs_review`). Un squelette ne contient jamais de semaine `block` ; les
   `warn`/`info` restants (ACWR projeté…) sont rendus tels quels, par semaine.
+- **Semaine de course et récupération** : jusqu'à 3 footings avant la course,
+  jamais la veille (laissée libre : repos ou déverrouillage court, au choix du
+  coach), volume au prorata des jours avant la course (6/6 un dimanche, 1/6 un
+  mardi). Aucun créneau de course à pied dans les 3 jours qui suivent la
+  course ; la semaine concernée garde le volume du gabarit au prorata des jours
+  restants.
+- **Référence `previous_week`** : la reprise qui suit une semaine allégée (ou
+  post-course) n'est pas réduite tant qu'elle reste sous la dernière semaine
+  non allégée + seuil, comme pour la validation des gabarits ; le `warn` R2/R3
+  reste affiché.
+- **Vérifier une semaine écrite** : le verdict du squelette compare chaque
+  semaine aux semaines générées avant elle. `arc_guardrails.py check --week`
+  sur un fichier `Semaine_<lundi>.md`, lui, compare à l'historique **réel** :
+  lancé sur une semaine lointaine, il voit des semaines intercalaires vides
+  (R2/R3 et ACWR projeté sans objet). Le coach repasse donc `check` sur chaque
+  semaine au moment où elle devient la **prochaine**, après l'avoir habillée.
 - **Forme prévue le jour J** : le squelette est projeté par
   [`load-forecast`](guardrails.md) (estimation à partir de créneaux dont
   l'intensité est un placeholder : un ordre de grandeur, pas une mesure).
