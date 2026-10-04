@@ -59,6 +59,7 @@ from typing import Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import arc_block_timeline as BT  # noqa: E402
 import arc_guardrails as G  # noqa: E402
 import arc_index as I  # noqa: E402
 import arc_metrics as M  # noqa: E402
@@ -1006,6 +1007,28 @@ def api_report(store: Store, q: dict):
     return {**_strip(row, "body_md"), "body_html": render_markdown(I.C.body_after_block(row["body_md"] or ""))}
 
 
+def api_block(store: Store, q: dict) -> dict:
+    """Frise du bloc planifié (#193) : phases semaine par semaine + repère de course. Lecture seule de
+    l'index (`week`, `activity`, `objective`) ; la logique pure vit dans `arc_block_timeline`."""
+    today = _today(store)
+    weeks = store.rows("SELECT week_start, phase, week_type, target_duration_s, target_distance_m, "
+                       "target_elevation_m FROM week WHERE shadowed = 0 ORDER BY week_start")
+    starts = BT.select_block([w["week_start"] for w in weeks if w["week_start"]], today, BT.block_bridgeable(weeks))
+    done: dict = {}
+    if starts:
+        last = date.fromisoformat(starts[-1]) + timedelta(days=6)
+        for row in store.rows("SELECT date, distance_m, duration_s, elevation_gain_m FROM activity "
+                              "WHERE sport != 'rest' AND date >= ? AND date <= ?", (starts[0], last.isoformat())):
+            ws = _monday(date.fromisoformat(row["date"])).isoformat()
+            agg = done.setdefault(ws, {"duration_s": 0, "distance_m": 0, "elevation_m": 0, "sessions": 0})
+            agg["duration_s"] += row["duration_s"] or 0
+            agg["distance_m"] += row["distance_m"] or 0
+            agg["elevation_m"] += row["elevation_gain_m"] or 0
+            agg["sessions"] += 1
+    obj = store.one("SELECT name, race_date FROM objective WHERE race_date IS NOT NULL ORDER BY source_path LIMIT 1")
+    return BT.build(weeks, done, obj["race_date"] if obj else None, today, obj["name"] if obj else None)
+
+
 def api_calendar(store: Store, q: dict) -> dict:
     rows = store.rows("SELECT date, SUM(distance_m) AS distance_m, SUM(duration_s) AS duration_s, "
                       "SUM(elevation_gain_m) AS elevation_m, SUM(load) AS load, COUNT(*) AS sessions "
@@ -1554,7 +1577,7 @@ ROUTES = {
     "/api/summary": api_summary, "/api/assumptions": api_assumptions, "/api/form": api_form, "/api/load": api_load,
     "/api/health": api_health, "/api/week": api_week, "/api/activities": api_activities,
     "/api/performance": api_performance, "/api/reports": api_reports, "/api/report": api_report,
-    "/api/calendar": api_calendar, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
+    "/api/calendar": api_calendar, "/api/block": api_block, "/api/nutrition": api_nutrition, "/api/fueling": api_fueling,
     "/api/decoupling": api_decoupling, "/api/vam": api_vam, "/api/descent": api_descent,
     "/api/durability": api_durability, "/api/slope-model": api_slope_model, "/api/files": api_files,
     "/api/trail-shape": api_trail_shape, "/api/energy-trend": api_energy_trend,

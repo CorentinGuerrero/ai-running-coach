@@ -1,7 +1,7 @@
 // Tableau de bord ai-running-coach — lecture seule, servi par scripts/arc_serve.py.
 import * as F from "./format.js";
 import { navItems } from "./nav.js";
-import { timeChart, attachCursor, verdictStrip, yearCalendar } from "./chart.js";
+import { timeChart, attachCursor, verdictStrip, yearCalendar, blockFrise } from "./chart.js";
 import { resampleByDistance, colorModes, sessionMap } from "./map.js";
 import { roadbookHtml, wireRoadbook } from "./roadbook.js";
 
@@ -1455,9 +1455,70 @@ async function viewHealth(params) {
 // Vue : Semaine
 // ---------------------------------------------------------------------------
 
+/** Frise du bloc planifié (#193) : phases semaine par semaine, volume prévu/réalisé, drapeau de course.
+ * `selected` : lundi de la semaine affichée (vue Semaine). Rien n'est rendu sans plan au contrat ;
+ * une erreur d'API ne casse jamais la vue qui l'accueille. Retourne `{ html, mount }` (`mount` branche
+ * le lecteur de détail et recentre la frise, une fois le HTML inséré). */
+async function friseSection(selected = null) {
+  let b;
+  try { b = await api("block"); } catch { return { html: "", mount: () => {} }; }
+  if (!b || b.status !== "ok" || !b.weeks.length) return { html: "", mount: () => {} };
+  const TYPE = { build: "construction", recovery: "allégée", taper: "affûtage", race: "course", lead_in: "mise en route", post_race: "récupération post-course" };
+  const peak = Math.max(1, ...b.weeks.map((w) => Math.max(w.target_duration_s || 0, (w.done && w.done.duration_s) || 0)));
+  const describe = (w) => {
+    const bits = [`Semaine du ${F.dayShort(w.week_start)}`, w.phase_label];
+    if (w.week_type) bits.push(TYPE[w.week_type] || w.week_type);
+    if (!w.planned) bits.push("aucun fichier de semaine (trou dans le bloc)");
+    else bits.push(w.target_duration_s ? `prévu ${F.duration(w.target_duration_s)}${w.target_elevation_m ? ` · ${F.elevation(w.target_elevation_m)}` : ""}` : "volume prévu non renseigné");
+    if (w.done) bits.push(`réalisé ${F.duration(w.done.duration_s)}${w.done.elevation_m ? ` · ${F.elevation(w.done.elevation_m)}` : ""}${w.done.partial ? " (semaine en cours)" : ""}`);
+    if (w.status === "current") bits.push("semaine en cours");
+    if (w.is_race_week) bits.push("semaine de course");
+    return bits.join(", ");
+  };
+  const items = b.weeks.map((w) => {
+    const d = F.parseDate(w.week_start);
+    return {
+      href: `#/semaine?debut=${w.week_start}`, aria: describe(w), tip: describe(w), phase: w.phase,
+      phaseText: w.phase_label,
+      tick: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
+      h: w.target_duration_s ? w.target_duration_s / peak : null, d: w.done ? w.done.duration_s / peak : null,
+      light: w.light, current: w.status === "current", selected: w.week_start === selected, race: w.is_race_week,
+    };
+  });
+  const present = new Set(b.weeks.map((w) => w.phase));
+  const keys = b.phases.filter((p) => present.has(p.id)).map((p) => `<span class="legend__item"><span class="key key--phase-${p.id}"></span>${F.esc(p.label)}</span>`);
+  if (present.has("other")) keys.push(`<span class="legend__item"><span class="key key--phase-other"></span>Autre libellé</span>`);
+  if (present.has("unknown")) keys.push(`<span class="legend__item"><span class="key key--phase-unknown"></span>Phase inconnue</span>`);
+  if (present.has("missing")) keys.push(`<span class="legend__item"><span class="key key--phase-missing"></span>Semaine sans plan</span>`);
+  const idx = b.weeks.findIndex((w) => w.status === "current");
+  const race = b.race;
+  const raceTxt = race ? (race.in_block ? `course le ${F.dateLong(race.date)}${race.days_left >= 0 ? ` (dans ${race.days_left} j)` : ""}` : `course le ${F.dateLong(race.date)}, hors des semaines planifiées`) : "";
+  const pos = idx >= 0 ? `Semaine ${idx + 1} sur ${b.weeks.length} du bloc` : (b.weeks[0].status === "future" ? `Bloc de ${b.weeks.length} semaines à venir` : `Bloc de ${b.weeks.length} semaines terminé`);
+  const unknownTxt = b.unknown_weeks ? ` · ${b.unknown_weeks} semaine${b.unknown_weeks > 1 ? "s" : ""} sans phase renseignée (plan antérieur au squelette de bloc ?)` : "";
+  const missingTxt = b.missing_weeks ? ` · ${b.missing_weeks} semaine sans fichier dans le bloc` : "";
+  const html = `<section class="band band--frise" aria-labelledby="frise-title"><h2 id="frise-title">Frise du bloc</h2>
+    <p class="legend">${keys.join("")}<span class="legend__item"><span class="key key--frise-light"></span>Semaine allégée</span><span class="legend__item"><span class="key key--frise-done"></span>Réalisé</span></p>
+    <div class="chart-host chart-host--frise" id="frise-host">${blockFrise(items, "Phases du bloc planifié, une colonne par semaine")}</div>
+    <p class="readout" id="frise-readout" aria-live="polite">${F.esc(pos)}${raceTxt ? ` · ${F.esc(raceTxt)}` : ""}${F.esc(unknownTxt)}${F.esc(missingTxt)}</p></section>`;
+  const mount = () => {
+    const host = $("#frise-host");
+    const readout = $("#frise-readout");
+    if (!host) return;
+    const initial = readout.textContent;
+    const show = (ev) => { const a = ev.target.closest && ev.target.closest("a[data-i]"); if (a) readout.textContent = describe(b.weeks[Number(a.dataset.i)]); };
+    host.addEventListener("mouseover", show);
+    host.addEventListener("focusin", show);
+    host.addEventListener("mouseleave", () => { readout.textContent = initial; });
+    const target = host.querySelector(".frise-focus.is-selected") || host.querySelector(".frise-focus.is-current");
+    if (target) host.scrollLeft = Math.max(0, target.getBoundingClientRect().left - host.getBoundingClientRect().left + host.scrollLeft - host.clientWidth / 2);
+  };
+  return { html, mount };
+}
+
 async function viewWeek(params) {
   const start = params.get("debut");
   const w = await api(start ? `week?start=${start}` : "week");
+  const frise = await friseSection(w.week_start);
   const known = w.known_weeks;
   const prev = F.addDays(w.week_start, -7);
   const next = F.addDays(w.week_start, 7);
@@ -1478,10 +1539,12 @@ async function viewWeek(params) {
   main.innerHTML = `${header(`Semaine du ${F.dayShort(w.week_start)}`, w.week ? `${F.esc(w.week.location || "")}${w.week.phase ? " · " + F.esc(w.week.phase) : ""}` : "Pas de plan de semaine au contrat pour ces dates.")}
     <div class="toolbar"><a class="seg" href="#/semaine?debut=${prev}">← Précédente</a><a class="seg" href="#/semaine">Cette semaine</a><a class="seg" href="#/semaine?debut=${next}">Suivante →</a>
       ${known.length ? `<label class="select">Plans : <select id="weeks">${known.slice().reverse().map((k) => `<option value="${k}" ${k === w.week_start ? "selected" : ""}>${F.dayShort(k)}</option>`).join("")}</select></label>` : ""}</div>
+    ${frise.html}
     <ol class="week">${cols}</ol>
     <section class="band"><h2>Réalisé</h2><dl class="facts facts--inline"><div><dt>Séances</dt><dd>${w.activities.length}</dd></div><div><dt>Durée</dt><dd>${F.hours(totalS)}${target.target_duration_s ? ` <small>/ ${F.hours(target.target_duration_s)}</small>` : ""}</dd></div><div><dt>Distance</dt><dd>${F.distance(totalM)}${target.target_distance_m ? ` <small>/ ${F.distance(target.target_distance_m, 0)}</small>` : ""}</dd></div></dl></section>
     ${complianceSection(w.compliance, trail)}
     ${w.body_html ? `<section class="band prose"><h2>Plan du coach</h2>${w.body_html}</section>` : ""}`;
+  frise.mount();
   const sel = $("#weeks");
   if (sel) sel.addEventListener("change", () => { location.hash = `#/semaine?debut=${sel.value}`; });
 }
@@ -3023,6 +3086,7 @@ async function viewRoadbook(params) {
 
 async function viewCalendar(params) {
   const cal = await api("calendar");
+  const frise = await friseSection();
   const years = Object.keys(cal.cumulative).sort();
   if (!years.length) {
     main.innerHTML = header("Calendrier") + empty("Aucune séance", "Le calendrier se remplit avec les séances indexées.");
@@ -3046,11 +3110,13 @@ async function viewCalendar(params) {
   const monthLabels = cumDates.map((_, i) => (i % 31 === 0 ? ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."][i / 31] || "" : ""));
   const cum = timeChart(cumDates, cumLayers, [], { height: 200, y: { zero: true }, xLabels: monthLabels, label: "Distance cumulée par année", yFormat: (v) => `${F.num(v)} km` });
   main.innerHTML = `${header("Calendrier", trail ? "Intensité : durée d'effort du jour." : "Intensité : durée d'effort du jour.")}
+    ${frise.html}
     <div class="toolbar">${years.map((y) => `<a class="seg ${y === year ? "is-on" : ""}" href="#/calendrier?annee=${y}">${y}</a>`).join("")}</div>
     <section class="band"><div class="chart-host chart-host--cal">${yearCalendar(Number(year), byDate, value, bucket)}</div>
       <p class="legend legend--small">Moins <span class="key cal--1"></span><span class="key cal--2"></span><span class="key cal--3"></span><span class="legend__item"><span class="key cal--4"></span>Plus (&lt; 40 min, 40–75, 75–120, &gt; 2 h)</span></p></section>
     <section class="band"><h2>Distance cumulée</h2><p class="legend">${years.slice(-3).map((y, k, arr) => `<span class="key key--year-${arr.length - 1 - k}"></span>${y}`).join(" ")}</p>
       <div class="chart-host chart-host--nox">${cum.svg}</div></section>`;
+  frise.mount();
 }
 
 // ---------------------------------------------------------------------------
