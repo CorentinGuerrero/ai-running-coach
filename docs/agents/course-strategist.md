@@ -126,6 +126,26 @@ décalage UTC du fuseau et l'heure solaire de la longitude du départ →
 traverse le passage à l'heure d'hiver reste juste, l'affichage suit l'heure
 locale du moment.
 
+## Roadbook imprimable (#187)
+
+Une fois le plan écrit ou mis à jour, l'agent mentionne le **roadbook** : la vue
+`#/roadbook` du [tableau de bord](../dashboard/views.md#roadbook) (adresse locale
+du tableau de bord, `scripts/dashboard.sh`) en tire une feuille A4 par scénario
+— profil, sections, heures de passage, barrières et marges, ravitos avec ce
+qu'on y prend, matériel obligatoire, urgence — à imprimer ou enregistrer en PDF
+depuis le navigateur. Rien n'est recalculé : la page lit le plan persisté, donc
+**ce que le plan ne contient pas manque aussi sur la feuille** (et l'encart
+« À compléter » le dit).
+
+Pour que la feuille soit complète, l'agent écrit dans le bloc ```arc du plan :
+`start_time` (date-heure ISO du départ, sans quoi pas d'heures de passage à
+l'horloge), `cutoff` des ravitos qui en ont, **`take`** de chaque ravito (liste
+courte de ce que le plan nutrition y fait prendre — il ne l'invente pas : il le
+recopie du fichier `nutrition/`), `gear` (le contrôle contre l'inventaire est
+celui de `arc_index.py equipment --race-plan`), `emergency` (organisation,
+points d'abandon) et `notes`. `nutrition_plan` pointe vers le fichier du plan
+de ravitaillement.
+
 ## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,
