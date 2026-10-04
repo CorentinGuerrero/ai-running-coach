@@ -218,7 +218,17 @@ chaque facteur et **propose** des coefficients personnels (JSON par défaut,
 - **Refus argumentés** : trop peu de segments (4 minimum par groupe et par
   cellule), facteur **confondu** (toutes les sections techniques sont aussi de
   nuit, par exemple), écart dans le bruit. Le facteur dit pourquoi, il ne
-  propose rien.
+  propose rien. Un débrief « dans le bruit » laisse quand même sa preuve, pour
+  que le cumul ne retienne pas que les courses à gros écart.
+- **Fatigue et course anormale** : quand l'exposition occupe la fin de la course
+  (nuit tombante), toute la référence est plus tôt ; l'écart de position est
+  publié (`position_gap`) et, au-delà de 15 % de la distance, la confiance est
+  plafonnée à « faible ». Une fin de course anormale (dernier quart 1,5 × plus
+  lent que la première moitié, par rapport au plan : blessure, fin marchée) fait
+  tout refuser (`abnormal_fade`) ; `--exclude-from-km KM` écarte la partie
+  touchée par un incident déclaré par l'athlète.
+- **Nuit** : la pénalité calibrée est la pénalité de **base** ; le supplément de
+  descente du plan est retranché de l'observé, jamais ré-attribué à la base.
 - **Attrition vers le défaut** : `nouveau = défaut + w × (observé − défaut)`,
   `w = n / (n + 20)` (n = segments exposés cumulés ; approximation du projet).
   Un seul débrief ne déplace donc jamais le coefficient jusqu'à l'observation brute.
@@ -226,8 +236,8 @@ chaque facteur et **propose** des coefficients personnels (JSON par défaut,
   absolue) dans `[pacing.personal].evidence` ; les suivants se **combinent**,
   rejouer le même débrief ne le compte pas deux fois.
 - **Chaleur** : un seul facteur pour toute la course, donc pas de contraste
-  interne ; estimée **entre** courses (une chaude, une sans correction météo),
-  confiance faible. **Altitude** : seulement si le plan porte `altitude_factor`.
+  interne ; estimée **entre** courses, et **aucune proposition avant deux courses
+  chaudes** et une sans correction météo débriefées, confiance faible. **Altitude** : seulement si le plan porte `altitude_factor`.
 - **Écriture après accord** : après confirmation explicite de l'athlète,
   `… --calibrate --apply` écrit `[pacing.personal]` dans
   `config/workspace.user.toml` ; `arc_race_pacing.py` le relit aux plans
