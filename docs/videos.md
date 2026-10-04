@@ -202,6 +202,20 @@ Vos données restent des fichiers Markdown chez vous : un bloc validé, un index
 
 </div>
 
+<div class="arc-video" markdown>
+
+[![Nouvelles portes d'entrée](video/sources-retours/poster.jpg)](video/sources-retours/index.html)
+
+<span class="arc-video__meta">Étape 13 · 1 min 49</span>
+
+### [Nouvelles portes d'entrée](video/sources-retours/index.html)
+
+Strava comme troisième source de données, retours en un geste par Telegram sans aucun modèle, et deux options à activer soi-même : le contexte du cycle et les apports poussés vers Garmin.
+
+[Regarder](video/sources-retours/index.html) · [English (1 min 53)](video/sources-retours/index.html?lang=en) · [La documentation](strava-setup.md)
+
+</div>
+
 </div>
 <!-- arc-videos:end -->
 

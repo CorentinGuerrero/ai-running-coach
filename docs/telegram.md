@@ -6,6 +6,24 @@ le coach l'a dans vos fichiers — **sans aucun modèle, donc sans clé d'API ni
 conversation libre avec le coach est possible en option (elle, facturée à la clé d'API, voir
 [le coach dans la poche](mobile.md#ce-qui-nest-pas-possible-et-pourquoi)).
 
+<!-- arc-video:sources-retours -->
+<div class="arc-video-card" markdown>
+
+[![Nouvelles portes d'entrée](video/sources-retours/poster.jpg)](video/sources-retours/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 13 · 1 min 49</span>
+
+**[Nouvelles portes d'entrée](video/sources-retours/index.html)** — Strava comme troisième source de données, retours en un geste par Telegram sans aucun modèle, et deux options à activer soi-même : le contexte du cycle et les apports poussés vers Garmin.
+
+[Regarder](video/sources-retours/index.html) · [English](video/sources-retours/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 !!! note "Un canal pour l'athlète, pas un outil des agents"
     Le bot lit vos appuis et écrit dans votre workspace. Aucun agent ne s'en sert pour agir, et il
     n'appelle jamais Garmin : aucune écriture Garmin ne passe par ce canal sans l'approbation
