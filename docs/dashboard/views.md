@@ -961,6 +961,24 @@ score sans que ce soit un problème.
 
 **Qu'ai-je dans la poche le jour J ?**
 
+<!-- arc-video:ultra -->
+<div class="arc-video-card" markdown>
+
+[![La nuit, la roche et le roadbook](../video/ultra/poster.jpg)](../video/ultra/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 14 · 1 min 49</span>
+
+**[La nuit, la roche et le roadbook](../video/ultra/index.html)** — Préparer un ultra : la nuit calculée sur place (crépuscule, frontale, heure d'hiver), le dénivelé corrigé par un modèle de terrain, la technicité du sentier, puis le roadbook imprimable avec passages, barrières et matériel obligatoire.
+
+[Regarder](../video/ultra/index.html) · [English](../video/ultra/index.html?lang=en) · [Toutes les vidéos](../videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 Une feuille imprimable par scénario (#187, épopée #170), accessible par le lien
 « Roadbook imprimable du plan de course » en bas de [Trail Shape](#trail-shape)
 (adresse `#/roadbook`, `?plan=<fichier>` pour choisir un plan, `?scenario=safe|realistic|ambitious`).

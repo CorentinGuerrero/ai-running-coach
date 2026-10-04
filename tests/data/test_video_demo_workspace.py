@@ -88,6 +88,18 @@ class TestDemoWorkspace(unittest.TestCase):
         self.assertEqual(plan["scenarios"], {"ambitious": 20280, "realistic": 21900, "safe": 24000})
         self.assertEqual([a["km"] for a in plan["aid_stations"]], [12, 24, 34])
 
+    def test_plan_ultra_de_nuit(self):
+        """Épisode 14 : plan calculé par le vrai moteur, nuit et technicité présentes, rien d'autre ne bouge."""
+        plan = block(self.root / "planning/2026-09-27_ultra_ultra-des-cretes.md")
+        self.assertEqual((plan["race_date"], plan["timezone"]), ("2027-10-30", "Europe/Paris"))
+        self.assertEqual([a["km"] for a in plan["aid_stations"]], [13, 28, 41, 55])
+        self.assertTrue(all("take" in a and "cutoff" in a for a in plan["aid_stations"]))
+        segs = plan["segments"]
+        self.assertTrue(any(s["night_fraction"]["realistic"] > 0 for s in segs))
+        self.assertTrue(any(s["technicity"]["coef"] > 1.1 for s in segs))
+        self.assertLessEqual(plan["scenarios"]["ambitious"], plan["scenarios"]["realistic"])
+        self.assertLessEqual(plan["scenarios"]["realistic"], plan["scenarios"]["safe"])
+
     def test_inspections_et_photos(self):
         files = sorted((self.root / "gear").glob("*_inspection.md"))
         self.assertEqual(len(files), 2)

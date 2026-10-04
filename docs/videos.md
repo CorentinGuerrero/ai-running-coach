@@ -216,6 +216,20 @@ Strava comme troisième source de données, retours en un geste par Telegram san
 
 </div>
 
+<div class="arc-video" markdown>
+
+[![La nuit, la roche et le roadbook](video/ultra/poster.jpg)](video/ultra/index.html)
+
+<span class="arc-video__meta">Étape 14 · 1 min 49</span>
+
+### [La nuit, la roche et le roadbook](video/ultra/index.html)
+
+Préparer un ultra : la nuit calculée sur place (crépuscule, frontale, heure d'hiver), le dénivelé corrigé par un modèle de terrain, la technicité du sentier, puis le roadbook imprimable avec passages, barrières et matériel obligatoire.
+
+[Regarder](video/ultra/index.html) · [English (1 min 54)](video/ultra/index.html?lang=en) · [La documentation](agents/course-strategist.md)
+
+</div>
+
 </div>
 <!-- arc-videos:end -->
 
