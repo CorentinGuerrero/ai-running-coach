@@ -153,6 +153,69 @@ class TestNightAttribution(unittest.TestCase):
         self.assertEqual({c["cell"] for c in rep["factors"]["night"]["cells"]}, {"smooth/low"})
 
 
+class TestReviewFindings(unittest.TestCase):
+    """Revue de code #188 : supplément de descente, preuves « dans le bruit », écart de position,
+    course anormale."""
+
+    def test_night_descent_extra_not_attributed_to_base(self):
+        """Le plan ajoute un supplément de nuit en DESCENTE ; la vraie pénalité de base est 12 %.
+        L'observé doit être 12, pas 12 + supplément (double compte au plan suivant)."""
+        night = range(18, 34)
+        plan = _plan(night=night)
+        for i, seg in enumerate(plan["segments"]):
+            seg["grade_mean_pct"] = -10.0 if i % 2 else 3.0
+            if i in night:
+                pen = RP.night_penalty_fraction(seg["grade_mean_pct"])
+                seg["night_factor"] = {k: 1.0 + pen for k in ("safe", "realistic", "ambitious")}
+                for k in ("predicted_time_s", "pace_s_km"):
+                    seg[k] = {sc: round(BASE_S * (1.0 + pen) * f, 1)
+                              for sc, f in (("safe", 1.1), ("realistic", 1.0), ("ambitious", 0.9))}
+        act = _activity(plan)
+        for i in night:
+            pen_true = RP.night_penalty_fraction(plan["segments"][i]["grade_mean_pct"], base_pct=12.0)
+            act["splits"][i][1] = round(BASE_S * (1.0 + pen_true), 2)
+        f = _calibrate(plan, act)["factors"]["night"]
+        self.assertEqual(f["status"], "estimated")
+        self.assertAlmostEqual(f["observed"], 12.0, delta=0.3)
+
+    def test_inconclusive_debrief_still_records_evidence(self):
+        """Sans quoi seules les courses à gros écart seraient cumulées (biais loin du défaut)."""
+        plan = _plan()
+        rep = _calibrate(plan, _activity(plan, bias=1.08))
+        self.assertEqual(rep["factors"]["night"]["status"], "inconclusive")
+        self.assertNotIn("night_penalty_pct", rep["proposals"])
+        self.assertTrue(any("|night|" in e for e in rep["evidence"]))
+        self.assertNotIn("evidence", rep["factors"]["night"])
+
+    def test_late_exposure_caps_confidence(self):
+        """Nuit en FIN de course : toute la référence est plus tôt -> confiance faible + note."""
+        plan = _plan(night=range(24, 40))
+        f = _calibrate(plan, _activity(plan, night_true=12.0))["factors"]["night"]
+        self.assertEqual(f["status"], "estimated")
+        self.assertGreater(f["position_gap"], CAL.POSITION_GAP_MAX)
+        self.assertEqual(f["confidence"], "low")
+        self.assertIn("fatigue", f["position_note"])
+        mid = _calibrate(_plan(), _activity(_plan(), night_true=12.0))["factors"]["night"]
+        self.assertLessEqual(abs(mid["position_gap"]), CAL.POSITION_GAP_MAX)
+        self.assertNotIn("position_note", mid)
+
+    def test_abnormal_fade_refuses_and_exclusion_recovers(self):
+        plan = _plan()
+        act = _activity(plan, night_true=12.0)
+        for i in range(32, N_SEG):  # fin de course marchée
+            act["splits"][i][1] = round(act["splits"][i][1] * 2.0, 2)
+        rep = _calibrate(plan, act)
+        for f in ("night", "technicity", "altitude", "heat"):
+            self.assertEqual(rep["factors"][f]["status"], "refused", f)
+            self.assertEqual(rep["factors"][f]["refusal_code"], "abnormal_fade")
+        self.assertEqual(rep["config_patch"], {"section": "pacing.personal", "values": {}, "evidence": []})
+        self.assertIn("abnormal_fade", rep["segments"])
+        ok = _calibrate(plan, act, exclude_from_km=32.0)
+        self.assertEqual(ok["segments"]["skipped"]["excluded"], 8)
+        self.assertEqual(ok["factors"]["night"]["status"], "estimated")
+        self.assertAlmostEqual(ok["factors"]["night"]["observed"], 12.0, delta=0.3)
+
+
 class TestTechnicityAttribution(unittest.TestCase):
     def test_underestimated_technicity_scale_goes_up(self):
         # coef planifié 1,10 (surcoût 10 %) ; surcoût réel 20 % -> échelle observée 2,0
@@ -218,16 +281,29 @@ class TestHeat(unittest.TestCase):
         self.assertNotIn("heat_hot_factor", rep["proposals"])
         self.assertIn("note", rep["factors"]["heat"])
 
+    @staticmethod
+    def _existing(report):
+        return {"values": {}, "evidence": [PP.parse_evidence(e)[0][0] for e in report["evidence"]], "warnings": []}
+
+    def test_one_hot_race_is_never_enough(self):
+        """Revue #188 : une course chaude + une neutre ne proposent RIEN (biais de base du jour
+        indiscernable de la chaleur) ; il en faut au moins HEAT_MIN_HOT_RACES."""
+        neutral = _plan(night=(), heat_notes=[], race_name="Course Fraiche", race_date="2026-05-01")
+        r1 = _calibrate(neutral, _activity(neutral, bias=1.0, date="2026-05-01"))
+        hot = _plan(night=(), heat_notes=self.HOT, race_name="Course Chaude", race_date="2026-09-27")
+        rep = _calibrate(hot, _activity(hot, bias=1.20 / 1.10), existing=self._existing(r1))
+        self.assertNotIn("heat_hot_factor", rep["proposals"])
+        self.assertIn(str(CAL.HEAT_MIN_HOT_RACES), rep["factors"]["heat"]["note"])
+
     def test_hot_and_neutral_races_estimate_hot_factor(self):
         neutral = _plan(night=(), heat_notes=[], race_name="Course Fraiche", race_date="2026-05-01")
         r1 = _calibrate(neutral, _activity(neutral, bias=1.0, date="2026-05-01"))
-        existing = {"values": {}, "evidence": [tuple(PP.parse_evidence(e)[0][0]) for e in r1["evidence"]], "warnings": []}
+        hot1 = _plan(night=(), heat_notes=self.HOT, race_name="Course Chaude 1", race_date="2026-07-14")
+        r2 = _calibrate(hot1, _activity(hot1, bias=1.20 / 1.10, date="2026-07-14"), existing=self._existing(r1))
         hot = _plan(night=(), heat_notes=self.HOT, race_name="Course Chaude", race_date="2026-09-27")
         # vraie chaleur : x1,20 au lieu de 1,10 (le plan l'a déjà appliquée dans son prévu)
         act = _activity(hot, bias=1.20 / 1.10)
-        for seg, sp in zip(hot["segments"], act["splits"]):
-            pass
-        rep = _calibrate(hot, act, existing=existing)
+        rep = _calibrate(hot, act, existing=self._existing(r2))
         p = rep["proposals"]["heat_hot_factor"]
         self.assertAlmostEqual(rep["factors"]["heat"]["base_ratio"], 1.20 / 1.10, places=3)
         self.assertAlmostEqual(p["observed_cumulated"], 1.10 * (1.20 / 1.10), delta=0.005)
@@ -300,6 +376,28 @@ class TestPersonalConfig(unittest.TestCase):
             self.assertEqual(got["values"], {"night_penalty_pct": 8.1, "technicity_scale": 1.2})
             self.assertEqual(got["evidence"], ev)
             self.assertEqual(got["warnings"], [])
+
+    def test_backup_is_the_file_before_the_debrief(self):
+        """`.bak` = fichier d'AVANT l'écriture, même quand plusieurs clés changent (revue #188)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "config").mkdir()
+            user = ws / "config" / "workspace.user.toml"
+            before = '# perso\n[coaching]\nstyle = "direct"\n'
+            user.write_text(before, encoding="utf-8")
+            PP.write_workspace(ws, {"night_penalty_pct": 8.1, "technicity_scale": 1.2},
+                               [("2026-09-27", "course-a", "night", 16, 12.0)])
+            self.assertEqual((ws / "config" / "workspace.user.toml.bak").read_text(encoding="utf-8"), before)
+
+    def test_invalid_value_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "config").mkdir()
+            user = ws / "config" / "workspace.user.toml"
+            user.write_text("[coaching]\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                PP.write_workspace(ws, {"night_penalty_pct": 8.0, "technicity_scale": 9.0}, [])
+            self.assertEqual(user.read_text(encoding="utf-8"), "[coaching]\n")
 
     def test_invalid_values_ignored_with_warning(self):
         got = PP.read_config({"pacing": {"personal": {"night_penalty_pct": 99, "technicity_scale": "abc",
@@ -421,6 +519,9 @@ class TestCalibrateCli(unittest.TestCase):
             cmd = [sys.executable, str(REPO / "scripts" / "arc_race_debrief.py"), "debrief", "--plan", str(root / "plan.md"),
                    "--activity", str(root / "act.md"), "--apply"]
             self.assertEqual(subprocess.run(cmd, capture_output=True, text=True).returncode, 1)
+            out = subprocess.run(cmd[:-1] + ["--exclude-from-km", "30"], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 1)
+            self.assertIn("--calibrate", out.stderr)
 
 
 class TestTechnicityScaleInEngine(unittest.TestCase):

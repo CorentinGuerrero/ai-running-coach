@@ -99,6 +99,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -1077,6 +1078,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                           "facteur (nuit, technicité, chaleur, altitude) et PROPOSITION de coefficients "
                           "personnels, JSON par défaut (--text pour lire) ; n'applique rien")
     ap.add_argument("--text", action="store_true", help="avec --calibrate : rendu lisible au lieu du JSON")
+    ap.add_argument("--exclude-from-km", type=float, dest="exclude_from_km",
+                     help="avec --calibrate : écarte les segments au-delà de ce km (blessure, fin de course "
+                          "marchée… déclarée par l'athlète) pour ne calibrer que la partie normale")
     ap.add_argument("--apply", action="store_true",
                      help="avec --calibrate : écrit les propositions dans [pacing.personal] de "
                           "config/workspace.user.toml. UNIQUEMENT après confirmation explicite de l'athlète")
@@ -1129,7 +1133,8 @@ def _run_calibration(args, plan: dict, activity: dict, common: dict, actual_weat
     else:
         scenario = args.scenario
         debrief = build_race_debrief(plan, activity, scenario=scenario, **common)
-    report = CAL.calibrate(plan, debrief, scenario=scenario, existing=existing, actual_weather=actual_weather)
+    report = CAL.calibrate(plan, debrief, scenario=scenario, existing=existing, actual_weather=actual_weather,
+                           exclude_from_km=args.exclude_from_km)
     if args.apply:
         patch = report["config_patch"]
         if not patch["values"] and not patch["evidence"]:
@@ -1148,8 +1153,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.scenario == "auto" and not args.calibrate:
         print("ERREUR : --scenario auto n'a de sens qu'avec --calibrate", file=sys.stderr)
         return 1
-    if (args.text or args.apply) and not args.calibrate:
-        print("ERREUR : --text et --apply n'ont de sens qu'avec --calibrate", file=sys.stderr)
+    if (args.text or args.apply or args.exclude_from_km is not None) and not args.calibrate:
+        print("ERREUR : --text, --apply et --exclude-from-km n'ont de sens qu'avec --calibrate", file=sys.stderr)
+        return 1
+    if args.exclude_from_km is not None and not (args.exclude_from_km > 0 and math.isfinite(args.exclude_from_km)):
+        print("ERREUR : --exclude-from-km attend un km positif", file=sys.stderr)
         return 1
     try:
         plan = load_block(args.plan, expected_kind="race_plan")

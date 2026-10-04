@@ -58,6 +58,9 @@ MIN_GROUP_N = 4                  # segments minimum par groupe (exposé ET réf�
 SHRINKAGE_K_SEGMENTS = 20        # K de n/(n+K) pour les facteurs estimés par segments
 HEAT_SHRINKAGE_K_RACES = 2       # idem pour la chaleur, n = nombre de courses
 POSITION_MARGIN = 0.15           # fenêtre de position (fraction de la distance) autour de l'exposition
+POSITION_GAP_MAX = 0.15          # écart de position moyenne exposés/référence au-delà duquel la confiance est « faible »
+ABNORMAL_FADE_RATIO = 1.5        # dernier quart / première moitié (médianes) : fin de course anormale -> refus
+HEAT_MIN_HOT_RACES = 2           # courses chaudes débriefées minimum avant TOUTE proposition de chaleur
 NIGHT_MIN_FRACTION = 0.5         # section « de nuit » (même seuil que `night_error_summary`)
 DAY_MAX_FRACTION = 0.05          # section « de jour »
 TECH_EXPOSED_MIN = 0.05          # effective_factor - 1 >= 0.05 : technique
@@ -82,6 +85,8 @@ ASSUMPTIONS = {
         "réalisé/prévu : segments exposés vs segments de référence dans la MÊME cellule des autres "
         "facteurs (nuit/jour/crépuscule × roulant/technique/intermédiaire × basse/haute altitude), "
         "cellules combinées par la moyenne des log-ratios pondérée par le nombre de segments exposés. "
+        "Le coefficient observé est la médiane pondérée des coefficients IMPLICITES de chaque segment "
+        "exposé (son ratio rapporté à la médiane de référence de sa cellule). "
         "Choix délibéré d'une méthode simple plutôt qu'une régression multi-facteurs : avec quelques "
         "dizaines de segments corrélés (la nuit tombe tard dans la course, l'altitude est groupée), "
         "une régression sur-ajusterait. Approximation du projet, aucune littérature vérifiable ne "
@@ -95,6 +100,23 @@ ASSUMPTIONS = {
         f"position +/- {POSITION_MARGIN:g} de la distance autour des segments exposés. Approximations "
         "du projet."
     ),
+    "fatigue": (
+        "La fenêtre de position limite la confusion « de nuit » / « tard dans la course » sans "
+        "l'annuler : quand la nuit (ou le terrain technique) occupe la FIN de la course, toute la "
+        "référence est plus tôt, et un reste de fatigue que le modèle de durabilité n'a pas prévu "
+        "gonflerait la pénalité. L'écart de position moyenne exposés/référence (`position_gap`, "
+        f"fraction de la distance) est donc publié ; au-delà de {POSITION_GAP_MAX:g}, la confiance est "
+        "plafonnée à « faible ». Aucune correction de tendance n'est tentée (elle extrapolerait hors "
+        "de la référence)."
+    ),
+    "outlier_race": (
+        "Course anormale (blessure, fin de course marchée, longue pause hors ravito) : si la médiane "
+        "des ratios réalisé/prévu du dernier quart dépasse "
+        f"{ABNORMAL_FADE_RATIO:g} x celle de la première moitié, AUCUN facteur n'est estimé (refus "
+        "`abnormal_fade`). `--exclude-from-km KM` écarte les segments au-delà d'un km (incident "
+        "connu de l'athlète) ; une défaillance plus douce que ce seuil n'est PAS détectée : c'est à "
+        "l'athlète de la signaler avant d'accepter une proposition. Seuil : approximation du projet."
+    ),
     "shrinkage": (
         f"nouveau = défaut + w x (observé - défaut), w = n / (n + K), K = {SHRINKAGE_K_SEGMENTS} segments "
         f"exposés (chaleur : {HEAT_SHRINKAGE_K_RACES} courses). Approximation du projet : un "
@@ -103,12 +125,18 @@ ASSUMPTIONS = {
     ),
     "confidence": (
         "Confiance = nombre de segments (>= 8 exposés ET référence : haute ; >= 5 : moyenne ; sinon "
-        "faible) ET écart > 2x son erreur-type (médiane robuste : 1,2533 x 1,4826 x MAD / racine de n) "
-        "pour « haute ». Un écart inférieur à son erreur-type est « inconclusif » : aucune proposition."
+        "faible) ET écart > 2x son erreur-type (médiane robuste : 1,2533 x 1,4826 x MAD / racine de n, "
+        "formule asymptotique qui SOUS-estime l'erreur sur 4 à 8 segments) pour « haute ». Un écart "
+        "inférieur à son erreur-type est « inconclusif » : aucune proposition issue de CE débrief, mais "
+        "sa preuve est conservée (sans quoi seules les courses à gros écart seraient cumulées, ce qui "
+        "biaiserait le cumul loin du défaut). Le seuil d'une erreur-type est volontairement permissif : "
+        "l'attrition, la zone morte, les bornes et la confirmation de l'athlète bornent l'effet d'un "
+        "faux positif."
     ),
     "heat": (
         "Un seul `heat_factor` pour toute la course : pas de contraste intra-course. Estimation "
-        "ENTRE courses (une chaude, une sans correction météo), par le biais de base de chacune "
+        f"ENTRE courses (au moins {HEAT_MIN_HOT_RACES} chaudes et une sans correction météo avant "
+        "toute proposition), par le biais de base de chacune "
         "(médiane des ratios jour/roulant/basse altitude). Ce biais mélange l'erreur de chaleur et "
         "l'erreur d'intensité de base propre à chaque course : confiance faible tant que peu de "
         "courses, d'où une attrition forte. La météo PRÉVUE n'est pas la météo RÉELLE : si la météo "
@@ -118,7 +146,9 @@ ASSUMPTIONS = {
         "Hypothèses non vérifiables par ce module : les temps réels reflètent le terrain, la nuit et "
         "l'altitude, mais aussi la forme du jour, les erreurs de GPS et de segmentation ; le baseline "
         "OSM de technicité (`--technicity-baseline`) n'est pas estimé, seule l'échelle du surcoût l'est ; "
-        "la perte d'altitude n'est estimée que si le plan porte `altitude_factor`. " + ALTITUDE_ENGINE_NOTE + "."
+        "la perte d'altitude n'est estimée que si le plan porte `altitude_factor`. " + ALTITUDE_ENGINE_NOTE + ". "
+        "Nuit : la pénalité proposée est la pénalité de BASE (plat/montée) ; le supplément de "
+        "descente du plan (`night_penalty_fraction`) est retranché de l'observé, pas ré-estimé."
     ),
 }
 
@@ -160,16 +190,29 @@ def _scenario_value(obj, scenario: str) -> Optional[float]:
     return float(obj)
 
 
-def segment_rows(plan: dict, debrief: dict, scenario: str) -> Tuple[List[dict], dict]:
+def _night_parameters(plan: dict) -> Tuple[float, float]:
+    """`(pénalité de base %, supplément de descente max %)` RÉELLEMENT utilisés par le plan :
+    `night.parameters` s'il a été recopié, sinon `pacing_personal`, sinon les défauts."""
+    params = (plan.get("night") or {}).get("parameters") if isinstance(plan.get("night"), dict) else None
+    params = params if isinstance(params, dict) else {}
+    personal = plan.get("pacing_personal") if isinstance(plan.get("pacing_personal"), dict) else {}
+    base = params.get("base_penalty_pct", personal.get("night_penalty_pct", RP.NIGHT_BASE_PENALTY_PCT))
+    dmax = params.get("descent_extra_max_pct", RP.NIGHT_DESCENT_EXTRA_MAX_PCT)
+    return float(base), float(dmax)
+
+
+def segment_rows(plan: dict, debrief: dict, scenario: str,
+                 exclude_from_km: Optional[float] = None) -> Tuple[List[dict], dict]:
     """Une ligne par segment exploitable : ratio, poids, position et cellules d'exposition.
     Rend `(rows, meta)` ; `meta` dit ce que le plan porte (nuit, technicité, altitude) et combien de
-    segments sont écartés (résolution basse, ravito, non atteints)."""
+    segments sont écartés (résolution basse, ravito, non atteints, au-delà de `exclude_from_km`)."""
     plan_segments = {s["id"]: s for s in plan.get("segments") or []}
+    night_base, night_dmax = _night_parameters(plan)
     total_km = max((s["km_end"] for s in plan_segments.values()), default=0.0) or 1.0
     aid_kms = [a["km"] for a in plan.get("aid_stations") or [] if isinstance(a.get("km"), (int, float))]
     has = {"night": False, "technicity": False, "altitude": False}
     rows: List[dict] = []
-    skipped = {"low_resolution": 0, "aid_station": 0, "not_comparable": 0}
+    skipped = {"low_resolution": 0, "aid_station": 0, "not_comparable": 0, "excluded": 0}
     for entry in debrief.get("segments") or []:
         seg = plan_segments.get(entry["id"])
         if seg is None or entry.get("status") == "not_reached":
@@ -184,6 +227,9 @@ def segment_rows(plan: dict, debrief: dict, scenario: str) -> Tuple[List[dict], 
         has["night"] |= frac is not None
         has["technicity"] |= eff is not None
         has["altitude"] |= alt is not None
+        if exclude_from_km is not None and seg["km_end"] > exclude_from_km:
+            skipped["excluded"] += 1
+            continue
         if entry.get("resolution") != "high":
             skipped["low_resolution"] += 1
             continue
@@ -214,8 +260,14 @@ def segment_rows(plan: dict, debrief: dict, scenario: str) -> Tuple[List[dict], 
             alt_cell = "high"
         else:
             alt_cell = "mid"
+        # Supplément de descente (fraction) que le plan a ajouté à la pénalité de base : il n'est
+        # pas à attribuer à la base (sinon double compte au plan suivant).
+        grade = seg.get("grade_mean_pct")
+        grade = float(grade) if isinstance(grade, (int, float)) and not isinstance(grade, bool) else None
+        night_extra = (RP.night_penalty_fraction(grade, base_pct=night_base, descent_extra_max_pct=night_dmax)
+                       - night_base / 100.0)
         rows.append({
-            "id": seg["id"], "ratio": actual / planned, "weight": float(planned),
+            "id": seg["id"], "ratio": actual / planned, "weight": float(planned), "night_extra": night_extra,
             "pos": ((seg["km_start"] + seg["km_end"]) / 2.0) / total_km,
             "night_cell": night_cell, "tech_cell": tech_cell, "alt_cell": alt_cell,
             "night_fraction": frac, "night_factor": nfac, "eff": eff, "alt": alt,
@@ -251,12 +303,15 @@ def stratified_contrast(rows: Sequence[dict], is_exposed, is_ref, cell_of) -> di
         ref = [r for r in g["ref"] if lo <= r["pos"] <= hi]
         if len(g["exp"]) < MIN_GROUP_N or len(ref) < MIN_GROUP_N:
             continue
-        log_m = math.log(weighted_median([r["ratio"] for r in g["exp"]], [r["weight"] for r in g["exp"]])
-                         / weighted_median([r["ratio"] for r in ref], [r["weight"] for r in ref]))
+        ref_med = weighted_median([r["ratio"] for r in ref], [r["weight"] for r in ref])
+        log_m = math.log(weighted_median([r["ratio"] for r in g["exp"]], [r["weight"] for r in g["exp"]]) / ref_med)
         se = math.hypot(_log_se(g["exp"]), _log_se(ref))
+        gap = (sum(r["pos"] * r["weight"] for r in g["exp"]) / sum(r["weight"] for r in g["exp"])
+               - sum(r["pos"] * r["weight"] for r in ref) / sum(r["weight"] for r in ref))
         used.append({"cell": "/".join(str(c) for c in cell) if isinstance(cell, tuple) else str(cell),
                      "n_exposed": len(g["exp"]), "n_reference": len(ref), "log_ratio": log_m, "se": se,
-                     "exposed": g["exp"]})
+                     # ratio de chaque exposé RELATIF à la référence de sa cellule (estimation par segment)
+                     "exposed": [dict(r, rel=r["ratio"] / ref_med) for r in g["exp"]], "gap": gap})
     if not used:
         out["refusal"] = "too_few" if (n_exp < MIN_GROUP_N or n_ref < MIN_GROUP_N) else "confounded"
         return out
@@ -268,6 +323,7 @@ def stratified_contrast(rows: Sequence[dict], is_exposed, is_ref, cell_of) -> di
         "ratio": math.exp(log_ratio), "se_pct": round((math.exp(se) - 1.0) * 100.0, 2),
         "_se": se, "n_used_exposed": wsum, "n_used_reference": sum(c["n_reference"] for c in used),
         "_exposed_rows": exposed,
+        "position_gap": round(sum(c["gap"] * c["n_exposed"] for c in used) / wsum, 3),
         "cells": [{"cell": c["cell"], "n_exposed": c["n_exposed"], "n_reference": c["n_reference"],
                    "ratio": round(math.exp(c["log_ratio"]), 4)} for c in used],
     })
@@ -288,11 +344,6 @@ _REFUSAL_TEXT = {
                    "comparable (même nuit/technicité/altitude, même zone de la course) — les "
                    "séparer serait deviner"),
 }
-
-
-def _mean(rows: Sequence[dict], key: str) -> Optional[float]:
-    vals = [r[key] for r in rows if r.get(key) is not None]
-    return sum(vals) / len(vals) if vals else None
 
 
 def _estimate_segment_factor(rows, factor: str, plan_personal: dict) -> dict:
@@ -320,33 +371,48 @@ def _estimate_segment_factor(rows, factor: str, plan_personal: dict) -> dict:
     m, se = c["ratio"], c["_se"]
     res.update({"cells": c["cells"], "ratio": round(m, 4), "ratio_se_pct": c["se_pct"],
                 "n_used_exposed": c["n_used_exposed"], "n_used_reference": c["n_used_reference"],
+                "position_gap": c["position_gap"],
                 "confidence": _confidence(c["n_used_exposed"], c["n_used_reference"], m, se)})
-    if abs(math.log(m)) <= se:
-        res["status"] = "inconclusive"
-        res["reason"] = (f"écart exposés/référence ({(m - 1.0) * 100.0:+.1f} %) dans le bruit "
-                         f"(erreur-type {c['se_pct']:.1f} %) : aucune proposition")
-        return res
+    if abs(c["position_gap"]) > POSITION_GAP_MAX:
+        res["confidence"] = "low"
+        res["position_note"] = (f"référence en moyenne {abs(c['position_gap']) * 100:.0f} % de la distance "
+                                f"plus {'tôt' if c['position_gap'] > 0 else 'tard'} que les segments exposés : "
+                                "une fatigue non prévue par la durabilité peut se mêler à l'écart")
+    # Coefficient IMPLICITE de chaque segment exposé (son ratio rapporté à la référence de sa
+    # cellule), puis médiane pondérée par le temps prévu : la même pondération que le contraste.
+    # (Une moyenne des facteurs du plan combinée à une médiane des ratios mélangerait des segments
+    # différents dès que le facteur varie avec la pente — biais mesuré en revue #188.)
     rows_e = c["_exposed_rows"]
     if factor == "night":
-        f_bar, big_f = _mean(rows_e, "night_fraction"), _mean(rows_e, "night_factor")
-        if not f_bar or big_f is None:
+        rows_e = [r for r in rows_e if r["night_factor"] is not None and r["night_fraction"]]
+        if not rows_e:
             res.update(status="refused", reason="plan sans night_factor : pénalité non reconstructible")
             return res
-        observed = (big_f * m - 1.0) / f_bar * 100.0
+        # F_vrai ≈ F_plan × rel = 1 + f × (base + supplément de descente) : on ne garde que la base.
+        implied = [(r["night_factor"] * r["rel"] - 1.0 - r["night_fraction"] * r["night_extra"])
+                   / r["night_fraction"] * 100.0 for r in rows_e]
     else:
         key = "eff" if factor == "technicity" else "alt"
-        e_bar = _mean(rows_e, key)
-        if e_bar is None or e_bar - 1.0 < 1e-6:
+        rows_e = [r for r in rows_e if r.get(key) is not None and r[key] - 1.0 >= 1e-6]
+        if not rows_e:
             res.update(status="refused", reason="facteur du plan sans surcoût exploitable")
             return res
         used = float(plan_personal.get("technicity_scale" if factor == "technicity" else "altitude_scale", 1.0))
-        observed = used * (e_bar * m - 1.0) / (e_bar - 1.0)
+        implied = [used * (r[key] * r["rel"] - 1.0) / (r[key] - 1.0) for r in rows_e]
+    observed = weighted_median(implied, [r["weight"] for r in rows_e])
     lo, hi = PP.BOUNDS[FACTOR_KEY[factor]]
     res["observed"] = round(min(hi, max(lo, observed)), 4)
     if not (lo <= observed <= hi):
         res["observed_clamped_from"] = round(observed, 4)
-    res["status"] = "estimated"
+    # La preuve est gardée même dans le bruit (voir ASSUMPTIONS["confidence"]) : seul le statut
+    # dit si CE débrief justifie une proposition.
     res["evidence"] = (res["n_used_exposed"], res["observed"])
+    if abs(math.log(m)) <= se:
+        res["status"] = "inconclusive"
+        res["reason"] = (f"écart exposés/référence ({(m - 1.0) * 100.0:+.1f} %) dans le bruit "
+                         f"(erreur-type {c['se_pct']:.1f} %) : aucune proposition, preuve conservée")
+        return res
+    res["status"] = "estimated"
     return res
 
 
@@ -411,7 +477,9 @@ def accumulate(evidence: Sequence[PP.Evidence]) -> Dict[str, dict]:
                     "value": value}
     hot = [r for r in evidence if r[2] == "heat_hot"]
     neutral = [r for r in evidence if r[2] == "heat_neutral"]
-    if hot and neutral:
+    # Le biais de base d'une course mêle chaleur et intensité du jour : une seule course chaude ne
+    # suffit jamais (ASSUMPTIONS["heat"]).
+    if len(hot) >= HEAT_MIN_HOT_RACES and neutral:
         n_hot, n_neu = sum(r[3] for r in hot), sum(r[3] for r in neutral)
         observed = (sum(r[3] * r[4] for r in hot) / n_hot) / (sum(r[3] * r[4] for r in neutral) / n_neu)
         k_races = min(len(hot), len(neutral))
@@ -426,18 +494,37 @@ def accumulate(evidence: Sequence[PP.Evidence]) -> Dict[str, dict]:
     return out
 
 
+def abnormal_fade(rows: Sequence[dict]) -> Optional[dict]:
+    """Fin de course anormale (blessure, fin marchée) : médiane pondérée des ratios du dernier
+    quart / celle de la première moitié >= `ABNORMAL_FADE_RATIO`. `None` si rien d'anormal ou trop
+    peu de segments pour en juger (voir ASSUMPTIONS["outlier_race"])."""
+    early = [r for r in rows if r["pos"] <= 0.5]
+    late = [r for r in rows if r["pos"] >= 0.75]
+    if len(early) < MIN_GROUP_N or len(late) < MIN_GROUP_N:
+        return None
+    ratio = (weighted_median([r["ratio"] for r in late], [r["weight"] for r in late])
+             / weighted_median([r["ratio"] for r in early], [r["weight"] for r in early]))
+    return {"late_over_early": round(ratio, 3)} if ratio >= ABNORMAL_FADE_RATIO else None
+
+
 def calibrate(plan: dict, debrief: dict, *, scenario: str, existing: Optional[dict] = None,
-              actual_weather: Optional[dict] = None, race_date: Optional[str] = None) -> dict:
+              actual_weather: Optional[dict] = None, race_date: Optional[str] = None,
+              exclude_from_km: Optional[float] = None) -> dict:
     """Rapport de calibration d'UN débrief combiné aux preuves déjà cumulées (`existing` =
-    `arc_pacing_personal.read_config`). Pure : aucun accès disque. N'applique RIEN."""
+    `arc_pacing_personal.read_config`). Pure : aucun accès disque. N'applique RIEN.
+    `exclude_from_km` écarte les segments au-delà de ce km (incident déclaré par l'athlète)."""
     existing = existing or {"values": {}, "evidence": [], "warnings": []}
-    rows, meta = segment_rows(plan, debrief, scenario)
+    rows, meta = segment_rows(plan, debrief, scenario, exclude_from_km=exclude_from_km)
+    fade = abnormal_fade(rows)
     plan_personal = plan.get("pacing_personal") if isinstance(plan.get("pacing_personal"), dict) else {}
     date = race_date or plan.get("race_date") or debrief.get("race_date") or "0000-00-00"
     slug = PP.slugify(plan.get("race_name") or debrief.get("race_name"))
     factors: Dict[str, dict] = {}
     for f in ("night", "technicity", "altitude"):
-        if f == "technicity" and not meta["has"]["technicity"]:
+        if fade is not None:
+            factors[f] = {"factor": f, "status": "refused", "refusal_code": "abnormal_fade",
+                          "reason": _abnormal_reason(fade)}
+        elif f == "technicity" and not meta["has"]["technicity"]:
             factors[f] = {"factor": f, "status": "not_applicable", "n_exposed": 0, "n_reference": 0,
                           "reason": "plan construit sans technicité (--technicity) : rien à calibrer"}
         elif f == "night" and not meta["has"]["night"]:
@@ -448,11 +535,15 @@ def calibrate(plan: dict, debrief: dict, *, scenario: str, existing: Optional[di
                           "reason": "plan sans altitude_factor : rien à calibrer"}
         else:
             factors[f] = _estimate_segment_factor(rows, f, plan_personal)
-    factors["heat"] = _estimate_heat(plan, rows, actual_weather)
+    if fade is not None:
+        factors["heat"] = {"factor": "heat", "status": "refused", "refusal_code": "abnormal_fade",
+                           "reason": _abnormal_reason(fade)}
+    else:
+        factors["heat"] = _estimate_heat(plan, rows, actual_weather)
 
     new_records: List[PP.Evidence] = []
     for f, est in factors.items():
-        if est.get("status") != "estimated":
+        if "evidence" not in est:
             continue
         ev = est.pop("evidence")
         factor_name = ev[2] if len(ev) == 3 else f
@@ -485,13 +576,15 @@ def calibrate(plan: dict, debrief: dict, *, scenario: str, existing: Optional[di
     # Un facteur « estimé » sans accumulation possible (chaleur : il manque une course de
     # comparaison) l'explique au lieu de se taire.
     if factors["heat"].get("status") == "estimated" and "heat_hot_factor" not in proposals:
-        factors["heat"]["note"] = ("preuve enregistrée ; il faut une course chaude ET une course sans "
-                                   "correction météo débriefées pour estimer le facteur chaud")
+        factors["heat"]["note"] = (f"preuve enregistrée ; il faut au moins {HEAT_MIN_HOT_RACES} courses chaudes "
+                                   "ET une course sans correction météo débriefées pour estimer le facteur chaud")
 
     to_write = {k: p["proposed"] for k, p in proposals.items() if p["status"] == "proposal"}
     report = {
         "race": {"name": plan.get("race_name") or debrief.get("race_name"), "date": date, "scenario": scenario},
-        "segments": {"usable": meta["usable_segments"], "skipped": meta["skipped"]},
+        "segments": {"usable": meta["usable_segments"], "skipped": meta["skipped"],
+                     **({"exclude_from_km": exclude_from_km} if exclude_from_km is not None else {}),
+                     **({"abnormal_fade": fade} if fade is not None else {})},
         "factors": {f: _public(e) for f, e in factors.items()},
         "proposals": proposals,
         "defaults": DEFAULTS,
@@ -505,6 +598,12 @@ def calibrate(plan: dict, debrief: dict, *, scenario: str, existing: Optional[di
         "assumptions": ASSUMPTIONS,
     }
     return report
+
+
+def _abnormal_reason(fade: dict) -> str:
+    return (f"fin de course anormale (dernier quart {fade['late_over_early']:g} x plus lent, par rapport au "
+            "plan, que la première moitié : blessure, fin marchée ?) — l'écart ne mesure plus les "
+            "facteurs ; relancer avec --exclude-from-km KM pour ne garder que la partie normale")
 
 
 def _public(est: dict) -> dict:
@@ -541,6 +640,8 @@ def render_text(report: dict) -> str:
             lines.append(f"    raison : {e['reason']}")
         if e.get("note"):
             lines.append(f"    note : {e['note']}")
+        if e.get("position_note"):
+            lines.append(f"    position : {e['position_note']}")
     lines.append("")
     if report["proposals"]:
         lines.append("Propositions (jamais appliquées seules, confirmation de l'athlète requise) :")
