@@ -727,11 +727,12 @@ voir plus bas) prend sa place, jamais un statut Garmin inventé.
 | **`sessions`** | liste d'objets | une séance par entrée, voir ci-dessous |
 | `phase` | texte | phase du plan (« Base », « Spécifique », « Affûtage »…) |
 | `target_duration_s`, `target_distance_m`, `target_elevation_m` | nombre | volume visé |
+| `week_type`, `quality_sessions`, `long_run_target_s`, `strength_emphasis` | `build` `recovery` `taper` `race` `lead_in` `post_race` ; entier ; nombre (s) ; texte | squelette de bloc (#190, `arc_index.py plan-skeleton`) — facultatifs, jamais requis d'une semaine écrite à la main |
 
 Chaque séance : **`date`** (date), **`sport`** (comme `activity`), **`title`**
 (texte), et `planned_duration_s`, `planned_distance_m`, `planned_elevation_m`
 (nombres), `intensity` (`rest` `recovery` `endurance` `tempo` `threshold`
-`vo2max` `race` `strength`), `outdoor` (booléen), `garmin_workout_id`
+`vo2max` `race` `strength`), `placeholder` (booléen, #190 : créneau posé par `plan-skeleton`, à habiller par le coach, qui retire le drapeau), `outdoor` (booléen), `garmin_workout_id`
 (entier, après le push), `status` (`planned` `done` `missed` `moved`
 `cancelled`), `weather_category` et `best_slot` (comme `weather`), et
 `heat_adjustment` (#171, objet optionnel : trace de l'ajustement des cibles à

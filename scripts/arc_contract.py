@@ -68,6 +68,8 @@ INTENSITY = (
     "rest", "recovery", "endurance", "tempo", "threshold", "vo2max", "race", "strength",
 )
 SESSION_STATUS = ("planned", "done", "missed", "moved", "cancelled")
+# Type de semaine d'un squelette de bloc (#190, `scripts/arc_plan_skeleton.py`).
+WEEK_TYPE = ("build", "recovery", "taper", "race", "lead_in", "post_race")
 REPORT_TYPE = ("weekly", "monthly", "comparison", "race", "race_debrief", "adhoc")
 COURSE_VERDICT = ("compatible", "partial", "incompatible")
 WATER_SOURCE = ("officiel", "osm_drinking_water", "osm_spring", "osm_cafe")
@@ -409,6 +411,11 @@ SCHEMA = {
             "target_duration_s": "num+",
             "target_distance_m": "num+",
             "target_elevation_m": "num+",
+            # #190 : champs du squelette de bloc (`arc_index.py plan-skeleton`), tous facultatifs.
+            "week_type": _enum(WEEK_TYPE),
+            "quality_sessions": "int+",
+            "long_run_target_s": "num+",
+            "strength_emphasis": "str",
             # #69, plan multi-semaines : liste de `week_entry` (même forme qu'une
             # semaine unique ci-dessus), une entrée par semaine. Mutuellement
             # exclusif avec les champs de semaine unique au premier niveau — un
@@ -593,6 +600,11 @@ SUBSCHEMA = {
             "target_duration_s": "num+",
             "target_distance_m": "num+",
             "target_elevation_m": "num+",
+            # #190 : champs du squelette de bloc (`arc_index.py plan-skeleton`), tous facultatifs.
+            "week_type": _enum(WEEK_TYPE),
+            "quality_sessions": "int+",
+            "long_run_target_s": "num+",
+            "strength_emphasis": "str",
         },
     },
     "session": {
@@ -608,6 +620,8 @@ SUBSCHEMA = {
             "weather_category": _enum(WEATHER_CATEGORY),
             "best_slot": _enum(SLOT),
             "heat_adjustment": "{heat_adjustment}",
+            # #190 : créneau posé par `plan-skeleton`, à habiller par le coach (qui retire le drapeau).
+            "placeholder": "bool",
         },
     },
     # `session.heat_adjustment` (#171) : trace de l'ajustement des cibles à la chaleur prévue,

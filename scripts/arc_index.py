@@ -246,7 +246,18 @@ choisir selon l'objectif), rend le gabarit résolu semaine par semaine (en % de 
 `--weeks N` (défaut : celui du gabarit) et le verdict de cohérence avec les garde-fous du workspace
 (`[guardrails]`). Sans `--sport`, le sport vient de `[sport].primary`. Lecture seule, sans index ni
 base — voir `arc_plan_templates.py`. JSON par défaut (comme les autres sous-commandes), `--text` pour
-un tableau lisible. Un point de départ, jamais un plan : le squelette daté est #190.
+un tableau lisible. Un point de départ, jamais un plan : le squelette daté est `plan-skeleton`.
+
+`plan-skeleton [--format ID] [--race-date AAAA-MM-JJ] [--held-hours H] [--held-elevation-m M] [--long-run-day J]
+[--text] [--write]` (#190, épopée #173) génère le squelette du bloc, semaine par semaine, de la semaine en cours à
+la semaine de course (+ récupération post-course) : gabarit (`--format`, sinon choisi d'après la distance de
+l'objectif actif), volume/D+ TENUS sur les 4 dernières semaines (pic = tenu × `peak_from_current`, jamais inventé ;
+`--held-hours` pour un volume déclaré), disponibilité du profil, et créneaux de séance `placeholder` à habiller par
+le coach. Chaque semaine passe `arc_guardrails.evaluate` (jamais une semaine `block` émise) ; la forme prévue le
+jour J est projetée par `load-forecast`. Par défaut un DRY RUN (JSON, ou `--text`) ; `--write` écrit un
+`planning/Semaine_<lundi>.md` par semaine, refuse d'écraser (liste les conflits) et valide les fichiers — voir
+`arc_plan_skeleton.py`. États honnêtes : `too_short` (options), `no_history`, `no_objective`, `no_template`,
+`target_past`, `needs_review`.
 
 Options communes : `--workspace DIR` (sinon $ARC_WORKSPACE, le pointeur
 ~/.config/ai-running-coach/workspace, puis le moteur), `--db FICHIER` (défaut
@@ -4727,7 +4738,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
-                                 "decision-effects", "load-forecast", "plan-templates", "strength", "dem-check", "prevention"))
+                                 "decision-effects", "load-forecast", "plan-templates", "strength", "dem-check", "prevention", "plan-skeleton"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4809,7 +4820,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commandes « decision-effects », « load-forecast », « plan-templates », « strength » et « prevention » : "
+                        help="commandes « decision-effects », « load-forecast », « plan-templates », « strength », « prevention » et « plan-skeleton » : "
                              "rendu texte lisible (défaut : JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
@@ -4839,7 +4850,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="commande « strength » (#191) : charge utile Garmin (workout_data + arguments de "
                              "create_strength_workout) au lieu de la sélection ; aucune écriture")
     parser.add_argument("--json", action="store_true",
-                        help="commandes « pace-curve », « decision-effects », « load-forecast », « plan-templates » et « strength » : "
+                        help="commandes « pace-curve », « decision-effects », « load-forecast », « plan-templates », « strength » et « plan-skeleton » : "
                              "sortie JSON (déjà le défaut, accepté pour la clarté ; l'emporte sur --text)")
     parser.add_argument("--until", metavar="AAAA-MM-JJ",
                         help="commande « load-forecast » (#172) : date de fin de la projection (défaut : date de "
@@ -4849,9 +4860,21 @@ def build_parser() -> argparse.ArgumentParser:
                              "semaine(s) (bloc ```arc ou JSON, `weeks[]` ou une semaine), `-` pour stdin ; les "
                              "semaines de même lundi REMPLACENT celles du plan actuel")
     parser.add_argument("--format", metavar="ID", dest="plan_format",
-                        help="commande « plan-templates » (#189) : identifiant du gabarit (ex. marathon_trail)")
+                        help="commandes « plan-templates » (#189) et « plan-skeleton » (#190) : identifiant du gabarit (ex. marathon_trail)")
     parser.add_argument("--distance-km", type=float, metavar="D", dest="distance_km",
                         help="commande « plan-templates » (#189) : choisit le gabarit d'après la distance de l'objectif")
+    parser.add_argument("--race-date", metavar="AAAA-MM-JJ", dest="race_date",
+                        help="commande « plan-skeleton » (#190) : date de course (défaut : objectif actif)")
+    parser.add_argument("--held-hours", type=float, metavar="H", dest="held_hours",
+                        help="commande « plan-skeleton » : volume hebdomadaire (heures) DÉCLARÉ par l'athlète, qui "
+                             "remplace celui des 4 dernières semaines de l'index")
+    parser.add_argument("--held-elevation-m", type=float, metavar="M", dest="held_elevation_m",
+                        help="commande « plan-skeleton » : D+ hebdomadaire (m) déclaré")
+    parser.add_argument("--long-run-day", metavar="JOUR", dest="long_run_day",
+                        help="commande « plan-skeleton » : jour de la sortie longue (défaut : profil, sinon dimanche)")
+    parser.add_argument("--write", action="store_true",
+                        help="commande « plan-skeleton » : écrit les semaines dans planning/ (jamais d'écrasement) ; "
+                             "sans cette option, un dry run")
     parser.add_argument("--band", choices=SL.BANDS, default="endurance",
                         help="commande « slope-model » : bande d'effort (défaut « endurance », voir "
                              "arc_slope_model.ASSUMPTIONS['population'])")
@@ -4929,6 +4952,44 @@ def prevention_cli(conn, args, workspace: Path, today: date) -> str:
                       gconf["pain_consult_threshold"], "medical" in conf["agents"], risk, fmt, args.known)
     except (PV.PreventionError, SG.StrengthError) as exc:
         raise ConfigError(str(exc))
+
+
+def plan_skeleton_cli(args, conn, workspace: Path) -> int:
+    """`arc_index.py plan-skeleton` (#190) — dry run par défaut ; `--write` écrit `planning/Semaine_*.md`."""
+    import arc_plan_skeleton as PS
+    today_date = date.fromisoformat(args.today) if args.today else date.today()
+    for flag, value in (("--held-hours", args.held_hours), ("--held-elevation-m", args.held_elevation_m)):
+        if value is not None and value < 0:
+            raise ConfigError(f"{flag} : une valeur >= 0 attendue, « {value} » reçue.")
+    if args.race_date:
+        try:
+            date.fromisoformat(args.race_date)
+        except ValueError:
+            raise ConfigError(f"--race-date : date AAAA-MM-JJ attendue, « {args.race_date} » reçue.")
+    config = load_config(workspace)
+    try:
+        report = PS.skeleton_report(
+            conn=conn, config=config, workspace=workspace, today=today_date, template_id=args.plan_format,
+            race_date=args.race_date, held_hours=args.held_hours, held_elevation_m=args.held_elevation_m,
+            long_run_day=args.long_run_day)
+        PS.attach_forecast(conn, today_date, report)
+    except (PS.SkeletonError, PT.PlanTemplateError) as exc:
+        raise ConfigError(str(exc))
+    report["conflicts"] = PS.find_conflicts(workspace, report)
+    code = 0
+    if args.write:
+        report["write"] = PS.write_weeks(workspace, report, validate_file)
+        code = 0 if report["write"]["written"] else 1
+    if args.json or not args.text:
+        print(json.dumps(report, ensure_ascii=False))
+    else:
+        print(PS.render_text(report))
+        if args.write:
+            w = report["write"]
+            print("Écrit : " + (", ".join(w["written"]) if w["written"] else "rien — " + str(w["refused"])))
+            for c in w["conflicts"]:
+                print(f"  conflit : semaine du {c['week_start']} déjà dans {c['file']}")
+    return code
 
 
 def main(argv=None) -> int:
@@ -5026,6 +5087,8 @@ def main(argv=None) -> int:
         else:
             print(json.dumps(report, ensure_ascii=False))
         return 0
+    if args.command == "plan-skeleton":
+        return plan_skeleton_cli(args, conn, workspace)
     if args.command == "gear-career":
         if not args.gear:
             raise ConfigError("commande « gear-career » : --gear GEAR_ID est obligatoire.")

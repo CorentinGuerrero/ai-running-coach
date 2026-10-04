@@ -111,8 +111,15 @@ Pour un nouveau bloc, le coach part du gabarit qui correspond à l'objectif
 gabarit adapté, il construit le bloc comme avant et le dit) puis l'adapte au
 profil, au bilan matinal et à l'historique. Un gabarit est un **point de
 départ** : il ne remplace ni le profil, ni le bilan matinal, ni les
-garde-fous, que chaque semaine écrite passe toujours. Voir
-[Gabarits de périodisation](../plans.md).
+garde-fous, que chaque semaine écrite passe toujours.
+
+Pour **construire** le bloc, le coach lance
+`python3 scripts/arc_index.py plan-skeleton` (dry run) : squelette semaine par
+semaine depuis la semaine en cours jusqu'à la course (volume tenu, disponibilité
+du profil, garde-fous, forme prévue le jour J). Il le **présente** et
+n'écrit (`--write`) qu'après un « oui » explicite de l'athlète — jamais
+d'écrasement d'une semaine existante —, puis habille les créneaux de séance.
+Voir [Gabarits de périodisation](../plans.md).
 
 ### Score Trail Shape (#63)
 
