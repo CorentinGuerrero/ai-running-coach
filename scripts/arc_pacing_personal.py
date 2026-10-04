@@ -167,13 +167,20 @@ def write_workspace(workspace: Path, values: Dict[str, float], evidence: Sequenc
     en conservant tout le reste du fichier (`coach_config.set_toml_key`, sauvegarde `.bak`).
     À n'appeler qu'APRÈS la confirmation explicite de l'athlète."""
     path = Path(workspace) / "config" / "workspace.user.toml"
+    # Tout est validé AVANT la première écriture : jamais de fichier à moitié modifié.
     for key, value in values.items():
         if key not in BOUNDS:
             raise ValueError(f"coefficient inconnu : {key}")
         lo, hi = BOUNDS[key]
-        if not (lo <= value <= hi):
+        if not (isinstance(value, (int, float)) and math.isfinite(value) and lo <= value <= hi):
             raise ValueError(f"{key} = {value} hors de [{lo:g}, {hi:g}]")
+    # `set_toml_key` refait `.bak` à CHAQUE clé : sans ceci, la sauvegarde finale ne contiendrait
+    # que l'avant-dernière étape, pas le fichier d'avant le débrief.
+    original = path.read_bytes() if path.exists() else None
+    for key, value in values.items():
         CC.set_toml_key(path, SECTION, key, round(float(value), 4))
     if evidence:
         CC.set_toml_key(path, SECTION, EVIDENCE_KEY, [format_evidence(r) for r in evidence])
+    if original is not None and path.read_bytes() != original:
+        path.with_suffix(path.suffix + ".bak").write_bytes(original)
     return path
