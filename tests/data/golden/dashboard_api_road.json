@@ -1508,6 +1508,7 @@
     "/api/block": {
       "body": {
         "current_week_start": "2026-09-21",
+        "missing_weeks": 0,
         "phases": [
           {
             "id": "base",
@@ -1554,6 +1555,7 @@
             "phase": "specific",
             "phase_label": "Spécifique",
             "phase_text": "Spécifique",
+            "planned": true,
             "status": "past",
             "target_distance_m": null,
             "target_duration_s": 28800.0,
@@ -1574,6 +1576,7 @@
             "phase": "specific",
             "phase_label": "Spécifique",
             "phase_text": "Spécifique",
+            "planned": true,
             "status": "current",
             "target_distance_m": null,
             "target_duration_s": 28800.0,
