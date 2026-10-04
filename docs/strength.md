@@ -132,6 +132,7 @@ Une douleur que vous avez **déclarée** (`/log`, le parcours « Douleur » de T
 python3 scripts/arc_index.py prevention                       # 14 derniers jours, JSON
 python3 scripts/arc_index.py prevention --days 21 --text      # plus long, lisible
 python3 scripts/arc_index.py prevention --acute mollet        # vous la décrivez vive, nouvelle ou gonflée
+python3 scripts/arc_index.py prevention --known mollet        # vous confirmez une gêne connue, non aiguë, stable
 python3 scripts/arc_index.py prevention --equipment elastic   # sinon : puce « Équipement » du profil
 ```
 
@@ -142,7 +143,8 @@ par zone, un statut :
 
 | Statut | Sens |
 |---|---|
-| `prevention_ok` | gêne légère, connue et stable : une **routine douce** est proposée (2 séries, effort facile, sans impact, sans pliométrie ni excentrique) |
+| `prevention_ok` | gêne légère, connue et stable : une **routine douce** est proposée (2 séries, effort facile, sans impact, sans pliométrie ni excentrique dédié) |
+| `observe` | gêne légère pas encore confirmée (une seule déclaration, ou deux à moins de 2 jours d'écart) : **aucun exercice**, trois questions (nouvelle ? vive ? gonflement ?) |
 | `consult` | aucun exercice ; `consult_level` = `urgent` ou `advised`, avec les raisons |
 | `no_data` | aucune douleur déclarée sur la fenêtre, ou zone non reconnue : rien n'est inventé, le coach demande |
 
@@ -171,9 +173,23 @@ Appliquées dans cet ordre, **avant** toute proposition. Tous les seuils sont de
 4. **Score > 3/10, douleur qui s'aggrave** (au moins un point de plus entre la première et la
    dernière déclaration) **ou qui dure plus de 7 jours** : aucun exercice, avis professionnel
    conseillé.
-5. **Seulement une gêne légère (≤ 3/10), connue et stable** : routine douce de prévention.
+5. **Gêne légère pas encore confirmée** (une seule déclaration, ou déclarations à moins de 2 jours
+   d'écart) : statut `observe`, **aucun exercice**. Le coach vous pose trois questions — est-ce
+   nouveau ? vif ou brutal ? avec un gonflement ? Un « oui » mène à `--acute` (consultation) ; si
+   **vous** confirmez une gêne connue, non aiguë et stable, il relance avec `--known` ; sinon la
+   routine n'arrive qu'avec une deuxième déclaration au moins 2 jours plus tard, sans hausse.
+6. **Seulement une gêne légère (≤ 3/10), confirmée et stable** : routine douce de prévention.
 
-Une zone dont la dernière déclaration est à 0/10 est considérée comme résolue.
+Une zone dont la dernière déclaration est à 0/10 est considérée comme résolue — sauf si la fenêtre
+contient un score au-dessus du seuil de consultation ou une douleur aiguë : la recommandation de
+consulter reste alors affichée. Un drapeau de risque de blessure qui n'a pas pu être évalué n'est
+jamais supposé bas : aucune routine.
+
+Choix par zone, exercice par exercice (approximations du projet, volontairement prudentes) : pas
+d'étirement appuyé pour le tendon d'Achille ni le mollet, ni chaise murale, squat ou fente pour le
+genou, ni balancier ample, flexion glissante ou nordique pour les ischio-jambiers, aucun impact pour
+le tibia ; le « niveau suivant » affiché n'est jamais un exercice excentrique dédié ni de la
+pliométrie.
 
 ### Qui décide
 

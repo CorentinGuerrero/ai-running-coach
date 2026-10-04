@@ -203,7 +203,9 @@ risqueraient d'écraser la fusion l'un de l'autre.
    INTERACTION et jamais automatiquement, à la proposition d'une routine douce de la bibliothèque
    (`python3 scripts/arc_index.py prevention`) — le coach propose, `medical` (s'il est activé) décide,
    sinon le coach applique les règles du script en disant « ce n'est pas un avis médical ». Un score
-   ≥ seuil ou une douleur vive/gonflée : aucun exercice, consultation. Voir `docs/strength.md`.
+   ≥ seuil ou une douleur vive/gonflée : aucun exercice, consultation. Une PREMIÈRE déclaration légère
+   ne donne aucun exercice : le coach observe et pose trois questions (nouvelle ? vive ? gonflement ?).
+   Voir `docs/strength.md`.
 4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
 
 ### Position dans la séance (km, temps écoulé)

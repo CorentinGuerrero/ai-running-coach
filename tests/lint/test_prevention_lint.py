@@ -36,8 +36,16 @@ def section(text: str, start: str, end: str) -> str:
 COACH_PARA = section(COACH, "**Targeted prevention from declared pain (#192):**", "\n")
 MEDICAL_SEC = section(MEDICAL, "### TARGETED PREVENTION FROM DECLARED PAIN (#192", "### CYCLE CONTEXT")
 DOC_SEC = section(STRENGTH_DOC, "## Prévention ciblée", "## Sources")
-DIAGNOSIS = re.compile(r"tendinite|tendinopathie|fracture|entorse|l[ée]sion|p[ée]riostite|syndrome|d[ée]chirure|"
-                       r"claquage|fasciite|bursite|m[ée]nisque", re.IGNORECASE)
+# Liste partagée avec le palier D (sorties du module) : une seule source, `arc_prevention`.
+DIAGNOSIS = PV.DIAGNOSIS_TERMS
+CARE_FR = PV.CARE_TERMS
+CARE_EN = re.compile(r"\b(?<!never a )(?<!not a )(?<!no )treatment|\btreat(s|ing)?\b|\bheal(s|ed|ing)?\b|\bcure[sd]?\b|"
+                     r"\btherap(y|ies|eutic)\b|\brehab", re.IGNORECASE)
+LOG_PARA = section(read("skills/log/SKILL.md"), "**Prévention ciblée (#192) :**", "\n4. ")
+TELEGRAM_PARA = section(read("docs/telegram.md"), "Une douleur légère saisie ici", "\n\n")
+AGENTS_LINES = "\n".join(line for line in read("AGENTS.md").splitlines() if "#192" in line)
+DOCS_AGENT_LINES = "\n".join(line for f in ("docs/agents/coach.md", "docs/agents/medical.md")
+                              for line in read(f).splitlines() if "#192" in line)
 
 
 class TestCoachPrompt(unittest.TestCase):
@@ -65,6 +73,15 @@ class TestCoachPrompt(unittest.TestCase):
         self.assertIn("never push it automatically", COACH_PARA)
         self.assertIn("explicit-yes, never-headless", COACH_PARA)
 
+    def test_first_light_declaration_is_observed_and_known_needs_the_athlete(self):
+        self.assertIn('`status: "observe"`', COACH_PARA)
+        self.assertIn("no exercise yet", COACH_PARA)
+        self.assertIn("new? sharp or sudden? swollen?", COACH_PARA)
+        self.assertIn("only if the athlete explicitly says it is a known, non-acute, stable discomfort", COACH_PARA)
+        self.assertIn("`--known <zone>`", COACH_PARA)
+        self.assertIn("never on your own inference, never in headless mode", COACH_PARA)
+        self.assertIn("delegate to it before proposing anything", COACH_PARA)
+
     def test_unknown_zone_or_equipment_means_asking(self):
         self.assertIn("unknown equipment → ask", COACH_PARA)
         self.assertIn("an unrecognised zone → ask, never improvise", COACH_PARA)
@@ -86,6 +103,13 @@ class TestMedicalPrompt(unittest.TestCase):
         self.assertIn(f"more than {th['persistence_days']} days", MEDICAL_SEC)
         self.assertIn("pain_consult_threshold", MEDICAL_SEC)
         self.assertIn("`consult: true` or `level: \"high\"`", MEDICAL_SEC)
+
+    def test_observe_status_and_red_flags_kept(self):
+        self.assertIn("`observe`", MEDICAL_SEC)
+        self.assertIn("only when the athlete explicitly confirms", MEDICAL_SEC)
+        self.assertIn("never assumed low", MEDICAL_SEC)
+        self.assertIn("A zone back at 0/10 stays `consult`", MEDICAL_SEC)
+        self.assertNotIn("no loading exercise", MEDICAL_SEC)       # aigu = AUCUN exercice, comme le script
 
     def test_zones_only_and_no_automatic_push(self):
         self.assertIn("Name zones only", MEDICAL_SEC)
@@ -121,11 +145,34 @@ class TestDocs(unittest.TestCase):
         self.assertIn("ce n'est pas un avis médical", agents)
 
     def test_docs_and_script_texts_name_no_diagnosis(self):
-        for name, text in (("docs/strength.md section", DOC_SEC), ("coach", COACH_PARA), ("medical", MEDICAL_SEC)):
-            allowed = text.replace("never a diagnosis", "").replace("jamais un diagnostic", "")
-            m = DIAGNOSIS.search(allowed)
+        french = (("docs/strength.md section", DOC_SEC), ("skills/log", LOG_PARA), ("docs/telegram", TELEGRAM_PARA),
+                  ("AGENTS.md #192", AGENTS_LINES), ("docs/agents #192", DOCS_AGENT_LINES))
+        english = (("coach", COACH_PARA), ("medical", MEDICAL_SEC))
+        for name, text in french + english:
+            self.assertTrue(text.strip(), name)
             # « pathologie » est permis dans « jamais une pathologie » ; les noms précis ne le sont jamais.
+            m = DIAGNOSIS.search(text)
             self.assertIsNone(m, f"{name} : {m and m.group(0)}")
+        for name, text in french:
+            m = CARE_FR.search(text)
+            self.assertIsNone(m, f"{name} : {m and m.group(0)}")
+        for name, text in english:
+            m = CARE_EN.search(text)
+            self.assertIsNone(m, f"{name} : {m and m.group(0)}")
+
+    def test_the_lint_patterns_bite(self):
+        for word in ("tendinite", "fasciite", "périostite", "syndrome", "entorse", "déchirure", "fracture", "bursite",
+                     "rupture"):
+            self.assertIsNotNone(DIAGNOSIS.search(word), word)
+        for word in ("treatment for it", "to treat", "will heal", "a cure", "physical therapy", "rehab"):
+            self.assertIsNotNone(CARE_EN.search(word), word)
+        for ok in ("never a treatment", "never a diagnosis", "physiotherapist"):
+            self.assertIsNone(CARE_EN.search(ok), ok)
+
+    def test_docs_describe_the_observe_status(self):
+        for needle in ("`observe`", "aucun exercice", "--known", "nouveau ?", "gonflement ?",
+                       "jamais supposé bas", "consulter reste alors affichée"):
+            self.assertIn(needle, DOC_SEC, needle)
 
 
 class TestData(unittest.TestCase):
@@ -151,7 +198,8 @@ class TestData(unittest.TestCase):
 class TestEvalCases(unittest.TestCase):
     def test_both_cases_exist_with_relative_fixtures(self):
         for case, fixture in (("prevention-mollet-stable-routine", "prevention-mollet-stable"),
-                              ("prevention-genou-consult-no-exercise", "prevention-genou-consult")):
+                              ("prevention-genou-consult-no-exercise", "prevention-genou-consult"),
+                              ("prevention-premiere-declaration-observe", "prevention-premiere-observe")):
             text = read(f"tests/evals/cases/{case}.toml")
             self.assertIn(f'fixture = "{fixture}"', text)
             self.assertTrue((REPO / "tests/evals/fixtures" / fixture / "medical").is_dir())
@@ -161,6 +209,8 @@ class TestEvalCases(unittest.TestCase):
 
     def test_the_stable_case_has_no_medical_agent(self):
         self.assertIn('enabled = ["coach", "nutritionist"]', read("tests/evals/cases/prevention-mollet-stable-routine.toml"))
+        self.assertIn('enabled = ["coach", "nutritionist"]',
+                      read("tests/evals/cases/prevention-premiere-declaration-observe.toml"))
 
 
 if __name__ == "__main__":
