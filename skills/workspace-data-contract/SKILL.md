@@ -968,7 +968,14 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement), `stop_s` (nombre, secondes — temps d'arrêt PRÉVU à ce ravito, #61 : repris par `arc_race_pacing.py`/`arc_race_debrief.py` au lieu du défaut générique (90 s) dès qu'il est renseigné ; à ne persister que pour un ravito dont l'arrêt attendu diffère vraiment du défaut, ex. repas chaud ou drop bag) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
 | `gear` | liste | matériel obligatoire et conseillé |
+| `notes`, `emergency` | liste | consignes de course et urgence (organisation, points d'abandon) imprimées telles quelles par le roadbook (#187) — absentes = dites absentes, jamais inventées |
+| `nutrition_plan` | chemin du workspace | fichier `nutrition/…` du plan de ravitaillement (#187) |
 | `segments` | liste d'objets | allures par segment depuis le modèle personnel (#59) — voir ci-dessous |
+
+`take` d'un ravito (`aid_stations[]`, #187) : liste de textes courts — ce que le plan nutrition fait
+**prendre** à ce ravito (« 2 gels », « 500 ml »), recopié du fichier `nutrition/`, jamais
+déduit ; distinct de `services` (ce que le ravito sert). Le roadbook du tableau de bord
+(vue « Roadbook », `/api/roadbook`) l'imprime à côté du ravito.
 
 **`segments` (#59, `scripts/arc_race_pacing.py`).** Un segment par pièce de course
 (découpage par distance cible + fusion des pentes similaires, voir la docstring

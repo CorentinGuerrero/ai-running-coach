@@ -465,6 +465,13 @@ SCHEMA = {
             "aid_stations": "[aid_station]",
             "water_points": "[water_point]",
             "gear": "list",
+            # Roadbook imprimable (#187) : `notes` (consignes de course), `emergency` (urgence :
+            # numéro de l'organisation, abandon, points de repli) et `nutrition_plan` (chemin du
+            # fichier `nutrition/…` du plan de ravitaillement) — imprimés tels quels, absents =
+            # dits absents par le roadbook, jamais inventés.
+            "notes": "list",
+            "emergency": "list",
+            "nutrition_plan": "workspace_path",
             # `segments` (#59, allures par segment depuis le modèle personnel) : socle
             # de #61 (débrief post-course, comparaison plan vs réalisé PAR SEGMENT) —
             # voir `scripts/arc_race_pacing.py::segment_course`/`predict_segments` pour
@@ -639,7 +646,11 @@ SUBSCHEMA = {
         # `course-strategist` seulement quand un temps d'arrêt différent du défaut est
         # réellement attendu (ravito avec repas chaud, drop bag…) — jamais une valeur
         # inventée pour un ravito simple.
-        "optional": {"services": "list", "cutoff": "str", "cutoff_day": "int+", "stop_s": "num+"},
+        # `take` (#187) : ce que l'athlète PREND à ce ravito d'après le plan nutrition
+        # (liste de textes courts, ex. « 2 gels », « 500 ml »), imprimé tel quel par le
+        # roadbook — distinct de `services` (ce que le ravito SERT). Jamais déduit.
+        "optional": {"services": "list", "cutoff": "str", "cutoff_day": "int+", "stop_s": "num+",
+                     "take": "list"},
     },
     "water_point": {
         "required": {"km": "num+", "source": _enum(WATER_SOURCE)},

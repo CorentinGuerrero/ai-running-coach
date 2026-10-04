@@ -412,6 +412,23 @@ rattacher reste `missing` (l'athlète corrige le profil). Ce contrôle ne dépen
    - `description` : résumé (distance, D+, 3 scénarios, points d'eau)
 4. **Confirme** le succès : "GPX disponible dans Garmin Connect sous le nom 'X - Stratégie'"
 
+#### ROADBOOK IMPRIMABLE (#187, épopée #170)
+
+Après avoir écrit ou mis à jour le plan, **mentionne le roadbook** à l'athlète en une
+phrase : la vue « Roadbook » du tableau de bord (`scripts/dashboard.sh`, adresse
+`#/roadbook`, lien depuis « Trail Shape ») en tire une feuille A4 par scénario (profil,
+sections, heures de passage, barrières et marges, ravitos avec ce qu'on y prend,
+matériel obligatoire, urgence), imprimable ou enregistrable en PDF depuis le
+navigateur. La page ne calcule rien : elle lit le plan persisté, donc **ce que le plan
+ne contient pas manque aussi sur la feuille**. Pour qu'elle soit complète, persiste dans
+le bloc ```arc : `start_time` (date-heure ISO du départ), le `cutoff` de chaque ravito
+qui en a un, **`take`** de chaque ravito (liste courte de ce que le plan nutrition de
+l'ÉTAPE 5 y fait prendre, recopiée de ce fichier, jamais inventée), `gear` (ÉTAPE 7),
+`emergency` (organisation, points d'abandon, tels que donnés par le règlement ; sinon
+demande ou laisse absent), `notes`, et `nutrition_plan` (chemin du fichier `nutrition/…`).
+Une donnée que tu ne connais pas reste absente — le roadbook la signale dans son encart
+« À compléter ».
+
 #### APRÈS LA COURSE : DÉBRIEF (#61, épopée #23)
 
 `rapports/` appartient à `coach` (voir AGENTS.md, carte des dossiers) — jamais

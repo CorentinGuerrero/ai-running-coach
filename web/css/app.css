@@ -844,3 +844,112 @@ button.seg:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--foc
   .profile__label { margin-top: 0.4rem; }
   .map-bar { padding: 0.55rem 0.6rem; }
 }
+
+/* ---------------------------------------------------------------- roadbook (#187) */
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.rb-link { margin-top: 1.25rem; }
+.rb-controls { margin-bottom: 1rem; }
+.rb-controls .toolbar { gap: 0.5rem; }
+.rb-controls__label { color: var(--ink-faint); font-size: 0.82rem; margin-right: 0.15rem; }
+.rb-picks { display: inline-flex; gap: 0.4rem; }
+.rb-actions { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
+.rb .rb-sheet { display: none; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.4rem; }
+.rb .rb-sheet.is-active { display: block; }
+.seg { font: inherit; font-size: 0.86rem; cursor: pointer; }
+.seg:disabled { opacity: 0.4; cursor: not-allowed; }
+.rb-title { margin: 0; font: 700 1.5rem/1.2 var(--display); letter-spacing: -0.02em; }
+.rb-meta { margin: 0.2rem 0 0; color: var(--ink-soft); }
+.rb-scenario { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 1.2rem; margin: 0.6rem 0 0.4rem; }
+.rb-scenario__name { font: 700 1rem/1 var(--display); color: var(--pine); text-transform: uppercase; letter-spacing: 0.04em; }
+.rb h3 { margin: 1.1rem 0 0.4rem; font: 600 0.95rem/1.3 var(--text); }
+.rb-profile { display: block; width: 100%; height: auto; margin: 0.4rem 0 0.2rem; }
+.rb-area { fill: var(--s-band); stroke: none; }
+.rb-line { fill: none; stroke: var(--pine); stroke-width: 2; stroke-linejoin: round; }
+.rb-grid { stroke: var(--line); stroke-width: 1; }
+.rb-tick { stroke: var(--ink-faint); stroke-width: 1; }
+.rb-ticklabel { fill: var(--ink-faint); font: 11px var(--text); }
+.rb-hatch { stroke: var(--ink-faint); stroke-width: 1.4; }
+.rb-night { opacity: 0.85; }
+.rb-aid line { stroke: var(--ink-soft); stroke-width: 1; stroke-dasharray: 3 3; }
+.rb-aid circle { fill: var(--surface); stroke: var(--pine); stroke-width: 2; }
+.rb-aid text { fill: var(--ink); font: 600 11px var(--text); }
+.rb-table-wrap { margin-top: 0.5rem; }
+.rb-table td, .rb-table th { vertical-align: top; }
+.rb-km { white-space: nowrap; }
+.rb-take { margin-top: 0.15rem; }
+.rb-serv { font-size: 0.82rem; }
+.rb-night-tag { display: inline-block; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.02em; padding: 0.05rem 0.4rem; border: 1px solid var(--ink-soft); border-radius: 0.3rem; color: var(--ink); }
+.rb-row--night td { background: var(--surface-2); }
+.rb-cut { font-weight: 600; }
+.rb-cut--tendu, .rb-cut--tendu + br + .rb-cut__margin { color: var(--warn); }
+.rb-cut--hors_delai, .rb-cut--hors_delai + br + .rb-cut__margin { color: var(--bad); font-weight: 700; }
+.rb-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 2rem; }
+.rb-list { margin: 0.2rem 0; padding-left: 1.2rem; }
+.rb-gearlist { list-style: none; margin: 0; padding: 0; }
+.rb-gear { display: flex; gap: 0.55rem; align-items: baseline; padding: 0.15rem 0; }
+.rb-box { flex: none; width: 0.85em; height: 0.85em; border: 1.5px solid var(--ink); border-radius: 2px; transform: translateY(0.1em); }
+.rb-gear--warn .rb-gear__status { color: var(--warn); }
+.rb-gear--bad .rb-gear__status { color: var(--bad); font-weight: 600; }
+.rb-gear--muted .rb-gear__status, .rb-gear--ok .rb-gear__status { color: var(--ink-faint); }
+.rb-gaps { margin-top: 0.8rem; padding-top: 0.2rem; border-top: 1px dashed var(--line-strong); font-size: 0.88rem; }
+.rb-profile-cap { margin: 0 0 0.4rem; font-size: 0.78rem; }
+.rb-foot { margin: 0.9rem 0 0; font-size: 0.78rem; }
+@media (max-width: 36em) {
+  .rb .rb-sheet { padding: 1rem 0.8rem; }
+  .rb-cols { grid-template-columns: 1fr; }
+  .rb-actions { margin-left: 0; }
+  .rb-title { font-size: 1.25rem; }
+  .rb-ticklabel { font-size: 15px; }
+  .rb-aid text { font-size: 15px; }
+  /* Tableau empilé : une carte par section, libellés devant chaque valeur (pas de défilement latéral). */
+  .rb-table-wrap { overflow: visible; border: 0; background: transparent; }
+  .rb-table, .rb-table tbody, .rb-table tr, .rb-table td { display: block; width: 100%; }
+  .rb-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .rb-table tr { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 0.6rem; padding: 0.35rem 0.6rem; background: var(--surface); }
+  .rb-table td { border: 0; padding: 0.15rem 0; text-align: left; }
+  .rb-table td.num { white-space: normal; text-align: left; }
+  .rb-table td:empty { display: none; }
+  .rb-table td[data-label]::before { content: attr(data-label) " : "; color: var(--ink-faint); font-size: 0.78rem; }
+  .rb-table td.rb-km { font-weight: 700; font-size: 1rem; }
+}
+
+/* Impression : A4 portrait, noir et blanc lisible, sans cadre ni navigation. Les jetons de thème sont
+   forcés en clair quel que soit le thème écran (un PDF ne doit jamais sortir sombre). */
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"], :root[data-theme="light"] {
+    --bg: #fff; --surface: #fff; --surface-2: #eee; --ink: #000; --ink-soft: #222; --ink-faint: #444;
+    --line: #999; --line-strong: #666; --pine: #000; --s-band: #ddd; --warn: #000; --bad: #000; --ok: #000;
+    color-scheme: light;
+  }
+  html, body { background: #fff; color: #000; font-size: 9.5pt; line-height: 1.35; }
+  .top, .nav, .skip, .rb-controls, .rb-page > .view-head, .rb-link { display: none !important; }
+  .shell { display: block; min-height: 0; }
+  .main { max-width: none; padding: 0; opacity: 1; }
+  .rb .rb-sheet, .rb .rb-sheet.is-active { border: 0; border-radius: 0; padding: 0; background: #fff; }
+  .rb .rb-sheet { display: none; }
+  .rb .rb-sheet.is-active { display: block; }
+  .rb-all .rb-sheet { display: block !important; break-before: page; }
+  .rb-all .rb-sheet:first-child { break-before: auto; }
+  .rb-title { font-size: 16pt; }
+  .rb-scenario__name { color: #000; }
+  .rb-profile { max-height: 52mm; }
+  .rb-line { stroke: #000; }
+  .rb-hatch { stroke: #000; }
+  .rb-table-wrap { overflow: visible; border: 1px solid #000; border-radius: 0; }
+  .data { font-size: 8.5pt; }
+  .rb-table th, .rb-table td { padding: 2pt 4pt; border-bottom: 0.5pt solid #888; }
+  .rb-table thead { display: table-header-group; }
+  .rb-table tr { break-inside: avoid; }
+  .rb-table thead th { position: static; background: #eee; color: #000; font-weight: 700; }
+  .rb-row--night td { background: #eee; }
+  .rb-night-tag { border-color: #000; }
+  .rb-cut--tendu, .rb-cut--hors_delai { text-decoration: underline; }
+  .rb-cut--hors_delai { font-weight: 800; }
+  .rb h3 { font-size: 10pt; break-after: avoid; }
+  .rb-cols { break-inside: avoid; }
+  .rb-box { border-color: #000; }
+  .rb-gaps { break-inside: avoid; }
+  a { color: #000; text-decoration: none; }
+}

@@ -14,6 +14,7 @@ Le projet est **en français par défaut** (la langue des documents générés e
 |---|---|
 | 🧠 **4 agents spécialisés** | `coach`, `course-strategist`, `medical`, `nutritionist` — installez seulement ceux que vous voulez |
 | 🌙 **Pénalité de nuit en ultra** | le plan de course calcule, sans réseau, le crépuscule du lieu et pénalise la vitesse des sections courues de nuit (selon la pente), avec les heures de frontale par scénario |
+| 🗺️ **Roadbook imprimable** | une feuille A4 par scénario depuis le tableau de bord (vue Roadbook, lien depuis Trail Shape) : profil, sections, heures de passage, barrières et marges, ravitos avec ce qu'on y prend, matériel obligatoire — impression ou PDF du navigateur, sans dépendance |
 | 🌡️ **Cibles ajustées à la chaleur** | par grosse chaleur, l'allure cible des séances (endurance, sortie longue, qualité) est ralentie de façon déterministe — FC inchangée, créneau frais proposé, jamais d'intensité maintenue en 🔴 (mêmes coefficients que le plan de course) |
 | 🛠️ **20 skills** | commandes courtes `/today` `/why` `/week` `/race` `/log` `/inspection`, analyse GPX, comparaison de parcours, planification Garmin, météo, analyse de séances, Intervals.icu, diagnostic d'installation, inspection photo des chaussures, etc. |
 | 📡 **Accès Garmin Connect** | via `garmin-mcp` (mode direct, liste blanche d'outils) — passerelle `leanproxy-mcp` optionnelle |

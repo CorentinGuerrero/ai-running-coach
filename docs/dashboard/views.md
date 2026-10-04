@@ -957,6 +957,52 @@ score sans que ce soit un problème.
 | `planning/active_objective.md` (distance, D+, date de course) | `scripts/arc_trail_shape.py` |
 | `activities/*.md` (course/trail des 8 dernières semaines) | `scripts/arc_metrics.py` (km-effort ITRA #35, durabilité #48), `scripts/arc_trail_shape.py` |
 
+## Roadbook
+
+**Qu'ai-je dans la poche le jour J ?**
+
+Une feuille imprimable par scénario (#187, épopée #170), accessible par le lien
+« Roadbook imprimable du plan de course » en bas de [Trail Shape](#trail-shape)
+(adresse `#/roadbook`, `?plan=<fichier>` pour choisir un plan, `?scenario=safe|realistic|ambitious`).
+Elle lit le plan de course persisté dans `planning/` (bloc ```` ```arc ````
+`kind: race_plan`, écrit par `course-strategist`) et ne calcule rien de plus :
+heures de passage et marges de barrière viennent de `scripts/arc_race_pacing.py`,
+le contrôle du matériel de `arc_index.py equipment --race-plan` (#134).
+Les heures de passage sont en **heure locale réelle** du fuseau `timezone` du plan :
+une course qui traverse le changement d'heure reste juste (même règle que la nuit, #184) ;
+dans ce cas, un avertissement rappelle que les marges de barrière, elles, sont calculées
+à l'heure murale par `arc_race_pacing.py` et peuvent différer d'une heure après le changement.
+
+Une feuille contient :
+
+- l'en-tête (course, date, heure de départ, distance, D+/D−, temps du scénario,
+  heure d'arrivée, objectif du plan) ;
+- le **profil d'élévation**, avec les ravitos numérotés (R1, R2…) et la nuit
+  hachurée — **relatif au départ** : le plan ne contient pas l'altitude absolue ;
+- les **sections** (de ravito à ravito) : km, distance, D+/D−, temps, heure de
+  passage et durée écoulée, barrière horaire avec sa marge (texte « TENDU » /
+  « HORS DÉLAI », jamais la seule couleur), ravito avec **ce qu'on y prend**
+  (`take` du plan nutrition) et ce qu'il sert, drapeau **nuit / frontale** ;
+- le **matériel obligatoire** en liste à cocher, avec son statut contre l'inventaire
+  (prêt, à vérifier, jamais utilisé à l'entraînement, non retrouvé) ;
+- l'**urgence et les consignes** du plan (`emergency`, `notes`), et un encart
+  « À compléter / à savoir » qui liste **tout ce qui manque** au plan (pas de
+  départ renseigné, pas de barrière, `take` absent…) : une donnée absente est
+  dite absente, jamais inventée.
+
+Le sélecteur de scénario bascule sans nouvel appel. **Imprimer / PDF** ouvre la
+boîte d'impression du navigateur (`window.print()`, aucun service ni
+dépendance : choisissez « Enregistrer au format PDF ») ; **Imprimer les 3
+scénarios** met un scénario par page. La feuille d'impression est en A4
+portrait, noir et blanc lisible quel que soit le thème de l'écran, sans
+navigation, tableau à 9 pt. Sur téléphone, le tableau devient une carte par
+section.
+
+| Alimentée par | Calcul |
+|---|---|
+| `planning/*.md` (`race_plan` : `segments`, `aid_stations` dont `take`/`cutoff`, `start_time`, `gear`, `notes`, `emergency`) | `scripts/arc_roadbook.py` (`/api/roadbook`), `scripts/arc_race_pacing.py` (`compute_passages`, `check_cutoffs`) |
+| `planning/Runner_Profile.md`, `activities/*.md` (matériel) | `arc_index.equipment_race_check` (#134) |
+
 ## Calendrier
 
 **Suis-je régulier ?**
@@ -1172,6 +1218,7 @@ nourrit :
 | Performance | `activities/*.md`, `planning/Runner_Profile.md`, `planning/active_objective.md` | synchronisation, vous |
 | Matériel | `planning/Runner_Profile.md`, `activities/*.md`, `gear/*.md` | vous, coach, synchronisation |
 | Trail Shape | `activities/*.md` (8 dernières semaines), `planning/active_objective.md` | synchronisation, vous |
+| Roadbook | `planning/*.md` (plan de course : segments, ravitos, matériel), `planning/Runner_Profile.md` | `course-strategist`, vous |
 | Calendrier | `activities/*.md` | synchronisation |
 | Rapports | `rapports/*.md` | coach |
 | Nutrition | `nutrition/<date>_nutrition.md` | nutritionniste |

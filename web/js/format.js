@@ -21,6 +21,15 @@ export function distance(m, digits = 1) {
   return `${num(m / 1000, digits)}${NBSP}km`;
 }
 
+// Valeur de distance SANS unité (axes de graphique, colonnes « de → à ») et son unité.
+export function distanceValue(m, digits = 1) {
+  return num(UNITS === "imperial" ? m / 1609.344 : m / 1000, digits);
+}
+
+export function distanceUnit() {
+  return UNITS === "imperial" ? "mi" : "km";
+}
+
 export function elevation(m) {
   if (m === null || m === undefined) return "—";
   if (UNITS === "imperial") return `${num(m * 3.28084)}${NBSP}ft`;

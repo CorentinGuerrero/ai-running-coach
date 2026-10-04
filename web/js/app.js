@@ -3,6 +3,7 @@ import * as F from "./format.js";
 import { navItems } from "./nav.js";
 import { timeChart, attachCursor, verdictStrip, yearCalendar } from "./chart.js";
 import { resampleByDistance, colorModes, sessionMap } from "./map.js";
+import { roadbookHtml, wireRoadbook } from "./roadbook.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const main = $("#main");
@@ -631,7 +632,9 @@ function markNav(route) {
       || (route === "montee" && a.dataset.route === "analyse")
       // `#/decision?id=…` (#55, détail d'une décision) : même motif que `rapport`
       // ci-dessus, sous-page de « Décisions » sans onglet dédié.
-      || (route === "decision" && a.dataset.route === "decisions");
+      || (route === "decision" && a.dataset.route === "decisions")
+      // `#/roadbook` (#187, roadbook imprimable d'un plan de course) : sous-page de Trail Shape.
+      || (route === "roadbook" && a.dataset.route === "trail-shape");
     a.toggleAttribute("aria-current", on);
     if (on) {
       a.setAttribute("aria-current", "page");
@@ -2961,12 +2964,15 @@ function trailShapeComponentRow(c) {
   </div>`;
 }
 
+// Accès au roadbook imprimable (#187) depuis la zone « course » du tableau de bord.
+const ROADBOOK_LINK = `<p class="rb-link"><a href="#/roadbook">Roadbook imprimable du plan de course</a> <span class="muted">— profil, passages, barrières, ravitos et matériel, à imprimer ou en PDF.</span></p>`;
+
 async function viewTrailShape() {
   const r = await api("trail-shape");
   const sub = "Sorties longues, volume et D+ en moyenne sur les 8 dernières semaines glissantes, comparés aux exigences de l'objectif actif — un indicateur parmi d'autres, jamais un verdict.";
   if (r.status !== "ok") {
     const title = TRAIL_SHAPE_EMPTY_TITLE[r.status] || r.status;
-    main.innerHTML = `${header("Trail Shape", sub)}${empty(title, (r.notes || []).map((n) => F.esc(n.message)).join("<br>") || "Pas assez d'information pour calculer ce score.")}`;
+    main.innerHTML = `${header("Trail Shape", sub)}${empty(title, (r.notes || []).map((n) => F.esc(n.message)).join("<br>") || "Pas assez d'information pour calculer ce score.")}${ROADBOOK_LINK}`;
     return;
   }
   const o = r.objective || {};
@@ -2984,7 +2990,31 @@ async function viewTrailShape() {
     </section>
     <section class="band ts-components">${rows}</section>
     <section class="band"><h2>Formule</h2><p class="muted">${F.esc(r.formula)}</p>
-      ${note("Score calculé uniquement à partir de l'historique d'entraînement (aucune donnée de santé — HRV, FC de repos, readiness — n'y entre). Aucun affûtage n'est détecté : une baisse de volume dans les dernières semaines avant la course peut simplement refléter un affûtage réussi.")}</section>`;
+      ${note("Score calculé uniquement à partir de l'historique d'entraînement (aucune donnée de santé — HRV, FC de repos, readiness — n'y entre). Aucun affûtage n'est détecté : une baisse de volume dans les dernières semaines avant la course peut simplement refléter un affûtage réussi.")}</section>
+    ${ROADBOOK_LINK}`;
+}
+
+// ---------------------------------------------------------------------------
+// Vue : Roadbook imprimable (#187) — sous-page de Trail Shape (zone « course »)
+// ---------------------------------------------------------------------------
+
+async function viewRoadbook(params) {
+  const plan = params.get("plan");
+  const r = await api(`roadbook${plan ? `?plan=${encodeURIComponent(plan)}` : ""}`, { fresh: true });
+  const sub = "Une feuille par scénario : profil, sections, heures de passage, barrières, ravitos et matériel obligatoire — à imprimer ou à enregistrer en PDF.";
+  if (r.status !== "ok") {
+    const plans = (r.plans || []).map((p) => `<li><a href="#/roadbook?plan=${encodeURIComponent(p.path)}">${F.esc(p.race_name || p.path)}</a></li>`).join("");
+    main.innerHTML = `${header("Roadbook", sub)}${empty(r.status === "no_plan" ? "Aucun plan de course" : "Plan introuvable", `${F.esc(r.message || "")}${plans ? `</p><ul>${plans}</ul><p>` : ""}`)}`;
+    return;
+  }
+  const { html, active } = roadbookHtml(r, params.get("scenario"));
+  main.innerHTML = `<div class="rb-page">${header("Roadbook", sub)}${html}</div>`;
+  if (!active) return;
+  wireRoadbook($(".rb-page", main), (name) => {
+    const q = new URLSearchParams(location.hash.split("?")[1] || "");
+    q.set("scenario", name);
+    history.replaceState(null, "", `#/roadbook?${q}`);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3652,7 +3682,7 @@ function daysToWeeksPeriod(days) {
 
 const ROUTES = {
   "": viewToday, forme: viewForm, analyse: viewAnalyse, sante: viewHealth, semaine: viewWeek, seances: viewSessions,
-  performance: viewPerformance, materiel: viewMateriel, "trail-shape": viewTrailShape, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
+  performance: viewPerformance, materiel: viewMateriel, "trail-shape": viewTrailShape, roadbook: viewRoadbook, calendrier: viewCalendar, rapports: viewReports, rapport: viewReport,
   nutrition: viewNutrition, fichiers: viewFiles, hypotheses: viewHypotheses, decisions: viewDecisions, decision: viewDecision,
 };
 
