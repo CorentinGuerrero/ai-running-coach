@@ -507,5 +507,65 @@ class TestDeclaredOfficialKm(unittest.TestCase):
         self.assertEqual(decl[0]["km_start"], 40.0)  # l'entrée de l'appelant n'est pas modifiée
 
 
+class TestComposesWithDem(unittest.TestCase):
+    """`--dem` (#176) + `--technicity` : l'appariement OSM ne lit que lat/lon (inchangés par le MNT),
+    la pondération par la pente lit les pentes du plan, donc celles de l'altitude MNT."""
+
+    def _run(self, extra):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        import arc_dem as DEM
+        seen = {}
+
+        def fake_resample(pts, **_k):
+            # MNT : descente régulière de 15 % (le fichier, lui, est plat en dents de scie)
+            d = T.cumulative_m(pts)
+            return {"status": "ok", "ele": [1500.0 - 0.15 * x for x in d],
+                    "report": {"step_m": 25.0, "providers": ["stub"], "attribution": ["stub"]}}
+
+        def fake_fetch(pts, cache_dir=None, **_k):
+            seen["pts"] = [(p["lat"], p["lon"]) for p in pts]
+            return [], {"requests": 0, "cache_hits": 0, "chunks": 0}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            (ws / "config").mkdir(parents=True)
+            n, step = 300, 10.0
+            pts = [{"lat": -40.0, "lon": -140.0 + i * step / (111320.0 * 0.766044443)} for i in range(n)]
+            body = "".join(f'<trkpt lat="{q["lat"]}" lon="{q["lon"]}"><ele>{100 + (2 if i % 2 else -2)}</ele></trkpt>'
+                           for i, q in enumerate(pts))
+            gpx = Path(tmp) / "c.gpx"
+            gpx.write_text('<?xml version="1.0"?><gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>'
+                           f"{body}</trkseg></trk></gpx>", encoding="utf-8")
+            decl = Path(tmp) / "t.json"
+            decl.write_text(json.dumps({"sections": [{"km_start": 0, "km_end": 3, "coef": 1.2}]}))
+            out = io.StringIO()
+            with mock.patch.object(DEM, "resample_track", fake_resample), \
+                    mock.patch.object(T, "fetch_ways", fake_fetch), \
+                    redirect_stdout(out), redirect_stderr(io.StringIO()):
+                rc = RP.main(["plan", "--workspace", str(ws), "--memory", "--gpx", str(gpx),
+                              "--today", "2030-05-01", "--technicity", str(decl), "--technicity", "osm", *extra])
+            self.assertEqual(rc, 0)
+            return json.loads(out.getvalue()), seen["pts"], [(q["lat"], q["lon"]) for q in pts]
+
+    def test_dem_grades_drive_slope_weighting_coordinates_unchanged(self):
+        flat, flat_pts, gpx_pts = self._run([])
+        dem, dem_pts, _ = self._run(["--dem"])
+        self.assertIn("elevation_dem", dem)
+        self.assertTrue(flat["segments"] and len(dem["segments"]) == len(flat["segments"]))
+        # même trace envoyée à l'appariement OSM avec ou sans MNT (seule l'altitude change)
+        self.assertEqual(dem_pts, flat_pts)
+        self.assertEqual([(round(a, 6), round(b, 6)) for a, b in dem_pts],
+                         [(round(a, 6), round(b, 6)) for a, b in gpx_pts])
+        for seg in flat["segments"]:
+            self.assertEqual(seg["technicity"]["source"], "declared")
+            self.assertAlmostEqual(seg["technicity"]["effective_factor"], 1.2, places=3)  # à plat
+        for seg in dem["segments"]:
+            self.assertLess(seg["grade_mean_pct"], -12.0)
+            # descente MNT de 15 % -> poids plein ×1,5 : 1 + 0,2 × 1,5
+            self.assertAlmostEqual(seg["technicity"]["effective_factor"], 1.3, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()
