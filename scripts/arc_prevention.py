@@ -17,8 +17,15 @@ proposer quoi que ce soit :
 3. drapeau de risque de blessure (#57) `consult` ou niveau `high` -> AUCUN exercice : jamais assoupli ;
 4. score > 3/10, douleur qui s'aggrave, ou qui dure plus de 7 jours -> AUCUN exercice, avis
    professionnel conseillé ;
-5. seulement une gêne légère (<= 3/10), connue et stable -> routine DOUCE de prévention (2 séries,
+5. gêne légère (<= 3/10) mais pas encore CONFIRMÉE (une seule déclaration, ou déclarations à moins de
+   2 jours d'écart) -> `observe` : AUCUN exercice, l'agent pose les 3 questions (nouvelle ? vive ?
+   gonflement ?) ; la routine n'arrive qu'à une deuxième déclaration au moins 2 jours plus tard sans
+   hausse, ou si l'athlète confirme lui-même une gêne connue, non aiguë et stable (`--known`) ;
+6. seulement une gêne légère (<= 3/10), connue et stable -> routine DOUCE de prévention (2 séries,
    effort facile, sans impact), jamais un traitement.
+
+Une zone revenue à 0/10 est « résolue », sauf si la fenêtre contient un score >= seuil de consultation
+ou une douleur aiguë : la recommandation de consulter reste alors affichée.
 
 Rien de tout cela n'est un diagnostic : le module ne nomme que des zones, jamais une pathologie
 (un test de lint le vérifie sur toutes les sorties). Les seuils (3/10, 7 jours, aggravation d'un
@@ -27,7 +34,7 @@ point) sont des « approximations du projet », sans protocole publié derrière
 dit « ce n'est pas un avis médical ». Rien n'est poussé automatiquement : le coach PROPOSE la routine
 à la prochaine interaction.
 
-    python3 scripts/arc_index.py prevention [--days N] [--acute ZONE,…] [--equipment …] [--text]
+    python3 scripts/arc_index.py prevention [--days N] [--acute ZONE,…] [--known ZONE,…] [--equipment …] [--text]
 """
 
 from __future__ import annotations
@@ -42,7 +49,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import arc_strength as SG
 
 PREVENTION_FILE = SG.STRENGTH_DIR / "prevention.json"
-STATUSES = ("prevention_ok", "consult", "no_data")
+STATUSES = ("prevention_ok", "observe", "consult", "no_data")
 CONSULT_LEVELS = ("urgent", "advised")
 DEFAULT_WINDOW_DAYS = 14
 
@@ -50,6 +57,19 @@ DISCLAIMER_COACH = ("Ce n'est pas un avis médical : règles génériques du pro
                     "diagnostic. En cas de doute ou si la douleur persiste, consulte un professionnel de santé.")
 DISCLAIMER_MEDICAL = ("Décision de l'agent medical : le coach relaie sans l'assouplir. Règles génériques du "
                       "projet (approximations), sans diagnostic.")
+
+# Contrat de SORTIE (vérifié par les tests des paliers B et D sur les sorties, les données livrées, les
+# prompts et la documentation) : aucun nom de pathologie, aucun vocabulaire de soin. Les mots que
+# l'ATHLÈTE emploie (`synonyms`, `acute_keywords`) sont des entrées, hors contrat. « traitement » n'est
+# permis que nié (« jamais un/de traitement », « aucun traitement », « sans traitement »).
+DIAGNOSIS_TERMS = re.compile(
+    r"tendinite|tendinopathie|tendinose|fracture|entorse|l[ée]sion|p[ée]riostite|syndrome|d[ée]chirure|"
+    r"claquage|rupture|fasciite|apon[ée]vrosite|inflammation|bursite|sciatique|sciatalgie|hernie|"
+    r"ligamentaire|m[ée]nisque|contracture|[ée]longation|arthrose|luxation|fissure|chondropathie|pubalgie|"
+    r"lumbago|[ée]pine calcan[ée]enne|osgood", re.IGNORECASE)
+CARE_TERMS = re.compile(
+    r"\bsoign|\bgu[ée]ri|(?<!kin[ée]si)th[ée]rap|r[ée][ée]ducation|soulag|\btraiter\b|"
+    r"(?<!jamais un )(?<!jamais de )(?<!aucun )(?<!ni un )(?<!pas un )(?<!sans )\btraitement", re.IGNORECASE)
 
 ASSUMPTIONS = {
     "nature": (
@@ -68,6 +88,14 @@ ASSUMPTIONS = {
         "avec gonflement) n'est détecté que par des mots-clés dans la zone déclarée ou signalé par "
         "l'agent d'après les mots de l'athlète (`--acute`) : ABSENCE de signal ne vaut pas preuve "
         "d'absence de gravité, le coach demande si la douleur est nouvelle ou vive."),
+    "confirmation": (
+        "Une seule déclaration légère ne suffit pas à proposer des exercices de charge : la routine exige "
+        "deux déclarations à au moins 2 jours d'écart (`confirm_min_span_days`) sans hausse, ou la "
+        "confirmation explicite de l'athlète (gêne connue, non aiguë, stable : `--known`). Avant cela, "
+        "statut `observe` : aucun exercice, trois questions. Choix volontairement prudent du projet."),
+    "progression_shown": (
+        "Le « niveau suivant » d'un exercice n'est jamais un exercice excentrique dédié ni de la "
+        "pliométrie (`never_in_prevention`), même affiché « plus tard »."),
     "persistence": (
         "Durée = écart entre la première et la dernière déclaration de la zone dans la fenêtre "
         "(14 jours par défaut) : une douleur plus ancienne n'est pas visible au-delà de la fenêtre."),
@@ -101,10 +129,17 @@ def load_prevention(path: Optional[Path] = None) -> dict:
 def validate_prevention(doc: dict, exercises: Dict[str, dict]) -> List[str]:
     errors: List[str] = []
     th = doc.get("thresholds") or {}
-    for key in ("window_days", "gentle_max_score", "persistence_days", "worsening_min_delta"):
+    for key in ("window_days", "gentle_max_score", "persistence_days", "worsening_min_delta",
+                "confirm_min_span_days"):
         v = th.get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errors.append(f"thresholds.{key} : nombre > 0 attendu.")
+    banned = set(doc.get("never_in_prevention") or [])
+    for bid in sorted(banned):
+        if bid not in exercises:
+            errors.append(f"never_in_prevention : exercice {bid!r} absent de la bibliothèque.")
+    if not doc.get("observe_questions"):
+        errors.append("observe_questions : au moins une question attendue (nouvelle ? vive ? gonflement ?).")
     ids = set()
     for z in doc.get("zones", []):
         zid = z.get("id")
@@ -126,6 +161,8 @@ def validate_prevention(doc: dict, exercises: Dict[str, dict]) -> List[str]:
                 errors.append(f"zone {zid}/{ex['id']} : séries 1 à 3 attendues (routine douce).")
             if ex["group"] == "pliometrie":
                 errors.append(f"zone {zid}/{ex['id']} : pas de pliométrie dans une routine de prévention.")
+            if ex["id"] in banned:
+                errors.append(f"zone {zid}/{ex['id']} : exercice exclu de la prévention (never_in_prevention).")
             if ("reps" in b) == ("seconds" in b):
                 errors.append(f"zone {zid}/{ex['id']} : exactement un de reps/seconds attendu.")
     for kw in doc.get("acute_keywords", []):
@@ -204,10 +241,17 @@ def _routine(zone: dict, exercises: Dict[str, dict], sdoc: dict, doc: dict,
     substitutions: List[dict] = []
     dropped: List[dict] = []
     used: set = set()
+    banned = set(doc.get("never_in_prevention") or [])
+
+    def allowed(e: dict) -> bool:
+        return e["group"] != "pliometrie" and e["id"] not in banned
+
     for b in zone["exercises"]:
         ex = exercises[b["exercise"]]
         if not SG._usable(ex, available):
             fb = SG._fallback(ex, exercises, available)
+            if fb is not None and not allowed(fb):
+                fb = None
             if fb is None:
                 dropped.append({"exercise": ex["id"], "reason": "matériel manquant, aucune régression utilisable"})
                 continue
@@ -221,7 +265,8 @@ def _routine(zone: dict, exercises: Dict[str, dict], sdoc: dict, doc: dict,
         blk = SG._coerce_block({k: v for k, v in b.items()}, ex)
         blk["rest_s"] = 30
         blocks.append({**SG._exercise_view(ex), **blk,
-                       "next_level": [exercises[p]["name"] for p in ex.get("progressions", [])]})
+                       "next_level": [exercises[p]["name"] for p in ex.get("progressions", [])
+                                      if p in exercises and allowed(exercises[p])]})
     return {
         "level": "doux", "use": zone.get("use"), "label": f"Prévention douce — {zone['label']}",
         "sessions_per_week": {"min": 2, "max": 3}, "duration_min": 15, "fatigue": "low",
@@ -251,16 +296,24 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
              exercises: Optional[Dict[str, dict]] = None, sdoc: Optional[dict] = None,
              available: Optional[List[str]] = None, medical_enabled: bool = False,
              acute_zones: Optional[List[str]] = None, injury_risk: Optional[dict] = None,
-             window_days: Optional[int] = None) -> dict:
+             window_days: Optional[int] = None, known_zones: Optional[List[str]] = None) -> dict:
     """Cœur PUR. `entries` : [{date: 'AAAA-MM-JJ', location: str, score: nombre 0-10}] (déclarations de
     douleur lues dans `medical/*_health.md`). Rend, par zone, un statut (`prevention_ok` | `consult`),
-    des raisons et, seulement si prevention_ok, une routine douce ; `no_data` global sans déclaration."""
+    des raisons et, seulement si prevention_ok, une routine douce ; `no_data` global sans déclaration.
+    `known_zones` : zones que l'athlète a lui-même confirmées connues, non aiguës et stables (lève seulement
+    l'attente d'une deuxième déclaration, jamais une autre règle). `injury_risk={"unavailable": True}` :
+    drapeau non évalué -> aucune routine (`observe`), jamais supposé bas."""
     if doc is None or exercises is None or sdoc is None:
         doc, exercises, sdoc = _library()
     th = doc["thresholds"]
     window = int(window_days or th["window_days"])
     start = today - timedelta(days=window - 1)
-    acute_ids = {normalize_zone(doc, z)["zone"] or z for z in (acute_zones or [])}
+    def _ids(names: Optional[List[str]]) -> set:
+        # zone reconnue -> son id ; sinon la clé des zones non reconnues (« ?texte replié »)
+        return {normalize_zone(doc, z)["zone"] or "?" + _fold(z) for z in (names or [])}
+
+    acute_ids = _ids(acute_zones)
+    known_ids = _ids(known_zones)
     zones_by_id = {z["id"]: z for z in doc["zones"]}
 
     kept: List[dict] = []
@@ -277,7 +330,10 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
     meta = {e["location"]: normalize_zone(doc, e["location"]) for e in kept}
     per = _per_day(kept, lambda e: meta[e["location"]]["zone"] or ("?" + _fold(e["location"])))
 
-    risk_block = bool(injury_risk and (injury_risk.get("consult") or injury_risk.get("level") == "high"))
+    risk_unknown = bool(injury_risk and injury_risk.get("unavailable"))
+    risk_block = bool(injury_risk and not risk_unknown
+                      and (injury_risk.get("consult") or injury_risk.get("level") == "high"))
+    min_span = th["confirm_min_span_days"]
     gentle_max = th["gentle_max_score"]
     results: List[dict] = []
     unrecognized: List[dict] = []
@@ -286,16 +342,19 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
         dates = sorted(days)
         latest = days[dates[-1]]
         scores = [days[d]["score"] for d in dates]
-        if latest["score"] == 0 and not zid.startswith("?"):
-            resolved_ids.append(zid)
-            continue
-        if latest["score"] == 0:
-            continue
         positive = [d for d in dates if days[d]["score"] > 0]
+        texts = [t for d in dates for t in days[d]["texts"]]
+        if latest["score"] == 0:
+            # 0/10 = résolue… sauf si la fenêtre garde un signal d'alerte : la consultation reste affichée.
+            red_flag = bool(positive) and (max(scores) >= consult_threshold or zid in acute_ids
+                                           or any(is_acute(doc, t) for t in texts))
+            if not red_flag:
+                if not zid.startswith("?"):
+                    resolved_ids.append(zid)
+                continue
         first_d, last_d = date.fromisoformat(positive[0]), date.fromisoformat(positive[-1])
         span = (last_d - first_d).days
         max_s, first_s, last_s = max(scores), days[positive[0]]["score"], days[positive[-1]]["score"]
-        texts = [t for d in dates for t in days[d]["texts"]]
         reasons: List[str] = []
         level: Optional[str] = None
 
@@ -323,9 +382,12 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
         if span > th["persistence_days"]:
             need("advised", f"Douleur déclarée depuis {span} jours (> {th['persistence_days']} jours) : "
                             "elle persiste, un avis professionnel est conseillé avant toute routine.")
+        if latest["score"] == 0 and level is not None:
+            reasons.append("Dernière déclaration à 0/10, mais la fenêtre contient un signal d'alerte : la "
+                           "recommandation de consulter reste valable avant toute routine.")
 
         base = {"entries": [{"date": d, "score": days[d]["score"]} for d in dates],
-                "latest_score": last_s, "max_score": max_s, "first_date": first_d.isoformat(),
+                "latest_score": latest["score"], "max_score": max_s, "first_date": first_d.isoformat(),
                 "last_date": last_d.isoformat(), "span_days": span}
         if zid.startswith("?"):
             label = texts[-1].strip() or "zone non précisée"
@@ -334,32 +396,50 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
                                      "reasons": ["Zone non reconnue : aucune routine n'est proposée, demander "
                                                  "à l'athlète de préciser (zones reconnues : "
                                                  + ", ".join(z["label"].split(" (")[0] for z in doc["zones"])
-                                                 + ")."]})
+                                                 + ")."],
+                                     "questions": list(doc["observe_questions"])})
             else:
                 unrecognized.append({**base, "location": label, "status": "consult", "consult_level": level,
                                      "reasons": reasons})
             continue
         z = zones_by_id[zid]
         sides = sorted({s for t in texts for s in [normalize_zone(doc, t)["side"]] if s})
+        confirmed = (len(positive) >= 2 and span >= min_span) or zid in known_ids
         if level is not None:
             results.append({**base, "zone": zid, "label": z["label"], "sides": sides, "status": "consult",
                             "consult_level": level, "reasons": reasons, "routine": None})
+        elif risk_unknown or not confirmed:
+            why = []
+            if risk_unknown:
+                why.append("Drapeau de risque de blessure non évalué (données illisibles) : aucune routine tant "
+                           "qu'il ne l'est pas, jamais supposé bas.")
+            if not confirmed:
+                why.append(f"Gêne légère (≤ {_fmt(gentle_max)}/10) pas encore confirmée (une seule déclaration, ou "
+                           f"déclarations à moins de {min_span} jours d'écart) : aucun exercice pour l'instant, on "
+                           "observe. Poser les questions ci-dessous ; si l'athlète confirme une gêne connue, non "
+                           "aiguë et stable, relancer avec --known ; une réponse « oui » à l'une d'elles : --acute.")
+            results.append({**base, "zone": zid, "label": z["label"], "sides": sides, "status": "observe",
+                            "consult_level": None, "reasons": why, "routine": None,
+                            "questions": list(doc["observe_questions"])})
         else:
             why = [f"Gêne légère (≤ {_fmt(gentle_max)}/10), stable, déclarée depuis {span} jour(s) : "
                    "routine douce de prévention possible."]
             if len(positive) == 1:
-                why.append("Première déclaration : à surveiller — arrêter la routine et consulter si la douleur "
-                           "augmente, devient vive ou persiste.")
+                why.append("Une seule déclaration, confirmée par l'athlète comme connue et stable : à surveiller "
+                           "— arrêter la routine et consulter si la douleur augmente, devient vive ou persiste.")
             results.append({**base, "zone": zid, "label": z["label"], "sides": sides, "status": "prevention_ok",
                             "consult_level": None, "reasons": why,
                             "routine": _routine(z, exercises, sdoc, doc, available)})
 
     order = {"urgent": 0, "advised": 1, None: 2}
-    results.sort(key=lambda r: (order[r["consult_level"]], r["zone"]))
+    rank = {"consult": 0, "observe": 1, "prevention_ok": 2, "no_data": 3}
+    results.sort(key=lambda r: (order[r["consult_level"]], rank[r["status"]], r["zone"]))
     unrecognized.sort(key=lambda r: (order[r["consult_level"]], r["location"]))
     everything = results + unrecognized
     if any(r["status"] == "consult" for r in everything):
         overall = "consult"
+    elif any(r["status"] == "observe" for r in everything):
+        overall = "observe"        # le plus prudent l'emporte : des questions avant toute routine
     elif any(r["status"] == "prevention_ok" for r in everything):
         overall = "prevention_ok"
     else:
@@ -372,7 +452,8 @@ def evaluate(entries: List[dict], today: date, consult_threshold: float, doc: Op
         "persistence_days": th["persistence_days"], "zones": results, "unrecognized": unrecognized,
         "resolved": sorted(resolved_ids),
         "injury_risk": ({"level": injury_risk.get("level"), "consult": bool(injury_risk.get("consult")),
-                         "blocks_routines": risk_block} if injury_risk else None),
+                         "blocks_routines": risk_block or risk_unknown, "unavailable": risk_unknown}
+                        if injury_risk else None),
         "no_data_reason": ("Aucune douleur déclarée sur la fenêtre : rien à proposer (jamais d'exercice 'au cas où')."
                            if overall == "no_data" and not everything else None),
         "proposal": "Le coach PROPOSE la routine à la prochaine interaction ; aucun envoi automatique.",
@@ -407,8 +488,11 @@ def render_text(report: dict) -> str:
              f"(décision : {report['decision_owner']})"]
     if report["injury_risk"]:
         ir = report["injury_risk"]
-        lines.append(f"Drapeau de risque de blessure : niveau {ir['level']}, consult={ir['consult']}"
-                     + (" — aucune routine." if ir["blocks_routines"] else "."))
+        if ir.get("unavailable"):
+            lines.append("Drapeau de risque de blessure non évalué (données illisibles) — aucune routine.")
+        else:
+            lines.append(f"Drapeau de risque de blessure : niveau {ir['level']}, consult={ir['consult']}"
+                         + (" — aucune routine." if ir["blocks_routines"] else "."))
     if report["no_data_reason"]:
         lines.append(report["no_data_reason"])
     for r in report["zones"] + report["unrecognized"]:
@@ -416,6 +500,7 @@ def render_text(report: dict) -> str:
         lines += ["", f"{name} : {r['status']}" + (f" ({r['consult_level']})" if r["consult_level"] else "")
                   + f" — {_fmt(r['latest_score'])}/10, du {r['first_date']} au {r['last_date']}"]
         lines += [f"  - {x}" for x in r["reasons"]]
+        lines += [f"  ? {q}" for q in r.get("questions") or []]
         rt = r.get("routine")
         if rt:
             lines.append(f"  Routine douce (~{rt['duration_min']} min, {rt['sessions_per_week']['min']}-"
@@ -436,7 +521,7 @@ def render_text(report: dict) -> str:
 
 def run(conn, today: date, days: Optional[int], acute: Optional[str], equipment: Optional[str],
         workspace: Optional[Path], profile: str, consult_threshold: float, medical_enabled: bool,
-        injury_risk: Optional[dict], fmt: str = "json") -> str:
+        injury_risk: Optional[dict], fmt: str = "json", known: Optional[str] = None) -> str:
     """Point d'entrée de `arc_index.py prevention` (lecture seule, aucune écriture)."""
     doc, exercises, sdoc = _library()
     window = days or doc["thresholds"]["window_days"]
@@ -447,6 +532,7 @@ def run(conn, today: date, days: Optional[int], acute: Optional[str], equipment:
         text = prof.read_text(encoding="utf-8") if prof is not None and prof.is_file() else ""
         available = SG.equipment_from_profile(text)["available"]
     acute_zones = [x.strip() for x in (acute or "").split(",") if x.strip()]
+    known_zones = [x.strip() for x in (known or "").split(",") if x.strip()]
     report = evaluate(collect_entries(conn, today, window), today, consult_threshold, doc, exercises, sdoc,
-                      available, medical_enabled, acute_zones, injury_risk, window)
+                      available, medical_enabled, acute_zones, injury_risk, window, known_zones)
     return render_text(report) if fmt == "text" else json.dumps(report, ensure_ascii=False)

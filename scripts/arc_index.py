@@ -35,7 +35,7 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
                                                                         # gabarits de périodisation (#189)
     arc_index.py strength [--phase P] [--use U] [--equipment LISTE] [--text | --garmin-json]
                                                                         # bibliothèque de renforcement (#191)
-    arc_index.py prevention [--days N] [--acute ZONE,…] [--equipment LISTE] [--text]
+    arc_index.py prevention [--days N] [--acute ZONE,…] [--known ZONE,…] [--equipment LISTE] [--text]
                                                                         # prévention ciblée liée aux douleurs (#192)
 
 `strength` (#191, épopée #173) choisit un programme de renforcement/mobilité de la bibliothèque livrée avec
@@ -4832,6 +4832,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--acute", metavar="ZONES",
                         help="commande « prevention » (#192) : zones (séparées par des virgules) que l'athlète décrit "
                              "comme nouvelles, vives ou gonflées — aucune routine, consultation")
+    parser.add_argument("--known", metavar="ZONES",
+                        help="commande « prevention » (#192) : zones dont l'athlète a LUI-MÊME confirmé une gêne "
+                             "connue, non aiguë et stable — lève seulement l'attente d'une deuxième déclaration")
     parser.add_argument("--garmin-json", action="store_true", dest="garmin_json",
                         help="commande « strength » (#191) : charge utile Garmin (workout_data + arguments de "
                              "create_strength_workout) au lieu de la sélection ; aucune écriture")
@@ -4911,7 +4914,7 @@ def strength_cli(args, workspace: Path) -> int:
 def prevention_cli(conn, args, workspace: Path, today: date) -> str:
     """`arc_index.py prevention` (#192) — lecture seule. Seuil de consultation, agents activés et drapeau de
     risque de blessure sont lus dans la configuration vivante ; un drapeau illisible est dit, jamais supposé
-    bas (il n'est alors pas évalué : `injury_risk` absent)."""
+    bas : `injury_risk.unavailable` vaut alors true et aucune routine n'est proposée."""
     import arc_guardrails as G      # import tardif : arc_guardrails importe arc_index
     config = load_config(workspace)
     conf = settings(config)
@@ -4919,11 +4922,11 @@ def prevention_cli(conn, args, workspace: Path, today: date) -> str:
     try:
         risk = G.evaluate_injury_risk(G.build_injury_risk_context(conn, config, gconf, today), gconf)
     except Exception:       # pragma: no cover — repli défensif : le drapeau n'est pas évalué, jamais « bas »
-        risk = None
+        risk = {"unavailable": True}
     fmt = "text" if args.text and not args.json else "json"
     try:
         return PV.run(conn, today, args.days, args.acute, args.equipment, workspace, conf["profile"],
-                      gconf["pain_consult_threshold"], "medical" in conf["agents"], risk, fmt)
+                      gconf["pain_consult_threshold"], "medical" in conf["agents"], risk, fmt, args.known)
     except (PV.PreventionError, SG.StrengthError) as exc:
         raise ConfigError(str(exc))
 
