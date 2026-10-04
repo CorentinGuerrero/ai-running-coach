@@ -1,5 +1,23 @@
 # Gabarits de périodisation (`arc_plan_templates.py`)
 
+<!-- arc-video:bloc -->
+<div class="arc-video-card" markdown>
+
+[![Construire son bloc](video/bloc/poster.jpg)](video/bloc/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 15 · 1 min 48</span>
+
+**[Construire son bloc](video/bloc/index.html)** — Un bloc d'entraînement qui ne s'invente plus : gabarits de périodisation, squelette semaine par semaine relu par les garde-fous, frise du bloc sur le tableau de bord, renforcement par phase et prévention ciblée.
+
+[Regarder](video/bloc/index.html) · [English](video/bloc/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 Jusqu'ici, le coach écrivait chaque bloc d'entraînement « à main levée » : la
 périodisation et l'affûtage ne vivaient que dans son prompt. Les gabarits
 rangent cette structure dans des **données** (`config/plans/*.json`, livrées

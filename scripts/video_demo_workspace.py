@@ -29,6 +29,8 @@ montées de la séance restent alors vides).
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import re
 import shutil
@@ -801,10 +803,38 @@ def set_departure(root: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Bloc d'entraînement (épisode 15) : squelette écrit par le VRAI `plan-skeleton`
+# ---------------------------------------------------------------------------
+
+BLOC_OBJECTIVE = {                    # variante « bloc » : le Trail des Crêtes (22 nov.) n'a que 7 semaines, gabarit trop court
+    "Nom": "Trail du Solstice", "Date": "2026-12-27", "Distance": "42 km", "Dénivelé positif": "2 000 m",
+    "Temps visé": "6 h 20", "Scénario acceptable / scénario noir": "acceptable : 7 h 00 · noir : abandon sur blessure",
+    "Semaines restantes": "13",
+}
+
+
+def write_skeleton(root: Path) -> None:
+    """Vise la course de fin décembre (objectif actif de la variante), puis écrit les semaines du bloc avec
+    `arc_index.py plan-skeleton --write`
+    (gabarit marathon_trail, volume tenu lu dans l'index, chaque semaine vérifiée par les garde-fous) : rien n'est
+    inventé ici, c'est la sortie réelle de la commande. À la date du film (J-54 du Trail des Crêtes) ce même
+    gabarit, appliqué à la course du 22 novembre, répond honnêtement « trop court » (7 semaines pour 12)."""
+    import arc_index as I
+    text = _fill_template((REPO / "templates/active_objective.template.md").read_text(encoding="utf-8"),
+                          {**OBJECTIVE_VALUES, **BLOC_OBJECTIVE})
+    text = text.replace("|  |  |  |", "| 2026-09-29 | Objectif fixé : Trail du Solstice | Squelette du bloc généré par plan-skeleton |")
+    (root / "planning/active_objective.md").write_text(text, encoding="utf-8")
+    with contextlib.redirect_stdout(io.StringIO()):              # la sortie JSON de la commande n'intéresse pas
+        rc = I.main(["plan-skeleton", "--workspace", str(root), "--today", TODAY.isoformat(), "--write"])
+    if rc not in (0, None):
+        raise RuntimeError(f"plan-skeleton --write a échoué ({rc})")
+
+
+# ---------------------------------------------------------------------------
 # Assemblage
 # ---------------------------------------------------------------------------
 
-def build_demo(root: Path, *, with_samples: bool = True, force: bool = False) -> Path:
+def build_demo(root: Path, *, with_samples: bool = True, force: bool = False, bloc: bool = False) -> Path:
     root = Path(root)
     if root.exists() and any(root.iterdir()):
         if not force:
@@ -834,6 +864,8 @@ def build_demo(root: Path, *, with_samples: bool = True, force: bool = False) ->
         write_samples(root)
     set_departure(root)
     write_inspections(root)                       # après le départ : kilométrages cohérents avec la fiche
+    if bloc:                                      # épisode 15 seulement : les autres épisodes gardent le workspace d'origine
+        write_skeleton(root)                      # en dernier : lit le volume tenu dans l'index
     return root
 
 

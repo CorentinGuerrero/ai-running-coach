@@ -186,6 +186,19 @@ SHOTS = [
 ]
 
 
+# Épisode 15 : le bloc, sur une variante du workspace de Camille dont l'objectif est la course de fin décembre
+# (`demo.build_demo(bloc=True)` : le squelette est écrit par le vrai `plan-skeleton --write`).
+BLOC_SHOTS = [
+    dict(name="bloc-frise", view="Semaine", route="semaine", wait=".band--frise .frise-cell",
+         desc="Frise du bloc (vue Semaine) : 12 semaines du 5 octobre au 27 décembre, phases (Base, Développement, Spécifique, Affûtage), semaines allégées, drapeau de course, récupération post-course.",
+         boxes={"frise": B(".band--frise"), "colonnes": B(".band--frise svg"), "legende": B(".band--frise .legend"),
+                "lecture": B("#frise-readout"), "drapeau": B(".band--frise .frise-flag")}),
+    dict(name="bloc-semaine", view="Semaine", route="semaine?debut=2026-10-12", wait=".band--frise .frise-cell", reload=False,
+         desc="Semaine du 12 octobre du squelette : créneaux de séance à habiller (« à définir »), la frise du bloc en tête.",
+         boxes={"frise": B(".band--frise"), "semaine": B(".week")}),
+]
+
+
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
@@ -276,7 +289,7 @@ class Recorder:
         log(f"  {name}: {webp.stat().st_size // 1024} Ko, {len(found)} cadres")
 
     def write_manifest(self) -> None:
-        order = {s["name"]: i for i, s in enumerate(SHOTS)}
+        order = {s["name"]: i for i, s in enumerate(SHOTS + BLOC_SHOTS)}
         data = {"generated_for": "Camille — mardi 2026-09-29 (J-54), workspace fictif", "shots": sorted(
             self.entries, key=lambda e: order.get(e["name"], 999))}
         text = json.dumps(data, ensure_ascii=False, indent=1)
@@ -303,9 +316,10 @@ def new_context(browser, vp):
     return ctx
 
 
-def open_view(page, base, route, wait, scroll=None):
+def open_view(page, base, route, wait, scroll=None, reload=True):
     page.goto(f"{base}/#/{route}")
-    page.reload()                                  # état propre malgré le changement de hash
+    if reload:
+        page.reload()                              # état propre malgré le changement de hash
     page.wait_for_selector(wait, timeout=20000)
     page.wait_for_timeout(500)
     page.evaluate("window.scrollTo(0, 0)")
@@ -350,6 +364,28 @@ def capture_dashboard(rec, browser, base, only):
         open_view(page, base, shot["route"].format(act=act), shot["wait"], shot.get("scroll"))
         rec.snap(page, shot["name"], shot["view"], shot["desc"], vp, shot["boxes"], shot.get("full", False))
     ctx.close()
+
+
+def capture_bloc(rec, browser, tmp, only):
+    """Variante « bloc » du workspace (objectif de fin décembre + squelette), servie à part : les autres
+    captures de la série ne changent pas."""
+    shots = [sh for sh in BLOC_SHOTS if not only or sh["name"] in only]
+    if not shots:
+        return
+    ws = tmp / "workspace-bloc"
+    demo.build_demo(ws, bloc=True)
+    dash = Service([sys.executable, str(REPO / "scripts/arc_serve.py"), "--workspace", str(ws), "--today", TODAY,
+                    "--memory", "--port", "0"])
+    try:
+        vp = {**DESKTOP, "label": "desktop 1440×900 @2x"}
+        for shot in shots:
+            ctx = new_context(browser, {**DESKTOP})       # un contexte par capture : le routeur garde la semaine ouverte
+            page = ctx.new_page()
+            open_view(page, dash.url.rstrip("/"), shot["route"], shot["wait"], shot.get("scroll"), shot.get("reload", True))
+            rec.snap(page, shot["name"], shot["view"], shot["desc"], vp, shot["boxes"], shot.get("full", False))
+            ctx.close()
+    finally:
+        dash.stop()
 
 
 def capture_mobile_dashboard(rec, browser, base, only):
@@ -483,6 +519,8 @@ def main() -> int:
                 capture_dashboard(rec, browser, base, only)
                 log("tableau de bord (mobile)…")
                 capture_mobile_dashboard(rec, browser, base, only)
+                log("bloc (variante du workspace)…")
+                capture_bloc(rec, browser, tmp, only)
                 log("chat…")
                 capture_chat(rec, browser, base, ws, chat_port, tmp, only)
                 browser.close()

@@ -50,6 +50,7 @@ const SERIES = [
   { n: 12, dir: "donnees", docs: "workspace/", fr: "Vos données, votre sentier", en: "Your data, your trail" },
   { n: 13, dir: "sources-retours", docs: "strava-setup/", fr: "Nouvelles portes d'entrée", en: "New ways in" },
   { n: 14, dir: "ultra", docs: "agents/course-strategist/", fr: "La nuit, la roche et le roadbook", en: "The night, the rock and the roadbook" },
+  { n: 15, dir: "bloc", docs: "plans/", fr: "Construire son bloc", en: "Building your block" },
 ];
 
 const UI = {
