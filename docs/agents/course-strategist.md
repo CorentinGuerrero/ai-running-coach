@@ -199,6 +199,41 @@ espacées, puis « indisponible » ; le cache `.arc/overpass/` n'expire pas
 La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
 `tags`) et un résumé au niveau du plan. Sans `--technicity`, rien ne change.
 
+## Recalibrage des coefficients au débrief (#188)
+
+Nuit, technicité, chaleur et altitude sont des **hypothèses du projet**
+(`ASSUMPTIONS`). Après la course, `scripts/arc_race_debrief.py debrief --plan …
+--activity … --calibrate --workspace <workspace>` mesure l'erreur qui revient à
+chaque facteur et **propose** des coefficients personnels (JSON par défaut,
+`--text` pour lire). Rien n'est jamais appliqué seul.
+
+- **Méthode simple et transparente** : rapport des médianes (pondérées par le
+  temps prévu) des ratios réalisé/prévu entre segments *exposés* (nuit, terrain
+  technique, altitude) et segments de *référence* (jour, roulant, basse altitude),
+  **dans la même cellule** des autres facteurs — jamais une section de nuit
+  technique contre une section de jour roulante — et dans une fenêtre de position
+  autour de l'exposition (pour ne pas confondre « de nuit » et « tard dans la
+  course »). Le biais commun (allure de base, durabilité) s'annule dans le rapport.
+  Pas de régression : avec quelques dizaines de segments corrélés, elle sur-ajusterait.
+- **Refus argumentés** : trop peu de segments (4 minimum par groupe et par
+  cellule), facteur **confondu** (toutes les sections techniques sont aussi de
+  nuit, par exemple), écart dans le bruit. Le facteur dit pourquoi, il ne
+  propose rien.
+- **Attrition vers le défaut** : `nouveau = défaut + w × (observé − défaut)`,
+  `w = n / (n + 20)` (n = segments exposés cumulés ; approximation du projet).
+  Un seul débrief ne déplace donc jamais le coefficient jusqu'à l'observation brute.
+- **Cumul** : chaque débrief laisse une preuve (course, facteur, n, valeur
+  absolue) dans `[pacing.personal].evidence` ; les suivants se **combinent**,
+  rejouer le même débrief ne le compte pas deux fois.
+- **Chaleur** : un seul facteur pour toute la course, donc pas de contraste
+  interne ; estimée **entre** courses (une chaude, une sans correction météo),
+  confiance faible. **Altitude** : seulement si le plan porte `altitude_factor`.
+- **Écriture après accord** : après confirmation explicite de l'athlète,
+  `… --calibrate --apply` écrit `[pacing.personal]` dans
+  `config/workspace.user.toml` ; `arc_race_pacing.py` le relit aux plans
+  suivants, les drapeaux CLI (`--night-penalty-pct`) gardant la priorité.
+  Voir [la configuration](../configuration.md#les-coefficients-de-pacing-personnels-pacingpersonal).
+
 ## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,

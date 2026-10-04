@@ -364,3 +364,7 @@ dem_for_activities = false
 # Mètres retirés au début ET à la fin de chaque trace de séance avant envoi (200 à 5000).
 # Protection PARTIELLE : la trace restante passe souvent encore près de chez vous.
 dem_trim_m = 500
+
+# [pacing.personal] — coefficients de pacing personnels (#188). Section ABSENTE par défaut :
+# écrite par `arc_race_debrief.py --calibrate --apply` après accord explicite de l'athlète,
+# dans config/workspace.user.toml (voir docs/configuration.md). Ne rien décommenter ici.

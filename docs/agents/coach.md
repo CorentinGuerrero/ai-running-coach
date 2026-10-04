@@ -212,6 +212,12 @@ rapports hebdomadaires. Les pistes d'ajustement du profil
 (`suggested_profile_updates`) restent des propositions présentées à
 l'athlète, jamais une écriture silencieuse dans `planning/Runner_Profile.md`.
 
+**Recalibrage des coefficients (#188).** Avec `--calibrate`, le même script
+mesure l'erreur attribuable à la nuit, à la technicité, à la chaleur et à
+l'altitude et **propose** des coefficients personnels (voir
+[le stratège de course](course-strategist.md#recalibrage-des-coefficients-au-debrief-188)) ;
+`[pacing.personal]` n'est écrit qu'après un « oui » explicite de l'athlète.
+
 ### Bilan matinal (HRV + FC de repos + readiness)
 
 - **Le triptyque est indivisible** : avant de valider, maintenir, ajuster ou annuler une séance, les **trois** métriques doivent être récupérées et rapportées — HRV nocturne (`get_hrv_data`), **FC de repos (`get_rhr_day`)** et training readiness (`get_training_readiness`). HRV + readiness sans FC de repos = bilan incomplet.

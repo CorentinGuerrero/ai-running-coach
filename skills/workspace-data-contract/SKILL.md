@@ -965,6 +965,7 @@ Reprend la sortie `--json` de `analyze_gpx.py` (skill `gpx-analysis`).
 | `start_time` | date-heure | départ |
 | `timezone` | texte | fuseau IANA de la course (ex. Europe/Paris, #184) — l'entrée `--tz` de la pénalité de nuit de `arc_race_pacing.py`, persistée pour ne pas la redemander au recalcul |
 | `scenarios` | objet | `{"ambitious": s, "realistic": s, "safe": s}` en secondes |
+| `heat_factor`, `heat_notes`, `pacing_personal` | nombre, liste, objet | sortie de `arc_race_pacing.py` : facteur de chaleur du plan et ses notes, coefficients personnels `[pacing.personal]` réellement appliqués (#188) — recopiés tels quels, lus par `arc_race_debrief.py --calibrate` pour recalibrer ; absents sur un plan ancien |
 | `aid_stations` | liste d'objets | **`km`**, **`name`**, `services` (liste), `cutoff` (`HH:MM`, `+HH:MM` élapsé, ou date-heure ISO 8601 — barrière du surlendemain d'un ultra, #59), `cutoff_day` (entier, avec `cutoff` en `HH:MM` seulement), `stop_s` (nombre, secondes — temps d'arrêt PRÉVU à ce ravito, #61 : repris par `arc_race_pacing.py`/`arc_race_debrief.py` au lieu du défaut générique (90 s) dès qu'il est renseigné ; à ne persister que pour un ravito dont l'arrêt attendu diffère vraiment du défaut, ex. repas chaud ou drop bag) |
 | `water_points` | liste d'objets | **`km`**, **`source`** (`officiel` `osm_drinking_water` `osm_spring` `osm_cafe`), `name` |
 | `gear` | liste | matériel obligatoire et conseillé |
