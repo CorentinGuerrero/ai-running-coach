@@ -48,6 +48,7 @@ const SERIES = [
   { n: 10, dir: "coach-poche", docs: "mobile/", fr: "Le coach dans la poche", en: "Coach in your pocket" },
   { n: 11, dir: "styles-coaching", docs: "configuration/", fr: "Trois voix, une décision", en: "Three voices, one decision" },
   { n: 12, dir: "donnees", docs: "workspace/", fr: "Vos données, votre sentier", en: "Your data, your trail" },
+  { n: 13, dir: "sources-retours", docs: "strava-setup/", fr: "Nouvelles portes d'entrée", en: "New ways in" },
 ];
 
 const UI = {

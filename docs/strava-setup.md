@@ -5,6 +5,24 @@ Cette page détaille la source de données **Strava** : la plus « universelle �
 vers Strava, et beaucoup d'athlètes l'ont déjà). Elle est installée par
 `./install.sh --source strava`, **à la place** de Garmin, pas en plus.
 
+<!-- arc-video:sources-retours -->
+<div class="arc-video-card" markdown>
+
+[![Nouvelles portes d'entrée](video/sources-retours/poster.jpg)](video/sources-retours/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 13 · 1 min 49</span>
+
+**[Nouvelles portes d'entrée](video/sources-retours/index.html)** — Strava comme troisième source de données, retours en un geste par Telegram sans aucun modèle, et deux options à activer soi-même : le contexte du cycle et les apports poussés vers Garmin.
+
+[Regarder](video/sources-retours/index.html) · [English](video/sources-retours/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 !!! info "Ceci ne change rien si vous utilisez Garmin ou Intervals.icu"
     Par défaut (`[data].source = "garmin"`, ou pas de clé du tout), rien dans
     ce projet ne change. `install.sh` ne touche jamais à `[data]` tant que vous
