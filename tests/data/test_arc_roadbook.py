@@ -189,6 +189,13 @@ class TestRoadbookHonesty(unittest.TestCase):
         plan["aid_stations"][0]["cutoff"] = "2026-06-20T20:00:00+00:00"
         model = RB.build_roadbook(plan)
         self.assertTrue(model["scenarios"]["realistic"]["available"])
+        # #205 : la marge est calculée (instant exact dans le fuseau du plan), plus de « fuseau mixte ».
+        first = model["scenarios"]["realistic"]["sections"][0]
+        self.assertIn("margin_s", first["cutoff"])
+        self.assertFalse(any("fuseau mixte" in m for m in model["missing"]))
+        # Etc/GMT+9 : départ 16:00 local = 2026-06-21T01:00Z ; barrière 20:00Z la veille -> hors délai.
+        self.assertEqual(first["cutoff"]["margin_s"], -5 * 3600 - first["arrival_s"])
+        self.assertEqual(first["cutoff"]["status"], "hors_delai")
 
     def test_aid_station_beyond_the_course_is_flagged(self):
         plan = R.persisted_plan()
