@@ -35,6 +35,8 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
                                                                         # gabarits de périodisation (#189)
     arc_index.py strength [--phase P] [--use U] [--equipment LISTE] [--text | --garmin-json]
                                                                         # bibliothèque de renforcement (#191)
+    arc_index.py prevention [--days N] [--acute ZONE,…] [--equipment LISTE] [--text]
+                                                                        # prévention ciblée liée aux douleurs (#192)
 
 `strength` (#191, épopée #173) choisit un programme de renforcement/mobilité de la bibliothèque livrée avec
 le moteur (`config/strength/`, `arc_strength.py`) par phase du bloc et/ou par usage (descente, cheville,
@@ -42,6 +44,13 @@ hanches, pied), remplace les exercices selon le matériel disponible (`--equipme
 « Équipement » du profil ; inconnu → question, jamais deviné) et rend la sélection en JSON, en `--text`
 (description intervals.icu / chat) ou en `--garmin-json` (charge utile `create_strength_workout`, aucune
 écriture). Sans `--phase` ni `--use` : le catalogue. Lecture seule, sans index. Approximations du projet.
+
+`prevention` (#192, épopée #173) relie les douleurs DÉCLARÉES des `--days` derniers jours (14 par défaut,
+`health.pain` des `medical/*_health.md`) à une routine douce de la bibliothèque, après des garde-fous
+déterministes (score >= `[injury_risk].pain_consult_threshold`, douleur aiguë `--acute`, aggravation,
+persistance > 7 jours, drapeau de risque de blessure → consultation, aucun exercice). Jamais un diagnostic ;
+`[agents].enabled` décide qui tranche (`medical` s'il est activé, sinon le coach avec « ce n'est pas un avis
+médical »). Lecture seule : rien n'est écrit ni poussé. Voir `arc_prevention.py`.
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
 compris) : elle réindexe puis rend le point du jour de `arc_metrics.hrv_baseline_series`
@@ -281,6 +290,7 @@ import arc_gap as G  # noqa: E402
 import arc_legacy as L  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_plan_templates as PT  # noqa: E402
+import arc_prevention as PV  # noqa: E402
 import arc_samples as S  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
 import arc_strength as SG  # noqa: E402
@@ -4717,7 +4727,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
-                                 "decision-effects", "load-forecast", "plan-templates", "strength", "dem-check"))
+                                 "decision-effects", "load-forecast", "plan-templates", "strength", "dem-check", "prevention"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4799,7 +4809,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commandes « decision-effects », « load-forecast », « plan-templates » et « strength » : "
+                        help="commandes « decision-effects », « load-forecast », « plan-templates », « strength » et « prevention » : "
                              "rendu texte lisible (défaut : JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
@@ -4819,6 +4829,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--equipment", metavar="LISTE",
                         help="commande « strength » (#191) : matériel disponible, séparé par des virgules "
                              "(none, elastic, dumbbell, step, box) ; sans lui, lu dans le profil de l'athlète")
+    parser.add_argument("--acute", metavar="ZONES",
+                        help="commande « prevention » (#192) : zones (séparées par des virgules) que l'athlète décrit "
+                             "comme nouvelles, vives ou gonflées — aucune routine, consultation")
     parser.add_argument("--garmin-json", action="store_true", dest="garmin_json",
                         help="commande « strength » (#191) : charge utile Garmin (workout_data + arguments de "
                              "create_strength_workout) au lieu de la sélection ; aucune écriture")
@@ -4895,6 +4908,26 @@ def strength_cli(args, workspace: Path) -> int:
     return 0
 
 
+def prevention_cli(conn, args, workspace: Path, today: date) -> str:
+    """`arc_index.py prevention` (#192) — lecture seule. Seuil de consultation, agents activés et drapeau de
+    risque de blessure sont lus dans la configuration vivante ; un drapeau illisible est dit, jamais supposé
+    bas (il n'est alors pas évalué : `injury_risk` absent)."""
+    import arc_guardrails as G      # import tardif : arc_guardrails importe arc_index
+    config = load_config(workspace)
+    conf = settings(config)
+    gconf = G.injury_risk_settings(config)
+    try:
+        risk = G.evaluate_injury_risk(G.build_injury_risk_context(conn, config, gconf, today), gconf)
+    except Exception:       # pragma: no cover — repli défensif : le drapeau n'est pas évalué, jamais « bas »
+        risk = None
+    fmt = "text" if args.text and not args.json else "json"
+    try:
+        return PV.run(conn, today, args.days, args.acute, args.equipment, workspace, conf["profile"],
+                      gconf["pain_consult_threshold"], "medical" in conf["agents"], risk, fmt)
+    except (PV.PreventionError, SG.StrengthError) as exc:
+        raise ConfigError(str(exc))
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.today:
@@ -4964,6 +4997,12 @@ def main(argv=None) -> int:
             report.update(gear_photo_dropbox(conn, workspace))
         print(json.dumps(report, ensure_ascii=False))
         return 1 if "error" in report else 0
+    if args.command == "prevention":
+        if args.days is not None and args.days < 1:
+            raise ConfigError(f"--days : un entier >= 1 attendu, « {args.days} » reçu.")
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(prevention_cli(conn, args, workspace, today_date))
+        return 0
     if args.command == "decision-effects":
         if args.days is not None and args.days < 1:
             raise ConfigError(f"--days : un entier >= 1 attendu, « {args.days} » reçu.")

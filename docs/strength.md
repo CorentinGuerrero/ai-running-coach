@@ -123,6 +123,68 @@ la validation de la bibliothèque. Un exercice sans équivalent vérifié porte 
 « texte seul ») : il part sans `category` ni `exerciseName`, son nom français dans la description.
 La correspondance choisit la variante **la plus proche**, pas toujours le même mouvement.
 
+## Prévention ciblée
+
+Une douleur que vous avez **déclarée** (`/log`, le parcours « Douleur » de Telegram, ou un bilan
+`medical`) peut être reliée à une routine douce de la bibliothèque. Story #192 de l'épopée #173.
+
+```bash
+python3 scripts/arc_index.py prevention                       # 14 derniers jours, JSON
+python3 scripts/arc_index.py prevention --days 21 --text      # plus long, lisible
+python3 scripts/arc_index.py prevention --acute mollet        # vous la décrivez vive, nouvelle ou gonflée
+python3 scripts/arc_index.py prevention --equipment elastic   # sinon : puce « Équipement » du profil
+```
+
+La commande lit les déclarations `pain` de `medical/*_health.md` (index dérivé), ramène chaque
+zone saisie en texte libre à une **zone** du vocabulaire normalisé — accents, pluriels et
+synonymes tolérés (« Tendon d'Achille gauche », « voute plantaire », « lombaires »…) — puis rend,
+par zone, un statut :
+
+| Statut | Sens |
+|---|---|
+| `prevention_ok` | gêne légère, connue et stable : une **routine douce** est proposée (2 séries, effort facile, sans impact, sans pliométrie ni excentrique) |
+| `consult` | aucun exercice ; `consult_level` = `urgent` ou `advised`, avec les raisons |
+| `no_data` | aucune douleur déclarée sur la fenêtre, ou zone non reconnue : rien n'est inventé, le coach demande |
+
+Les **zones** reconnues sont : tendon d'Achille, cheville, mollet, tibia, genou (face avant ou
+externe), hanche, fessier, ischio-jambiers, pied (voûte, talon) et bas du dos. Seules des
+**zones anatomiques** sont nommées : jamais une pathologie, jamais un traitement. Chaque zone
+renvoie à un sous-ensemble doux de la bibliothèque (correspondance dans
+`config/strength/prevention.json`, programmes d'usage cheville / hanches / pied quand ils
+existent) et à une règle de progression : rester au niveau doux tant que la gêne est déclarée,
+n'avancer d'un cran qu'après 14 jours sans gêne.
+
+### Règles de sécurité (déterministes)
+
+Appliquées dans cet ordre, **avant** toute proposition. Tous les seuils sont des
+**approximations du projet**, jamais un diagnostic ni un protocole publié :
+
+1. **Score ≥ seuil de consultation** (`[injury_risk].pain_consult_threshold`, 7/10 par défaut) :
+   aucun exercice, consultation d'un professionnel de santé recommandée (même formulation que
+   `/log` et Telegram).
+2. **Douleur aiguë** (nouvelle, vive, avec gonflement : mots-clés dans la zone déclarée, ou
+   `--acute`) : aucun exercice de charge, consultation. Le contrat des données ne porte qu'une
+   zone et un score : sans signal, le coach **demande** si la douleur est nouvelle ou vive,
+   l'absence de signal ne vaut pas preuve de bénignité.
+3. **Drapeau de risque de blessure** (#57, `consult` ou niveau `high`) : toutes les routines sont
+   bloquées, il n'est jamais assoupli.
+4. **Score > 3/10, douleur qui s'aggrave** (au moins un point de plus entre la première et la
+   dernière déclaration) **ou qui dure plus de 7 jours** : aucun exercice, avis professionnel
+   conseillé.
+5. **Seulement une gêne légère (≤ 3/10), connue et stable** : routine douce de prévention.
+
+Une zone dont la dernière déclaration est à 0/10 est considérée comme résolue.
+
+### Qui décide
+
+- Si l'agent `medical` est dans `[agents].enabled`, **c'est lui qui décide** et le coach relaie,
+  sans jamais assouplir (`decision_owner: "medical"`).
+- Sinon, le coach applique ces règles et dit toujours **« ce n'est pas un avis médical »**
+  (`decision_owner: "coach"`).
+- Rien n'est poussé automatiquement : une douleur saisie par `/log` ou Telegram permet au coach
+  de **proposer** la routine à la prochaine interaction. Un éventuel envoi vers la montre garde la
+  règle habituelle (confirmation explicite, jamais en mode headless).
+
 ## Sources
 
 Deux revues, vérifiées par Crossref, citées pour la **direction** seulement — un entraînement de
