@@ -124,6 +124,19 @@ class TestDemoWorkspace(unittest.TestCase):
             for rel in ("medical/2026-09-29_health.md", "activities/2026-09-27_trail.md", "planning/Runner_Profile.md"):
                 self.assertEqual((self.root / rel).read_text(encoding="utf-8"), (other / rel).read_text(encoding="utf-8"))
 
+    def test_variante_bloc_ecrit_par_plan_skeleton(self):
+        """Épisode 15 : le squelette vient de la vraie commande ; le workspace par défaut n'en a pas."""
+        self.assertFalse((self.root / "planning/Semaine_2026-10-05.md").exists())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = V.build_demo(Path(tmp) / "ws-bloc", with_samples=False, bloc=True)
+            weeks = sorted(root.glob("planning/Semaine_2026-1[0-2]-*.md"))
+            self.assertEqual(len(weeks), 13)                        # 12 semaines du gabarit + la récupération post-course
+            self.assertIn("Trail du Solstice", (root / "planning/active_objective.md").read_text(encoding="utf-8"))
+            for path in weeks:
+                errors, _warnings = C.validate(block(path))
+                self.assertEqual(errors, [], f"{path.name} : {errors}")
+            self.assertEqual(block(weeks[0])["phase"], "Base")
+
 
 if __name__ == "__main__":
     unittest.main()

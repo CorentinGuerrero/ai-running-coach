@@ -230,6 +230,20 @@ Préparer un ultra : la nuit calculée sur place (crépuscule, frontale, heure d
 
 </div>
 
+<div class="arc-video" markdown>
+
+[![Construire son bloc](video/bloc/poster.jpg)](video/bloc/index.html)
+
+<span class="arc-video__meta">Étape 15 · 1 min 48</span>
+
+### [Construire son bloc](video/bloc/index.html)
+
+Un bloc d'entraînement qui ne s'invente plus : gabarits de périodisation, squelette semaine par semaine relu par les garde-fous, frise du bloc sur le tableau de bord, renforcement par phase et prévention ciblée.
+
+[Regarder](video/bloc/index.html) · [English (1 min 53)](video/bloc/index.html?lang=en) · [La documentation](plans.md)
+
+</div>
+
 </div>
 <!-- arc-videos:end -->
 

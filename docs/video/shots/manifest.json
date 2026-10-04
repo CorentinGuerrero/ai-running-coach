@@ -698,6 +698,72 @@
    }
   },
   {
+   "name": "bloc-frise",
+   "file": "bloc-frise.webp",
+   "view": "Semaine",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Frise du bloc (vue Semaine) : 12 semaines du 5 octobre au 27 décembre, phases (Base, Développement, Spécifique, Affûtage), semaines allégées, drapeau de course, récupération post-course.",
+   "boxes": {
+    "frise": [
+     248,
+     219.5,
+     1008,
+     255.2
+    ],
+    "colonnes": [
+     269,
+     296.9,
+     908,
+     124.0
+    ],
+    "legende": [
+     269,
+     269.7,
+     966,
+     20.8
+    ],
+    "lecture": [
+     269,
+     431.3,
+     966,
+     24.0
+    ],
+    "drapeau": [
+     1079,
+     322.9,
+     14,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "bloc-semaine",
+   "file": "bloc-semaine.webp",
+   "view": "Semaine",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Semaine du 12 octobre du squelette : créneaux de séance à habiller (« à définir »), la frise du bloc en tête.",
+   "boxes": {
+    "frise": [
+     248,
+     219.5,
+     1008,
+     255.2
+    ],
+    "semaine": [
+     248,
+     486.7,
+     1008,
+     161.3
+    ]
+   }
+  },
+  {
    "name": "mobile-aujourdhui",
    "file": "mobile-aujourdhui.webp",
    "view": "Aujourd'hui",

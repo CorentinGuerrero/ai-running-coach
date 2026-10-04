@@ -1,5 +1,23 @@
 # Renforcement : bibliothèque d'exercices et programmes
 
+<!-- arc-video:bloc -->
+<div class="arc-video-card" markdown>
+
+[![Construire son bloc](video/bloc/poster.jpg)](video/bloc/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 15 · 1 min 48</span>
+
+**[Construire son bloc](video/bloc/index.html)** — Un bloc d'entraînement qui ne s'invente plus : gabarits de périodisation, squelette semaine par semaine relu par les garde-fous, frise du bloc sur le tableau de bord, renforcement par phase et prévention ciblée.
+
+[Regarder](video/bloc/index.html) · [English](video/bloc/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 Le coach ne réinvente plus ses séances de renforcement : il puise dans une
 **bibliothèque livrée avec le moteur** (`config/strength/exercises.json` et
 `config/strength/programmes.json`, en français) et laisse un script faire le calcul
