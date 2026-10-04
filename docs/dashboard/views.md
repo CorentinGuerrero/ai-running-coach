@@ -476,6 +476,22 @@ Le plan de la semaine face au réalisé. Pour chaque jour :
 - **la catégorie météo** du jour (*Optimal*, *Vigilance*…) quand une prévision existe ;
 - **les séances réellement enregistrées**, sous le plan : un clic ouvre leur détail.
 
+En tête de la vue (et de **Calendrier**), la **frise du bloc** (#193) : une colonne par
+semaine planifiée, du début du bloc courant à la course (et la semaine de récupération qui
+la suit). La teinte donne la **phase** (*Base*, *Développement*, *Spécifique*, *Affûtage*,
+*Récupération*), la hauteur le **volume prévu**, le trait noir le **réalisé** (partiel pour la
+semaine en cours), une pastille marque une **semaine allégée**, un drapeau la **semaine de
+course**, et un cadre vert la **semaine en cours**. Chaque colonne est un lien vers la vue
+Semaine de ce lundi (clavier : Tab puis Entrée) ; survol ou focus affichent le détail
+sous la frise. Sur téléphone, la frise défile horizontalement dans sa carte.
+
+La frise ne devine rien : la phase vient du champ `phase` de la semaine, reconnu seulement
+s'il correspond à un libellé du gabarit (c'est ce qu'écrit `plan-skeleton`, #190). Une semaine
+sans phase (fichier antérieur) est tracée en pointillé « Phase inconnue » ; un autre libellé
+libre est affiché tel quel, sans teinte de phase. Le bloc est la suite de semaines planifiées
+aux lundis consécutifs qui contient la semaine courante (sinon la prochaine, sinon la plus
+récente). Les données viennent de `/api/block`.
+
 En dessous, **le réalisé face à la cible** de la semaine (18,2 km sur 40 visés), puis
 **la conformité** — le KPI de l'épopée #20 (story #33) : % de séances faites, ratio
 durée réalisée/planifiée, ratio D+ réalisé/planifié (route : ratio absent, pas de D+
@@ -1011,7 +1027,8 @@ section.
 
 L'année en carte de chaleur — plus la case est foncée, plus la durée d'effort du jour
 est longue — et la **distance cumulée**, comparée d'une année à l'autre. Les boutons
-d'année remontent l'historique.
+d'année remontent l'historique. Au-dessus, la **frise du bloc** planifié (voir
+[Semaine](#semaine)) quand un plan existe.
 
 ## Décisions
 
@@ -1219,7 +1236,7 @@ nourrit :
 | Matériel | `planning/Runner_Profile.md`, `activities/*.md`, `gear/*.md` | vous, coach, synchronisation |
 | Trail Shape | `activities/*.md` (8 dernières semaines), `planning/active_objective.md` | synchronisation, vous |
 | Roadbook | `planning/*.md` (plan de course : segments, ravitos, matériel), `planning/Runner_Profile.md` | `course-strategist`, vous |
-| Calendrier | `activities/*.md` | synchronisation |
+| Calendrier | `activities/*.md`, `planning/Semaine_<lundi>.md` (frise du bloc) | synchronisation, coach |
 | Rapports | `rapports/*.md` | coach |
 | Nutrition | `nutrition/<date>_nutrition.md` | nutritionniste |
 | Hypothèses | aucun fichier du workspace : les modules de calcul (`scripts/arc_*.py`) | — |

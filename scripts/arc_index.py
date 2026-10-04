@@ -373,7 +373,10 @@ from coach_setup import ENGINE, workspace_root  # noqa: E402
 # colonne `strava_activity_id` (TEXT, `s<chiffres>`) — troisième espace d'identifiants externes, disjoint
 # des deux autres (`arc_samples.parse_activity_ref`). Version 34 (33 = #166 cycle) : sans ce bump, une base déjà construite
 # n'a pas la colonne et l'insertion échouerait avec « no such column ».
-SCHEMA_VERSION = 34
+# #193 : `week` gagne `week_type` (type de semaine du squelette de bloc #190, NULL pour les semaines plus
+# anciennes) — la frise du bloc (`/api/block`) en a besoin. Version 35 (34 = Strava) : sans ce bump,
+# l'insertion d'une semaine échouerait avec « no such column » sur une base déjà construite.
+SCHEMA_VERSION = 35
 # Colonnes d'identifiant externe d'une séance, dans l'ordre de priorité de `activity_ref` — une séance n'en
 # porte qu'une (`workspace-data-contract`) ; Garmin prime si un fichier ancien en porte plusieurs.
 REF_COLUMNS = ("garmin_activity_id", "intervals_activity_id", "strava_activity_id")
@@ -708,7 +711,7 @@ CREATE TABLE weather_day (
 CREATE TABLE week (
     source_path TEXT, arc_version INTEGER, week_start TEXT, location TEXT, phase TEXT,
     target_duration_s REAL, target_distance_m REAL, target_elevation_m REAL, body_md TEXT,
-    shadowed INTEGER DEFAULT 0
+    shadowed INTEGER DEFAULT 0, week_type TEXT
 );
 CREATE TABLE planned_session (
     source_path TEXT, week_start TEXT, date TEXT, sport TEXT, title TEXT,
@@ -1306,7 +1309,8 @@ def store(conn, rel: str, kind: str, data: dict, arc_version: int) -> None:
             ge = entry.get
             _insert(conn, "week", {
                 "source_path": rel, "arc_version": arc_version, "week_start": ge("week_start"),
-                "location": ge("location"), "phase": ge("phase"), "target_duration_s": ge("target_duration_s"),
+                "location": ge("location"), "phase": ge("phase"), "week_type": ge("week_type"),
+                "target_duration_s": ge("target_duration_s"),
                 "target_distance_m": ge("target_distance_m"), "target_elevation_m": ge("target_elevation_m"),
                 "body_md": body,
             })

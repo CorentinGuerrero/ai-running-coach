@@ -1505,6 +1505,86 @@
       },
       "status": 200
     },
+    "/api/block": {
+      "body": {
+        "current_week_start": "2026-09-21",
+        "phases": [
+          {
+            "id": "base",
+            "label": "Base"
+          },
+          {
+            "id": "development",
+            "label": "Développement"
+          },
+          {
+            "id": "specific",
+            "label": "Spécifique"
+          },
+          {
+            "id": "taper",
+            "label": "Affûtage"
+          },
+          {
+            "id": "recovery",
+            "label": "Récupération"
+          }
+        ],
+        "race": {
+          "date": "2026-11-16",
+          "days_left": 54,
+          "in_block": false,
+          "name": "Trail des Collines",
+          "week_start": "2026-11-16"
+        },
+        "status": "ok",
+        "today": "2026-09-23",
+        "unknown_weeks": 0,
+        "weeks": [
+          {
+            "done": {
+              "distance_m": 51000.0,
+              "duration_s": 21659.0,
+              "elevation_m": 1658.0,
+              "partial": false,
+              "sessions": 5
+            },
+            "is_race_week": false,
+            "light": false,
+            "phase": "specific",
+            "phase_label": "Spécifique",
+            "phase_text": "Spécifique",
+            "status": "past",
+            "target_distance_m": null,
+            "target_duration_s": 28800.0,
+            "target_elevation_m": null,
+            "week_start": "2026-09-14",
+            "week_type": null
+          },
+          {
+            "done": {
+              "distance_m": 22000.0,
+              "duration_s": 7521.0,
+              "elevation_m": 452.0,
+              "partial": true,
+              "sessions": 2
+            },
+            "is_race_week": false,
+            "light": false,
+            "phase": "specific",
+            "phase_label": "Spécifique",
+            "phase_text": "Spécifique",
+            "status": "current",
+            "target_distance_m": null,
+            "target_duration_s": 28800.0,
+            "target_elevation_m": null,
+            "week_start": "2026-09-21",
+            "week_type": null
+          }
+        ]
+      },
+      "status": 200
+    },
     "/api/calendar": {
       "body": {
         "cumulative": {
@@ -9517,7 +9597,8 @@
           "target_distance_m": null,
           "target_duration_s": 28800.0,
           "target_elevation_m": null,
-          "week_start": "2026-09-21"
+          "week_start": "2026-09-21",
+          "week_type": null
         },
         "week_start": "2026-09-21"
       },

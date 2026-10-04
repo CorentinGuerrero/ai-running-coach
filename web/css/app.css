@@ -953,3 +953,54 @@ button.seg:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--foc
   .rb-gaps { break-inside: avoid; }
   a { color: #000; text-decoration: none; }
 }
+
+/* ---------------------------------------------------------------- frise du bloc (#193) */
+/* Teinte = phase du gabarit ; l'information n'est jamais portée par la couleur seule (libellé de phase
+   sous la frise, légende, aria-label de chaque semaine). Contraste visé : >= 3:1 contre la carte. */
+:root {
+  --ph-base: #5f8f73; --ph-development: #2f6b9a; --ph-specific: #b0712f; --ph-taper: #6a4c93;
+  --ph-recovery: #2f8a8a; --ph-other: #6b7a72; --ph-unknown: #8a948d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ph-base: #7cc39b; --ph-development: #6fa8dc; --ph-specific: #e0a45c; --ph-taper: #b39ddb;
+    --ph-recovery: #5fc2c2; --ph-other: #8b9a92; --ph-unknown: #7a867f;
+  }
+}
+:root[data-theme="dark"] {
+  --ph-base: #7cc39b; --ph-development: #6fa8dc; --ph-specific: #e0a45c; --ph-taper: #b39ddb;
+  --ph-recovery: #5fc2c2; --ph-other: #8b9a92; --ph-unknown: #7a867f;
+}
+.chart-host--frise { overflow-x: auto; overflow-y: hidden; padding-bottom: 0.3rem; max-width: 100%; }
+.chart-host--frise .chart { width: auto; max-width: none; }
+.chart--frise a { cursor: pointer; }
+.chart--frise .frise-track { fill: var(--surface-2); stroke: var(--line); }
+.chart--frise .frise-cell { fill: var(--ph-unknown); }
+.chart--frise .frise-cell--base { fill: var(--ph-base); } .chart--frise .frise-cell--development { fill: var(--ph-development); }
+.chart--frise .frise-cell--specific { fill: var(--ph-specific); } .chart--frise .frise-cell--taper { fill: var(--ph-taper); }
+.chart--frise .frise-cell--recovery { fill: var(--ph-recovery); } .chart--frise .frise-cell--other { fill: var(--ph-other); }
+/* Phase inconnue : jamais une teinte de phase — fond neutre + contour pointillé. */
+.chart--frise .frise-cell--unknown { fill: var(--surface-2); stroke: var(--ph-unknown); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart--frise .frise-cell--noplan { opacity: 0.55; }
+.chart--frise .frise-done-case { stroke: var(--surface); stroke-width: 6; stroke-linecap: round; }
+.chart--frise .frise-done { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.chart--frise .frise-focus { fill: transparent; stroke: none; }
+.chart--frise .frise-focus.is-current { stroke: var(--lime-strong); stroke-width: 2.5; }
+.chart--frise .frise-focus.is-selected { stroke: var(--ink); stroke-width: 2; }
+.chart--frise a:hover .frise-focus { stroke: var(--ink-soft); stroke-width: 1.5; }
+.chart--frise a:focus-visible { outline: none; }
+.chart--frise a:focus-visible .frise-focus { stroke: var(--focus); stroke-width: 3; }
+.chart--frise .frise-light { fill: var(--surface); stroke: var(--ink-soft); stroke-width: 1.5; }
+.chart--frise .frise-tick.is-current, .chart--frise .frise-tick.is-selected { fill: var(--ink); font-weight: 700; }
+.chart--frise .frise-flag { fill: var(--lime-strong); stroke: var(--pine-deep); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.chart--frise .frise-phase { fill: var(--ink-soft); font: 600 11px var(--text); }
+.key--phase-base { background: var(--ph-base); height: 0.6rem; } .key--phase-development { background: var(--ph-development); height: 0.6rem; }
+.key--phase-specific { background: var(--ph-specific); height: 0.6rem; } .key--phase-taper { background: var(--ph-taper); height: 0.6rem; }
+.key--phase-recovery { background: var(--ph-recovery); height: 0.6rem; } .key--phase-other { background: var(--ph-other); height: 0.6rem; }
+.key--phase-unknown { background: var(--surface-2); border: 1.5px dashed var(--ph-unknown); height: 0.6rem; }
+.key--frise-light { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink-soft); }
+.key--frise-done { background: var(--ink); height: 0.2rem; }
+@media (max-width: 36em) {
+  /* Frise à dimensions fixes en px (pas de réduction par viewBox) : on rétablit la taille normale du texte. */
+  .chart--frise .tick, .chart--frise .frise-phase { font-size: 11px; }
+}
