@@ -53,16 +53,21 @@ VERSION="0.2.0"
 # synchronisation — un changement en amont ne doit jamais être exécuté sans relecture.
 # Mettre à jour après vérification du diff amont.
 GARMIN_MCP_REF="git+https://github.com/Taxuspt/garmin_mcp@cfc5d799ab0f165e837f1188a1d093c65838aaf7"
-# Source alternative (#68) : serveur MCP communautaire déjà référencé par
-# docs/faq.md avant cette story (hypothèse de travail des tests, désormais
-# celui réellement installé par --source intervals). project.scripts expose
-# `intervals-icu-mcp` + `intervals-icu-mcp-auth`, comme garmin_mcp/garmin-mcp-auth
-# ci-dessus — même mécanique `uv tool install git+…`.
-# Épinglé à un commit précis (vérifié : project.scripts, tools/*.py, réponses
-# JSON) plutôt qu'à `main` — un changement en amont (renommage d'outil, retrait
-# de champ) ne doit jamais casser silencieusement ce projet. Documenté dans
-# docs/intervals-setup.md ; mettre à jour les deux ensemble après vérification.
-INTERVALS_MCP_REF="git+https://github.com/eddmann/intervals-icu-mcp@cb91d4a0f3b4dc21f57421e029c07a8e9af11649"
+# Source alternative (#68) : serveur MCP communautaire retenu par --source
+# intervals. project.scripts expose `intervals-icu-mcp` + `intervals-icu-mcp-auth`,
+# comme garmin_mcp/garmin-mcp-auth ci-dessus — même mécanique `uv tool install`.
+# #165 : fork maintenu hhopke/intervals-icu-mcp (v5.5.0), qui remplace
+# eddmann/intervals-icu-mcp@cb91d4a (plus de commit depuis nov. 2025). Mêmes
+# binaires et même `.env` (INTERVALS_ICU_API_KEY / INTERVALS_ICU_ATHLETE_ID),
+# MAIS tous les outils sont préfixés `icu_` — voir AGENTS.md et
+# docs/intervals-setup.md.
+# Épinglé à un commit précis (vérifié dans le code : project.scripts, tools/*.py,
+# réponses JSON) plutôt qu'à `main` — un changement en amont (renommage d'outil,
+# retrait de champ) ne doit jamais casser silencieusement ce projet. Mettre à jour
+# ensemble : cette ligne, AGENTS.md, docs/intervals-setup.md et
+# scripts/coach_doctor.py (INTERVALS_MCP_PINNED_*) ; le lint
+# tests/lint/test_data_source_parity.py vérifie qu'ils concordent.
+INTERVALS_MCP_REF="git+https://github.com/hhopke/intervals-icu-mcp@5cd7e1abf716ea28b7bc5a8da5b01860b4bf2aa4"
 # Le serveur charge ses identifiants depuis un `.env` relatif à SON répertoire
 # de travail (pydantic-settings) — jamais depuis le dépôt : `intervals-icu-mcp-auth`
 # est donc lancé depuis ce dossier dédié, hors du projet, comme `$GARMIN_TOKENS_DIR`
@@ -1202,6 +1207,16 @@ install_garmin_mcp() {
 # `uv run intervals-icu-mcp-auth`) : le binaire est déjà sur le PATH une fois
 # `uv tool install` fait (comme garmin-mcp-auth), et `uv run` chercherait un
 # projet uv (pyproject.toml) dans le cwd — qui n'en est pas un ici.
+# `intervals-icu-mcp-auth` écrit le .env avec les droits par défaut (0644 : lisible par les
+# autres comptes de la machine) — constaté au test d'intégration de #165. La clé API ne doit
+# être lisible que par son propriétaire : on resserre à 0600 après l'authentification et à
+# chaque relance (idempotent ; jamais en dry-run).
+restrict_intervals_env() {
+    local env_file="$INTERVALS_ENV_DIR/.env"
+    [[ -f "$env_file" && "$DRY_RUN" -eq 0 ]] || return 0
+    chmod 600 "$env_file" && ok "Droits du fichier d'identifiants Intervals.icu : 600"
+}
+
 intervals_auth_cmd() { printf '(cd "%s" && intervals-icu-mcp-auth)' "$INTERVALS_ENV_DIR"; }
 
 # Écrit le wrapper que CHAQUE config MCP (toutes les IDE, voir mcp_server_value_intervals*)
@@ -1239,6 +1254,63 @@ EOF
     ok "Wrapper écrit : $wrapper"
 }
 
+# Origine VCS de l'installation `uv tool` en place : « <url> <commit> » (vide si
+# illisible — installation locale, outil sans direct_url.json…). Source : le
+# `direct_url.json` du dist-info (PEP 610), écrit par uv pour toute installation
+# depuis un dépôt ; aucun réseau. Même lecture que scripts/coach_doctor.py
+# (check `intervals_mcp_pin`).
+intervals_installed_origin() {
+    local exe env_dir
+    exe="$(command -v intervals-icu-mcp)" || return 0
+    env_dir="$(dirname "$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$exe")")")"
+    python3 - "$env_dir" <<'PYEOF'
+import glob, json, sys
+for path in glob.glob(sys.argv[1] + "/lib/python*/site-packages/intervals_icu_mcp-*.dist-info/direct_url.json"):
+    try:
+        info = json.load(open(path))
+        print(info.get("url", ""), (info.get("vcs_info") or {}).get("commit_id", ""))
+    except (OSError, ValueError):
+        pass
+    break
+PYEOF
+}
+
+# #165 : une installation antérieure épinglée sur eddmann/intervals-icu-mcp (ou sur
+# un ancien commit du fork) est remplacée par le pin courant — sans cela, `install.sh`
+# la laisserait en place pour toujours (« déjà installé ») alors que les docs, les
+# agents et les skills parlent les noms d'outils `icu_*` du fork. Uniquement pour
+# les origines amont CONNUES : une installation locale/personnalisée (chemin, autre
+# fork) n'est jamais écrasée.
+upgrade_intervals_pin_if_needed() {
+    local origin url commit want_url want_commit ref="${INTERVALS_MCP_REF#git+}"
+    want_url="${ref%@*}"
+    want_commit="${ref##*@}"
+    origin="$(intervals_installed_origin)"
+    url="${origin%% *}"
+    commit="${origin#* }"
+    # Même dépôt écrit autrement (`…/intervals-icu-mcp.git`, barre finale) : même origine.
+    url="${url%/}"
+    url="${url%.git}"
+    if [[ -z "$origin" || -z "$url" ]]; then
+        warn "Origine de l'installation intervals-icu-mcp illisible — non mise à jour (voir /coach-doctor, check intervals_mcp_pin)."
+        return 0
+    fi
+    case "$url" in
+        https://github.com/eddmann/intervals-icu-mcp|https://github.com/hhopke/intervals-icu-mcp) ;;
+        *)
+            warn "intervals-icu-mcp installé depuis une origine personnalisée ($url) — laissé tel quel."
+            return 0 ;;
+    esac
+    if [[ "$url" == "$want_url" && "$commit" == "$want_commit" ]]; then
+        ok "intervals-icu-mcp au commit épinglé (${want_commit:0:7})"
+        return 0
+    fi
+    log "Mise à jour de intervals-icu-mcp : ${url#https://github.com/}@${commit:0:7} -> ${want_url#https://github.com/}@${want_commit:0:7} (#165)"
+    warn "Les outils du serveur sont désormais préfixés « icu_ » — ouvrez une NOUVELLE session de coaching après l'installation (docs/update.md)."
+    run uv tool install --python 3.12 --force --with fitparse "$INTERVALS_MCP_REF" \
+        || warn "Mise à jour de intervals-icu-mcp échouée — l'ancienne version reste en place (voir /coach-doctor)."
+}
+
 install_intervals_mcp() {
     log "Installation de intervals-icu-mcp (accès Intervals.icu, --source intervals)"
     # `--with fitparse` : `skills/fit-download/scripts/download_fit.py --source
@@ -1249,6 +1321,7 @@ install_intervals_mcp() {
     # fichiers du serveur (et tout correctif local que l'athlète y aurait appliqué).
     if have intervals-icu-mcp; then
         ok "intervals-icu-mcp déjà installé : $(command -v intervals-icu-mcp)"
+        upgrade_intervals_pin_if_needed
         local tool_py
         # realpath via python3 : `readlink -f` n'existe pas sur les macOS anciens.
         tool_py="$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' \
@@ -1277,6 +1350,7 @@ install_intervals_mcp() {
         log "Authentification Intervals.icu (clé API + identifiant athlète, une seule fois)"
         if [[ -f "$INTERVALS_ENV_DIR/.env" ]]; then
             ok "Identifiants Intervals.icu présents ($INTERVALS_ENV_DIR/.env)"
+            restrict_intervals_env
         elif [[ "$DRY_RUN" -eq 1 ]]; then
             warn "Authentification Intervals.icu sautée (dry-run) — serait lancée dans $INTERVALS_ENV_DIR."
         else
@@ -1286,6 +1360,7 @@ install_intervals_mcp() {
             mkdir -p "$INTERVALS_ENV_DIR"
             (cd "$INTERVALS_ENV_DIR" && intervals-icu-mcp-auth) \
                 || die "Échec de l'authentification Intervals.icu (voir le message ci-dessus)."
+            restrict_intervals_env
         fi
     else
         warn "Authentification Intervals.icu sautée (--no-auth)."

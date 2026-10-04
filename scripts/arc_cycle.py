@@ -12,7 +12,7 @@ hydratation, chaleur), jamais une règle automatique ni un diagnostic.
   "garmin" — la phase est lue sur Garmin Connect (outils `get_menstrual_*` de
              garmin-mcp, activés SEULEMENT dans ce mode par `install.sh`).
   "intervals" — la phase est lue dans le champ wellness `menstrualPhase`
-             d'intervals.icu (même appel `get_wellness_for_date` que le bilan
+             d'intervals.icu (même appel `icu_get_wellness_for_date` que le bilan
              matinal, aucune installation à refaire).
   "manual" — la phase est déclarée par l'athlète (`/log`).
 La casse et les espaces autour de la valeur sont ignorés (« Garmin » = « garmin »,
