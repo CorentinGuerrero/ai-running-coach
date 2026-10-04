@@ -224,7 +224,9 @@ dans le bloc ```arc. Désactivation : `--no-altitude`.
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
 (`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
 élapsé ou une date-heure ISO 8601 complète pour une barrière du surlendemain
-sur un ultra). Persiste `stop_s` dans le champ `aid_stations` du bloc ```arc
+sur un ultra, avec ou sans décalage `+01:00`/`Z` — #205 ; avec `--tz`, `HH:MM`
+et l'ISO sans décalage sont l'heure locale du fuseau de course et les marges
+restent justes après un changement d'heure). Persiste `stop_s` dans le champ `aid_stations` du bloc ```arc
 du plan (#61) dès qu'un arrêt attendu à ce ravito diffère du défaut générique
 de 90 s (`arc_race_pacing.DEFAULT_AID_STATION_STOP_S`) — repas chaud, drop
 bag, changement de chaussettes — jamais une valeur inventée pour un ravito

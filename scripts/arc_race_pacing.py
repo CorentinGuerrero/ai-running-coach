@@ -188,7 +188,7 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_altitude as AL  # noqa: E402
@@ -575,7 +575,13 @@ ASSUMPTIONS = {
         "départ, 2 = lendemain, etc. ; SANS `cutoff_day`, une heure antérieure à l'heure de départ est "
         "supposée le LENDEMAIN, comportement historique conservé) ; `+HH:MM` élapsé depuis le départ "
         "(les heures peuvent dépasser 24, ex. `+30:00` pour un ultra) ; une date-heure ISO 8601 complète "
-        "(`2026-11-16T10:30:00`) pour une barrière à une date/heure absolue sans ambiguïté. Comparée à "
+        "(`2026-11-16T10:30:00`) pour une barrière à une date/heure absolue sans ambiguïté, éventuellement "
+        "avec décalage (`2026-10-25T12:00:00+01:00`, `…Z` — #205). Un seul parseur "
+        "(`_parse_cutoff_dt`) : quand le fuseau de course est connu (`--tz`, champ `timezone` du plan, "
+        "#184), `HH:MM` et l'ISO sans décalage sont des heures murales de ce fuseau, l'ISO avec décalage "
+        "un instant exact, et les marges sont calculées en temps ABSOLU — justes après un changement "
+        "d'heure en pleine course. Sans fuseau connu : heure murale du départ ; une barrière avec "
+        "décalage garde alors sa propre heure murale (aucun fuseau deviné). Comparée à "
         "l'heure de passage CUMULÉE de chaque scénario (départ + temps de segment + arrêts ravito). "
         "Marge = barrière − passage. `\"ok\"` si marge ≥ `CUTOFF_MARGIN_OK_S` (30 min — approximation du "
         "projet, pas une règle de course réelle), `\"tendu\"` si 0 ≤ marge < 30 min, `\"hors_delai\"` "
@@ -1649,54 +1655,115 @@ def _parse_hhmm(value: str, *, label: str) -> Tuple[int, int]:
     return hh, mm
 
 
-def _parse_cutoff_dt(cutoff: Optional[str], cutoff_day: Optional[int], start_dt: datetime) -> Optional[datetime]:
-    """Résout une barrière horaire en date-heure absolue — voir
-    `ASSUMPTIONS["cutoffs"]` pour les trois formats acceptés (`HH:MM`
-    [+ `cutoff_day` optionnel], `+HH:MM` élapsé, date-heure ISO 8601). Rend
-    `None` si `cutoff` est absent ou illisible (jamais une exception : une
-    barrière mal formée ne doit pas faire échouer tout le plan)."""
-    if not cutoff:
+def _as_instant(dt: datetime, zone) -> datetime:
+    """Instant comparable (#205) : UTC si `dt` porte un décalage ou si le fuseau de
+    course `zone` est connu (heure murale `dt` interprétée dans `zone`), sinon heure
+    murale naïve. Toute soustraction/comparaison se fait ensuite en temps ABSOLU — deux
+    datetimes du MÊME `ZoneInfo` se comparent sinon à l'heure murale (faux d'1 h après
+    un changement d'heure)."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
+    if zone is not None:
+        # Heure ambiguë (recul) ou inexistante (avance) : le plus TÔT des deux instants
+        # possibles — une barrière n'est jamais rendue plus généreuse qu'écrite.
+        return min(dt.replace(tzinfo=zone, fold=f).astimezone(timezone.utc) for f in (0, 1))
+    return dt
+
+
+def has_offset_cutoff(aid_stations: Sequence[dict]) -> bool:
+    """Vrai si une barrière est une date-heure ISO AVEC décalage (`+01:00`, `Z`) : sans fuseau de
+    course connu, elle n'est comparée qu'à son heure murale (#205) — l'appelant le signale."""
+    for station in aid_stations:
+        cutoff = station.get("cutoff")
+        if not isinstance(cutoff, str) or "T" not in cutoff:
+            continue
+        try:
+            if datetime.fromisoformat(cutoff.strip().replace("Z", "+00:00")).tzinfo is not None:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _race_clock(start_dt: datetime, zone=None) -> Tuple[datetime, Any, datetime]:
+    """Normalise le départ (#205) : rend `(start_wall, race_tz, start_abs)` — heure murale
+    NAÏVE du départ dans le fuseau de course, ce fuseau (`zone`, sinon le décalage d'un
+    départ daté, sinon `None`) et l'instant absolu du départ (`_as_instant`)."""
+    race_tz = zone if zone is not None else start_dt.tzinfo
+    if start_dt.tzinfo is not None:
+        start_wall = start_dt.astimezone(race_tz).replace(tzinfo=None)
+    else:
+        start_wall = start_dt
+    return start_wall, race_tz, _as_instant(start_wall, race_tz)
+
+
+def _parse_cutoff_dt(cutoff: Optional[str], cutoff_day: Optional[int], start_dt: datetime,
+                     zone=None) -> Optional[datetime]:
+    """Résout une barrière horaire en instant absolu comparable au départ
+    `_race_clock(start_dt, zone)[2]` — voir `ASSUMPTIONS["cutoffs"]` pour les quatre
+    formes acceptées (`HH:MM` [+ `cutoff_day` optionnel], `+HH:MM` élapsé, date-heure
+    ISO 8601 naïve ou avec décalage `+01:00`/`Z`). Seul parseur des barrières (#205) :
+    `HH:MM` et l'ISO naïve sont des heures murales du fuseau de course `zone` quand il est
+    connu ; `+HH:MM` est du temps écoulé absolu. Rend `None` si `cutoff` est absent ou
+    illisible (jamais une exception : une barrière mal formée ne doit pas faire échouer
+    tout le plan)."""
+    if not isinstance(cutoff, str) or not cutoff.strip():
         return None
+    start_wall, race_tz, start_abs = _race_clock(start_dt, zone)
     text = cutoff.strip()
     if text.startswith("+"):
         try:
             hh_s, mm_s = text[1:].split(":")
-            return start_dt + timedelta(hours=int(hh_s), minutes=int(mm_s))
+            return start_abs + timedelta(hours=int(hh_s), minutes=int(mm_s))
         except ValueError:
             return None
     if "T" in text:
         try:
-            return datetime.fromisoformat(text)
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
             return None
+        if parsed.tzinfo is not None and race_tz is None:
+            # Départ en heure murale sans fuseau connu : seule l'heure murale de la barrière
+            # (dans son propre décalage) est comparable — aucun fuseau deviné.
+            return parsed.replace(tzinfo=None)
+        return _as_instant(parsed, race_tz)
     try:
         hh, mm = _parse_hhmm(text, label="aid_station.cutoff")
     except ValueError:
         return None
-    day_offset = (cutoff_day - 1) if cutoff_day else 0
-    cutoff_dt = (start_dt + timedelta(days=day_offset)).replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if not cutoff_day and cutoff_dt < start_dt:
-        cutoff_dt += timedelta(days=1)
-    return cutoff_dt
+    try:
+        day_offset = (int(cutoff_day) - 1) if cutoff_day else 0
+    except (TypeError, ValueError):
+        return None
+    if day_offset < 0:
+        return None
+    cutoff_wall = (start_wall + timedelta(days=day_offset)).replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if not cutoff_day and cutoff_wall < start_wall:
+        cutoff_wall += timedelta(days=1)
+    return _as_instant(cutoff_wall, race_tz)
 
 
 def check_cutoffs(aid_station_passages: Sequence[dict], aid_stations: Sequence[dict],
-                   start_dt: datetime) -> List[dict]:
+                   start_dt: datetime, zone=None) -> List[dict]:
     """Marge de chaque scénario face à une barrière horaire — voir
-    `ASSUMPTIONS["cutoffs"]`. Une station sans `cutoff` (ou dont le `cutoff`
-    est illisible) n'apparaît pas dans le résultat (rien à vérifier)."""
+    `ASSUMPTIONS["cutoffs"]`. `start_dt` : départ naïf (heure murale) ou daté ;
+    `zone` : fuseau de course (`tzinfo`, #184) quand il est connu — marges alors
+    calculées en temps absolu, justes après un changement d'heure (#205). Une station
+    sans `cutoff` (ou dont le `cutoff` est illisible) n'apparaît pas dans le résultat
+    (rien à vérifier)."""
     by_km = {round(a["km"], 6): a for a in aid_stations if a.get("cutoff")}
+    start_abs = _race_clock(start_dt, zone)[2]
     out = []
     for passage in aid_station_passages:
         station = by_km.get(round(passage["km"], 6))
         if station is None:
             continue
-        cutoff_dt = _parse_cutoff_dt(station.get("cutoff"), station.get("cutoff_day"), start_dt)
+        cutoff_dt = _parse_cutoff_dt(station.get("cutoff"), station.get("cutoff_day"), start_dt, zone)
         if cutoff_dt is None:
             continue
         entry = {"km": passage["km"], "name": passage.get("name"), "cutoff": station["cutoff"]}
         for scenario in SCENARIOS:
-            passage_dt = start_dt + timedelta(seconds=passage[scenario])
+            passage_dt = start_abs + timedelta(seconds=passage[scenario])
             margin_s = round((cutoff_dt - passage_dt).total_seconds())
             status = "ok" if margin_s >= CUTOFF_MARGIN_OK_S else ("tendu" if margin_s >= 0 else "hors_delai")
             entry[scenario] = {"margin_s": margin_s, "status": status}
@@ -2336,7 +2403,20 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         for scenario in SCENARIOS:
             night["scenarios"][scenario] = night_scenario_summary(
                 night_mask, night_start_dt, passages["totals_s"][scenario], night_tzinfo)
-    cutoffs = check_cutoffs(passages["aid_station_passages"], aid_stations, start_dt)
+    # Fuseau de course pour les barrières (#205) : celui de la nuit s'il a été résolu, sinon `--tz`
+    # même sans pénalité de nuit (un fuseau illisible n'est alors qu'un avertissement).
+    cutoff_zone = night_tzinfo
+    if cutoff_zone is None and tz and any(a.get("cutoff") for a in aid_stations):
+        import arc_solar as SOLAR
+        try:
+            cutoff_zone = SOLAR.resolve_timezone(tz)
+        except ValueError as exc:
+            warnings.append(f"barrières horaires calculées à l'heure murale : {exc}")
+    if cutoff_zone is None and has_offset_cutoff(aid_stations):
+        warnings.append(
+            "barrière horaire avec décalage (+HH:MM/Z) sans fuseau de course (--tz) : comparée à son "
+            "heure murale, marge fausse si ce décalage n'est pas celui du départ")
+    cutoffs = check_cutoffs(passages["aid_station_passages"], aid_stations, start_dt, cutoff_zone)
     for aid_passage in passages["aid_station_passages"]:
         if aid_passage.get("note"):
             warnings.append(aid_passage["note"])

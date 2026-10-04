@@ -52,8 +52,8 @@ ASSUMPTIONS = {
         "Heures de passage à l'horloge = départ + temps écoulé compté en temps ABSOLU (UTC) puis "
         "affiché dans le fuseau `timezone` du plan : juste après un changement d'heure en pleine "
         "course. Sans `timezone` (ou fuseau inconnu), simple addition à l'heure murale du départ. "
-        "Les marges de barrière restent celles d'`arc_race_pacing.check_cutoffs` (heure murale) : "
-        "si l'heure change pendant la course, une marge peut différer d'une heure — signalé."),
+        "Les marges de barrière sont celles d'`arc_race_pacing.check_cutoffs`, calculées dans le même "
+        "fuseau, en temps absolu (#205) : justes aussi après un changement d'heure."),
     "night": (
         "Le drapeau nuit d'une section reprend `night_fraction` des segments (#184) pondéré par leur "
         "temps ; absent du plan (course sans nuit, ou plan d'avant #184), aucune nuit n'est déduite."),
@@ -364,10 +364,10 @@ def build_roadbook(plan: dict, *, plan_path: Optional[str] = None,
             if start_dt is None:
                 missing.append("barrières horaires présentes mais heure de départ inconnue : marges non calculées")
             else:
-                try:
-                    cutoffs = RP.check_cutoffs(passages["aid_station_passages"], stations, start_dt)
-                except TypeError:
-                    missing.append("barrière horaire avec fuseau explicite : marges non calculées (fuseau mixte)")
+                cutoffs = RP.check_cutoffs(passages["aid_station_passages"], stations, start_dt, zone)
+                if zone is None and RP.has_offset_cutoff(stations):
+                    missing.append("barrière horaire avec décalage mais fuseau du plan (`timezone`) inconnu : "
+                                   "marge comparée à l'heure murale de la barrière")
         elif stations:
             missing.append("aucune barrière horaire renseignée sur les ravitos du plan")
         for s in avail:
@@ -379,10 +379,8 @@ def build_roadbook(plan: dict, *, plan_path: Optional[str] = None,
             off1 = _local(start_dt, longest, zone).replace(tzinfo=zone).utcoffset()
             if off0 != off1:
                 warnings.append(
-                    "changement d'heure pendant la course : heures de passage en heure locale réelle"
-                    + (" ; les marges de barrière restent calculées à l'heure murale par "
-                       "arc_race_pacing et peuvent différer d'une heure après le changement"
-                       if cutoffs else ""))
+                    "changement d'heure pendant la course : heures de passage et marges de barrière "
+                    "en heure locale réelle")
         for s in SCENARIOS:
             if s not in scenarios:
                 scenarios[s] = {"available": False}
