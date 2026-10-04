@@ -96,7 +96,10 @@ class TestProportions(unittest.TestCase):
             self.assertEqual(w["intensity_split"], rec["intensity"])
             self.assertEqual(w["strength_emphasis"], rec["strength"])
             if not w["adjustments"]:
-                self.assertAlmostEqual(w["target_duration_s"], peak * rec["volume_pct"] / 100.0, delta=125)
+                # Première semaine post-course (course un dimanche) : 3 jours sans course → 4/7 du gabarit.
+                first_post = next(x for x in self.weeks if x["type"] == "post_race")
+                prorata = 4 / 7 if w is first_post else 1
+                self.assertAlmostEqual(w["target_duration_s"], peak * rec["volume_pct"] / 100.0 * prorata, delta=125)
             expected_type = {"build": "build", "recovery_week": "recovery", "taper": "taper",
                              "post_race": "post_race"}[rec["kind"]]
             if w["type"] != "race":
@@ -243,6 +246,21 @@ class TestLengthCases(unittest.TestCase):
         self.assertEqual(sk["start_week"], (TODAY + timedelta(days=7)).isoformat())
         self.assertEqual(sk["status"], "ok")
 
+    def test_started_week_is_assumed_at_held_volume_in_the_reference(self):
+        """Semaine en cours entamée : elle entre dans la référence R2/R3 au volume tenu (ASSUMPTIONS
+        `start_week`), donc mean4 de la 1re semaine = (3 dernières réelles + tenu) / 4."""
+        wed = TODAY + timedelta(days=2)
+        weeks = [{"duration_s": h * 3600.0, "elevation_gain_m": 0.0, "distance_m": 0.0} for h in (2, 4, 6, 8)]
+        seen = []
+        real = G.evaluate
+
+        def spy(proposed, ctx, gconf):
+            seen.append(ctx["mean4_weeks"]["duration_s"])
+            return real(proposed, ctx, gconf)
+        with mock.patch.object(G, "evaluate", spy):
+            build(MARATHON, today=wed, race=race_after(MARATHON["weeks"]["default"] + 1), held_=held(weeks=weeks))
+        self.assertAlmostEqual(seen[0], (4 + 6 + 8 + 5) / 4 * 3600.0)
+
     def test_no_history_is_stated_never_invented(self):
         empty = PS.held_from_weeks([{"duration_s": 0.0, "distance_m": 0.0, "elevation_gain_m": 0.0,
                                      "has_any_activity": False}] * 4)
@@ -331,6 +349,70 @@ class TestAvailability(unittest.TestCase):
         self.assertEqual((race["planned_distance_m"], race["planned_elevation_m"]), (42000, 2000))
         self.assertLessEqual(len([s for s in sessions if s["intensity"] != "race"]), PS.MAX_RACE_WEEK_RUNS)
         self.assertTrue(all(s["date"] < sk["race_date"] for s in sessions[:-1]))
+        # Veille de course laissée libre.
+        eve = (date.fromisoformat(sk["race_date"]) - timedelta(days=1)).isoformat()
+        self.assertNotIn(eve, [s["date"] for s in sessions])
+
+    def _race_on(self, weekday: int) -> dict:
+        race = race_after(MARATHON["weeks"]["default"]) - timedelta(days=6 - weekday)
+        return PS.build_skeleton(template=MARATHON, today=TODAY, race_date=race, held=held(), availability=AVAIL,
+                                 gconf=GCONF, context_factory=factory())
+
+    def test_race_not_on_sunday_prorates_and_never_piles_up_before_the_race(self):
+        full = next(w for w in self._race_on(6)["weeks"] if w["type"] == "race")
+        for weekday in (1, 2, 5):            # mardi, mercredi, samedi
+            sk = self._race_on(weekday)
+            race_week = next(w for w in sk["weeks"] if w["type"] == "race")
+            runs = [s for s in race_week["entry"]["sessions"] if s["intensity"] != "race"]
+            race_d = date.fromisoformat(sk["race_date"])
+            self.assertTrue(all(date.fromisoformat(s["date"]) < race_d - timedelta(days=1) for s in runs), weekday)
+            # Volume au prorata des jours avant la course (≤ jour/6 du volume d'une course le dimanche).
+            self.assertLessEqual(race_week["target_duration_s"], full["target_duration_s"] * weekday / 6 + 120, weekday)
+            self.assertTrue(any("ramené à" in f for f in race_week["flags"]), weekday)
+        # Course un mardi : la seule journée avant est la veille → aucun footing, jamais 3 h la veille.
+        tuesday = next(w for w in self._race_on(1)["weeks"] if w["type"] == "race")
+        self.assertEqual([s for s in tuesday["entry"]["sessions"] if s["intensity"] != "race"], [])
+
+    def test_no_run_slot_in_the_days_after_the_race(self):
+        for weekday in (6, 5, 2):
+            sk = self._race_on(weekday)
+            race_d = date.fromisoformat(sk["race_date"])
+            rest_end = race_d + timedelta(days=PS.POST_RACE_REST_DAYS)
+            for w in sk["weeks"]:
+                if w["type"] != "post_race":
+                    continue
+                days = [date.fromisoformat(s["date"]) for s in w["entry"]["sessions"] if s["sport"] == "trail"]
+                self.assertTrue(all(d > rest_end for d in days), (weekday, w["week_start"]))
+        first_post = next(w for w in self._race_on(6)["weeks"] if w["type"] == "post_race")
+        self.assertTrue(any("ramené à 4/7" in f for f in first_post["flags"]))
+
+
+class TestPreviousWeekReference(unittest.TestCase):
+    """`r2_volume_reference = "previous_week"` : la reprise après une semaine allégée n'est pas réduite
+    (comme `arc_plan_templates`, #189), sauf si R2/R3 sont configurés en `block`."""
+
+    def test_rebound_after_recovery_week_is_kept_and_flagged(self):
+        g = G.guardrail_settings({"guardrails": {"r2_volume_reference": "previous_week"}})
+        sk = build(ULTRA, gconf=g)
+        ref = build(ULTRA)                      # référence mean4 : aucune réduction
+        self.assertEqual(sk["summary"]["adjusted_weeks"], 0)
+        for a, b in zip(sk["weeks"], ref["weeks"]):
+            if b["type"] != "post_race":
+                self.assertEqual(a["target_duration_s"], b["target_duration_s"], a["week_start"])
+        rebounds = [w for w in sk["weeks"] if any("reprise" in f for f in w["flags"])]
+        self.assertTrue(rebounds)
+        for w in rebounds:
+            self.assertEqual(w["guardrails"]["level"], "warn")
+            self.assertIn(sk["weeks"][w["week"] - 2]["type"], ("recovery", "post_race"))
+
+    def test_rebound_is_still_reduced_when_r2_blocks(self):
+        g = G.guardrail_settings({"guardrails": {"r2_volume_reference": "previous_week",
+                                                 "severity_r2_weekly_volume_jump": "block",
+                                                 "severity_r3_weekly_elevation_jump": "block"}})
+        sk = build(ULTRA, gconf=g)
+        self.assertTrue(sk["summary"]["block_free"])
+        self.assertGreater(sk["summary"]["adjusted_weeks"], 0)
+        self.assertFalse(any("reprise" in f for w in sk["weeks"] for f in w["flags"]))
 
 
 class TestRoad(unittest.TestCase):
@@ -486,6 +568,49 @@ class TestCli(unittest.TestCase):
         self.assertNotEqual(unknown.returncode, 0)
         self.assertIn("inconnu", unknown.stderr)
         self.assertNotIn("Traceback", unknown.stderr)
+
+    def test_declared_zero_hours_is_no_history_not_the_index(self):
+        data = json.loads(self._cli("--held-hours", "0").stdout)
+        self.assertEqual(data["status"], "no_history")
+        self.assertEqual(data["held"]["source"], "declared")
+
+    def test_file_appearing_after_the_conflict_check_is_never_overwritten(self):
+        conn = I.open_db(self.ws, memory=True)
+        try:
+            I.index_workspace(conn, self.ws, TODAY.isoformat())
+            report = PS.skeleton_report(conn=conn, config=I.load_config(self.ws), workspace=self.ws, today=TODAY)
+        finally:
+            conn.close()
+        late = self.ws / "planning" / PS.week_file_name(report["weeks"][3]["week_start"])
+        late.write_text("écrit entre-temps\n", encoding="utf-8")
+        with mock.patch.object(PS, "find_conflicts", return_value=[]):
+            out = PS.write_weeks(self.ws, report, I.validate_file)
+        self.assertEqual(out["written"], [])
+        self.assertIn("interrompue", out["refused"])
+        self.assertEqual(late.read_text(encoding="utf-8"), "écrit entre-temps\n")
+        self.assertEqual(sorted(p.name for p in (self.ws / "planning").glob("Semaine_*.md")), [late.name])
+
+    def test_current_week_plan_feeds_the_acwr_projection(self):
+        today = TODAY + timedelta(days=2)              # mercredi : le squelette démarre lundi prochain
+        _write_arc(self.ws / "planning/Semaine_courante.md", {
+            "kind": "week", "week_start": TODAY.isoformat(), "location": "Tournai",
+            "sessions": [{"date": (TODAY + timedelta(days=4)).isoformat(), "sport": "trail", "title": "Longue",
+                          "planned_duration_s": 9000, "intensity": "endurance", "status": "planned"}]})
+        conn = I.open_db(self.ws, memory=True)
+        seen = []
+        real = G.build_context
+
+        def spy(conn_, config, gconf, week_start, today_=None, other_weeks=None):
+            seen.append([w["week_start"] for w in other_weeks or []])
+            return real(conn_, config, gconf, week_start, today_, other_weeks)
+        try:
+            I.index_workspace(conn, self.ws, today.isoformat())
+            factory_ = PS.default_context_factory(conn, {}, GCONF, today)
+            with mock.patch.object(G, "build_context", spy):
+                factory_(TODAY + timedelta(days=7), [])
+        finally:
+            conn.close()
+        self.assertEqual(seen, [[TODAY.isoformat()]])
 
 
 if __name__ == "__main__":

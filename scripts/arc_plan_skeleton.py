@@ -92,6 +92,7 @@ STRENGTH_SLOT_S = 40 * 60            # créneau de renforcement (approximation d
 EASY_WEIGHT = 0.8                    # poids d'une sortie facile face à une séance de qualité (1.0)
 MIN_SESSIONS_FOR_STRENGTH = 4        # en dessous, tous les créneaux vont à la course à pied
 MAX_RACE_WEEK_RUNS = 3               # footings de la semaine de course, course exclue
+POST_RACE_REST_DAYS = 3              # jours sans créneau de course à pied après la course (approximation du projet)
 CAP_MARGIN = 0.998                   # marge sous le seuil R2/R3 quand on réduit une semaine
 MAX_ADJUST_ATTEMPTS = 6
 LONG_RUN_FLOOR_FACTOR = 1.15         # plancher de la sortie longue face à une part égale
@@ -158,8 +159,12 @@ ASSUMPTIONS = {
         "permettent (sinon moins de qualité, signalé). L'intensité d'un créneau de qualité est un "
         "PLACEHOLDER (tempo en base/affûtage, seuil ensuite) servant à la charge projetée. Créneau de "
         f"renforcement : {STRENGTH_SLOT_S // 60} min, hors volume course à pied. Semaine de course : jusqu'à "
-        f"{MAX_RACE_WEEK_RUNS} footings avant la course, volume du gabarit hors course ; le créneau de "
-        "course porte la distance/le D+ de l'objectif."),
+        f"{MAX_RACE_WEEK_RUNS} footings avant la course, jamais la veille (laissée libre : repos ou "
+        "déverrouillage court, au choix du coach), volume du gabarit hors course ramené au prorata des jours "
+        "avant la course (jour de course / 6 : 6/6 un dimanche, 1/6 un mardi) ; le créneau de course porte la "
+        f"distance/le D+ de l'objectif. Après la course : aucun créneau de course à pied pendant "
+        f"{POST_RACE_REST_DAYS} jours, et la semaine concernée garde le volume du gabarit au prorata des jours "
+        "restants. Choix prudents du projet (approximation du projet), pas un protocole publié."),
     "guardrails": (
         "Chaque semaine est évaluée par `arc_guardrails.evaluate`. R1/R4 reposent sur la charge PROJETÉE de "
         "créneaux dont l'intensité est un placeholder : lecture indicative. Une semaine réduite pour passer "
@@ -284,9 +289,17 @@ def synthetic_context(week_start: date, today: date, sport: str = "trail", morni
 
 def default_context_factory(conn, config: dict, gconf: dict, today: date) -> Callable:
     """Fabrique le contexte réel (`arc_guardrails.build_context`) d'une semaine ; les semaines
-    déjà générées servent de `other_weeks` (projection ACWR d'une semaine au-delà de la prochaine, #69)."""
+    déjà générées servent de `other_weeks` (projection ACWR d'une semaine au-delà de la prochaine, #69).
+    La semaine EN COURS (non générée : le squelette démarre lundi prochain) y entre aussi avec ses
+    séances déjà planifiées dans l'index : sans elles, ses jours restants compteraient comme du repos
+    complet dans la projection R1/R4 (le réel prime toujours, `_intervening_weeks_loads`)."""
+    import arc_load_forecast as LF
+    current = _monday(today)
+    planned_now = LF._planned_weeks_from_index(conn, current, current + timedelta(days=6))
+
     def factory(week_start: date, prior_weeks: List[dict]) -> dict:
-        return G.build_context(conn, config, gconf, week_start, today, prior_weeks or None)
+        others = [w for w in planned_now if w["week_start"] < week_start.isoformat()] + list(prior_weeks or [])
+        return G.build_context(conn, config, gconf, week_start, today, others or None)
     return factory
 
 
@@ -401,12 +414,21 @@ def make_week(spec: dict, scale_d: float = 1.0, scale_e: float = 1.0, no_quality
     flags: List[str] = []
     target_s = max(0.0, spec["target_duration_s"] * scale_d)
     target_e = (spec["target_elevation_m"] * scale_e) if spec.get("target_elevation_m") else None
+    # Volume au prorata des jours réellement utilisables (semaine de course avant un dimanche, première
+    # semaine post-course) : jamais tout le volume du gabarit entassé sur un ou deux jours.
+    prorata = 1.0
     quality_q = 0 if no_quality else rec["quality_sessions_max"]
     n_run = spec["n_run"]
 
     long_day: Optional[int] = None
     if typ == TYPE_RACE:
-        days = [d for d in days if d < race_wd]
+        # Veille de course laissée libre (repos ou déverrouillage court, au choix du coach) ; volume au
+        # prorata des jours avant la course (course le dimanche = 6/6).
+        days = [d for d in days if d < race_wd - 1]
+        prorata = race_wd / 6.0
+        if race_wd < 6:
+            flags.append(f"course un {DAY_NAMES_FR[race_wd]} : volume de la semaine ramené à {race_wd}/6 "
+                         "(jours avant la course), veille laissée libre.")
         n_run = min(n_run, MAX_RACE_WEEK_RUNS, len(days))
         chosen = _spread(days, n_run, days[0]) if days and n_run else []
         # Activation : une seule séance de qualité, au plus tard 3 jours avant la course.
@@ -417,6 +439,13 @@ def make_week(spec: dict, scale_d: float = 1.0, scale_e: float = 1.0, no_quality
     else:
         if typ == TYPE_POST_RACE:
             n_run = min(n_run, 4)
+            rest_end = spec["race_date"] + timedelta(days=POST_RACE_REST_DAYS)
+            cut = sum(1 for d in range(7) if ws + timedelta(days=d) <= rest_end)
+            if cut:
+                days = [d for d in days if ws + timedelta(days=d) > rest_end]
+                prorata = (7 - cut) / 7.0
+                flags.append(f"aucun créneau de course à pied jusqu'au {rest_end.isoformat()} "
+                             f"({POST_RACE_REST_DAYS} jours après la course) ; volume ramené à {7 - cut}/7.")
         n_run = max(1, min(n_run, len(days))) if days else 0
         if not days:
             flags.append("aucun jour disponible : semaine sans créneau (disponibilité à revoir).")
@@ -435,6 +464,9 @@ def make_week(spec: dict, scale_d: float = 1.0, scale_e: float = 1.0, no_quality
             cands = [d for d in free if long_day is None or d != long_day - 1] or free
             strength_day = cands[0]
 
+    target_s *= prorata
+    if target_e:
+        target_e *= prorata
     roles, role_days = [], []
     for d in sorted(chosen):
         if d == long_day:
@@ -551,11 +583,24 @@ def _scale_from(violation: dict) -> float:
     return ((1 + threshold / 100.0) / (1 + observed / 100.0)) * CAP_MARGIN
 
 
+def _is_rebound(entry: dict, violation: Optional[dict], rebound_ref: Optional[dict], key: str) -> bool:
+    """Reprise après une semaine allégée avec `r2_volume_reference = "previous_week"` : le dépassement
+    face à la semaine allégée est mécanique (100 / 80 = +25 %), comme `arc_plan_templates` le traite
+    (#189) — pas de réduction tant que la reprise reste sous la dernière semaine non allégée + seuil.
+    Le `warn` reste dans le verdict (`arc_guardrails.py check` l'avertira aussi sur l'historique réel)."""
+    if violation is None or rebound_ref is None or violation["severity"] == "block":
+        return False
+    up = G._pct_increase(_run_totals(entry)[key], rebound_ref.get(key) or 0.0)
+    return up is not None and up <= violation["values"]["threshold"]
+
+
 def settle_week(spec: dict, chain: List[dict], prior: List[dict], context_factory: Callable, gconf: dict,
-                race_date: Optional[date]) -> Tuple[Optional[dict], dict, List[str]]:
+                race_date: Optional[date], rebound_ref: Optional[dict] = None) -> Tuple[Optional[dict], dict, List[str]]:
     """Génère la semaine, l'évalue, l'ajuste (R2/R3 → réduction ; `block` → sans qualité puis −10 %).
 
-    Rend `(entrée | None, verdict compact, ajustements)`. `None` = blocage persistant."""
+    `rebound_ref` : totaux de la dernière semaine non allégée quand la semaine suit une semaine allégée
+    avec la référence `previous_week` (voir `_is_rebound`). Rend `(entrée | None, verdict compact,
+    ajustements)`. `None` = blocage persistant."""
     scale_d = scale_e = 1.0
     no_quality = False
     adjustments: List[str] = []
@@ -563,6 +608,11 @@ def settle_week(spec: dict, chain: List[dict], prior: List[dict], context_factor
         entry = make_week(spec, scale_d, scale_e, no_quality)
         result = check_week(entry, chain, prior, context_factory, gconf, race_date)
         v2, v3 = _violation(result, "r2_weekly_volume_jump"), _violation(result, "r3_weekly_elevation_jump")
+        r2_key = "distance_m" if v2 and "distance" in v2["message"].lower() else "duration_s"
+        if _is_rebound(entry, v2, rebound_ref, r2_key):
+            v2 = None
+        if _is_rebound(entry, v3, rebound_ref, "elevation_gain_m"):
+            v3 = None
         blocks = [v for v in result["violations"] if v["severity"] == "block"
                   and v["rule_id"] not in ("r2_weekly_volume_jump", "r3_weekly_elevation_jump")]
         if v2:
@@ -685,7 +735,7 @@ def build_skeleton(*, template: dict, today: date, race_date: date, held: dict, 
     capped = False
     max_s = availability.get("max_weekly_s")
     if max_s and peak_s > max_s:
-        warnings.append(f"pic dérivé {peak_s / 3600:.1f} h > plafond de disponibilité {max_s / 3600:g} h : "
+        warnings.append(f"pic dérivé {_h(peak_s)} > plafond de disponibilité {_h(max_s)} : "
                         "pic ramené au plafond (le bloc part alors sous le volume tenu).")
         peak_s, capped = float(max_s), True
     peak_e = None
@@ -697,8 +747,10 @@ def build_skeleton(*, template: dict, today: date, race_date: date, held: dict, 
                             "— `--held-elevation-m` si l'athlète en fait réellement.")
     ind = template["peak_week_indicative"]["duration_h"]
     if peak_s / 3600 < ind["min"]:
-        warnings.append(f"pic dérivé {peak_s / 3600:.1f} h sous le pic indicatif du gabarit ({ind['min']:g}–{ind['max']:g} h) : "
-                        "proposer un bloc de mise en route plus long ou revoir l'objectif — jamais étirer le gabarit.")
+        warnings.append(f"pic dérivé {_h(peak_s)} sous le pic indicatif du gabarit ({ind['min']:g}–{ind['max']:g} h) : "
+                        "proposer d'abord une mise en route qui FASSE MONTER le volume tenu (semaines écrites et vérifiées "
+                        "par les garde-fous, puis relancer `plan-skeleton`) ou revoir l'objectif — jamais étirer le "
+                        "gabarit ; les semaines `lead_in` du squelette restent, elles, au volume tenu.")
     distance_per_s = held["distance_m"] / held_s if sport == "road" and held["distance_m"] > 0 else None
 
     sessions_per_week = availability.get("sessions_per_week") or DEFAULT_SESSIONS_PER_WEEK
@@ -723,6 +775,9 @@ def build_skeleton(*, template: dict, today: date, race_date: date, held: dict, 
     weeks_out: List[dict] = []
     entries_for_ctx: List[dict] = []
     unresolved: List[dict] = []
+    # Types parallèles à `chain` (semaines réelles/supposée = pleines) : reprise après semaine allégée.
+    chain_types: List[str] = ["held"] * len(chain)
+    lighter = (TYPE_RECOVERY, TYPE_TAPER, TYPE_RACE, TYPE_POST_RACE)
     for idx, (rec, typ) in enumerate(records):
         ws = start + timedelta(days=7 * idx)
         target_s = peak_s * rec["volume_pct"] / 100.0
@@ -731,7 +786,12 @@ def build_skeleton(*, template: dict, today: date, race_date: date, held: dict, 
                 "target_elevation_m": target_e, "availability": availability, "race_date": race_date,
                 "sport": primary, "location": location, "distance_per_s": distance_per_s, "n_run": n_run,
                 "strength": strength_slot, "objective": objective}
-        entry, verdict, adjustments = settle_week(spec, chain, entries_for_ctx, context_factory, gconf, race_date)
+        rebound_ref = None
+        if gconf.get("r2_volume_reference") == "previous_week" and chain_types[-1] in (TYPE_RECOVERY, TYPE_POST_RACE):
+            rebound_ref = next((c for c, t in zip(reversed(chain), reversed(chain_types)) if t not in lighter), None)
+        entry, verdict, adjustments = settle_week(spec, chain, entries_for_ctx, context_factory, gconf, race_date,
+                                                  rebound_ref)
+        chain_types.append(typ)
         if entry is None:
             unresolved.append({"week_start": ws.isoformat(), "week_type": typ, "phase": rec["phase_label"],
                                "guardrails": verdict, "adjustments": adjustments})
@@ -739,6 +799,10 @@ def build_skeleton(*, template: dict, today: date, race_date: date, held: dict, 
             chain.append({"duration_s": target_s, "distance_m": 0.0, "elevation_gain_m": target_e or 0.0})
             continue
         flags = entry.pop("_flags")
+        if rebound_ref is not None and any(v["rule_id"] in ("r2_weekly_volume_jump", "r3_weekly_elevation_jump")
+                                           for v in verdict["violations"]):
+            flags.append("reprise après une semaine allégée (ou post-course) : R2/R3 avertit face à la semaine précédente "
+                         "(référence `previous_week`), mais reste sous la dernière semaine non allégée + seuil.")
         chain.append(_run_totals(entry))
         entries_for_ctx.append({"week_start": entry["week_start"], "sessions": entry["sessions"]})
         weeks_out.append({
@@ -830,7 +894,8 @@ def skeleton_report(*, conn, config: dict, workspace: Path, today: date, templat
         except OSError:
             continue
     availability = parse_availability(profile_text, long_run_day)
-    if held_hours:
+    if held_hours is not None:
+        # Déclaré, même à 0 : `no_history` honnête plutôt qu'un repli silencieux sur l'index.
         held = declared_held(held_hours, held_elevation_m)
     else:
         held = held_from_index(conn, today)
@@ -947,10 +1012,19 @@ def write_weeks(workspace: Path, result: dict, validate: Callable) -> dict:
         return out
     planning.mkdir(parents=True, exist_ok=True)
     created: List[Path] = []
-    for w in result["weeks"]:
-        path = planning / week_file_name(w["week_start"])
-        path.write_text(week_markdown(result, w), encoding="utf-8")
-        created.append(path)
+    try:
+        for w in result["weeks"]:
+            path = planning / week_file_name(w["week_start"])
+            # Création exclusive (« x ») : un fichier apparu depuis la détection des conflits n'est
+            # jamais écrasé ; toute erreur retire ce qui vient d'être écrit (tout ou rien).
+            with open(path, "x", encoding="utf-8") as fh:
+                created.append(path)
+                fh.write(week_markdown(result, w))
+    except OSError as exc:
+        for path in created:
+            path.unlink(missing_ok=True)
+        out["refused"] = f"écriture interrompue ({exc}) : fichiers retirés, rien n'est écrit."
+        return out
     bad = False
     for path in created:
         ok, errors, warnings = validate(path)
