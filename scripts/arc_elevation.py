@@ -209,11 +209,26 @@ def grade_series(samples: Sequence[dict], *, window_m: float = DEFAULT_GRADE_WIN
     return ordered
 
 
+def step_gain_loss(step: float, min_step_m: float = 0.0) -> tuple:
+    """`(montée, descente)` en mètres apportées par UN pas d'altitude `step`. Règle
+    unique du seuil anti-bruit, partagée par `gain_loss` et par le total ET le profil
+    par km d'`analyze_gpx.compute_metrics` : un pas dont la valeur absolue est
+    inférieure OU ÉGALE à `min_step_m` est ignoré (comparaison stricte `>` — un pas
+    d'exactement 1,0 m n'est pas compté avec le seuil de 1 m d'un GPX brut ; passer à
+    `>=` changerait fortement le D+ des GPX à altitudes entières, dont les pas lissés
+    tombent souvent pile sur 1,0 m)."""
+    if step > min_step_m:
+        return step, 0.0
+    if step < -min_step_m:
+        return 0.0, -step
+    return 0.0, 0.0
+
+
 def gain_loss(values: Sequence[Optional[float]], *, smooth_taps: int = 1,
               min_step_m: float = 0.0) -> tuple:
     """`(D+, D-)` en mètres d'une série d'altitudes (`None` ignorés), après lissage
-    optionnel (`smooth_taps`) ; un pas strictement inférieur ou égal à `min_step_m`
-    est ignoré (seuil anti-bruit : `analyze_gpx.compute_metrics` utilise 1,0 m sur un
+    optionnel (`smooth_taps`) ; un pas inférieur ou égal à `min_step_m` en valeur
+    absolue est ignoré (`step_gain_loss`, seuil anti-bruit : `analyze_gpx.compute_metrics` utilise 1,0 m sur un
     GPX brut, voir `ASSUMPTIONS["dem_series"]` pour le cas d'une série issue d'un MNT,
     #176). Série de moins de 2 valeurs → `(0.0, 0.0)`."""
     series = smooth_moving_average(values, smooth_taps)
@@ -221,11 +236,9 @@ def gain_loss(values: Sequence[Optional[float]], *, smooth_taps: int = 1,
     for prev, cur in zip(series, series[1:]):
         if prev is None or cur is None:
             continue
-        step = cur - prev
-        if step > min_step_m:
-            gain += step
-        elif step < -min_step_m:
-            loss += -step
+        up, down = step_gain_loss(cur - prev, min_step_m)
+        gain += up
+        loss += down
     return gain, loss
 
 

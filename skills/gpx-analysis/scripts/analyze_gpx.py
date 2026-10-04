@@ -65,7 +65,7 @@ from pathlib import Path
 # Moteur : scripts/ à la racine (le skill peut être atteint par un lien symbolique
 # depuis un workspace séparé — resolve() remonte au vrai dossier du moteur).
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
-from arc_elevation import smooth_moving_average  # noqa: E402
+from arc_elevation import smooth_moving_average, step_gain_loss  # noqa: E402
 import arc_climb  # noqa: E402
 import arc_dem  # noqa: E402
 
@@ -131,16 +131,17 @@ def compute_metrics(pts: list[dict], smooth: int = 3, min_step_m: float = 1.0) -
     # partagée avec le GAP, `arc_elevation.smooth_moving_average` — #44)
     ele = smooth_moving_average([p["ele"] for p in pts], smooth)
 
-    # 3) D+ / D- : somme des montées/descentes > 1 m (post-lissage)
-    dp, dm = 0.0, 0.0
+    # 3) D+ / D- : montée/descente de chaque pas `i - 1 -> i` (post-lissage), seuil
+    # `min_step_m` STRICT (`arc_elevation.step_gain_loss` : un pas de |d| <= seuil est
+    # ignoré). Calculée UNE fois par pas : le total et le profil par km somment les mêmes
+    # contributions — le profil sommait les écarts bruts sans seuil et pouvait dépasser
+    # le D+ total sans `--dem`.
+    step_up, step_down = [0.0] * len(ele), [0.0] * len(ele)
     for i in range(1, len(ele)):
         if ele[i] is None or ele[i - 1] is None:
             continue
-        d = ele[i] - ele[i - 1]
-        if d > min_step_m:
-            dp += d
-        elif d < -min_step_m:
-            dm += abs(d)
+        step_up[i], step_down[i] = step_gain_loss(ele[i] - ele[i - 1], min_step_m)
+    dp, dm = sum(step_up), sum(step_down)
 
     # 4) profil par km
     total_km = dist[-1] / 1000
@@ -151,12 +152,10 @@ def compute_metrics(pts: list[dict], smooth: int = 3, min_step_m: float = 1.0) -
         if not idx:
             km_profile.append({"km": km, "dp": 0.0, "dm": 0.0, "alt_min": None, "alt_max": None})
             continue
-        # Pas `i - 1 -> i` attribué au km du point `i` ; jamais `i = 0` : `ele[-1]` est le
-        # DERNIER point de la trace en Python — l'écart arrivée/départ était compté à tort
-        # dans le km 0 (relecture #176).
-        steps = [i for i in idx if i > 0 and ele[i] is not None and ele[i - 1] is not None]
-        kdp = sum(ele[i] - ele[i - 1] for i in steps if ele[i] > ele[i - 1])
-        kdm = sum(ele[i - 1] - ele[i] for i in steps if ele[i] < ele[i - 1])
+        # Pas `i - 1 -> i` attribué au km du point `i` ; `step_up[0]`/`step_down[0]` valent 0
+        # par construction — jamais l'écart arrivée/départ dans le km 0 (relecture #176).
+        kdp = sum(step_up[i] for i in idx)
+        kdm = sum(step_down[i] for i in idx)
         alts = [ele[i] for i in idx if ele[i] is not None]
         km_profile.append({
             "km": km,

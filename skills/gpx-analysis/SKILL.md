@@ -65,7 +65,7 @@ python3 skills/gpx-analysis/scripts/analyze_gpx.py \
 - **Stdlib uniquement** (xml.etree + math) — aucune dépendance.
 - **Namespace-agnostic** : fonctionne avec ou sans préfixe XML (`<trkpt>` vs `<g:trkpt>`).
 - **Altitude** : champ `<ele>` ; lissage glissant pour neutraliser le bruit GPS.
-- **D+** : somme des élévations > 1 m après lissage → valeur conservative proche du baromètre.
+- **D+** : somme des pas d'altitude strictement supérieurs à 1 m après lissage (un pas d'exactement 1,0 m est ignoré) → valeur conservative proche du baromètre. Le **profil par km** applique la même règle, pas par pas : la somme des D+/D- par km égale le total (à l'arrondi au dixième près par km). Limite : sur un GPX très finement échantillonné, une pente douce donne des pas de moins de 1 m et n'est pas comptée — `--dem` (sans seuil) est alors la référence.
 - **Boucle fermée** : si retour-à-départ < 300 m.
 
 ## Correction altimétrique par MNT (#176)
