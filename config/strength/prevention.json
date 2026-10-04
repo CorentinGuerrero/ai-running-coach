@@ -6,9 +6,16 @@
     "window_days": 14,
     "gentle_max_score": 3,
     "persistence_days": 7,
-    "worsening_min_delta": 1
+    "worsening_min_delta": 1,
+    "confirm_min_span_days": 2
   },
   "acute_keywords": ["aigu", "aigue", "vive", "vives", "vif", "soudain", "soudaine", "brutal", "brutale", "gonfl*", "enfl*", "craquement", "claquage", "blocage", "bloque"],
+  "never_in_prevention": ["descente_de_marche_excentrique", "mollet_excentrique_marche", "squat_excentrique_lent", "nordique_assiste"],
+  "observe_questions": [
+    "Est-ce nouveau (jamais ressenti à cet endroit) ou une gêne que tu connais déjà ?",
+    "Est-ce vif ou apparu brusquement (pendant un effort, un faux pas) ?",
+    "Vois-tu un gonflement, ou est-ce que ça gêne la marche ?"
+  ],
   "progression_rule": "Rester au niveau doux (2 séries, effort facile) tant que la gêne est déclarée ; ne passer à la progression indiquée qu'après au moins 14 jours sans aucune gêne, et revenir au niveau doux au moindre retour de la douleur. Approximation du projet.",
   "zones": [
     {
@@ -17,11 +24,11 @@
       "synonyms": ["tendon d achille", "achille", "talon d achille"],
       "use": "cheville",
       "exercises": [
-        {"exercise": "mobilite_cheville_genou_mur", "sets": 2, "seconds": 30, "each_side": true},
+        {"exercise": "mollet_debout", "sets": 2, "reps": 10, "each_side": false},
         {"exercise": "soleaire_genou_flechi", "sets": 2, "reps": 10, "each_side": true},
         {"exercise": "equilibre_unipodal", "sets": 2, "seconds": 30, "each_side": true}
       ],
-      "notes": ["Pas d'exercice excentrique ni de pliométrie : la routine reste douce, sans impact."]
+      "notes": ["Montées lentes et contrôlées seulement : pas d'étirement appuyé de la cheville, pas de descente excentrique sur une marche, ni saut ni impact tant que la gêne est déclarée."]
     },
     {
       "id": "cheville",
@@ -42,12 +49,12 @@
       "synonyms": ["mollet", "mollets", "gastrocnemien", "soleaire", "jumeau"],
       "use": "cheville",
       "exercises": [
-        {"exercise": "etirement_mollet", "sets": 2, "seconds": 30, "each_side": true},
         {"exercise": "mobilite_cheville_genou_mur", "sets": 2, "seconds": 30, "each_side": true},
         {"exercise": "soleaire_genou_flechi", "sets": 2, "reps": 10, "each_side": true},
-        {"exercise": "mollet_debout", "sets": 2, "reps": 10, "each_side": false}
+        {"exercise": "mollet_debout", "sets": 2, "reps": 10, "each_side": false},
+        {"exercise": "equilibre_unipodal", "sets": 2, "seconds": 30, "each_side": true}
       ],
-      "notes": []
+      "notes": ["Pas d'étirement appuyé du mollet tant que la gêne est déclarée : mobilité sans forcer, montées sur pointes lentes."]
     },
     {
       "id": "tibia",
@@ -71,9 +78,9 @@
         {"exercise": "pont_fessier", "sets": 2, "reps": 12, "each_side": false},
         {"exercise": "coquille_elastique", "sets": 2, "reps": 12, "each_side": true},
         {"exercise": "planche_laterale", "sets": 2, "seconds": 20, "each_side": true},
-        {"exercise": "chaise_murale", "sets": 2, "seconds": 20, "each_side": false}
+        {"exercise": "extension_hanche_quadrupedie", "sets": 2, "reps": 10, "each_side": true}
       ],
-      "notes": ["Pas de fentes, de squats profonds ni de sauts tant que la gêne est déclarée : routine douce centrée sur les hanches."]
+      "notes": ["Pas de fentes, de squats, de chaise murale ni de sauts tant que la gêne est déclarée : routine douce centrée sur les hanches, genou peu fléchi."]
     },
     {
       "id": "hanche",
@@ -107,11 +114,11 @@
       "synonyms": ["ischio", "ischios", "ischio jambiers", "ischio jambier", "arriere de cuisse", "arriere de la cuisse"],
       "use": null,
       "exercises": [
-        {"exercise": "balancier_jambes", "sets": 2, "reps": 10, "each_side": true},
-        {"exercise": "pont_fessier", "sets": 2, "reps": 12, "each_side": false},
-        {"exercise": "flexion_jambe_glissante", "sets": 2, "reps": 8, "each_side": false}
+        {"exercise": "pont_fessier", "sets": 2, "reps": 10, "each_side": false},
+        {"exercise": "extension_hanche_quadrupedie", "sets": 2, "reps": 8, "each_side": true},
+        {"exercise": "insecte_mort", "sets": 2, "reps": 8, "each_side": true}
       ],
-      "notes": ["Aucun étirement forcé ni travail excentrique intense tant que la gêne est déclarée."]
+      "notes": ["Ni étirement, ni balancier de jambe ample, ni flexion de jambes glissante ou nordique (travail excentrique) tant que la gêne est déclarée."]
     },
     {
       "id": "pied",
