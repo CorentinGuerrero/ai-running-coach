@@ -681,6 +681,9 @@ SUBSCHEMA = {
             # que `predicted_time_s`). Absents si le plan n'a pas de nuit.
             "night_fraction": "obj",
             "night_factor": "obj",
+            # Technicité du terrain (#186, `arc_technicity`) : `{coef, effective_factor, source, tags,
+            # coverage_pct}`. Absent si `--technicity` n'a pas été demandé.
+            "technicity": "obj",
             "notes": "list",
         },
     },

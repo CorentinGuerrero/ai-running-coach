@@ -119,6 +119,14 @@ Avec `--race-date`, `--start` explicite et `--tz`, l'heure d'horloge de chaque s
 pénalité décale les sections suivantes, et en gardant `prudent >= réaliste >= ambitieux`.
 Sans ces entrées, ou de jour : sortie inchangée (clé additive `night` seulement).
 
+## Technicité du terrain (voir `ASSUMPTIONS["technicity"]`, #186)
+
+Option `--technicity` (fichier JSON déclaré et/ou `osm`) : coefficient par section,
+déclaré par l'athlète ou dérivé des tags OpenStreetMap (`sac_scale`, `trail_visibility`,
+`surface`, `tracktype`, `highway`) via Overpass (réseau, opt-in, cache `.arc/overpass/`),
+pondéré par la pente (descente technique plus pénalisante), appliqué de façon identique
+aux trois scénarios avant la nuit. Sans l'option : sortie inchangée (aucune clé).
+
 ## Allure de BASE : endurance mise à l'échelle de l'intensité de course (voir `ASSUMPTIONS["base_pace"]`)
 
 `arc_slope_model.predict_speed` rend une allure de la bande « endurance »
@@ -172,6 +180,7 @@ import arc_elevation as EL  # noqa: E402
 import arc_energy as EN  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+import arc_technicity as TECH  # noqa: E402
 from coach_setup import workspace_root  # noqa: E402 (revue de code #107 : même résolution que arc_index.py/arc_guardrails.py, jamais un simple Path(".") qui ignore ARC_WORKSPACE/le pointeur)
 
 # ---------------------------------------------------------------------------
@@ -732,6 +741,58 @@ ASSUMPTIONS = {
         "(`NIGHT_TZ_SUSPECT_OFFSET_H` = 3,5 h d'écart entre le décalage UTC du fuseau et l'heure "
         "solaire de la longitude du départ → `night.timezone_warning` et avertissement, jamais un "
         "refus ; une erreur d'une heure passe inaperçue)."
+    ),
+    "technicity": (
+        "Coefficient de TECHNICITÉ du terrain par section (#186, épopée #170), appliqué EN PLUS du modèle "
+        "pente -> allure, de la chaleur et de la nuit ; opt-in (`--technicity`), sinon l'étape n'existe pas "
+        "(aucune clé `technicity`, temps inchangés octet pour octet). Deux sources, la déclaration gagnant "
+        "section par section : (a) **déclarée** (`--technicity fichier.json`, "
+        "`{\"sections\": [{\"km_start\", \"km_end\", \"coef\", \"note\"}]}`, coef dans [0,8 ; 1,8], 1,0 = terrain "
+        "« comme à l'entraînement », 1,25 = très technique) — retenue pour un segment couvert à au moins 50 % ; "
+        "(b) **dérivée d'OpenStreetMap** (`--technicity osm`, RÉSEAU, jamais par défaut) : requête Overpass "
+        "(`out tags geom`) des chemins `highway` (path, track, footway, steps, routes mineures) dans une boîte "
+        "autour de chaque tronçon de ~8 km de la trace (marge 60 m, boîtes arrondies à ~10 m), trace "
+        "échantillonnée tous les 40 m, appariement au chemin le plus proche à moins de 20 m "
+        "(`MATCH_RADIUS_M`), coefficient du segment = moyenne pondérée par la distance des points appariés ; "
+        "moins de 30 % de points appariés -> aucun coefficient (source `none`, 1,0), jamais une valeur "
+        "inventée. Réponses mises en cache dans `<workspace>/.arc/overpass/` (une requête = un fichier) ; une "
+        "requête à la fois, 1,5 s de pause entre deux requêtes réseau, User-Agent explicite (politique de "
+        "l'instance publique). **Seuls des GPX de COURSE** sont concernés : seules des boîtes englobantes "
+        "arrondies partent, jamais une trace d'activité personnelle. Hors ligne ou Overpass en erreur -> "
+        "`technicity.osm.status = \"unavailable\"`, note explicite et avertissement, aucun coefficient OSM "
+        "(tout ou rien : pas de coefficient sur la moitié d'un parcours).\n\n"
+        "**Table tags -> coefficient (APPROXIMATIONS DU PROJET, jamais des mesures ni une source "
+        "publiée)** : surcoût de temps (coef - 1) par tag. `sac_scale` : hiking 0 / mountain_hiking +6 % / "
+        "demanding_mountain_hiking +15 % / alpine_hiking +30 % / demanding_alpine_hiking +45 % / "
+        "difficult_alpine_hiking +60 %. `trail_visibility` : excellent, good 0 / intermediate +5 % / bad +12 % "
+        "/ horrible +25 % / no +35 %. `surface` : asphalt, paved, concrete, compacted, fine_gravel 0 / gravel, "
+        "unpaved, ground, dirt, earth +3 % / grass +4 % / pebblestone +8 % / rock +12 % / sand, mud, snow "
+        "+15 %. `tracktype` : grade1-2 0 / grade3 +3 % / grade4 +6 % / grade5 +10 %. `highway` : steps +15 % / "
+        "path +2 % / autres 0. **Combinaison** : surcoût dominant + la moitié du deuxième (les tags sont "
+        "corrélés : un sentier alpin est presque toujours « mauvaise visibilité » et « rocheux », on "
+        "n'additionne pas), plafonné à 1,8. Un coefficient dérivé d'OSM ne descend JAMAIS sous 1,0 (aucun "
+        "crédit de vitesse tiré de tags incertains) ; une valeur de tag inconnue est ignorée, jamais "
+        "devinée ; un chemin sans aucun tag exploitable vaut 1,0.\n\n"
+        "**Pente** : le surcoût est pondéré par la pente MOYENNE de la section — `effective_factor` = 1 + "
+        "(coef - 1) × poids : ×0,7 en montée (> +2 %, l'effort y est limité par la puissance plus que par "
+        "l'appui), ×1,0 à plat (|pente| <= 2 %), de ×1,0 à ×1,5 en descente (pleine à -12 %) car un terrain "
+        "technique ralentit surtout la descente. Pente inconnue = ×1,0. Approximations du projet.\n\n"
+        "**Composition et scénarios** : `effective_factor` multiplie les temps (et allures) de la section "
+        "pour les TROIS scénarios à l'identique — un même facteur positif sur trois temps ordonnés conserve "
+        "prudent >= réaliste >= ambitieux par construction (aucun écrêtage nécessaire), et la dispersion des "
+        "scénarios reste relative ; aucune donnée ne justifie de moduler la technicité par scénario. L'étape "
+        "s'applique APRÈS le fade neutre et la chaleur et AVANT la nuit : la technicité est une propriété du "
+        "terrain, pas de l'horloge, et l'itération de nuit part des temps déjà corrigés, donc des heures de "
+        "passage cohérentes (les deux facteurs se multiplient). **Limite à connaître** : le modèle personnel "
+        "pente -> allure a été appris sur les sorties de l'athlète, qui contiennent déjà son terrain habituel "
+        "— le coefficient exprime l'écart par rapport à CE terrain, pas par rapport à un sentier idéal ; "
+        "1,0 = « comme à l'entraînement ». OSM décrit le chemin, pas l'état du jour (boue, neige, "
+        "éboulis récents) et ses tags sont inégalement renseignés. Réglable (fichier déclaré), jamais une "
+        "vérité ; l'écart réel s'apprend au débrief (#188).\n\n"
+        "**Sortie** : par section `technicity` = `{coef, effective_factor, source (declared | osm | none), "
+        "tags (déclaration : notes ; OSM : trois tags les plus présents), coverage_pct}` ; au niveau du plan "
+        "`technicity` = `{status, sources_requested, osm, distance_pct_by_source, mean_coef, max_coef, "
+        "scenario_scaling}`."
     ),
 }
 
@@ -1903,6 +1964,37 @@ def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_
     return night, mask, start_dt, zone
 
 
+def _technicity_stage(pts, segments, technicity):
+    """Étape « technicité » de `build_race_plan` (#186). `technicity` : `None` (non demandée ->
+    `(segments, None, [])`, sortie inchangée octet pour octet) ou `{"declared": [...]|None,
+    "ways": [...]|None, "osm_requested": bool, "osm_status": str, "osm_note": str|None,
+    "osm_info": dict|None}` résolu par l'appelant (réseau et disque jamais ici). Rend
+    `(segments, plan_technicity, warnings)`."""
+    if technicity is None:
+        return segments, None, []
+    declared, ways = technicity.get("declared"), technicity.get("ways")
+    coefs = TECH.section_coefficients(segments, pts, declared=declared, ways=ways)
+    warnings: List[str] = []
+    osm_block = None
+    if technicity.get("osm_requested"):
+        osm_block = {"status": technicity.get("osm_status"), "note": technicity.get("osm_note"),
+                     "match_radius_m": TECH.MATCH_RADIUS_M, **(technicity.get("osm_info") or {})}
+    info = {
+        "status": "applied" if any(c["source"] != "none" for c in coefs) else "no_coefficient",
+        "sources_requested": [k for k, v in (("declared", declared), ("osm", technicity.get("osm_requested")))
+                               if v],
+        "osm": osm_block,
+        "scenario_scaling": "identique pour les trois scénarios (voir ASSUMPTIONS['technicity'])",
+        **TECH.summarize(segments, coefs),
+    }
+    if technicity.get("osm_note"):
+        warnings.append(technicity["osm_note"])
+    if info["status"] == "no_coefficient":
+        warnings.append("Technicité demandée mais aucune section n'a de coefficient (déclaration absente "
+                        "ou OSM sans couverture suffisante) : temps inchangés.")
+    return TECH.apply_to_segments(segments, coefs, SCENARIOS, SEGMENT_ROUND_S), info, warnings
+
+
 def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      aid_stations: Optional[Sequence[dict]] = None,
                      fade_pct: float = 0.0, fade_source: str = "generic",
@@ -1922,7 +2014,8 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      calibration: Optional[dict] = None,
                      tz: Optional[str] = None, start_time_known: bool = True,
                      night_enabled: bool = True, night_penalty_pct: float = NIGHT_BASE_PENALTY_PCT,
-                     night_descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT) -> dict:
+                     night_descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT,
+                     technicity: Optional[dict] = None) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
@@ -1937,6 +2030,9 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     `night_*` : pénalité de nuit (#184, `ASSUMPTIONS["night"]`) — appliquée seulement si la date
     de course, l'heure de départ explicite et le fuseau sont connus, sinon la clé additive
     `night` dit pourquoi et les temps restent ceux d'avant #184.
+
+    `technicity` : coefficient de technicité par section (#186, `ASSUMPTIONS["technicity"]`), résolu par
+    l'appelant ; `None` (défaut) = étape absente, sortie inchangée.
 
     Lève `ValueError` si `start_time` n'est pas un `HH:MM` valide (revue de
     code #59, nit : jamais un repli silencieux sur 07:00) ou si `tz` est inconnu."""
@@ -2013,6 +2109,11 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             f"{FADE_TIME_NEUTRAL_MAX_DURATION_S / 3600.0:.0f} h) : le fade reste ADDITIF (pas neutralisé) "
             "malgré une prédiction Riegel/VDOT — voir ASSUMPTIONS['fade'].")
 
+    # Technicité du terrain (#186) : propriété du TERRAIN, pas de l'horloge -> AVANT la nuit, dont
+    # l'itération part ainsi des temps de section déjà corrigés (heures de passage cohérentes).
+    segments, technicity_info, technicity_warnings = _technicity_stage(pts, segments, technicity)
+    warnings.extend(technicity_warnings)
+
     night, night_mask, night_start_dt, night_tzinfo = _night_stage(
         pts, segments, aid_stations, hh, mm, race_date, tz, start_time_known, night_enabled,
         night_penalty_pct, night_descent_extra_max_pct)
@@ -2065,6 +2166,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         "heat_factor": round(heat_factor, 3),
         "heat_notes": heat_notes,
         "night": night,
+        **({"technicity": technicity_info} if technicity_info is not None else {}),
         "start_time": start_time,
         "race_date": race_date,
         "warnings": warnings,
@@ -2340,6 +2442,30 @@ def _validate_night_pct(value: Optional[float], default: float, label: str) -> f
     return value
 
 
+def _resolve_technicity(values: Optional[Sequence[str]], pts: Sequence[dict], workspace: Path) -> Optional[dict]:
+    """Entrées CLI `--technicity` -> dict pour `build_race_plan` (I/O ici : fichier déclaré, Overpass).
+    `None` si l'option est absente. Hors ligne / Overpass en erreur : pas de coefficient OSM,
+    note explicite, jamais fatal. Lève `ValueError` (TechnicityError) sur une déclaration invalide."""
+    if not values:
+        return None
+    declared, want_osm = None, False
+    for v in values:
+        if v.strip().lower() == "osm":
+            want_osm = True
+        else:
+            declared = (declared or []) + TECH.load_declared(Path(v))
+    out = {"declared": declared, "ways": None, "osm_requested": want_osm}
+    if want_osm:
+        try:
+            ways, info = TECH.fetch_ways(pts, cache_dir=Path(workspace) / ".arc" / "overpass")
+            out.update(ways=ways, osm_status="ok", osm_note=None, osm_info={**info, "ways_found": len(ways)})
+        except TECH.OverpassError as exc:
+            out.update(osm_status="unavailable", osm_info=None,
+                       osm_note=f"OpenStreetMap indisponible ({exc}) : aucun coefficient de technicité "
+                                "dérivé d'OSM (déclarez --technicity fichier.json ou réessayez en ligne).")
+    return out
+
+
 def _read_temp_max_c(args) -> Optional[float]:
     if args.temp_max_c is not None:
         return float(args.temp_max_c)
@@ -2381,6 +2507,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--night-descent-extra-max-pct", type=float, dest="night_descent_extra_max_pct",
                      help=f"supplément maximal (points de %%) de pénalité de nuit en descente (défaut "
                           f"{NIGHT_DESCENT_EXTRA_MAX_PCT:g}, approximation du projet)")
+    ap.add_argument("--technicity", action="append", dest="technicity", metavar="FICHIER.json|osm",
+                     help="coefficient de technicité du terrain par section (#186, ASSUMPTIONS['technicity']) : "
+                          "un fichier JSON déclaré {\"sections\": [{\"km_start\", \"km_end\", \"coef\"}]} et/ou "
+                          "`osm` (dérivé d'OpenStreetMap via Overpass, RÉSEAU, opt-in, GPX de COURSE seulement ; "
+                          "cache <workspace>/.arc/overpass). Répétable ; la déclaration l'emporte section par "
+                          "section. Absent = comportement inchangé")
     ap.add_argument("--aid-stations", dest="aid_stations_path",
                      help="fichier JSON : liste d'objets {km, name, cutoff?, cutoff_day?, stop_s?}")
     ap.add_argument("--official-distance-m", type=float, dest="official_distance_m",
@@ -2481,6 +2613,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     intensity_factor, intensity_source, _race_flat_speed, intensity_notes, safe_scenario_factor = \
         _resolve_intensity_factor(conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
+    try:
+        technicity = _resolve_technicity(args.technicity, pts, workspace)
+    except ValueError as exc:
+        print(f"ERREUR : {exc}", file=sys.stderr)
+        return 1
 
     # Poids de l'athlète à la date de la COURSE — MÊME résolveur que
     # `activity_energy`, voir ASSUMPTIONS["energy"] : jamais une seconde
@@ -2521,7 +2658,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             calibration_band=calibration_band, calibration_band_source=calibration_band_source,
             calibration=calibration, tz=args.tz, start_time_known=start_time_known,
             night_enabled=not args.no_night, night_penalty_pct=night_penalty_pct,
-            night_descent_extra_max_pct=night_descent_extra_max_pct)
+            night_descent_extra_max_pct=night_descent_extra_max_pct, technicity=technicity)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1

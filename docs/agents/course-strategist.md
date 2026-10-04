@@ -158,6 +158,40 @@ indisponible (altitude du fichier conservée, jamais de valeur inventée). Seule
 coordonnées amincies sont envoyées, jamais par défaut : voir
 [la page Correction altimétrique](../elevation.md).
 
+## Technicité du terrain (#186)
+
+Un sentier de randonnée alpine ne se court pas comme une piste forestière :
+avec `--technicity`, `arc_race_pacing.py plan` multiplie le temps de chaque
+section par un coefficient de technicité, **en plus** du modèle pente → allure,
+de la chaleur et de la nuit. Deux sources, combinables (la déclaration gagne,
+section par section) :
+
+- **déclarée** : `--technicity technicite.json`, avec
+  `{"sections": [{"km_start": 12, "km_end": 18, "coef": 1.25, "note": "pierriers"}]}`
+  (1,0 = « comme à l'entraînement », 1,25 = très technique ; bornes 0,8 à 1,8) ;
+- **dérivée d'OpenStreetMap** : `--technicity osm` interroge Overpass (les mêmes
+  serveurs que les points d'eau) pour les chemins proches de la trace, apparie
+  chaque point au chemin le plus proche à moins de 20 m et traduit `sac_scale`,
+  `trail_visibility`, `surface`, `tracktype` et `highway` en coefficient. **Opt-in,
+  réseau** : seul le GPX de la course part (boîtes englobantes arrondies, jamais une
+  trace d'activité personnelle), une requête à la fois, réponses en cache dans
+  `<workspace>/.arc/overpass/`. Hors ligne : aucun coefficient OSM, une note
+  explicite, jamais d'échec.
+
+La table tags → coefficient (par exemple `sac_scale=mountain_hiking` +6 %,
+`alpine_hiking` +30 %, `surface=rock` +12 %, `trail_visibility=bad` +12 %,
+dominant + moitié du deuxième, plafond 1,8, jamais sous 1,0 côté OSM) et la
+pondération par la pente (×0,7 en montée, ×1,0 à plat, jusqu'à ×1,5 en descente
+raide) sont des **approximations du projet** (`assumptions.technicity`), pas des
+mesures. Le facteur est le même pour les trois scénarios (l'ordre
+`prudent ≥ réaliste ≥ ambitieux` est donc conservé) et s'applique avant la nuit.
+Attention : le modèle personnel a appris sur ton terrain habituel — le
+coefficient exprime l'écart avec CE terrain. OSM décrit le chemin, pas son état
+du jour.
+
+La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
+`tags`) et un résumé au niveau du plan. Sans `--technicity`, rien ne change.
+
 ## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,
