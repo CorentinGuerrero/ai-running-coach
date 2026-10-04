@@ -27,6 +27,14 @@ function marginText(c) {
   return `${sign(c.margin_s)}${F.duration(Math.abs(c.margin_s))}`;
 }
 
+/** Texte de barrière lisible sur papier : une date-heure ISO du plan (`2026-10-25T12:00`, barrière du
+ * surlendemain) devient « 12:00 (25/10) » — heure murale telle qu'écrite, aucun fuseau converti ;
+ * `HH:MM` et `+HH:MM` restent tels quels. */
+function cutoffText(text) {
+  const m = /^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(text || "");
+  return m ? `${m[3]} (${m[2]}/${m[1]})` : (text || "");
+}
+
 /** Pas de graduation « rond » (km) pour une course de `total` km, ~6 graduations. */
 function kmStep(total) {
   for (const s of [1, 2, 5, 10, 20, 25, 50, 100]) if (total / s <= 8) return s;
@@ -71,7 +79,7 @@ function stationCell(row, idx) {
     ? `<div class="rb-take"><strong>À prendre :</strong> ${st.take.map(F.esc).join(" · ")}</div>`
     : `<div class="rb-take rb-take--none muted">À prendre : non renseigné</div>`;
   const serv = st.services && st.services.length ? `<div class="rb-serv muted">Servi : ${st.services.map(F.esc).join(", ")}</div>` : "";
-  const stop = row.stop_s ? `<div class="rb-serv muted">Arrêt prévu ${F.esc(F.duration(row.stop_s))}</div>` : "";
+  const stop = row.stop_s ? `<div class="rb-serv muted">Arrêt prévu ${F.esc(F.duration(row.stop_s, { seconds: row.stop_s % 60 !== 0 }))}</div>` : "";
   return `<strong>R${idx} ${F.esc(st.name)}</strong>${take}${serv}${stop}`;
 }
 
@@ -81,7 +89,7 @@ function sectionsTable(sc) {
     const idx = r.station ? ++stationIdx : 0;
     const night = r.night ? `<span class="rb-night-tag">${NIGHT_LABEL[r.night]} · frontale</span>` : "";
     const cut = r.cutoff
-      ? `<span class="rb-cut rb-cut--${F.esc(r.cutoff.status)}">${F.esc(r.cutoff.text || "")}${r.cutoff.day ? ` (J${r.cutoff.day})` : ""}</span><br><span class="rb-cut__margin">${F.esc(marginText(r.cutoff))} · ${F.esc(CUTOFF_STATUS[r.cutoff.status] || r.cutoff.status)}</span>`
+      ? `<span class="rb-cut rb-cut--${F.esc(r.cutoff.status)}">${F.esc(cutoffText(r.cutoff.text))}${r.cutoff.day ? ` (J${r.cutoff.day})` : ""}</span><br><span class="rb-cut__margin">${F.esc(marginText(r.cutoff))} · ${F.esc(CUTOFF_STATUS[r.cutoff.status] || r.cutoff.status)}</span>`
       : r.station ? `<span class="muted">—</span>` : "";
     const passage = r.arrival_clock
       ? `<strong>${F.esc(r.arrival_clock)}</strong><br><span class="muted">T+${F.esc(F.duration(r.arrival_s))}</span>`

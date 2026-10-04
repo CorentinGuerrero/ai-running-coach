@@ -381,7 +381,7 @@ def build_roadbook(plan: dict, *, plan_path: Optional[str] = None,
                 warnings.append(
                     "changement d'heure pendant la course : heures de passage en heure locale réelle"
                     + (" ; les marges de barrière restent calculées à l'heure murale par "
-                       "`arc_race_pacing` et peuvent différer d'une heure après le changement"
+                       "arc_race_pacing et peuvent différer d'une heure après le changement"
                        if cutoffs else ""))
         for s in SCENARIOS:
             if s not in scenarios:
