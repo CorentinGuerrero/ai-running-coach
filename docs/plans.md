@@ -11,8 +11,8 @@ au lieu de se fier à de la prose.
     priment toujours. Chaque semaine écrite à partir d'un gabarit repasse
     `arc_guardrails.py check` sur l'historique réel. Cette page décrit les
     gabarits et leur validation ; le squelette daté d'un bloc (date de course,
-    disponibilité, historique) viendra avec
-    [#190](https://github.com/mmornati/ai-running-coach/issues/190).
+    disponibilité, historique) est décrit plus bas, section
+    [Le squelette de bloc](#le-squelette-de-bloc-plan-skeleton).
 
 ## Les gabarits livrés
 
@@ -140,8 +140,8 @@ vérifie chaque gabarit, pas seulement sa forme :
     trop bas pour l'objectif, le coach le dit et propose un bloc de mise en
     route préalable (ou un objectif revu) au lieu d'étirer le gabarit. Ce choix
     garde les gabarits cohérents avec les garde-fous tels qu'ils sont et donne
-    au futur générateur de squelette ([#190](https://github.com/mmornati/ai-running-coach/issues/190))
-    une règle déterministe : il partira de l'historique réel et de ce facteur.
+    au [générateur de squelette](#le-squelette-de-bloc-plan-skeleton) une règle
+    déterministe : il part de l'historique réel et de ce facteur.
 
 !!! note "La semaine de course"
     Le `volume_pct` de la dernière semaine d'affûtage s'entend **hors course** :
@@ -150,6 +150,68 @@ vérifie chaque gabarit, pas seulement sa forme :
 
 La validation porte sur les seuils, pas sur l'athlète : elle ne dit rien de
 l'historique réel, que seul `arc_guardrails.py check` évalue.
+
+## Le squelette de bloc (`plan-skeleton`)
+
+`arc_index.py plan-skeleton` transforme un gabarit en **squelette daté**, de la
+semaine en cours à la semaine de course (puis la récupération post-course).
+C'est une **proposition** : un *dry run* par défaut, rien n'est écrit sans
+`--write`.
+
+```bash
+python3 scripts/arc_index.py plan-skeleton --text                      # gabarit choisi d'après l'objectif actif
+python3 scripts/arc_index.py plan-skeleton --format ultra_80_100 --race-date 2027-02-14
+python3 scripts/arc_index.py plan-skeleton --held-hours 5 --held-elevation-m 1200   # volume déclaré
+python3 scripts/arc_index.py plan-skeleton --write                     # écrit planning/Semaine_<lundi>.md
+```
+
+Entrées : le gabarit (`--format`, sinon choisi d'après la distance de
+l'objectif et `[sport].primary`), la date de course (objectif actif ou
+`--race-date`), le **volume tenu** (moyenne des 4 dernières semaines complètes
+de course à pied dans l'index : durée, D+, distance — ou `--held-hours` /
+`--held-elevation-m` déclarés), et la disponibilité du profil
+(« Disponibilité hebdomadaire » : nombre de séances et plus grande durée en
+heures ; « Jours impossibles » ; « Sortie longue » facultatif ou
+`--long-run-day`).
+
+Chaque semaine porte : le début (lundi), la phase, le **type** (`build`,
+`recovery`, `taper`, `race`, `lead_in`, `post_race`), la durée visée (le volume
+se compte en **durée**, ce que compare R2) et le D+ visé, le nombre de séances
+de qualité, la sortie longue visée, la répartition d'intensité, l'emphase de
+renforcement et des **créneaux de séance** (`placeholder: true`) posés sur les
+jours disponibles — pas des séances : le coach les habille.
+
+- **Pic** = volume tenu × `peak_from_current`, jamais inventé ; si le pic
+  dérivé est sous le pic indicatif du gabarit, un avertissement le dit (mise en
+  route plus longue ou objectif revu — jamais un gabarit étiré). Un plafond
+  d'heures du profil ramène le pic à ce plafond, et le dit.
+- **Trop court** (moins de semaines que le minimum du gabarit) :
+  `status: "too_short"`, aucune semaine, options explicites (format plus court,
+  date de course au plus tôt, bloc sans gabarit). **Trop long** (plus que le
+  maximum) : des semaines de mise en route (`lead_in`) au volume tenu, avec une
+  semaine allégée tous les N, avant le gabarit.
+- **Pas d'historique** (moins d'1 h par semaine) : `status: "no_history"` — le
+  coach demande le volume actuel de l'athlète, jamais inventé.
+- **Départ** : le lundi de la semaine en cours si c'est aujourd'hui, sinon le
+  lundi suivant (la semaine entamée n'est pas touchée).
+- **Garde-fous** : chaque semaine passe `arc_guardrails.evaluate` (la fonction
+  du moteur), avec pour référence R2/R3 les semaines déjà générées. Une
+  violation R2/R3 réduit la semaine ; un `block` retire la qualité puis réduit ;
+  s'il persiste, la semaine n'est **pas** émise (`unresolved`, statut
+  `needs_review`). Un squelette ne contient jamais de semaine `block` ; les
+  `warn`/`info` restants (ACWR projeté…) sont rendus tels quels, par semaine.
+- **Forme prévue le jour J** : le squelette est projeté par
+  [`load-forecast`](guardrails.md) (estimation à partir de créneaux dont
+  l'intensité est un placeholder : un ordre de grandeur, pas une mesure).
+- **`--write`** : un fichier `planning/Semaine_<lundi>.md` par semaine (comme le
+  coach le fait aujourd'hui), bloc `arc` validé par `arc_index.py --validate`.
+  **Aucun écrasement** : si une semaine existe déjà (fichier du même nom ou
+  entrée d'un plan multi-semaines), rien n'est écrit et les conflits sont
+  listés. Le dry run les signale déjà (`conflicts`).
+
+Les coefficients propres au squelette (poids des sorties faciles, durée du
+créneau de renforcement, séances par défaut…) sont des « approximations du
+projet », listés dans `ASSUMPTIONS` de `scripts/arc_plan_skeleton.py`.
 
 ## D'où viennent les chiffres
 
@@ -176,9 +238,10 @@ de deux choix, jamais un chiffre :
 
 ## Dans le workflow du coach
 
-Pour un nouveau bloc, le coach cherche le gabarit de l'objectif actif
-(distance et sport), lit sa résolution semaine par semaine, l'adapte au profil,
-au bilan matinal et à l'historique, puis habille lui-même les séances. Sans
+Pour un nouveau bloc, le coach lance `plan-skeleton` (dry run), présente le
+squelette à l'athlète, **n'écrit qu'après son accord** (`--write`), puis habille
+lui-même les séances (contenu, allures, cibles), en adaptant au profil, au
+bilan matinal et à l'historique. Sans
 gabarit adapté, il construit le bloc comme avant et le dit. Les pourcentages
 sont relatifs à une semaine pic que le coach dérive de l'historique réel — il
 n'invente jamais de volumes absolus. Voir [Coach](agents/coach.md#gabarits-de-periodisation-189).
