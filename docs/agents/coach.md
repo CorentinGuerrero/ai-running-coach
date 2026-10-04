@@ -104,6 +104,16 @@ sans trancher — un écart de plus de 5 % avec le seuil lactique Garmin. La cou
 elle-même : `python3 scripts/arc_index.py pace-curve`. Voir
 [Vitesse critique](../vitesse-critique.md).
 
+### Gabarits de périodisation (#189)
+
+Pour un nouveau bloc, le coach part du gabarit qui correspond à l'objectif
+(`python3 scripts/arc_index.py plan-templates --distance-km <D>` ; sans
+gabarit adapté, il construit le bloc comme avant et le dit) puis l'adapte au
+profil, au bilan matinal et à l'historique. Un gabarit est un **point de
+départ** : il ne remplace ni le profil, ni le bilan matinal, ni les
+garde-fous, que chaque semaine écrite passe toujours. Voir
+[Gabarits de périodisation](../plans.md).
+
 ### Score Trail Shape (#63)
 
 `python3 scripts/arc_index.py trail-shape` compare les 8 dernières semaines

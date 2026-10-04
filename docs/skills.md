@@ -83,6 +83,7 @@ agents ou par les commandes courtes plutôt que par un skill dédié :
 | `arc_race_debrief.py` | `coach`, `course-strategist` | Débrief post-course plan vs réalisé, par segment (#61) |
 | `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60), plage en % de la vitesse critique quand l'ajustement est valide (#169) |
 | `arc_cs.py` | `arc_index.py pace-curve`, `arc_workout_targets.py` | Courbe allure-durée en GAP, vitesse critique et D′ (#169) — fonctions pures, voir [Vitesse critique](vitesse-critique.md) |
+| `arc_plan_templates.py` | `coach` | Gabarits de périodisation (`config/plans/*.json`) : chargement, validation contre les garde-fous, résolution semaine par semaine (#189) — voir [Gabarits de périodisation](plans.md) |
 | `arc_trail_shape.py` | `coach`, `/race` | Score Trail Shape, préparation à l'objectif actif (#63) |
 | `arc_load_forecast.py` | `coach`, `/race` | Projection de condition/fatigue/forme jusqu'à la course, comparaison de plans (#172) |
 | `garmin_gear_backfill.py` | `coach` (interactif, sur accord), à la main | Rattrape le matériel Garmin sur l'historique (#145) : simulation par défaut, `--apply` ; dépend de `garminconnect` (via l'environnement garmin-mcp), voir [Rattraper le matériel de l'historique](garmin-setup.md#rattraper-le-materiel-de-lhistorique) |
@@ -120,6 +121,7 @@ python3 scripts/arc_index.py <commande> [options]
 | `slope-model` | Modèle personnel pente → allure (#58) |
 | `trail-shape` | Score Trail Shape (#63) |
 | `load-forecast` | Projection de charge jusqu'à la course : forme prévue le jour J, `--compare` (#172) |
+| `plan-templates` | Gabarits de périodisation : liste, choix par distance (`--distance-km`), détail résolu (`--format`, `--weeks`) ; JSON par défaut, `--text` pour un tableau lisible (#189) |
 
 `python3 scripts/arc_index.py --help` liste toutes les options associées à
 chaque commande.
