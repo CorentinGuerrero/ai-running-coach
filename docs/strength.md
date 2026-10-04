@@ -25,7 +25,7 @@ python3 scripts/arc_index.py strength --use hanches --garmin-json       # charge
 ```
 
 - `--phase` : `base`, `development`, `specific`, `taper`, `recovery` (ou leur libellé
-  français, ou l'emphase du gabarit de périodisation #189). Avec un gabarit, c'est son
+  français, ou l'emphase du [gabarit de périodisation](plans.md)). Avec un gabarit, c'est son
   **emphase** qui compte : la phase spécifique des gabarits route vise `entretien` (et non la
   pliométrie) — le coach passe alors `--phase entretien`.
 - `--use` : `descente`, `cheville`, `hanches`, `pied`.
@@ -44,7 +44,7 @@ python3 scripts/arc_index.py strength --use hanches --garmin-json       # charge
 ## Les programmes
 
 Programmes **par phase** — les emphases sont celles des gabarits de périodisation (champ
-`strength` de `config/plans/*.json`) :
+`strength` de `config/plans/*.json`, voir [Gabarits de périodisation](plans.md)) :
 
 | Phase | Emphase | Programme | Séances / sem. | Fatigue |
 |---|---|---|---|---|

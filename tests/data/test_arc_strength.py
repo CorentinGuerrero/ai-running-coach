@@ -91,12 +91,21 @@ class TestShippedLibrary(unittest.TestCase):
                 ids = [b["exercise_id"] for b in blocks]
                 self.assertEqual(len(ids), len(set(ids)), (p["id"], eq))
 
-    def test_emphases_match_the_periodisation_templates_when_present(self):
-        try:
-            import arc_plan_templates as PT
-        except ImportError:
-            self.skipTest("gabarits #189 absents de cette branche")
+    def test_emphases_match_the_periodisation_templates(self):
+        import arc_plan_templates as PT
         self.assertEqual(SG.STRENGTH_EMPHASES, PT.STRENGTH_EMPHASES)
+        self.assertEqual(SG.PHASES, PT.PHASES_PRE_RACE + (PT.PHASE_RECOVERY,))
+        # Chaque emphase citée par un gabarit livré a son programme de phase, et `--phase <emphase>` le résout.
+        cited = set()
+        for path in sorted((REPO / "config/plans").glob("*.json")):
+            tpl = json.loads(path.read_text(encoding="utf-8"))
+            for ph in tpl["phases"]:
+                self.assertIn(ph["strength"], SG.STRENGTH_EMPHASES, (path.name, ph))
+                cited.add(ph["strength"])
+        self.assertTrue(cited)
+        for emph in cited:
+            sel = SG.select_programme(EXERCISES, DOC, phase=emph, available=None)
+            self.assertEqual(sel["emphasis"], emph)
 
 
 class TestValidationCatchesBreakage(unittest.TestCase):
