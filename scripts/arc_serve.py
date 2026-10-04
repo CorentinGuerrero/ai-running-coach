@@ -62,6 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_guardrails as G  # noqa: E402
 import arc_index as I  # noqa: E402
 import arc_metrics as M  # noqa: E402
+import arc_roadbook as RB  # noqa: E402
 from coach_config import ConfigError  # noqa: E402
 
 LOOPBACK = "127.0.0.1"                   # défaut : le tableau de bord ne sort pas de la machine
@@ -1227,6 +1228,42 @@ def api_trail_shape(store: Store, q: dict) -> dict:
         return I.trail_shape_report(store.conn, today)
 
 
+def api_roadbook(store: Store, q: dict) -> dict:
+    """Roadbook imprimable d'un plan de course (#187) : `/api/roadbook?plan=<fichier>&scenario=`.
+
+    Délègue ENTIÈREMENT à `arc_roadbook.build_roadbook` (heures de passage et marges de barrière :
+    `arc_race_pacing`, matériel : `arc_index.equipment_race_check`, #134) — aucun calcul ici. Sans
+    `plan`, le prochain plan dont la date n'est pas passée (sinon le plus récent) ; `scenario`
+    (`safe|realistic|ambitious`) ne garde que ce scénario, absent ou inconnu = les trois (la page
+    bascule sans nouvel appel). Lecture seule, aucune donnée de santé."""
+    plan = (q.get("plan", [""])[0] or "").strip()
+    wanted = (q.get("scenario", [""])[0] or "").strip()
+    today = _today(store)                  # avant le verrou : `store.meta` le prend aussi
+    with store.lock:
+        plans = [dict(r) for r in store.conn.execute(
+            "SELECT source_path AS path, race_name, race_date FROM race_plan ORDER BY race_date DESC, source_path")]
+        if not plans:
+            return {"status": "no_plan", "plans": [],
+                    "message": "Aucun plan de course indexé : demande-le au course-strategist."}
+        check = I.equipment_race_check(store.conn, plan or None, today, store.workspace)
+        if check.get("error"):
+            return {"status": "plan_not_found", "plans": plans, "message": check["error"]}
+        row = store.conn.execute("SELECT data_json FROM race_plan WHERE source_path = ?",
+                                 (check["race_plan"],)).fetchone()
+    try:
+        data = json.loads(row["data_json"] or "{}")
+    except ValueError:
+        data = {}
+    model = RB.build_roadbook(data, plan_path=check["race_plan"], gear_check=check)
+    model["plans"] = plans
+    if wanted in RB.SCENARIOS:
+        model["scenarios"] = {wanted: model["scenarios"][wanted]}
+        model["default_scenario"] = wanted
+    elif wanted and wanted != "all":
+        model["warnings"].append(f"scénario inconnu « {wanted} » : les trois scénarios sont renvoyés")
+    return model
+
+
 def api_slope_model(store: Store, q: dict) -> dict:
     """Modèle personnel pente -> allure (et FC) — #58, `/api/slope-model?band=`.
 
@@ -1525,6 +1562,7 @@ ROUTES = {
     "/api/injury-risk": api_injury_risk, "/api/performance-index": api_performance_index,
     "/api/gait": api_gait, "/api/pace-curve": api_pace_curve,
     "/api/decision-effects": api_decision_effects, "/api/load-forecast": api_load_forecast,
+    "/api/roadbook": api_roadbook,
 }
 
 # ---------------------------------------------------------------------------
