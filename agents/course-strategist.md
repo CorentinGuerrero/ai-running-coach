@@ -180,6 +180,32 @@ HH:MM à HH:MM ») dans le plan, avec le fait que la pénalité est une approxim
 va dans `gear` et son contrôle est celui de l'ÉTAPE 7 (`arc_index.py equipment
 --race-plan`), pas un second contrôle ici.
 
+**Technicité du terrain (#186).** Option `--technicity` (répétable), jamais par
+défaut : `--technicity <technicite.json>` (coefficients que l'athlète ou toi
+déclarez : `{"sections": [{"km_start": 12, "km_end": 18, "coef": 1.25, "note":
+"pierriers"}]}`, 1.0 = comme à l'entraînement, 1.25 = très technique) et/ou
+`--technicity osm` (dérivé d'OpenStreetMap : `sac_scale`, `trail_visibility`,
+`surface`, `tracktype`, `highway` via Overpass, **réseau**, cache
+`.arc/overpass/`). **Demande à l'athlète** s'il connaît la technicité de
+sections du parcours (reconnaissance, avis) et propose `osm` ; n'envoie à
+Overpass que le GPX de la COURSE, jamais une trace d'activité personnelle. La
+déclaration l'emporte section par section (ses km sont des km officiels,
+rééchelonnés comme les ravitos avec `--official-distance-m`). **Avec `osm`,
+demande aussi sur quel terrain il s'entraîne d'habitude** et passe-le en
+`--technicity-baseline` (valeur `sac_scale` : `hiking` chemins faciles,
+`mountain_hiking` sentiers de montagne, `demanding_mountain_hiking` sentiers
+raides/rocheux… ou un nombre de 1.0 à 1.8) : son modèle personnel contient
+déjà ce terrain, la table OSM est absolue. Sans réponse, n'invente pas de
+référence : le plan l'avertit (pénalité surestimée), répète-le à l'athlète. Les coefficients sont des
+approximations du projet (`assumptions.technicity`) : le facteur est pondéré par
+la pente (descente technique plus pénalisante), identique pour les trois
+scénarios, appliqué avant la nuit. Hors ligne, `technicity.osm.status ==
+"unavailable"` : dis qu'aucun coefficient OSM n'a été appliqué, n'en invente
+pas. Cite `technicity.mean_coef` et les sections les plus techniques
+(`segments[].technicity`) ; `segments[].technicity` est persisté dans le bloc
+```arc (`race_plan`), `technicity` (niveau plan) est un KPI dérivé : ne le
+copie pas.
+
 `--aid-stations` : fichier JSON `[{"km": 14.5, "name": "...", "cutoff": "10:30", "cutoff_day": 1, "stop_s": 90}]`
 (`cutoff`/`cutoff_day`/`stop_s` optionnels — `cutoff` accepte aussi `+HH:MM`
 élapsé ou une date-heure ISO 8601 complète pour une barrière du surlendemain
