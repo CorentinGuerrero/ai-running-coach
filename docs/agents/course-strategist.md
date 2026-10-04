@@ -146,6 +146,18 @@ celui de `arc_index.py equipment --race-plan`), `emergency` (organisation,
 points d'abandon) et `notes`. `nutrition_plan` pointe vers le fichier du plan
 de ravitaillement.
 
+## Altitude corrigée par MNT (#176)
+
+Sur demande (ou avec `[elevation].dem = "auto"`), `analyze_gpx.py --dem` et
+`arc_race_pacing.py plan --dem` rééchantillonnent l'altitude du GPX sur un modèle
+numérique de terrain (IGN RGE ALTI en France, Copernicus GLO-90 via Open-Meteo
+ailleurs). Le **D+ MNT devient la référence** de l'évaluation de parcours et du
+plan (segments, allures, énergie) ; l'agent présente toujours « D+ fichier / D+ MNT »
+avec l'écart, cite l'attribution et relaie l'avertissement si le service est
+indisponible (altitude du fichier conservée, jamais de valeur inventée). Seules des
+coordonnées amincies sont envoyées, jamais par défaut : voir
+[la page Correction altimétrique](../elevation.md).
+
 ## Dépense énergétique prévue par section
 
 La sortie de `scripts/arc_race_pacing.py plan` porte aussi `energy` (kcal,

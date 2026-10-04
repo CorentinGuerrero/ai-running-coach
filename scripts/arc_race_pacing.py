@@ -2404,6 +2404,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                           "voir ASSUMPTIONS['energy']) — force le choix explicitement ; sans cette "
                           "option, dérivé du D+/km RÉEL de ce GPX (TRAIL_GAIN_M_PER_KM), jamais du "
                           "profil général de l'athlète ([sport].primary)")
+    ap.add_argument("--dem", action="store_true",
+                     help="altitude corrigée par MNT public (IGN France / Copernicus ailleurs, #176) : "
+                          "le D+ MNT devient la référence du plan, le D+ du fichier reste affiché "
+                          "(`elevation_dem`). Envoie des coordonnées amincies au fournisseur ; hors "
+                          "ligne, altitudes du fichier conservées avec un avertissement")
+    ap.add_argument("--no-dem", action="store_true", dest="no_dem",
+                     help="désactive la correction MNT même avec [elevation].dem = \"auto\"")
     return ap
 
 
@@ -2430,6 +2437,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"heure de départ effective : {hh:02d}:{mm:02d}", file=sys.stderr)
 
     workspace = workspace_root(args.workspace)
+    dem_info = None
+    if args.dem and args.no_dem:
+        print("ERREUR : --dem et --no-dem sont incompatibles.", file=sys.stderr)
+        return 1
+    import arc_dem as DEM
+    dem_settings = DEM.load_settings(workspace)
+    if args.dem or (dem_settings["dem"] == "auto" and not args.no_dem):
+        dem_res = DEM.resample_track(
+            pts, step_m=dem_settings["step_m"],
+            cache=DEM.DemCache(DEM.cache_path(workspace), enabled=dem_settings["cache"]))
+        if dem_res["status"] == "unavailable":
+            dem_info = {"status": "unavailable", "error": dem_res["report"].get("error")}
+            print(f"AVERTISSEMENT : correction MNT indisponible ({dem_info['error']}) — "
+                  "altitudes du fichier conservées.", file=sys.stderr)
+        else:
+            dem_info = {"status": dem_res["status"],
+                        # D+ fichier mesuré comme le plan l'aurait fait sans --dem (lissage
+                        # 3 points, sans seuil : `course_totals`) : l'écart affiché est
+                        # exactement l'effet de la correction sur le plan.
+                        **DEM.compare_gain_loss([p.get("ele") for p in pts], dem_res["ele"],
+                                                file_smooth=EL.DEFAULT_SMOOTH_TAPS, file_min_step_m=0.0),
+                        "step_m": dem_res["report"]["step_m"], "providers": dem_res["report"]["providers"],
+                        "attribution": dem_res["report"]["attribution"]}
+            pts = [{**p, "ele": z} for p, z in zip(pts, dem_res["ele"])]
 
     # Index ouvert et reconstruit UNE SEULE FOIS (revue de code #59 : trois
     # réindexations indépendantes coûtaient ≈ 7,6 s contre ≈ 2,5 s pour une
@@ -2494,6 +2525,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
+    if dem_info is not None:
+        plan["elevation_dem"] = dem_info
+        if dem_info["status"] != "unavailable":
+            plan.setdefault("warnings", []).append(
+                f"altitude corrigée par MNT (D+ fichier {dem_info['file_gain_m']:.0f} m, D+ MNT "
+                f"{dem_info['dem_gain_m']:.0f} m) : le plan repose sur le D+ MNT — "
+                + " ".join(dem_info["attribution"]))
     print(json.dumps(plan, ensure_ascii=False))
     return 0
 

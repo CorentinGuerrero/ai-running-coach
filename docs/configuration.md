@@ -293,6 +293,28 @@ pour qu'une montée soit reconnue. Ajustez au terrain habituel — montez
 `climb_min_gain_m` en plaine vallonnée pour ignorer les faux plats,
 descendez-le en montagne pour capter de courts raidillons.
 
+## La correction d'altitude — `[elevation]` et `[privacy]` (#176)
+
+```toml
+[elevation]
+dem = "off"      # "off" (défaut) | "auto"
+step_m = 50      # pas d'amincissement des coordonnées envoyées (m)
+cache = true     # cache local <workspace>/.arc/dem-cache.json
+
+[privacy]
+dem_for_activities = false   # opt-in : comparaison altitude enregistrée / MNT d'une séance
+dem_trim_m = 500             # mètres jamais envoyés en début et fin de séance (200 à 5000)
+```
+
+Rééchantillonne l'altitude d'un GPX de course sur un modèle numérique de terrain
+(IGN RGE ALTI en France, Copernicus GLO-90 via Open-Meteo ailleurs). **Rien n'est
+envoyé par défaut** : `dem = "auto"` corrige d'office les parcours de course
+(`analyze_gpx.py`, `arc_race_pacing.py`), `--dem` le fait pour un appel ; les
+traces de séances ne partent qu'avec `dem_for_activities = true`, sans leurs
+`dem_trim_m` premiers et derniers mètres (protection partielle du domicile). Seules des
+coordonnées arrondies et amincies sont envoyées. Détails, licences, limites :
+[Correction altimétrique](elevation.md).
+
 ## Les garde-fous — `[guardrails]`
 
 ```toml

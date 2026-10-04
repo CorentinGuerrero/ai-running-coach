@@ -77,6 +77,8 @@ python3 skills/gpx-analysis/scripts/analyze_gpx.py \
 ```
 Le script produit : distance réelle (Haversine), D+/D- (lissage anti-bruit), profil par km, montées significatives, type boucle (fermée / point-to-point), verdict compatibilité vs cible. Croise ensuite ces chiffres avec le contexte (séance planifiée, météo, historique) avant de recommander.
 
+**Correction altimétrique par MNT (#176, opt-in).** L'altitude d'un GPX est bruitée (GPS) ou biaisée (baromètre) : si l'athlète le demande, ou si `[elevation].dem = "auto"`, ajoute `--dem` (aux deux scripts `analyze_gpx.py` ET `arc_race_pacing.py plan`) — le D+ **MNT** (IGN RGE ALTI en France, Copernicus GLO-90 via Open-Meteo ailleurs) devient alors la **référence** du plan et de l'évaluation de parcours, et tu présentes toujours « D+ fichier / D+ MNT » avec l'écart. Seules des coordonnées amincies partent chez le fournisseur : dis-le une fois à l'athlète avant la première utilisation (jamais d'envoi silencieux quand le réglage est `off`). Hors ligne ou couverture insuffisante, le script garde l'altitude du fichier et l'avertit : relaie l'avertissement, n'invente jamais un D+ MNT. Cite l'attribution renvoyée (IGN / Copernicus via Open-Meteo) dans la fiche. Hypothèses et limites : `scripts/arc_dem.py::ASSUMPTIONS` (résolution, arbres/bâtiments, erreur verticale).
+
 **Cas B : URL de course fournie**
 Utilise `webfetch` pour extraire les informations depuis le site de la course :
 - Date et heure de départ
@@ -151,7 +153,8 @@ python3 scripts/arc_race_pacing.py plan \
   --gpx <fichier.gpx> --race-date <AAAA-MM-JJ> --start <HH:MM> \
   --aid-stations <tmp/ravitos.json> --temp-max-c <température prévue, si connue> \
   --pack-kg <poids sac/flasques/matériel porté, kg> \
-  --tz <fuseau IANA de la course, ex. Europe/Paris>
+  --tz <fuseau IANA de la course, ex. Europe/Paris> \
+  [--dem]   # altitude corrigée par MNT (#176) : opt-in, voir l'étape 1
 ```
 
 **Nuit (#184).** Avec `--race-date`, `--start` (explicite) ET `--tz`, le script
