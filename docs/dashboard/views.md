@@ -968,6 +968,10 @@ Elle lit le plan de course persisté dans `planning/` (bloc ```` ```arc ````
 `kind: race_plan`, écrit par `course-strategist`) et ne calcule rien de plus :
 heures de passage et marges de barrière viennent de `scripts/arc_race_pacing.py`,
 le contrôle du matériel de `arc_index.py equipment --race-plan` (#134).
+Les heures de passage sont en **heure locale réelle** du fuseau `timezone` du plan :
+une course qui traverse le changement d'heure reste juste (même règle que la nuit, #184) ;
+dans ce cas, un avertissement rappelle que les marges de barrière, elles, sont calculées
+à l'heure murale par `arc_race_pacing.py` et peuvent différer d'une heure après le changement.
 
 Une feuille contient :
 

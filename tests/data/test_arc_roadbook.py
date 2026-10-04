@@ -211,6 +211,45 @@ class TestRoadbookHonesty(unittest.TestCase):
         self.assertEqual(plan, before)
 
 
+class TestRoadbookClockTimezone(unittest.TestCase):
+    """Heures de passage d'un ultra qui traverse le changement d'heure (revue #187) : le temps écoulé
+    est absolu, l'horloge affichée est l'heure locale RÉELLE du fuseau du plan — comme la nuit (#184)."""
+
+    @staticmethod
+    def _expected(start_iso, elapsed_s):
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo("Europe/Paris")
+        start = datetime.fromisoformat(start_iso).astimezone(zone)
+        local = (start.astimezone(timezone.utc) + timedelta(seconds=elapsed_s)).astimezone(zone)
+        days = (local.date() - start.date()).days
+        return local.strftime("%H:%M") + (f" (J+{days})" if days > 0 else "")
+
+    def test_fall_back_during_the_race_uses_real_local_time(self):
+        start = "2026-10-25T01:30:00+02:00"          # 03:00 CEST -> 02:00 CET pendant la course
+        model = _model(start_time=start, timezone="Europe/Paris", race_date="2026-10-25")
+        secs = model["scenarios"]["realistic"]["sections"]
+        for r in secs:
+            self.assertEqual(r["arrival_clock"], self._expected(start, r["arrival_s"]))
+        # 1 h 30 CEST + 1 h 54 de course = 02:24 CET (et non 03:24 en simple addition murale)
+        self.assertEqual(secs[0]["arrival_clock"], self._expected(start, secs[0]["arrival_s"]))
+        self.assertNotEqual(secs[0]["arrival_clock"], "03:24")
+        self.assertTrue(any("changement d'heure" in w for w in model["warnings"]))
+
+    def test_utc_start_is_shown_in_the_plan_timezone(self):
+        model = _model(start_time="2026-10-24T16:00:00Z", timezone="Europe/Paris", race_date="2026-10-24")
+        self.assertEqual(model["header"]["start_clock"], "18:00")
+
+    def test_without_timezone_the_clock_is_a_plain_wall_clock_addition(self):
+        plan = R.persisted_plan(start_time="2026-10-25T01:30:00+02:00", race_date="2026-10-25")
+        del plan["timezone"]
+        model = RB.build_roadbook(plan)
+        first = model["scenarios"]["realistic"]["sections"][0]
+        h, m = divmod((90 * 60 + first["arrival_s"]) // 60, 60)
+        self.assertEqual(first["arrival_clock"], f"{h % 24:02d}:{m:02d}")
+        self.assertFalse(any("changement d'heure" in w for w in model["warnings"]))
+
+
 class TestRoadbookContract(unittest.TestCase):
     def test_new_optional_keys_validate(self):
         plan = R.persisted_plan(nutrition_plan="nutrition/2026-06-10_nutrition.md")

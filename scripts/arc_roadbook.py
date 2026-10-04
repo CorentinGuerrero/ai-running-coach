@@ -21,12 +21,13 @@ Bibliothèque standard uniquement (CONTRIBUTING.md).
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arc_race_pacing as RP  # noqa: E402
+import arc_solar as SOLAR  # noqa: E402
 
 SCENARIOS = RP.SCENARIOS                      # ("safe", "realistic", "ambitious")
 DEFAULT_SCENARIO = "realistic"
@@ -47,6 +48,12 @@ ASSUMPTIONS = {
     "profile": (
         "Profil RELATIF au départ (D+ cumulé moins D- cumulé) : le plan ne persiste pas l'altitude "
         "absolue. Axe en mètres relatifs, jamais une altitude réelle."),
+    "clock": (
+        "Heures de passage à l'horloge = départ + temps écoulé compté en temps ABSOLU (UTC) puis "
+        "affiché dans le fuseau `timezone` du plan : juste après un changement d'heure en pleine "
+        "course. Sans `timezone` (ou fuseau inconnu), simple addition à l'heure murale du départ. "
+        "Les marges de barrière restent celles d'`arc_race_pacing.check_cutoffs` (heure murale) : "
+        "si l'heure change pendant la course, une marge peut différer d'une heure — signalé."),
     "night": (
         "Le drapeau nuit d'une section reprend `night_fraction` des segments (#184) pondéré par leur "
         "temps ; absent du plan (course sans nuit, ou plan d'avant #184), aucune nuit n'est déduite."),
@@ -68,9 +75,22 @@ def _text_list(value: Any) -> List[str]:
     return [str(v).strip() for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
 
 
-def _parse_start(plan: dict) -> Optional[datetime]:
-    """Heure de départ en HEURE MURALE locale (fuseau éventuel retiré) : `start_time` ISO complet,
-    ou `HH:MM` associé à `race_date`. Rien d'autre n'est deviné (pas de 07:00 par défaut)."""
+def _zone(plan: dict):
+    """Fuseau IANA du plan (`timezone`, #184) ou `None` (absent, inconnu, base tz absente)."""
+    name = plan.get("timezone")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    try:
+        return SOLAR.resolve_timezone(name.strip())
+    except ValueError:
+        return None
+
+
+def _parse_start(plan: dict, zone=None) -> Optional[datetime]:
+    """Heure de départ en HEURE MURALE locale (naïve) : `start_time` ISO complet, ou `HH:MM`
+    associé à `race_date`. Un `start_time` avec décalage (`Z`, `+01:00`) est d'abord ramené dans
+    le fuseau du plan quand il est connu (`…T16:00Z` = 18:00 à Paris l'été), sinon son heure murale
+    est gardée telle quelle. Rien d'autre n'est deviné (pas de 07:00 par défaut)."""
     raw = plan.get("start_time")
     if not isinstance(raw, str) or not raw.strip():
         return None
@@ -80,6 +100,8 @@ def _parse_start(plan: dict) -> Optional[datetime]:
     except ValueError:
         parsed = None
     if parsed is not None:
+        if parsed.tzinfo is not None and zone is not None:
+            parsed = parsed.astimezone(zone)
         return parsed.replace(tzinfo=None)
     try:
         hh, mm = RP._parse_hhmm(raw.strip(), label="start_time")
@@ -89,10 +111,19 @@ def _parse_start(plan: dict) -> Optional[datetime]:
     return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
 
-def _clock(start_dt: Optional[datetime], elapsed_s: Optional[float]) -> Optional[str]:
+def _local(start_dt: datetime, elapsed_s: float, zone=None) -> datetime:
+    """Heure locale (naïve) de départ + `elapsed_s` : en temps absolu dans `zone` quand il est
+    connu (changement d'heure en course, comme la nuit de #184), sinon addition murale."""
+    if zone is None:
+        return start_dt + timedelta(seconds=elapsed_s)
+    start_utc = start_dt.replace(tzinfo=zone).astimezone(timezone.utc)
+    return (start_utc + timedelta(seconds=elapsed_s)).astimezone(zone).replace(tzinfo=None)
+
+
+def _clock(start_dt: Optional[datetime], elapsed_s: Optional[float], zone=None) -> Optional[str]:
     if start_dt is None or elapsed_s is None:
         return None
-    dt = start_dt + timedelta(seconds=elapsed_s)
+    dt = _local(start_dt, elapsed_s, zone)
     days = (dt.date() - start_dt.date()).days
     return dt.strftime("%H:%M") + (f" (J+{days})" if days > 0 else "")
 
@@ -211,7 +242,7 @@ def _cutoff_entry(cut: Optional[dict], scenario: str, st: dict) -> Optional[dict
 
 def _scenario_block(plan: dict, segments: Sequence[dict], stations: Sequence[dict], scenario: str,
                     passages: dict, cutoffs: Sequence[dict], start_dt: Optional[datetime],
-                    total_km: float, warnings: List[str]) -> dict:
+                    total_km: float, warnings: List[str], zone=None) -> dict:
     total_s = passages["totals_s"][scenario]
     seg_pass = passages["aid_station_passages"]
     cut_by_km = {round(c["km"], 6): c for c in cutoffs}
@@ -244,13 +275,13 @@ def _scenario_block(plan: dict, segments: Sequence[dict], stations: Sequence[dic
             "loss_m": round(_cum_at(segments, b, "elevation_loss_m") - _cum_at(segments, a, "elevation_loss_m"), 1),
             "moving_s": round(moving), "arrival_s": round(cur["arrival_s"]),
         }
-        clock = _clock(start_dt, cur["arrival_s"])
+        clock = _clock(start_dt, cur["arrival_s"], zone)
         if clock:
             row["arrival_clock"] = clock
         if cur.get("st") is not None:
             row["station"] = _station_info(cur["st"])
             row["stop_s"] = round(cur["stop_s"])
-            dep = _clock(start_dt, cur["arrival_s"] + cur["stop_s"])
+            dep = _clock(start_dt, cur["arrival_s"] + cur["stop_s"], zone)
             if dep:
                 row["departure_clock"] = dep
             cutoff = _cutoff_entry(cut_by_km.get(round(cur["st"]["km"], 6)), scenario, cur["st"])
@@ -265,7 +296,7 @@ def _scenario_block(plan: dict, segments: Sequence[dict], stations: Sequence[dic
         "night_spans_km": _night_spans(segments, scenario),
         "lamp_sections": sum(1 for r in sections if r.get("night")),
     }
-    finish = _clock(start_dt, total_s)
+    finish = _clock(start_dt, total_s, zone)
     if finish:
         block["finish_clock"] = finish
     return block
@@ -295,7 +326,8 @@ def build_roadbook(plan: dict, *, plan_path: Optional[str] = None,
     warnings: List[str] = []
     segments = _valid_segments(plan)
     stations = _stations(plan)
-    start_dt = _parse_start(plan)
+    zone = _zone(plan)
+    start_dt = _parse_start(plan, zone)
     if start_dt is None:
         missing.append("heure de départ absente du plan (`start_time`) : pas d'heures de passage "
                        "à l'horloge, seulement des durées depuis le départ")
@@ -340,7 +372,17 @@ def build_roadbook(plan: dict, *, plan_path: Optional[str] = None,
             missing.append("aucune barrière horaire renseignée sur les ravitos du plan")
         for s in avail:
             scenarios[s] = _scenario_block(plan, segments, stations, s, passages, cutoffs, start_dt,
-                                           total_km, warnings)
+                                           total_km, warnings, zone)
+        if zone is not None and start_dt is not None:
+            longest = max(passages["totals_s"][s] for s in avail)
+            off0 = start_dt.replace(tzinfo=zone).utcoffset()
+            off1 = _local(start_dt, longest, zone).replace(tzinfo=zone).utcoffset()
+            if off0 != off1:
+                warnings.append(
+                    "changement d'heure pendant la course : heures de passage en heure locale réelle"
+                    + (" ; les marges de barrière restent calculées à l'heure murale par "
+                       "`arc_race_pacing` et peuvent différer d'une heure après le changement"
+                       if cutoffs else ""))
         for s in SCENARIOS:
             if s not in scenarios:
                 scenarios[s] = {"available": False}
