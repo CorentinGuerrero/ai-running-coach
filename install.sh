@@ -1207,6 +1207,16 @@ install_garmin_mcp() {
 # `uv run intervals-icu-mcp-auth`) : le binaire est déjà sur le PATH une fois
 # `uv tool install` fait (comme garmin-mcp-auth), et `uv run` chercherait un
 # projet uv (pyproject.toml) dans le cwd — qui n'en est pas un ici.
+# `intervals-icu-mcp-auth` écrit le .env avec les droits par défaut (0644 : lisible par les
+# autres comptes de la machine) — constaté au test d'intégration de #165. La clé API ne doit
+# être lisible que par son propriétaire : on resserre à 0600 après l'authentification et à
+# chaque relance (idempotent ; jamais en dry-run).
+restrict_intervals_env() {
+    local env_file="$INTERVALS_ENV_DIR/.env"
+    [[ -f "$env_file" && "$DRY_RUN" -eq 0 ]] || return 0
+    chmod 600 "$env_file" && ok "Droits du fichier d'identifiants Intervals.icu : 600"
+}
+
 intervals_auth_cmd() { printf '(cd "%s" && intervals-icu-mcp-auth)' "$INTERVALS_ENV_DIR"; }
 
 # Écrit le wrapper que CHAQUE config MCP (toutes les IDE, voir mcp_server_value_intervals*)
@@ -1340,6 +1350,7 @@ install_intervals_mcp() {
         log "Authentification Intervals.icu (clé API + identifiant athlète, une seule fois)"
         if [[ -f "$INTERVALS_ENV_DIR/.env" ]]; then
             ok "Identifiants Intervals.icu présents ($INTERVALS_ENV_DIR/.env)"
+            restrict_intervals_env
         elif [[ "$DRY_RUN" -eq 1 ]]; then
             warn "Authentification Intervals.icu sautée (dry-run) — serait lancée dans $INTERVALS_ENV_DIR."
         else
@@ -1349,6 +1360,7 @@ install_intervals_mcp() {
             mkdir -p "$INTERVALS_ENV_DIR"
             (cd "$INTERVALS_ENV_DIR" && intervals-icu-mcp-auth) \
                 || die "Échec de l'authentification Intervals.icu (voir le message ci-dessus)."
+            restrict_intervals_env
         fi
     else
         warn "Authentification Intervals.icu sautée (--no-auth)."

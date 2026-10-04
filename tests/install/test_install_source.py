@@ -137,6 +137,23 @@ class TestIntervalsPinUpgrade(InstallAsserts):
     def _tool_installs(self, sb):
         return [args for _, args in sb.stub_calls("uv") if args.startswith("tool install")]
 
+    def test_existing_credentials_file_is_restricted_to_owner(self):
+        # Constaté au test d'intégration de #165 : `intervals-icu-mcp-auth` écrit le .env en 0644.
+        import re as _re
+        with Sandbox() as sb:
+            pinned = _re.search(r'^INTERVALS_MCP_REF="git\+[^@"]+@([0-9a-f]{40})"',
+                                (sb.repo / "install.sh").read_text(encoding="utf-8"), _re.MULTILINE).group(1)
+            path = self._fake_tool(sb, self.FORK, pinned)
+            env_dir = sb.home / ".config/ai-running-coach/intervals-icu-mcp"
+            env_dir.mkdir(parents=True)
+            env_file = env_dir / ".env"
+            env_file.write_text("INTERVALS_ICU_API_KEY=x\nINTERVALS_ICU_ATHLETE_ID=i1\n")
+            env_file.chmod(0o644)
+            proc = sb.install("--source", "intervals", "--ide", "claude", PATH=path)
+            self.assertSucceeded(proc)
+            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn("INTERVALS_ICU_API_KEY=x", proc.stdout + proc.stderr)
+
     def test_legacy_origin_is_reinstalled_at_the_pinned_commit(self):
         with Sandbox() as sb:
             path = self._fake_tool(sb, *self.LEGACY)

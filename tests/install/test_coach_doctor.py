@@ -805,6 +805,22 @@ class TestIntervalsMcpPin(InstallAsserts):
             _, check = self._check(sb)
             self.assertEqual(check["status"], "ok")
 
+    def test_pinned_install_with_world_readable_credentials_is_a_warning(self):
+        with Sandbox() as sb:
+            self._fake_install(sb, self.FORK, self._pinned_commit(sb))
+            env_dir = sb.home / ".config/ai-running-coach/intervals-icu-mcp"
+            env_dir.mkdir(parents=True)
+            env_file = env_dir / ".env"
+            env_file.write_text("INTERVALS_ICU_API_KEY=secret-value\n")
+            env_file.chmod(0o644)
+            proc, check = self._check(sb)
+            self.assertEqual(check["status"], "warning")
+            self.assertTrue(check["fix"].startswith("chmod 600 "))
+            self.assertNotIn("secret-value", proc.stdout)
+            env_file.chmod(0o600)
+            _, check = self._check(sb)
+            self.assertEqual(check["status"], "ok")
+
     def test_older_fork_commit_is_informational(self):
         with Sandbox() as sb:
             self._fake_install(sb, self.FORK, "0" * 40)

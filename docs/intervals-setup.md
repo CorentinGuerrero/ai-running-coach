@@ -67,6 +67,9 @@ flowchart LR
 `./install.sh --source intervals` vous les demande interactivement (sauf
 `--no-auth`) et les écrit dans le `.env` mentionné ci-dessus — jamais dans le
 dépôt, jamais dans une config d'IDE.
+L'installeur restreint ce fichier au seul propriétaire (`chmod 600`), y compris à
+chaque relance ; `/coach-doctor` (vérification `intervals_mcp_pin`) le signale ⚠️ s'il
+est lisible par d'autres comptes de la machine. Ne collez jamais la clé dans un chat.
 
 ## Pourquoi un wrapper, et pas une variable d'environnement
 

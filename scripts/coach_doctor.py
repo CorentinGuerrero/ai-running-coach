@@ -1001,6 +1001,19 @@ def check_intervals_mcp_pin(config: dict, home: Path) -> dict:
         )
     if url == INTERVALS_MCP_PINNED_URL:
         if commit == INTERVALS_MCP_PINNED_COMMIT:
+            env_file = home / ".config" / "ai-running-coach" / "intervals-icu-mcp" / ".env"
+            try:
+                too_open = env_file.is_file() and (env_file.stat().st_mode & 0o077) != 0
+            except OSError:
+                too_open = False
+            if too_open:
+                # La clé API ne doit être lisible que par son propriétaire (jamais lue ici).
+                return build_check(
+                    check_id, "warning",
+                    f"Serveur intervals-icu-mcp au commit épinglé ({short}), mais le fichier "
+                    "d'identifiants est lisible par d'autres comptes de la machine.",
+                    fix=f"chmod 600 {env_file}",
+                )
             return build_check(
                 check_id, "ok", f"Serveur intervals-icu-mcp au commit épinglé ({short}).", fix=None,
             )
