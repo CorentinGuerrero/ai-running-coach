@@ -33,6 +33,15 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
                                                                         # Garmin/modèle par panier route/trail)
     arc_index.py plan-templates [--format ID | --distance-km D [--sport S]] [--weeks N] [--text]
                                                                         # gabarits de périodisation (#189)
+    arc_index.py strength [--phase P] [--use U] [--equipment LISTE] [--text | --garmin-json]
+                                                                        # bibliothèque de renforcement (#191)
+
+`strength` (#191, épopée #173) choisit un programme de renforcement/mobilité de la bibliothèque livrée avec
+le moteur (`config/strength/`, `arc_strength.py`) par phase du bloc et/ou par usage (descente, cheville,
+hanches, pied), remplace les exercices selon le matériel disponible (`--equipment`, sinon la puce
+« Équipement » du profil ; inconnu → question, jamais deviné) et rend la sélection en JSON, en `--text`
+(description intervals.icu / chat) ou en `--garmin-json` (charge utile `create_strength_workout`, aucune
+écriture). Sans `--phase` ni `--use` : le catalogue. Lecture seule, sans index. Approximations du projet.
 
 `hrv-baseline` n'a besoin d'aucun tableau de bord lancé (headless, `/garmin-daily-sync`
 compris) : elle réindexe puis rend le point du jour de `arc_metrics.hrv_baseline_series`
@@ -273,6 +282,7 @@ import arc_metrics as M  # noqa: E402
 import arc_plan_templates as PT  # noqa: E402
 import arc_samples as S  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+import arc_strength as SG  # noqa: E402
 import arc_trail_shape as TS  # noqa: E402
 from coach_config import ConfigError, read_toml  # noqa: E402
 from coach_setup import ENGINE, workspace_root  # noqa: E402
@@ -4678,7 +4688,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
-                                 "decision-effects", "load-forecast", "plan-templates"))
+                                 "decision-effects", "load-forecast", "plan-templates", "strength"))
     parser.add_argument("selector", nargs="?", default=None,
                         help="argument de la sous-commande (ex. garmin_activity_id, intervals_activity_id ou strava_activity_id "
                              "pour « samples »)")
@@ -4760,8 +4770,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outcome", choices=C.DECISION_OUTCOME,
                         help="commande « decisions » : ne garde que les décisions de cette issue")
     parser.add_argument("--text", action="store_true",
-                        help="commandes « decision-effects », « load-forecast » et « plan-templates » : rendu texte lisible (défaut : "
-                             "JSON, comme les autres sous-commandes)")
+                        help="commandes « decision-effects », « load-forecast », « plan-templates » et « strength » : "
+                             "rendu texte lisible (défaut : JSON, comme les autres sous-commandes)")
     parser.add_argument("--active", action="store_true",
                         help="commande « decisions » : exclut « superseded »/« rejected_by_athlete » "
                              "(journal courant, voir DECISION_INACTIVE_OUTCOMES)")
@@ -4772,8 +4782,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lt-speed-ms", type=float, metavar="V", dest="lt_speed_ms",
                         help="commande « pace-curve » (#169) : vitesse (m/s) au seuil lactique Garmin, "
                              "pour le contrôle de cohérence avec la CS (signalé, jamais arbitré)")
+    parser.add_argument("--phase", metavar="P",
+                        help="commande « strength » (#191) : phase du bloc (base, development, specific, taper, "
+                             "recovery — ou leur libellé français, ou l'emphase du gabarit #189)")
+    parser.add_argument("--use", metavar="U",
+                        help="commande « strength » (#191) : usage ciblé (descente, cheville, hanches, pied)")
+    parser.add_argument("--equipment", metavar="LISTE",
+                        help="commande « strength » (#191) : matériel disponible, séparé par des virgules "
+                             "(none, elastic, dumbbell, step, box) ; sans lui, lu dans le profil de l'athlète")
+    parser.add_argument("--garmin-json", action="store_true", dest="garmin_json",
+                        help="commande « strength » (#191) : charge utile Garmin (workout_data + arguments de "
+                             "create_strength_workout) au lieu de la sélection ; aucune écriture")
     parser.add_argument("--json", action="store_true",
-                        help="commandes « pace-curve », « decision-effects », « load-forecast » et « plan-templates » : "
+                        help="commandes « pace-curve », « decision-effects », « load-forecast », « plan-templates » et « strength » : "
                              "sortie JSON (déjà le défaut, accepté pour la clarté ; l'emporte sur --text)")
     parser.add_argument("--until", metavar="AAAA-MM-JJ",
                         help="commande « load-forecast » (#172) : date de fin de la projection (défaut : date de "
@@ -4833,6 +4854,18 @@ def plan_templates_cli(args, workspace: Path) -> int:
     return 0
 
 
+def strength_cli(args, workspace: Path) -> int:
+    """`arc_index.py strength` (#191) — lecture seule, sans index : la bibliothèque est livrée avec le moteur
+    (`config/strength/`). JSON par défaut, `--text` lisible, `--garmin-json` pour la charge utile Garmin."""
+    fmt = "garmin" if args.garmin_json else ("text" if args.text and not args.json else "json")
+    try:
+        profile = settings(load_config(workspace))["profile"]     # `[athlete].profile`, comme coach_doctor
+        print(SG.run(args.phase, args.use, args.equipment, workspace, fmt, profile))
+    except SG.StrengthError as exc:
+        raise ConfigError(str(exc))
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.today:
@@ -4856,6 +4889,8 @@ def main(argv=None) -> int:
     workspace = workspace_root(args.workspace)
     if args.command == "plan-templates":
         return plan_templates_cli(args, workspace)
+    if args.command == "strength":
+        return strength_cli(args, workspace)
     conn = open_db(workspace, args.db, args.memory, args.rebuild)
     counts = index_workspace(conn, workspace, args.today)
     if args.command == "hrv-baseline":

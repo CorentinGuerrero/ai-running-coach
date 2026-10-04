@@ -13,7 +13,7 @@
 - **Schéma JSON exact** des DTO Garmin
 - Tables de correspondance : `step`, `endCondition`, `targetType`, `sportType`
 - **Idempotence** : éviter les doublons lors des re-push
-- **Détail des séances de renforcement** : exercices, répétitions, poids, repos, boucles `RepeatGroupDTO`
+- **Détail des séances de renforcement** : exercices, répétitions, poids, repos, boucles `RepeatGroupDTO` ; les exercices et leur correspondance Garmin viennent de la bibliothèque `arc_index.py strength --garmin-json` (#191, voir [Renforcement et mobilité](../strength.md)) — couples (`category`, `exercise`) vérifiés dans le catalogue Garmin, jamais devinés
 - **Pattern verify-after-push** : vérifier que la séance est bien dans le calendrier après le push
 - **Cibles personnelles (#60)** : zones FC, allure GAP plate, D+ de côte
 

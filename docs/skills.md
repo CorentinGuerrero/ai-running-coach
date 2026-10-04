@@ -82,6 +82,7 @@ agents ou par les commandes courtes plutôt que par un skill dédié :
 | `arc_race_pacing.py` | `course-strategist` | Allures de course par segment depuis le modèle personnel pente → allure (#59) |
 | `arc_race_debrief.py` | `coach`, `course-strategist` | Débrief post-course plan vs réalisé, par segment (#61) |
 | `arc_workout_targets.py` | `coach` | Cibles personnelles d'une séance structurée — zones FC, allure GAP, D+ de côte (#60), plage en % de la vitesse critique quand l'ajustement est valide (#169) |
+| `arc_strength.py` | `coach`, `arc_index.py strength` | Bibliothèque de renforcement/mobilité et programmes par phase ou usage (#191) : validation, repli matériel, charge utile Garmin vérifiée ou texte intervals.icu — voir [Renforcement et mobilité](strength.md) |
 | `arc_cs.py` | `arc_index.py pace-curve`, `arc_workout_targets.py` | Courbe allure-durée en GAP, vitesse critique et D′ (#169) — fonctions pures, voir [Vitesse critique](vitesse-critique.md) |
 | `arc_plan_templates.py` | `coach` | Gabarits de périodisation (`config/plans/*.json`) : chargement, validation contre les garde-fous, résolution semaine par semaine (#189) — voir [Gabarits de périodisation](plans.md) |
 | `arc_trail_shape.py` | `coach`, `/race` | Score Trail Shape, préparation à l'objectif actif (#63) |
