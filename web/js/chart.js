@@ -382,7 +382,7 @@ export function blockFrise(items, label) {
     g += `<rect class="${cls}" x="${x}" y="${top + barH - hh}" width="${cw}" height="${hh}" rx="4"/>`;
     if (it.d != null) {
       const dy = top + barH - Math.max(2, Math.round(barH * Math.max(0, Math.min(1, it.d))));
-      g += `<line class="frise-done-case" x1="${x + 3}" x2="${x + cw - 3}" y1="${dy}" y2="${dy}"/><line class="frise-done"x1="${x + 3}" x2="${x + cw - 3}" y1="${dy}" y2="${dy}"/>`;
+      g += `<line class="frise-done-case" x1="${x + 3}" x2="${x + cw - 3}" y1="${dy}" y2="${dy}"/><line class="frise-done" x1="${x + 3}" x2="${x + cw - 3}" y1="${dy}" y2="${dy}"/>`;
     }
     g += `<rect class="frise-focus${state}" x="${x - 1.5}" y="${top - 1.5}" width="${cw + 3}" height="${barH + 3}" rx="5.5"/>`;
     if (it.light) g += `<circle class="frise-light" cx="${x + cw / 2}" cy="${top + barH + 9}" r="3.5"/>`;
