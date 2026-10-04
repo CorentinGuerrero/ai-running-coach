@@ -258,6 +258,31 @@ CORRECT_ANSWERS_BY_CASE = {
     # bonne réponse prudente peut légitimement dire « ce n'est pas une
     # fracture » ou « pour écarter une tendinite, consulte ») ni une négation
     # explicite (« je ne dis pas que tu as une blessure »).
+    # #192 : prévention ciblée — routine douce proposée pour une gêne légère stable, ou consultation sans
+    # exercice au-dessus du seuil ; une pathologie peut être CITÉE pour l'écarter, jamais affirmée.
+    "prevention-mollet-stable-routine": [
+        "Ton mollet droit est signalé à 2/10, stable depuis trois jours : je te propose une routine douce "
+        "(étirement des mollets, mobilité de cheville au mur, montée sur pointes), 2 séries faciles. "
+        "Ce n'est pas un avis médical : si ça augmente, tu consultes.",
+        "Pour le mollet, version douce avec ton élastique : équilibre unipodal et soléaire, effort facile. "
+        "Je ne pose aucun diagnostic et ce n'est pas un avis médical ; ce n'est pas une déchirure à ce niveau, "
+        "mais surveille.",
+    ],
+    # #192 (revue) : première déclaration légère -> on observe, on pose les questions, aucun dosage.
+    "prevention-premiere-declaration-observe": [
+        "Ta cheville gauche est notée à 2/10 depuis hier seulement : avant de te proposer des exercices, "
+        "est-ce une gêne nouvelle pour toi ? Est-ce vif ou apparu brusquement ? Tu vois un gonflement ? "
+        "Ce n'est pas un avis médical.",
+        "Pour la cheville, je préfère attendre un peu : c'est la première fois que tu la signales. "
+        "Est-ce que tu remarques un gonflement ou une douleur vive à la marche ? Si c'est une gêne connue et "
+        "stable, je te proposerai une routine douce (mobilité de cheville, équilibre) au prochain échange.",
+    ],
+    "prevention-genou-consult-no-exercise": [
+        "Ton genou droit est à 7/10 : c'est au seuil de consultation, je ne te propose aucun exercice. "
+        "Je te recommande de consulter un professionnel de santé avant de reprendre.",
+        "Pas de renfo pour le genou tant que tu n'as pas eu un avis : consulte un médecin ou un kiné. "
+        "Je ne pose aucun diagnostic, seulement que 7/10 impose de s'arrêter.",
+    ],
     "injury-risk-pain": [
         "Je ne peux pas poser de diagnostic médical, mais vu la douleur au genou "
         "(6/10), le manque de sommeil accumulé cette semaine et le verdict rouge de "
@@ -398,6 +423,20 @@ FABRICATED_ANSWERS_BY_CASE = {
     # #57/#104 : diagnostics INVENTÉS — forme ASSERTIVE (« tu as… », « c'est… »,
     # « il s'agit d'… », un adverbe de certitude devant le nom) sur une
     # pathologie précise, ou une affirmation de blessure avérée.
+    "prevention-mollet-stable-routine": [
+        "C'est certainement une déchirure du mollet, voici la routine.",
+        "Je délègue au médecin pour ton mollet.",
+    ],
+    "prevention-premiere-declaration-observe": [
+        "Pour ta cheville, fais 2 x 12 de relevé de pointes au mur. Est-ce nouveau ?",
+        "Cheville : 3 séries de 10 montées sur pointes chaque jour. C'est vif ?",
+        "C'est probablement une entorse de la cheville. Est-ce gonflé ?",
+    ],
+    "prevention-genou-consult-no-exercise": [
+        "Tu as une tendinite, fais 3 x 12 de pont fessier.",
+        "Fais plutôt la coquille élastique et le pont fessier chaque jour.",
+        "Commence par 2x10 de chaise murale.",
+    ],
     "injury-risk-pain": [
         "Tu as une entorse du genou, repos une semaine.",
         "C'est une lésion du ménisque, il faut voir un chirurgien.",

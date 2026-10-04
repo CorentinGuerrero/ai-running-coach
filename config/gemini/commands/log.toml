@@ -197,6 +197,13 @@ risqueraient d'écraser la fusion l'un de l'autre.
    l'athlète, jamais une valeur 7/10 supposée en dur, voir `agents/medical.md`) :
    recommandez explicitement une consultation dans votre réponse, en plus de
    l'avoir écrit dans `pain`.
+   **Prévention ciblée (#192) :** une douleur légère déclarée peut donner lieu, À LA PROCHAINE
+   INTERACTION et jamais automatiquement, à la proposition d'une routine douce de la bibliothèque
+   (`python3 scripts/arc_index.py prevention`) — le coach propose, `medical` (s'il est activé) décide,
+   sinon le coach applique les règles du script en disant « ce n'est pas un avis médical ». Un score
+   ≥ seuil ou une douleur vive/gonflée : aucun exercice, consultation. Une PREMIÈRE déclaration légère
+   ne donne aucun exercice : le coach observe et pose trois questions (nouvelle ? vive ? gonflement ?).
+   Voir `docs/strength.md`.
 4. Validez : `python3 scripts/arc_index.py --validate <fichier>`.
 
 ### Position dans la séance (km, temps écoulé)

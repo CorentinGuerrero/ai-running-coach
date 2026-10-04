@@ -62,7 +62,7 @@ L'agent **coach** est l'agent principal du projet. Il est le point d'entrée pou
 
 Pour chaque séance, le coach fournit :
 
-1. **Renforcement** : nom de l'exercice, technique, séries, répétitions, charge, RPE, matériel — les exercices viennent de la **bibliothèque livrée** (`arc_index.py strength`, voir [Renforcement et mobilité](../strength.md)), jamais inventés ; matériel inconnu → le coach demande, programmes marqués « approximation du projet », placement relatif aux séances de qualité
+1. **Renforcement** : nom de l'exercice, technique, séries, répétitions, charge, RPE, matériel — les exercices viennent de la **bibliothèque livrée** (`arc_index.py strength`, voir [Renforcement et mobilité](../strength.md)), jamais inventés ; matériel inconnu → le coach demande, programmes marqués « approximation du projet », placement relatif aux séances de qualité ; **douleur déclarée (#192)** : `arc_index.py prevention` — routine douce seulement pour une gêne légère, connue et stable, sinon aucun exercice et consultation ; `medical` décide s'il est activé, sinon le coach applique les règles et dit « ce n'est pas un avis médical » (voir [Prévention ciblée](../strength.md#prevention-ciblee))
 2. **Fractionné** : splits détaillés avec allure, FC et/ou cadence cibles
 3. **Z1/Z2 (aérobie)** : attentes claires (ex. « rester strictement sous 140 bpm »)
 4. **Matériel** : liste explicite pour chaque séance

@@ -60,6 +60,9 @@ de provenance sous le bloc, puis réindexent le tableau de bord. Elles sont **id
 même appui deux fois n'écrit qu'une fois, et le bot dit « déjà noté ». Un score de douleur au seuil
 `[injury_risk].pain_consult_threshold` (7/10 par défaut) déclenche la même recommandation de
 consultation que `/log` ; rien n'est modifié dans votre plan depuis ce canal.
+Une douleur légère saisie ici peut ensuite valoir une proposition de routine douce de prévention à la
+prochaine interaction avec le coach (#192, [Prévention ciblée](strength.md#prevention-ciblee)) — jamais un envoi
+automatique.
 
 Si aucune séance n'est synchronisée pour le jour visé, le bot le dit et n'écrit rien — il n'invente
 jamais une activité.

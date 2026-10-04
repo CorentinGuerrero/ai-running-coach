@@ -39,6 +39,7 @@ L'agent **medical** est le spécialiste de la récupération et de la santé. Il
 ### Drapeau composite de risque de blessure (#57)
 
 - **Lecture, jamais un diagnostic** : `python3 scripts/arc_guardrails.py injury-risk` combine ACWR, monotonie, douleur déclarée, écart effort perçu/charge FC mesurée, dette de sommeil et un verdict rouge récent en un niveau à **3 paliers** (`low` / `moderate` / `high`), toujours accompagné d'un avertissement non-diagnostique — jamais le nom d'une pathologie.
+- **Prévention ciblée (#192)** : `python3 scripts/arc_index.py prevention` relie une douleur déclarée à une routine douce de la bibliothèque de renforcement — ou à une recommandation de consulter, sans exercice, au-dessus du seuil, pour une douleur vive, qui s'aggrave, qui dure plus de 7 jours, ou sous un drapeau de risque de blessure. **`medical` décide** (le coach relaie sans assouplir) ; zones seulement, jamais une pathologie ; approximations du projet. Voir [Prévention ciblée](../strength.md#prevention-ciblee).
 - **Seuil de consultation** : dès que le drapeau rend `consult: true` (douleur sévère à elle seule, ou niveau `high` avec la douleur comme facteur), l'agent recommande explicitement un avis médical professionnel.
 - **Facteur sauté ≠ facteur rassurant** : historique insuffisant, bilan matinal désactivé (`[health].morning_check`)… chaque saut porte sa raison, jamais traité comme un signal favorable.
 - Détail complet (facteurs, poids, seuils réglables) : [Les garde-fous](../guardrails.md#drapeau-composite-de-risque-de-blessure-57).
