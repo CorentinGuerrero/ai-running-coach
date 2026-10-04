@@ -13,6 +13,7 @@ sert au tableau de bord (`scripts/arc_serve.py`) et aux calculs de charge
     arc_index.py hrv-baseline            # ligne de base HRV personnelle du jour, en JSON (#34)
     arc_index.py sleep-debt               # dette de sommeil 7 j du jour, en JSON (#37)
     arc_index.py heat-acclimation         # acclimatation à la chaleur, 14 j, en JSON (#38)
+    arc_index.py altitude-exposure [--days N]   # exposition à l'altitude (≥ 1 500 / 2 000 m), 14 et 28 j (#185)
     arc_index.py fueling                  # glucides/h et sudation, sorties longues, en JSON (#41)
     arc_index.py samples GARMIN_ID         # échantillons ingérés d'une séance, en JSON (#42)
     arc_index.py zones [--activity GARMIN_ID] [--weeks N]   # zones FC, temps en zone, polarisation (#43)
@@ -285,6 +286,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import arc_altitude as AL  # noqa: E402
 import arc_climb as VC  # noqa: E402
 import arc_climb_match as VM  # noqa: E402
 import arc_contract as C  # noqa: E402
@@ -4540,6 +4542,34 @@ def gear_of_activity(conn, activity_id: int, today: Optional[date] = None) -> di
     return out
 
 
+def altitude_exposure(conn, today: Optional[date] = None, days: Optional[int] = None) -> dict:
+    """Exposition à l'altitude à l'entraînement (#185) — commande « altitude-exposure » et
+    `/api/altitude-exposure`. Fenêtres de 14 et 28 j (ou `days`), temps et séances au-dessus de
+    1 500 / 2 000 m d'après les échantillons FIT (`activity_sample.altitude_m`). Une séance sans
+    altitude est comptée à part, jamais comme exposition nulle : voir `arc_altitude.ASSUMPTIONS["exposure"]`."""
+    today = today or date.today()
+    windows = (max(1, min(365, int(days))),) if days else AL.EXPOSURE_WINDOWS_DAYS
+    since = today - timedelta(days=max(windows) - 1)
+    weight = "CASE WHEN covered_s IS NULL OR covered_s <= 0 THEN 1.0 ELSE covered_s END"
+    thr_cols = ", ".join(f"SUM(CASE WHEN altitude_m >= ? THEN {weight} END) AS ge_{t}"
+                         for t in AL.EXPOSURE_THRESHOLDS_M)
+    ref = "CAST(COALESCE(garmin_activity_id, intervals_activity_id, strava_activity_id) AS TEXT)"
+    sql = (f"SELECT a.date, s.max_alt, s.alt_s, {', '.join('s.ge_' + str(t) for t in AL.EXPOSURE_THRESHOLDS_M)} "
+           f"FROM activity a LEFT JOIN (SELECT {ref} AS ref, MAX(altitude_m) AS max_alt, "
+           f"SUM(CASE WHEN altitude_m IS NOT NULL THEN {weight} END) AS alt_s, {thr_cols} "
+           f"FROM activity_sample GROUP BY {ref}) s "
+           f"ON s.ref = CAST(COALESCE(a.garmin_activity_id, a.intervals_activity_id, a.strava_activity_id) AS TEXT) "
+           f"WHERE a.date >= ? AND a.date <= ? "
+           f"AND COALESCE(a.sport, '') NOT IN ({', '.join('?' for _ in AL.EXPOSURE_EXCLUDED_SPORTS)}) "
+           f"ORDER BY a.date, a.id")
+    rows = []
+    for r in conn.execute(sql, (*AL.EXPOSURE_THRESHOLDS_M, since.isoformat(), today.isoformat(),
+                                *AL.EXPOSURE_EXCLUDED_SPORTS)):
+        rows.append({"date": r["date"], "max_altitude_m": r["max_alt"], "altitude_s": r["alt_s"],
+                     "above_s": {t: r[f"ge_{t}"] or 0.0 for t in AL.EXPOSURE_THRESHOLDS_M}})
+    return AL.exposure_report(rows, today, windows)
+
+
 GAIT_DEFAULT_WEEKS = 26
 
 
@@ -4738,7 +4768,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="index",
                         choices=("index", "backfill-plan", "status", "hrv-baseline", "sleep-debt",
-                                 "heat-acclimation", "gear", "gear-attribution", "performance-index", "fueling", "samples",
+                                 "heat-acclimation", "altitude-exposure", "gear", "gear-attribution", "performance-index", "fueling", "samples",
                                  "zones", "gap", "decoupling", "vam", "descent", "durability",
                                  "climb-history", "decisions", "slope-model", "trail-shape", "energy", "equipment",
                                  "inspections", "gear-career", "gait-summary", "pace-curve",
@@ -5077,6 +5107,10 @@ def main(argv=None) -> int:
         today_date = date.fromisoformat(args.today) if args.today else date.today()
         report = decision_effects(conn, today_date, args.days, args.trigger)
         print(decision_effects_text(report) if args.text and not args.json else json.dumps(report, ensure_ascii=False))
+        return 0
+    if args.command == "altitude-exposure":
+        today_date = date.fromisoformat(args.today) if args.today else date.today()
+        print(json.dumps(altitude_exposure(conn, today_date, args.days), ensure_ascii=False))
         return 0
     if args.command == "gait-summary":
         today_date = date.fromisoformat(args.today) if args.today else date.today()

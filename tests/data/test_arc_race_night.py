@@ -363,6 +363,7 @@ class TestByteIdenticalWithoutNight(unittest.TestCase):
         self.assertEqual(plan["night"]["status"], "unavailable")
         plan.pop("assumptions")
         plan.pop("night")
+        plan.pop("altitude")   # clé additive (#185) : parcours sous 1 500 m, aucun effet
         text = json.dumps(plan, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
         self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), GOLDEN_NO_NIGHT_SHA256)
 

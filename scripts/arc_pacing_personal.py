@@ -13,7 +13,7 @@ Ce module est la couche de stockage : une section `[pacing.personal]` de
 night_penalty_pct = 6.5       # pénalité de nuit à pleine nuit (défaut 5.0)
 technicity_scale = 1.2        # échelle du surcoût de technicité (défaut 1.0)
 heat_hot_factor = 1.14        # facteur de temps > seuil chaud (défaut 1.10)
-altitude_scale = 1.1          # échelle de la perte d'altitude (défaut 1.0, #185)
+altitude_scale = 1.1          # échelle du surcoût d'altitude (défaut 1.0, #185)
 evidence = ["2026-09-27|trail-x|night|14|7.8"]   # preuves cumulées, une par course et facteur
 ```
 

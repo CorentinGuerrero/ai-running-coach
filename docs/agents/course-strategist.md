@@ -74,7 +74,7 @@ analysé, jamais sur `planning/active_objective.md`. Fade de fin de course
 depuis la durabilité récente (`scripts/arc_durability.py`, #48, rendu NEUTRE
 en temps total quand Riegel/VDOT s'applique déjà — jamais une double
 dégradation d'endurance — ou un repli générique signalé comme tel, échelonné à
-la durée réelle de la course), ajustement chaleur/acclimatation (#38), pénalité de nuit (#184, voir ci-dessous) et
+la durée réelle de la course), ajustement chaleur/acclimatation (#38), pénalité de nuit (#184) et d'altitude (#185), voir ci-dessous, et
 vérification des barrières
 horaires (formats `HH:MM`, `+HH:MM` élapsé ou date-heure ISO 8601 pour un
 ultra multi-jours). Chaque segment porte sa **provenance**
@@ -199,6 +199,55 @@ espacées, puis « indisponible » ; le cache `.arc/overpass/` n'expire pas
 La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
 `tags`) et un résumé au niveau du plan. Sans `--technicity`, rien ne change.
 
+## Pénalité d'altitude (#185)
+
+Au-dessus d'un seuil de **1 500 m** (choix du projet), `arc_race_pacing.py plan` majore le
+temps de chaque section d'un facteur qui croît avec son **excédent moyen au-dessus du seuil**,
+pondéré par la distance (une section qui franchit le seuil, col de 1 200 à 2 800 m, n'est
+pénalisée que pour sa partie haute). Altitudes du GPX, ou du MNT quand la correction
+`elevation_dem` du plan est présente (#176 : `altitude.elevation_source` le dit). La pente vient
+de Wehrlin & Hallén 2006 (*Eur J Appl Physiol* 96:404-412, doi:10.1007/s00421-005-0081-9) : la
+VO2max baisse de **6,3 % par 1 000 m** (plage individuelle 4,6-7,5 %, linéaire de 300 à 2 800 m,
+8 athlètes d'endurance en chambre hypobare, exposition aiguë).
+**La traduction de cette perte de VO2max en perte de vitesse d'ultra est une approximation du
+projet**, pas un résultat de l'étude : à fraction constante de la VO2max la vitesse baisserait
+d'autant, mais une allure d'ultra (environ 50-70 % de la VO2max) dépend aussi de la fatigue
+musculaire, de l'alimentation et du terrain. Le modèle **atténue** donc la pente en ne comptant
+la perte qu'au-dessus de 1 500 m (l'étude part de 300 m) : il applique environ 30 % de la perte de
+VO2max de l'étude à 2 000 m, 45 % à 2 500 m, 50 % à 2 800 m — atténuation choisie, non mesurée
+(facteur de temps = 1/(1 − perte)). Le critère de performance de l'étude (temps jusqu'à
+épuisement à 107 % de la VO2max, −14,5 % par 1 000 m) n'est pas repris : effort supra-maximal.
+Au-delà de 2 800 m, hors de la plage mesurée, la pénalité est extrapolée (avertissement) et
+l'altitude est plafonnée à 4 500 m pour le calcul.
+
+**Acclimatation.** Sans information, l'athlète est supposé non acclimaté (pénalité pleine).
+`--altitude-acclimated-days N` (jours déjà passés en altitude) et l'exposition mesurée à
+l'entraînement (`arc_index.py altitude-exposure`, 28 derniers jours, résolue par le script) réduisent la
+perte, jamais à zéro : crédit plafonné à 50 % (déclaré : jusqu'à 14 jours ; entraînement :
+jusqu'à 25 %, à 10 h au-dessus de 1 500 m) — approximations du projet, `assumptions.altitude`.
+L'exposition mesurée n'est créditée que si la course a lieu **14 jours au plus** après la fin de
+la fenêtre mesurée (`--race-date` requis, `altitude.acclimation.training_credited`) : un plan
+calculé des semaines à l'avance est à recalculer dans les deux dernières semaines.
+Réglages : `--altitude-threshold-m`, `--altitude-loss-pct`, `--no-altitude`. Le coefficient
+personnel `[pacing.personal].altitude_scale` (#188, recalibré au débrief) multiplie le **surcoût**
+de chaque section (facteur − 1, après le crédit d'acclimatation) ; `--altitude-loss-pct` en ligne
+de commande prime sur lui. Quand il joue, il figure dans `altitude.parameters.personal_scale` et
+dans `pacing_personal` du plan.
+
+**Changement de comportement pour les plans existants.** La pénalité est active par défaut : un
+plan de course dont une section dépasse 1 500 m, recalculé après #185, donne des temps plus longs
+qu'avant (par exemple environ +8 % sur une section courue autour de 2 700 m, sans acclimatation).
+L'avertissement du plan le dit ; `--no-altitude` redonne exactement l'ancien calcul. Les plans
+déjà persistés ne changent pas tant qu'ils ne sont pas recalculés, et les champs ajoutés
+(`altitude_m`, `altitude_factor`) sont optionnels dans le contrat `race_plan`.
+
+**Composition.** Le facteur (`altitude_m`, `altitude_factor` par section) est identique pour
+les trois scénarios, se compose par multiplication avec la chaleur, la technicité et la nuit
+(ordre du calcul : correction MNT éventuelle → modèle pente → allure, avec la chaleur → fade →
+technicité → altitude → nuit ; une seule étape du calcul) et conserve `prudent ≥ réaliste ≥ ambitieux`. **Si aucune
+section ne dépasse le seuil, les temps et les sections sont identiques à ceux d'avant** : seul
+l'objet `altitude` (`status` : `applied`, `below_threshold`, `no_elevation`, `disabled`) s'ajoute.
+
 ## Recalibrage des coefficients au débrief (#188)
 
 Nuit, technicité, chaleur et altitude sont des **hypothèses du projet**
@@ -237,11 +286,13 @@ chaque facteur et **propose** des coefficients personnels (JSON par défaut,
   rejouer le même débrief ne le compte pas deux fois.
 - **Chaleur** : un seul facteur pour toute la course, donc pas de contraste
   interne ; estimée **entre** courses, et **aucune proposition avant deux courses
-  chaudes** et une sans correction météo débriefées, confiance faible. **Altitude** : seulement si le plan porte `altitude_factor`.
+  chaudes** et une sans correction météo débriefées, confiance faible. **Altitude** : seulement si le plan porte `altitude_factor` ; le
+  `altitude_scale` proposé est l'échelle du surcoût d'altitude, appliquée par
+  `arc_race_pacing.py` aux plans suivants.
 - **Écriture après accord** : après confirmation explicite de l'athlète,
   `… --calibrate --apply` écrit `[pacing.personal]` dans
   `config/workspace.user.toml` ; `arc_race_pacing.py` le relit aux plans
-  suivants, les drapeaux CLI (`--night-penalty-pct`) gardant la priorité.
+  suivants, les drapeaux CLI (`--night-penalty-pct`, `--altitude-loss-pct`) gardant la priorité.
   Voir [la configuration](../configuration.md#les-coefficients-de-pacing-personnels-pacingpersonal).
 
 ## Dépense énergétique prévue par section

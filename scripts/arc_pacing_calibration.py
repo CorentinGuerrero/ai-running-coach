@@ -74,10 +74,12 @@ FACTOR_KEY = {"night": "night_penalty_pct", "technicity": "technicity_scale",
               "heat": "heat_hot_factor", "altitude": "altitude_scale"}
 DEFAULTS = {"night_penalty_pct": RP.NIGHT_BASE_PENALTY_PCT, "technicity_scale": 1.0,
             "heat_hot_factor": H.HEAT_HOT_TIME_FACTOR, "altitude_scale": 1.0}
-# Facteurs d'altitude : `altitude_factor` (#185) n'est pas lu par le moteur de cette branche ; la
-# valeur personnelle est stockée pour #185 mais n'est PAS appliquée tant que ce moteur est absent.
-ALTITUDE_ENGINE_NOTE = ("l'altitude du plan (#185) est lue si `altitude_factor` est présent ; le moteur de "
-                        "pacing de cette version n'applique pas encore `altitude_scale`")
+# Altitude (#185) : `altitude_scale` multiplie le SURCOÛT (`altitude_factor` − 1) de chaque section
+# dans `arc_race_pacing.apply_altitude_penalty` — exactement la grandeur estimée ici (rapport surcoût
+# réel / surcoût prévu, ramené à l'échelle déjà utilisée par le plan, `pacing_personal`).
+ALTITUDE_ENGINE_NOTE = ("`altitude_scale` multiplie le surcoût d'altitude (`altitude_factor` − 1) de chaque "
+                        "section dans `arc_race_pacing.py` (#185) ; `--altitude-loss-pct` en ligne de "
+                        "commande prime sur lui")
 
 ASSUMPTIONS = {
     "method": (
@@ -593,8 +595,7 @@ def calibrate(plan: dict, debrief: dict, *, scenario: str, existing: Optional[di
         "config_patch": {"section": PP.SECTION, "values": to_write,
                          "evidence": [PP.format_evidence(r) for r in merged] if new_records else []},
         "applied": False,
-        "warnings": list(existing.get("warnings") or []) + [
-            "ALTITUDE : " + ALTITUDE_ENGINE_NOTE] * (1 if "altitude_scale" in to_write else 0),
+        "warnings": list(existing.get("warnings") or []),
         "assumptions": ASSUMPTIONS,
     }
     return report

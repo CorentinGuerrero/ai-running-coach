@@ -463,6 +463,26 @@ rattrapage — sur un FIT déjà téléchargé avant #151, relancer
 balance : elle reste alors absente, jamais remplacée par 50 %. Sans inspection, la carte invite à
 en demander une au coach.
 
+### Exposition à l'altitude
+
+**Combien de temps ai-je passé en altitude ?**
+
+Une carte sous « Foulée » dans la vue Santé (#185), elle aussi indépendante du bilan matinal. Pour
+les fenêtres de **14 et 28 jours**, le nombre de séances et le temps passés **au-dessus de
+1 500 m et de 2 000 m**, et l'altitude maximale atteinte, d'après les échantillons FIT. Une séance
+compte à un seuil à partir de 5 minutes au-dessus (un col franchi 30 s ne compte pas). Seules les séances de terrain
+sont prises en compte (salle, piscine et repos exclus).
+
+**Comment la lire** : c'est un **indicateur d'exposition**, pas un modèle d'acclimatation. L'altitude
+barométrique ou GPS est approximative près d'un seuil. Une séance **sans altitude** (échantillons FIT
+absents, capteur muet) est comptée à part (« sans altitude, non comptée »), jamais comme une
+exposition nulle. Cette exposition réduit légèrement la pénalité d'altitude du plan de course
+quand la course a lieu dans les 14 jours (approximation du projet, voir [l'agent Course Strategist](../agents/course-strategist.md#penalite-daltitude-185)).
+
+**Si c'est vide** : sans séance sur la fenêtre, ou sans aucune altitude dans les séances, la carte
+l'écrit et pointe vers `skills/fit-download` ; rien n'est inventé. Hors tableau de bord :
+`python3 scripts/arc_index.py altitude-exposure [--days N]` (`/api/altitude-exposure`).
+
 ## Semaine
 
 **Qu'est-ce qui était prévu, qu'est-ce qui a été fait ?**
@@ -1250,7 +1270,7 @@ nourrit :
 | Aujourd'hui | `medical/<date>_health.md`, `medical/<date>_meteo.md`, `planning/Semaine_<lundi>.md` | synchronisation, coach |
 | Forme & charge | `activities/*.md`, `planning/Runner_Profile.md` | synchronisation, vous |
 | Analyse | `activities/fit/*.json`, `planning/Runner_Profile.md` | skill `fit-download`, synchronisation |
-| Santé | `medical/<date>_health.md` ; carte Foulée : `activities/fit/*.json`, `gear/*_inspection.md` | synchronisation, coach, skill `fit-download` |
+| Santé | `medical/<date>_health.md` ; cartes Foulée et Exposition à l'altitude : `activities/fit/*.json`, `gear/*_inspection.md` (Foulée) | synchronisation, coach, skill `fit-download` |
 | Semaine | `planning/Semaine_<lundi>.md`, `activities/*.md` | coach, synchronisation |
 | Séances | `activities/<date>_<sport>.md` | synchronisation |
 | Performance | `activities/*.md`, `planning/Runner_Profile.md`, `planning/active_objective.md` | synchronisation, vous |
