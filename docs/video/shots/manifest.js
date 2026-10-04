@@ -608,6 +608,96 @@ window.ARC_SHOTS = {
    }
   },
   {
+   "name": "roadbook",
+   "file": "roadbook.webp",
+   "view": "Roadbook",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Roadbook de l'Ultra des Crêtes (scénario réaliste, départ 16 h) : profil relatif avec la nuit hachurée, sections, passages à l'heure locale.",
+   "boxes": {
+    "entete": [
+     271.4,
+     355.5,
+     961.2,
+     89.0
+    ],
+    "profil": [
+     271.4,
+     450.8,
+     961.2,
+     252.9
+    ]
+   }
+  },
+  {
+   "name": "roadbook-sections",
+   "file": "roadbook-sections.webp",
+   "view": "Roadbook",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Roadbook : passages, barrières avec leur marge (« TENDU »), ravitos avec ce qu'on y prend, drapeau nuit et frontale.",
+   "boxes": {
+    "sections": [
+     272.4,
+     111.3,
+     959.2,
+     542.6
+    ],
+    "barriere-tendue": [
+     796.3,
+     268.2,
+     128.3,
+     101.5
+    ],
+    "a-prendre": [
+     934.2,
+     176.0,
+     287.9,
+     44.7
+    ],
+    "passage": [
+     649.0,
+     268.2,
+     147.3,
+     101.5
+    ]
+   }
+  },
+  {
+   "name": "roadbook-materiel",
+   "file": "roadbook-materiel.webp",
+   "view": "Roadbook",
+   "viewport": "desktop 1440×900 @2x",
+   "width": 1440,
+   "height": 900,
+   "scale": 2,
+   "description": "Roadbook : matériel obligatoire en liste à cocher, statut contre l'inventaire, urgence et consignes.",
+   "boxes": {
+    "materiel": [
+     271.4,
+     600.6,
+     464.6,
+     186.7
+    ],
+    "manquant": [
+     271.4,
+     759.2,
+     464.6,
+     28.0
+    ],
+    "consignes": [
+     271.4,
+     556.9,
+     961.2,
+     230.4
+    ]
+   }
+  },
+  {
    "name": "mobile-aujourdhui",
    "file": "mobile-aujourdhui.webp",
    "view": "Aujourd'hui",

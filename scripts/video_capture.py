@@ -90,6 +90,9 @@ def log(msg: str) -> None:
 # route : hash ; wait : sélecteur à attendre ; scroll : (sélecteur, texte) amené en haut ; full : page entière ;
 # boxes : nom -> {sel, text?, closest?, nth?}
 
+ULTRA_ROUTE = "roadbook?plan=planning/2026-09-27_ultra_ultra-des-cretes.md&scenario=realistic"   # épisode 14
+
+
 def B(sel, text=None, closest=None, nth=0):
     return {"sel": sel, "text": text, "closest": closest, "nth": nth}
 
@@ -165,6 +168,21 @@ SHOTS = [
          boxes={"rapport": B(".prose"), "tableau": B(".prose table")}),
     dict(name="performance", view="Performance", route="performance", wait="main h2",
          desc="Performance : VO2max estimée et indices.", boxes={"premier-bloc": B("main section.band")}),
+    dict(name="roadbook", view="Roadbook", route=ULTRA_ROUTE, wait=".rb-sheet.is-active .rb-table",
+         desc="Roadbook de l'Ultra des Crêtes (scénario réaliste, départ 16 h) : profil relatif avec la nuit hachurée, sections, passages à l'heure locale.",
+         boxes={"entete": B(".rb-sheet.is-active .rb-head"), "profil": B(".rb-sheet.is-active .rb-profile"),
+                "sections": B(".rb-sheet.is-active .rb-table")}),
+    dict(name="roadbook-sections", view="Roadbook", route=ULTRA_ROUTE, wait=".rb-sheet.is-active .rb-table",
+         scroll=(".rb-sheet.is-active .rb-table-wrap", None, 110),
+         desc="Roadbook : passages, barrières avec leur marge (« TENDU »), ravitos avec ce qu'on y prend, drapeau nuit et frontale.",
+         boxes={"sections": B(".rb-sheet.is-active .rb-table"), "nuit": B(".rb-sheet.is-active .rb-night-tag"),
+                "barriere-tendue": B(".rb-sheet.is-active .rb-cut--tendu", closest="td"),
+                "a-prendre": B(".rb-sheet.is-active .rb-take"), "passage": B(".rb-sheet.is-active tr.rb-row--night td.num", nth=2)}),
+    dict(name="roadbook-materiel", view="Roadbook", route=ULTRA_ROUTE, wait=".rb-sheet.is-active .rb-gearlist",
+         scroll=(".rb-sheet.is-active .rb-cols", None, 110),
+         desc="Roadbook : matériel obligatoire en liste à cocher, statut contre l'inventaire, urgence et consignes.",
+         boxes={"materiel": B(".rb-sheet.is-active .rb-gearlist"), "manquant": B(".rb-sheet.is-active .rb-gear--bad"),
+                "consignes": B(".rb-sheet.is-active .rb-cols")}),
 ]
 
 

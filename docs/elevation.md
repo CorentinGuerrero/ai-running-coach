@@ -2,6 +2,24 @@
 
 > **Fonction optionnelle, désactivée par défaut (#176).** Aucune coordonnée ne quitte votre machine tant que vous ne l'avez pas demandé.
 
+<!-- arc-video:ultra -->
+<div class="arc-video-card" markdown>
+
+[![La nuit, la roche et le roadbook](video/ultra/poster.jpg)](video/ultra/index.html)
+
+<div markdown>
+
+<span class="arc-video__meta">En vidéo · Étape 14 · 1 min 49</span>
+
+**[La nuit, la roche et le roadbook](video/ultra/index.html)** — Préparer un ultra : la nuit calculée sur place (crépuscule, frontale, heure d'hiver), le dénivelé corrigé par un modèle de terrain, la technicité du sentier, puis le roadbook imprimable avec passages, barrières et matériel obligatoire.
+
+[Regarder](video/ultra/index.html) · [English](video/ultra/index.html?lang=en) · [Toutes les vidéos](videos.md)
+
+</div>
+
+</div>
+<!-- /arc-video -->
+
 Le D+ alimente presque tout : GAP, modèle pente → allure, VAM, descente, durabilité, énergie, pacing de course, évaluation de parcours. Or l'altitude d'un GPX est bruitée (GPS seul) et celle d'un FIT dérive (baromètre) ; `scripts/arc_elevation.py` lisse le signal mais ne peut pas corriger un biais. La correction rééchantillonne la trace sur un **modèle numérique de terrain** (MNT) public.
 
 ## Sources de données
