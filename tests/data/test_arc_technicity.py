@@ -314,5 +314,198 @@ class TestResolver(unittest.TestCase):
         self.assertEqual(out["osm_status"], "ok")
 
 
+# ---------------------------------------------------------------------------
+# Revue de code #186
+# ---------------------------------------------------------------------------
+
+def _brute_nearest(lat, lon, ways, radius_m=T.MATCH_RADIUS_M):
+    """Référence exhaustive (implémentation d'avant l'index) : le dernier chemin à égalité l'emporte."""
+    best, best_d = None, radius_m
+    for way in ways:
+        g = way["geom"]
+        for a, b in zip(g, g[1:]):
+            d = T._point_segment_m(lat, lon, a[0], a[1], b[0], b[1])
+            if d <= best_d:
+                best, best_d = way, d
+    return best
+
+
+class TestSpatialIndex(unittest.TestCase):
+    def test_index_matches_brute_force(self):
+        import random
+        rnd = random.Random(186)
+        ways = []
+        for k in range(300):
+            la, lo = 45.9 + rnd.random() * 0.02, 6.85 + rnd.random() * 0.02
+            ways.append({"id": k, "tags": {"highway": "path"},
+                         "geom": [(la + j * rnd.uniform(-3e-4, 3e-4), lo + j * rnd.uniform(-3e-4, 3e-4))
+                                  for j in range(rnd.randint(2, 12))]})
+        idx = T.build_index(ways)
+        hits = 0
+        for _ in range(2000):
+            la, lo = 45.9 + rnd.random() * 0.02, 6.85 + rnd.random() * 0.02
+            got = T.nearest_way(la, lo, ways, index=idx)
+            ref = _brute_nearest(la, lo, ways)
+            self.assertIs(got, ref)
+            hits += got is not None
+        self.assertGreater(hits, 100)  # le test apparie réellement des points
+
+    def test_long_way_spanning_many_cells(self):
+        way = {"id": 1, "tags": {"highway": "track"}, "geom": [(45.0, 6.0), (45.05, 6.05)]}  # ~7 km, 1 segment
+        self.assertIs(T.nearest_way(45.025, 6.025, [way]), way)
+
+
+class _HTTP:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+    def read(self):
+        return json.dumps(self.body).encode("utf-8")
+
+
+def _http_error(code, retry_after=None):
+    import email.message
+    import urllib.error
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return urllib.error.HTTPError(T.OVERPASS_URL, code, "x", headers, None)
+
+
+class TestOverpassRobustness(unittest.TestCase):
+    def _opener(self, script):
+        calls = []
+
+        def opener(req, timeout=None):
+            calls.append(req.get_header("User-agent"))
+            item = script.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return _HTTP(item)
+        return opener, calls
+
+    def test_retries_429_and_504_then_succeeds(self):
+        opener, calls = self._opener([_http_error(429, retry_after=7), _http_error(504), {"elements": []}])
+        sleeps = []
+        out = T._default_fetcher("q", sleep=sleeps.append, opener=opener)
+        self.assertEqual(out, {"elements": []})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(sleeps, [7.0, T.OVERPASS_RETRY_BASE_S * 2])  # Retry-After, puis exponentiel
+        self.assertTrue(all(ua == T.USER_AGENT for ua in calls))
+
+    def test_gives_up_after_bounded_retries(self):
+        opener, calls = self._opener([_http_error(429, retry_after=3600)] * 5)
+        sleeps = []
+        with self.assertRaises(T.OverpassError):
+            T._default_fetcher("q", sleep=sleeps.append, opener=opener)
+        self.assertEqual(len(calls), T.OVERPASS_RETRIES + 1)
+        self.assertTrue(all(s <= T.OVERPASS_RETRY_MAX_WAIT_S for s in sleeps))
+
+    def test_client_error_is_not_retried(self):
+        opener, calls = self._opener([_http_error(400), {"elements": []}])
+        with self.assertRaises(T.OverpassError):
+            T._default_fetcher("q", sleep=lambda _s: None, opener=opener)
+        self.assertEqual(len(calls), 1)
+
+    def test_runtime_error_remark_is_failure_and_never_cached(self):
+        pts = _ultra_pts()
+        bad = {"elements": [], "remark": 'runtime error: Query timed out in "query" at line 1 after 61 seconds.'}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(T.OverpassError):
+                T.fetch_ways(pts, cache_dir=Path(d), fetcher=lambda _q: bad, sleep=lambda _s: None)
+            self.assertEqual(list(Path(d).glob("*.json")), [])
+            # un cache empoisonné (version antérieure) ou tronqué est refait, jamais lu comme valide
+            good = {"elements": [_way(7, pts, 0, 91, {"highway": "path"})]}
+            q = T.build_query(T.chunk_bboxes(T.sample_track(pts))[0])
+            key = hashlib.sha256(q.encode("utf-8")).hexdigest()[:24]
+            (Path(d) / f"{key}.json").write_text(json.dumps(bad))
+            calls = []
+            ways, info = T.fetch_ways(pts, cache_dir=Path(d), fetcher=lambda q_: calls.append(q_) or good,
+                                      sleep=lambda _s: None)
+            self.assertEqual(info["cache_hits"], 0)
+            self.assertEqual(len(calls), info["chunks"])
+            self.assertEqual(len(ways), 1)
+            self.assertEqual(list(Path(d).glob("*.tmp")), [])
+
+    def test_payload_without_elements_is_failure(self):
+        with self.assertRaises(T.OverpassError):
+            T.check_payload({"remark": "x"})
+
+
+class TestBaseline(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.pts = _ultra_pts()
+        cls.ways = T.parse_ways({"elements": [
+            _way(1, cls.pts, 0, 45, {"highway": "path", "sac_scale": "mountain_hiking"}),
+            _way(2, cls.pts, 45, 91, {"highway": "path", "sac_scale": "alpine_hiking"})]})
+        cls.segs = RP.segment_course(cls.pts, target_segment_m=750.0)
+
+    def test_parse_baseline(self):
+        self.assertEqual(T.parse_baseline(None), (1.0, ""))
+        self.assertEqual(T.parse_baseline("mountain_hiking"), (1.06, "sac_scale=mountain_hiking"))
+        self.assertEqual(T.parse_baseline("1,1"), (1.1, "1.1"))
+        for bad in ("0.9", "2.5", "nan", "trottoir"):
+            with self.assertRaises(T.TechnicityError):
+                T.parse_baseline(bad)
+
+    def test_rebase_relative_to_usual_terrain_floor_one(self):
+        abs_coefs = T.section_coefficients(self.segs, self.pts, ways=self.ways)
+        rel = T.section_coefficients(self.segs, self.pts, ways=self.ways, osm_baseline=1.08)
+        easy, hard = rel[2], rel[-3]
+        self.assertEqual(easy["coef"], 1.0)  # T2 + chemin, l'athlète s'entraîne sur T2 : aucun surcoût
+        self.assertAlmostEqual(easy["osm_coef"], abs_coefs[2]["coef"], places=3)
+        self.assertAlmostEqual(hard["coef"], round(abs_coefs[-3]["coef"] / 1.08, 3), places=3)
+        self.assertNotIn("osm_coef", abs_coefs[2])
+        # une déclaration est déjà relative : jamais rebasée
+        dec = T.section_coefficients(self.segs, self.pts, ways=self.ways, osm_baseline=1.3,
+                                     declared=[{"km_start": 0, "km_end": 5, "coef": 1.2, "note": ""}])
+        self.assertEqual(dec[0]["coef"], 1.2)
+
+    def test_plan_warns_without_baseline_only(self):
+        tech = {"declared": None, "ways": self.ways, "osm_requested": True, "osm_status": "ok",
+                "osm_note": None, "osm_info": {}}
+        no_base = RP.build_race_plan(self.pts, PERSONAL_BINS, **_kwargs(), technicity=tech)
+        with_base = RP.build_race_plan(self.pts, PERSONAL_BINS, **_kwargs(), technicity={
+            **tech, "osm_baseline": 1.06, "osm_baseline_label": "sac_scale=mountain_hiking"})
+        self.assertTrue(any("--technicity-baseline" in w for w in no_base["warnings"]))
+        self.assertFalse(any("--technicity-baseline" in w for w in with_base["warnings"]))
+        self.assertEqual(no_base["technicity"]["osm"]["baseline"], {"coef": 1.0, "source": "default"})
+        self.assertEqual(with_base["technicity"]["osm"]["baseline"]["source"], "declared")
+        for s in RP.SCENARIOS:
+            self.assertLess(with_base["totals"]["time_s"][s], no_base["totals"]["time_s"][s])
+
+    def test_resolver_baseline_requires_osm(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                RP._resolve_technicity(None, [], Path(d), "mountain_hiking")
+            f = Path(d) / "t.json"
+            f.write_text(json.dumps({"sections": [{"km_start": 0, "km_end": 5, "coef": 1.2}]}))
+            with self.assertRaises(ValueError):
+                RP._resolve_technicity([str(f)], [], Path(d), "mountain_hiking")
+
+
+class TestDeclaredOfficialKm(unittest.TestCase):
+    def test_declared_km_rescaled_like_aid_stations(self):
+        pts = _ultra_pts()
+        measured = RP.segment_course(pts, target_segment_m=750.0)[-1]["km_end"] * 1000.0
+        decl = [{"km_start": 40.0, "km_end": 50.0, "coef": 1.3, "note": "pierrier"}]
+        tech = {"declared": decl, "ways": None, "osm_requested": False}
+        # km officiels = moitié des km mesurés : km 40-50 officiels = km 80-90 mesurés
+        plan = RP.build_race_plan(pts, PERSONAL_BINS, **_kwargs(), technicity=tech,
+                                  official_distance_m=measured / 2.0)
+        far = [s for s in plan["segments"] if s["km_start"] >= 81 and s["km_end"] <= 89]
+        self.assertTrue(far and all(s["technicity"]["source"] == "declared" for s in far))
+        mid = [s for s in plan["segments"] if 41 <= s["km_start"] and s["km_end"] <= 49]
+        self.assertTrue(mid and all(s["technicity"]["source"] == "none" for s in mid))
+        self.assertEqual(decl[0]["km_start"], 40.0)  # l'entrée de l'appelant n'est pas modifiée
+
+
 if __name__ == "__main__":
     unittest.main()

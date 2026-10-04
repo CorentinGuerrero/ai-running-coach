@@ -185,9 +185,16 @@ pondération par la pente (×0,7 en montée, ×1,0 à plat, jusqu'à ×1,5 en de
 raide) sont des **approximations du projet** (`assumptions.technicity`), pas des
 mesures. Le facteur est le même pour les trois scénarios (l'ordre
 `prudent ≥ réaliste ≥ ambitieux` est donc conservé) et s'applique avant la nuit.
-Attention : le modèle personnel a appris sur ton terrain habituel — le
-coefficient exprime l'écart avec CE terrain. OSM décrit le chemin, pas son état
-du jour.
+Attention : le modèle personnel a appris sur ton terrain habituel — un
+coefficient déclaré exprime l'écart avec CE terrain. La table OSM, elle, part
+d'un chemin facile : indique ton terrain d'entraînement habituel avec
+`--technicity-baseline` (ex. `mountain_hiking` si tu t'entraînes déjà sur
+sentiers de montagne, ou un nombre de 1,0 à 1,8) pour que seul l'écart soit
+compté ; sans elle, un avertissement rappelle que la pénalité est surestimée.
+Les km déclarés sont des km officiels, rééchelonnés comme les ravitos avec
+`--official-distance-m`. Overpass occupé (429/504) : deux nouvelles tentatives
+espacées, puis « indisponible » ; le cache `.arc/overpass/` n'expire pas
+(le supprimer pour rafraîchir). OSM décrit le chemin, pas son état du jour.
 
 La sortie ajoute `technicity` par section (`coef`, `effective_factor`, `source`,
 `tags`) et un résumé au niveau du plan. Sans `--technicity`, rien ne change.

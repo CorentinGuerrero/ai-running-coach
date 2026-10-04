@@ -36,6 +36,12 @@ OVERPASS_TIMEOUT_S = 60
 # Politesse envers l'instance publique : une requête à la fois, pause entre deux requêtes réseau
 # (les réponses en cache n'attendent pas).
 OVERPASS_PAUSE_S = 1.5
+# 429 (quota par IP) et 502/503/504 (instance surchargée, délai dépassé) sont TRANSITOIRES sur
+# l'instance publique : quelques nouvelles tentatives espacées avant de conclure « indisponible ».
+OVERPASS_RETRY_STATUS = (429, 502, 503, 504)
+OVERPASS_RETRIES = 2
+OVERPASS_RETRY_BASE_S = 5.0
+OVERPASS_RETRY_MAX_WAIT_S = 30.0
 
 # Rayon d'appariement point de trace -> chemin OSM (m) et marge de la boîte de requête (m).
 MATCH_RADIUS_M = 20.0
@@ -148,6 +154,38 @@ def effective_factor(coef: float, grade_mean_pct: Optional[float]) -> float:
     """Multiplicateur de temps réellement appliqué : `1 + (coef - 1) × poids(pente)`. Un coef
     sous 1 (route déclarée) est pondéré de la même façon (plus de gain en descente roulante)."""
     return 1.0 + (coef - 1.0) * grade_weight(grade_mean_pct)
+
+
+# ---------------------------------------------------------------------------
+# Référence : terrain HABITUEL de l'athlète (ancrage des coefficients OSM)
+# ---------------------------------------------------------------------------
+
+def parse_baseline(value: Optional[str]) -> Tuple[float, str]:
+    """`--technicity-baseline` -> `(coef de référence, libellé)`. Accepte un nombre dans
+    [1.0, COEF_MAX] ou une valeur `sac_scale` (ex. `mountain_hiking` -> 1.06) décrivant le terrain
+    sur lequel l'athlète s'entraîne d'habitude. Absent -> `(1.0, "")` (référence = chemin facile).
+    Lève `TechnicityError` sur une valeur inconnue (jamais devinée)."""
+    if value is None or not str(value).strip():
+        return 1.0, ""
+    raw = str(value).strip().lower()
+    if raw in SAC_SCALE_EXCESS:
+        return 1.0 + SAC_SCALE_EXCESS[raw], f"sac_scale={raw}"
+    try:
+        num = float(raw.replace(",", "."))
+    except ValueError:
+        raise TechnicityError(
+            f"--technicity-baseline : « {value} » n'est ni un nombre ni une valeur sac_scale "
+            f"({', '.join(SAC_SCALE_EXCESS)})")
+    if not (math.isfinite(num) and 1.0 <= num <= COEF_MAX):
+        raise TechnicityError(f"--technicity-baseline : {num} hors de [1.0, {COEF_MAX}]")
+    return num, f"{num:g}"
+
+
+def rebase(coef: float, baseline: float) -> float:
+    """Coefficient OSM (absolu, 1.0 = chemin facile) -> relatif au terrain habituel de l'athlète,
+    déjà contenu dans son modèle pente -> allure. Plancher 1.0 : un parcours plus facile que
+    l'entraînement ne donne aucun crédit de vitesse tiré de tags incertains."""
+    return max(1.0, coef / baseline) if baseline > 0 else coef
 
 
 # ---------------------------------------------------------------------------
@@ -269,14 +307,51 @@ def build_query(bbox: Tuple[float, float, float, float]) -> str:
             f'way["highway"~"^({OVERPASS_HIGHWAY_RE})$"]({s},{w},{n},{e});out tags geom;')
 
 
-def _default_fetcher(query: str) -> dict:
-    data = urllib.parse.urlencode({"data": query}).encode("utf-8")
-    req = urllib.request.Request(OVERPASS_URL, data=data, headers={"User-Agent": USER_AGENT})
+def _retry_delay_s(exc: urllib.error.HTTPError, attempt: int) -> float:
+    """Pause avant une nouvelle tentative : `Retry-After` (secondes) s'il est fourni, sinon
+    attente exponentielle ; toujours plafonnée à `OVERPASS_RETRY_MAX_WAIT_S`."""
     try:
-        with urllib.request.urlopen(req, timeout=OVERPASS_TIMEOUT_S + 10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        raise OverpassError(str(exc))
+        hinted = float((exc.headers or {}).get("Retry-After") or "")
+    except (TypeError, ValueError):
+        hinted = None
+    wait = hinted if hinted is not None and hinted >= 0 else OVERPASS_RETRY_BASE_S * (2 ** attempt)
+    return min(OVERPASS_RETRY_MAX_WAIT_S, wait)
+
+
+def check_payload(payload) -> dict:
+    """Refuse une réponse Overpass inexploitable. Overpass répond HTTP 200 avec un champ `remark`
+    (« runtime error: Query timed out… », « out of memory ») et des `elements` vides ou TRONQUÉS
+    quand la requête échoue côté serveur : la traiter comme un succès mettrait en cache, pour
+    toujours, un tronçon vide (aucun coefficient sur cette partie du parcours)."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
+        raise OverpassError("réponse Overpass inattendue (pas de liste `elements`)")
+    remark = str(payload.get("remark") or "")
+    if "error" in remark.lower():
+        raise OverpassError(f"Overpass : {remark[:160]}")
+    return payload
+
+
+def _default_fetcher(query: str, *, sleep: Callable[[float], None] = time.sleep,
+                     opener: Callable = urllib.request.urlopen) -> dict:
+    """POST de la requête à `OVERPASS_URL`. 429 (quota) / 502-504 (surcharge, délai) : jusqu'à
+    `OVERPASS_RETRIES` nouvelles tentatives espacées (politesse envers l'instance publique) ; toute
+    autre erreur, ou l'échec de la dernière tentative, lève `OverpassError`."""
+    data = urllib.parse.urlencode({"data": query}).encode("utf-8")
+    attempt = 0
+    while True:
+        req = urllib.request.Request(OVERPASS_URL, data=data, headers={"User-Agent": USER_AGENT})
+        try:
+            with opener(req, timeout=OVERPASS_TIMEOUT_S + 10) as resp:
+                return check_payload(json.loads(resp.read().decode("utf-8")))
+        except urllib.error.HTTPError as exc:
+            exc.close()  # libère la connexion avant d'attendre / de conclure
+            if exc.code in OVERPASS_RETRY_STATUS and attempt < OVERPASS_RETRIES:
+                sleep(_retry_delay_s(exc, attempt))
+                attempt += 1
+                continue
+            raise OverpassError(f"HTTP {exc.code}")
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise OverpassError(str(exc))
 
 
 def parse_ways(payload: dict) -> List[dict]:
@@ -310,19 +385,23 @@ def fetch_ways(pts: Sequence[dict], *, cache_dir: Optional[Path] = None,
         cache_file = (Path(cache_dir) / f"{key}.json") if cache_dir else None
         if cache_file and cache_file.is_file():
             try:
-                payload = json.loads(cache_file.read_text(encoding="utf-8"))
+                payload = check_payload(json.loads(cache_file.read_text(encoding="utf-8")))
                 hits += 1
-            except (OSError, ValueError):
+            except (OSError, ValueError, OverpassError):  # cache illisible/invalide -> refait la requête
                 payload = None
         if payload is None:
             if requests:
                 sleep(OVERPASS_PAUSE_S)
-            payload = fetch(query)
+            payload = check_payload(fetch(query))
             requests += 1
             if cache_file:
                 try:
                     cache_file.parent.mkdir(parents=True, exist_ok=True)
-                    cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                    # écriture atomique : un fichier tronqué (arrêt brutal) ne doit jamais passer pour
+                    # une réponse valide au run suivant
+                    tmp = cache_file.with_suffix(".tmp")
+                    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                    tmp.replace(cache_file)
                 except OSError:
                     pass  # cache best-effort : jamais bloquant
         for way in parse_ways(payload):
@@ -348,31 +427,56 @@ def _point_segment_m(plat, plon, alat, alon, blat, blon) -> float:
     return math.hypot(ax + t * dx, ay + t * dy)
 
 
-def nearest_way(lat: float, lon: float, ways: Sequence[dict], radius_m: float = MATCH_RADIUS_M
-                 ) -> Optional[dict]:
-    best, best_d = None, radius_m
-    deg = radius_m / 100_000.0
-    for way in ways:
+# Index spatial : grille de cellules de `GRID_DEG` degrés -> segments de chemins qui la touchent.
+# Sans index, chaque point de trace parcourt TOUS les chemins (un ultra = des milliers de points ×
+# des milliers de chemins : plusieurs minutes) ; avec, seuls les segments des cellules voisines.
+GRID_DEG = 0.002  # ~220 m en latitude, toujours > MATCH_RADIUS_M
+
+
+def build_index(ways: Sequence[dict]) -> Dict[Tuple[int, int], List[tuple]]:
+    """Grille `(i, j) -> [(rang du chemin, chemin, A, B), ...]` ; le rang départage les égalités de
+    distance exactement comme un parcours de la liste (le dernier chemin à égalité l'emporte)."""
+    grid: Dict[Tuple[int, int], List[tuple]] = {}
+    for rank, way in enumerate(ways):
         g = way["geom"]
-        # pré-filtre boîte (rapide) avant les distances exactes
-        if (lat < min(p[0] for p in g) - deg or lat > max(p[0] for p in g) + deg
-                or lon < min(p[1] for p in g) - 2 * deg or lon > max(p[1] for p in g) + 2 * deg):
-            continue
         for a, b in zip(g, g[1:]):
-            d = _point_segment_m(lat, lon, a[0], a[1], b[0], b[1])
-            if d <= best_d:
-                best, best_d = way, d
+            i0, i1 = sorted((math.floor(a[0] / GRID_DEG), math.floor(b[0] / GRID_DEG)))
+            j0, j1 = sorted((math.floor(a[1] / GRID_DEG), math.floor(b[1] / GRID_DEG)))
+            for i in range(i0, i1 + 1):
+                for j in range(j0, j1 + 1):
+                    grid.setdefault((i, j), []).append((rank, way, a, b))
+    return grid
+
+
+def nearest_way(lat: float, lon: float, ways: Sequence[dict], radius_m: float = MATCH_RADIUS_M,
+                index: Optional[dict] = None) -> Optional[dict]:
+    """Chemin le plus proche du point à moins de `radius_m` (ou `None`). `index` (de `build_index`)
+    évite le parcours exhaustif ; même résultat avec ou sans."""
+    grid = index if index is not None else build_index(ways)
+    # cellules voisines couvrant le rayon (en longitude, la cellule est plus étroite en mètres)
+    di = int(math.ceil(radius_m / (111_320.0 * GRID_DEG)))
+    dj = int(math.ceil(radius_m / (111_320.0 * max(0.01, math.cos(math.radians(lat))) * GRID_DEG)))
+    ci, cj = math.floor(lat / GRID_DEG), math.floor(lon / GRID_DEG)
+    best, best_key = None, (radius_m, -1)
+    for i in range(ci - di, ci + di + 1):
+        for j in range(cj - dj, cj + dj + 1):
+            for rank, way, a, b in grid.get((i, j), ()):
+                d = _point_segment_m(lat, lon, a[0], a[1], b[0], b[1])
+                if d < best_key[0] or (d == best_key[0] and rank > best_key[1]):
+                    best, best_key = way, (d, rank)
     return best
 
 
-def osm_for_segment(samples: Sequence[dict], ways: Sequence[dict], km_start: float, km_end: float
-                     ) -> Optional[dict]:
+def osm_for_segment(samples: Sequence[dict], ways: Sequence[dict], km_start: float, km_end: float,
+                     index: Optional[dict] = None) -> Optional[dict]:
     """Coefficient dérivé d'OSM pour la section `[km_start, km_end]` (km de la trace) : moyenne,
     pondérée par la distance, des coefficients des points appariés ; `None` si la part appariée
     est sous `MIN_OSM_COVERAGE`. Rend `{coef, coverage, tags}`."""
     inside = [s for s in samples if km_start * 1000.0 <= s["d_m"] <= km_end * 1000.0 + 1e-6]
     if not inside:
         return None
+    if index is None:
+        index = build_index(ways)
     total_w = matched_w = acc = 0.0
     tag_w: Dict[str, float] = {}
     for i, s in enumerate(inside):
@@ -380,7 +484,7 @@ def osm_for_segment(samples: Sequence[dict], ways: Sequence[dict], km_start: flo
         hi = inside[i + 1]["d_m"] if i + 1 < len(inside) else s["d_m"]
         w = max(1.0, (hi - lo) / 2.0) if len(inside) > 1 else 1.0
         total_w += w
-        way = nearest_way(s["lat"], s["lon"], ways)
+        way = nearest_way(s["lat"], s["lon"], ways, index=index)
         if way is None:
             continue
         coef, used = coef_from_tags(way["tags"])
@@ -400,10 +504,15 @@ def osm_for_segment(samples: Sequence[dict], ways: Sequence[dict], km_start: flo
 
 def section_coefficients(segments: Sequence[dict], pts: Sequence[dict], *,
                           declared: Optional[Sequence[dict]] = None,
-                          ways: Optional[Sequence[dict]] = None) -> List[dict]:
-    """Un dict par segment : `{coef, effective_factor, source, tags, coverage_pct?}` avec
-    `source` in `declared | osm | none`. `none` = coefficient 1.0 (rien d'inventé)."""
+                          ways: Optional[Sequence[dict]] = None,
+                          osm_baseline: float = 1.0) -> List[dict]:
+    """Un dict par segment : `{coef, effective_factor, source, tags, coverage_pct?, osm_coef?}` avec
+    `source` in `declared | osm | none`. `none` = coefficient 1.0 (rien d'inventé). Un coefficient
+    OSM est rapporté au terrain habituel (`osm_baseline`, voir `rebase`) ; la valeur absolue tirée
+    des tags reste dans `osm_coef` quand la référence n'est pas 1.0. Une déclaration est déjà
+    relative (1.0 = comme à l'entraînement) : jamais rebasée."""
     samples = sample_track(pts) if ways else []
+    index = build_index(ways) if ways else None
     out = []
     for seg in segments:
         k0, k1 = seg["km_start"], seg["km_end"]
@@ -412,10 +521,12 @@ def section_coefficients(segments: Sequence[dict], pts: Sequence[dict], *,
         if dec is not None and dec[1] >= MIN_DECLARED_COVERAGE:
             entry = {"coef": dec[0], "source": "declared", "tags": dec[2], "coverage_pct": round(dec[1] * 100, 1)}
         elif ways:
-            osm = osm_for_segment(samples, ways, k0, k1)
+            osm = osm_for_segment(samples, ways, k0, k1, index=index)
             if osm is not None:
-                entry = {"coef": osm["coef"], "source": "osm", "tags": osm["tags"],
+                entry = {"coef": rebase(osm["coef"], osm_baseline), "source": "osm", "tags": osm["tags"],
                          "coverage_pct": round(osm["coverage"] * 100, 1)}
+                if abs(osm_baseline - 1.0) > 1e-12:
+                    entry["osm_coef"] = round(osm["coef"], 3)
         entry["coef"] = round(entry["coef"], 3)
         entry["effective_factor"] = round(effective_factor(entry["coef"], seg.get("grade_mean_pct")), 4)
         out.append(entry)

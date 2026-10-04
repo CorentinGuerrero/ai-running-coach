@@ -189,7 +189,14 @@ déclarez : `{"sections": [{"km_start": 12, "km_end": 18, "coef": 1.25, "note":
 `.arc/overpass/`). **Demande à l'athlète** s'il connaît la technicité de
 sections du parcours (reconnaissance, avis) et propose `osm` ; n'envoie à
 Overpass que le GPX de la COURSE, jamais une trace d'activité personnelle. La
-déclaration l'emporte section par section. Les coefficients sont des
+déclaration l'emporte section par section (ses km sont des km officiels,
+rééchelonnés comme les ravitos avec `--official-distance-m`). **Avec `osm`,
+demande aussi sur quel terrain il s'entraîne d'habitude** et passe-le en
+`--technicity-baseline` (valeur `sac_scale` : `hiking` chemins faciles,
+`mountain_hiking` sentiers de montagne, `demanding_mountain_hiking` sentiers
+raides/rocheux… ou un nombre de 1.0 à 1.8) : son modèle personnel contient
+déjà ce terrain, la table OSM est absolue. Sans réponse, n'invente pas de
+référence : le plan l'avertit (pénalité surestimée), répète-le à l'athlète. Les coefficients sont des
 approximations du projet (`assumptions.technicity`) : le facteur est pondéré par
 la pente (descente technique plus pénalisante), identique pour les trois
 scénarios, appliqué avant la nuit. Hors ligne, `technicity.osm.status ==

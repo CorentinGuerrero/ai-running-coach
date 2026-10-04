@@ -748,7 +748,9 @@ ASSUMPTIONS = {
         "(aucune clé `technicity`, temps inchangés octet pour octet). Deux sources, la déclaration gagnant "
         "section par section : (a) **déclarée** (`--technicity fichier.json`, "
         "`{\"sections\": [{\"km_start\", \"km_end\", \"coef\", \"note\"}]}`, coef dans [0,8 ; 1,8], 1,0 = terrain "
-        "« comme à l'entraînement », 1,25 = très technique) — retenue pour un segment couvert à au moins 50 % ; "
+        "« comme à l'entraînement », 1,25 = très technique ; km OFFICIELS, rééchelonnés sur la distance "
+        "mesurée du GPX avec `--official-distance-m` comme les ravitos) — retenue pour un segment couvert à "
+        "au moins 50 % ; "
         "(b) **dérivée d'OpenStreetMap** (`--technicity osm`, RÉSEAU, jamais par défaut) : requête Overpass "
         "(`out tags geom`) des chemins `highway` (path, track, footway, steps, routes mineures) dans une boîte "
         "autour de chaque tronçon de ~8 km de la trace (marge 60 m, boîtes arrondies à ~10 m), trace "
@@ -757,7 +759,10 @@ ASSUMPTIONS = {
         "moins de 30 % de points appariés -> aucun coefficient (source `none`, 1,0), jamais une valeur "
         "inventée. Réponses mises en cache dans `<workspace>/.arc/overpass/` (une requête = un fichier) ; une "
         "requête à la fois, 1,5 s de pause entre deux requêtes réseau, User-Agent explicite (politique de "
-        "l'instance publique). **Seuls des GPX de COURSE** sont concernés : seules des boîtes englobantes "
+        "l'instance publique) ; HTTP 429/502/503/504 -> au plus 2 nouvelles tentatives (`Retry-After` ou "
+        "5 s puis 10 s, plafond 30 s) ; une réponse HTTP 200 portant une erreur d'exécution Overpass "
+        "(`remark`, ex. délai dépassé) est un ÉCHEC, jamais mise en cache. Le cache n'expire pas (les tags "
+        "OSM évoluent lentement) : supprimer `.arc/overpass/` pour rafraîchir. **Seuls des GPX de COURSE** sont concernés : seules des boîtes englobantes "
         "arrondies partent, jamais une trace d'activité personnelle. Hors ligne ou Overpass en erreur -> "
         "`technicity.osm.status = \"unavailable\"`, note explicite et avertissement, aucun coefficient OSM "
         "(tout ou rien : pas de coefficient sur la moitié d'un parcours).\n\n"
@@ -768,7 +773,9 @@ ASSUMPTIONS = {
         "/ horrible +25 % / no +35 %. `surface` : asphalt, paved, concrete, compacted, fine_gravel 0 / gravel, "
         "unpaved, ground, dirt, earth +3 % / grass +4 % / pebblestone +8 % / rock +12 % / sand, mud, snow "
         "+15 %. `tracktype` : grade1-2 0 / grade3 +3 % / grade4 +6 % / grade5 +10 %. `highway` : steps +15 % / "
-        "path +2 % / autres 0. **Combinaison** : surcoût dominant + la moitié du deuxième (les tags sont "
+        "path +2 % / autres 0. Ordre de grandeur seulement : en T5-T6 (passages d'escalade facile, "
+        "désescalade) le ralentissement réel peut dépasser +60 %, le plafond reste prudent dans l'autre "
+        "sens (pas de prédiction extrême tirée d'un tag). **Combinaison** : surcoût dominant + la moitié du deuxième (les tags sont "
         "corrélés : un sentier alpin est presque toujours « mauvaise visibilité » et « rocheux », on "
         "n'additionne pas), plafonné à 1,8. Un coefficient dérivé d'OSM ne descend JAMAIS sous 1,0 (aucun "
         "crédit de vitesse tiré de tags incertains) ; une valeur de tag inconnue est ignorée, jamais "
@@ -785,12 +792,19 @@ ASSUMPTIONS = {
         "terrain, pas de l'horloge, et l'itération de nuit part des temps déjà corrigés, donc des heures de "
         "passage cohérentes (les deux facteurs se multiplient). **Limite à connaître** : le modèle personnel "
         "pente -> allure a été appris sur les sorties de l'athlète, qui contiennent déjà son terrain habituel "
-        "— le coefficient exprime l'écart par rapport à CE terrain, pas par rapport à un sentier idéal ; "
-        "1,0 = « comme à l'entraînement ». OSM décrit le chemin, pas l'état du jour (boue, neige, "
+        "— un coefficient DÉCLARÉ exprime l'écart par rapport à CE terrain (1,0 = « comme à "
+        "l'entraînement »). La table OSM, elle, est ABSOLUE (1,0 = chemin facile) : elle est donc rapportée "
+        "au terrain habituel déclaré par `--technicity-baseline` (nombre ou valeur `sac_scale`, ex. "
+        "`mountain_hiking` = 1,06) — coef appliqué = max(1,0 ; coef OSM / référence), valeur absolue "
+        "conservée dans `osm_coef`. Sans référence déclarée, la référence vaut 1,0 et un avertissement dit "
+        "que la pénalité est surestimée pour un athlète qui s'entraîne déjà en montagne (double comptage) ; "
+        "la référence n'est JAMAIS dérivée des traces d'entraînement (ce serait envoyer des traces "
+        "personnelles à Overpass). OSM décrit le chemin, pas l'état du jour (boue, neige, "
         "éboulis récents) et ses tags sont inégalement renseignés. Réglable (fichier déclaré), jamais une "
         "vérité ; l'écart réel s'apprend au débrief (#188).\n\n"
         "**Sortie** : par section `technicity` = `{coef, effective_factor, source (declared | osm | none), "
-        "tags (déclaration : notes ; OSM : trois tags les plus présents), coverage_pct}` ; au niveau du plan "
+        "tags (déclaration : notes ; OSM : trois tags les plus présents), coverage_pct, osm_coef si référence}` ; "
+        "au niveau du plan "
         "`technicity` = `{status, sources_requested, osm, distance_pct_by_source, mean_coef, max_coef, "
         "scenario_scaling}`."
     ),
@@ -1973,12 +1987,18 @@ def _technicity_stage(pts, segments, technicity):
     if technicity is None:
         return segments, None, []
     declared, ways = technicity.get("declared"), technicity.get("ways")
-    coefs = TECH.section_coefficients(segments, pts, declared=declared, ways=ways)
+    baseline = float(technicity.get("osm_baseline") or 1.0)
+    baseline_label = technicity.get("osm_baseline_label") or ""
+    coefs = TECH.section_coefficients(segments, pts, declared=declared, ways=ways, osm_baseline=baseline)
     warnings: List[str] = []
     osm_block = None
     if technicity.get("osm_requested"):
         osm_block = {"status": technicity.get("osm_status"), "note": technicity.get("osm_note"),
-                     "match_radius_m": TECH.MATCH_RADIUS_M, **(technicity.get("osm_info") or {})}
+                     "match_radius_m": TECH.MATCH_RADIUS_M,
+                     "baseline": {"coef": round(baseline, 3),
+                                  "source": "declared" if baseline_label else "default",
+                                  **({"label": baseline_label} if baseline_label else {})},
+                     **(technicity.get("osm_info") or {})}
     info = {
         "status": "applied" if any(c["source"] != "none" for c in coefs) else "no_coefficient",
         "sources_requested": [k for k, v in (("declared", declared), ("osm", technicity.get("osm_requested")))
@@ -1989,6 +2009,11 @@ def _technicity_stage(pts, segments, technicity):
     }
     if technicity.get("osm_note"):
         warnings.append(technicity["osm_note"])
+    if any(c["source"] == "osm" for c in coefs) and not baseline_label:
+        warnings.append("Technicité OSM sans terrain de référence (--technicity-baseline) : les coefficients "
+                        "sont comptés depuis un chemin facile, alors que le modèle personnel contient déjà le "
+                        "terrain habituel de l'athlète — s'il s'entraîne déjà sur sentier de montagne, la "
+                        "pénalité est surestimée (voir ASSUMPTIONS['technicity']).")
     if info["status"] == "no_coefficient":
         warnings.append("Technicité demandée mais aucune section n'a de coefficient (déclaration absente "
                         "ou OSM sans couverture suffisante) : temps inchangés.")
@@ -2063,6 +2088,14 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     raw_segments = segment_course(pts, target_segment_m=segment_m)
     total_measured_m = raw_segments[-1]["km_end"] * 1000.0 if raw_segments else None
     aid_stations = rescale_aid_stations(aid_stations, total_measured_m, official_distance_m)
+    if technicity and technicity.get("declared") and official_distance_m and official_distance_m > 0 \
+            and total_measured_m:
+        # Les km DÉCLARÉS sont des km officiels (roadbook), comme ceux des ravitos : même
+        # rééchelonnement sur la distance mesurée du GPX (#186, revue de code).
+        ratio = total_measured_m / official_distance_m
+        technicity = {**technicity, "declared": [
+            {**sec, "km_start": round(sec["km_start"] * ratio, 3), "km_end": round(sec["km_end"] * ratio, 3)}
+            for sec in technicity["declared"]]}
 
     heat_factor, heat_notes = heat_time_factor(temp_max_c, acclimated=acclimated)
     if acclimation_note:
@@ -2442,11 +2475,14 @@ def _validate_night_pct(value: Optional[float], default: float, label: str) -> f
     return value
 
 
-def _resolve_technicity(values: Optional[Sequence[str]], pts: Sequence[dict], workspace: Path) -> Optional[dict]:
+def _resolve_technicity(values: Optional[Sequence[str]], pts: Sequence[dict], workspace: Path,
+                        baseline: Optional[str] = None) -> Optional[dict]:
     """Entrées CLI `--technicity` -> dict pour `build_race_plan` (I/O ici : fichier déclaré, Overpass).
     `None` si l'option est absente. Hors ligne / Overpass en erreur : pas de coefficient OSM,
     note explicite, jamais fatal. Lève `ValueError` (TechnicityError) sur une déclaration invalide."""
     if not values:
+        if baseline:
+            raise TECH.TechnicityError("--technicity-baseline n'a de sens qu'avec --technicity osm")
         return None
     declared, want_osm = None, False
     for v in values:
@@ -2454,7 +2490,11 @@ def _resolve_technicity(values: Optional[Sequence[str]], pts: Sequence[dict], wo
             want_osm = True
         else:
             declared = (declared or []) + TECH.load_declared(Path(v))
-    out = {"declared": declared, "ways": None, "osm_requested": want_osm}
+    base_coef, base_label = TECH.parse_baseline(baseline)
+    if base_label and not want_osm:
+        raise TECH.TechnicityError("--technicity-baseline n'a de sens qu'avec --technicity osm")
+    out = {"declared": declared, "ways": None, "osm_requested": want_osm,
+           "osm_baseline": base_coef, "osm_baseline_label": base_label}
     if want_osm:
         try:
             ways, info = TECH.fetch_ways(pts, cache_dir=Path(workspace) / ".arc" / "overpass")
@@ -2513,6 +2553,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                           "`osm` (dérivé d'OpenStreetMap via Overpass, RÉSEAU, opt-in, GPX de COURSE seulement ; "
                           "cache <workspace>/.arc/overpass). Répétable ; la déclaration l'emporte section par "
                           "section. Absent = comportement inchangé")
+    ap.add_argument("--technicity-baseline", dest="technicity_baseline", metavar="COEF|sac_scale",
+                     help="terrain HABITUEL d'entraînement de l'athlète, pour ancrer les coefficients OSM "
+                          "(son modèle pente -> allure le contient déjà) : nombre dans [1.0, 1.8] ou valeur "
+                          "sac_scale (ex. mountain_hiking). Défaut : 1.0 = chemin facile, avec avertissement")
     ap.add_argument("--aid-stations", dest="aid_stations_path",
                      help="fichier JSON : liste d'objets {km, name, cutoff?, cutoff_day?, stop_s?}")
     ap.add_argument("--official-distance-m", type=float, dest="official_distance_m",
@@ -2614,7 +2658,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         _resolve_intensity_factor(conn, conf, flat_reference_speed_ms, gpx_distance_m, gpx_elevation_gain_m)
     aid_stations = _load_aid_stations(args.aid_stations_path)
     try:
-        technicity = _resolve_technicity(args.technicity, pts, workspace)
+        technicity = _resolve_technicity(args.technicity, pts, workspace, args.technicity_baseline)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1

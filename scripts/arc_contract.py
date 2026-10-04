@@ -682,7 +682,7 @@ SUBSCHEMA = {
             "night_fraction": "obj",
             "night_factor": "obj",
             # Technicité du terrain (#186, `arc_technicity`) : `{coef, effective_factor, source, tags,
-            # coverage_pct}`. Absent si `--technicity` n'a pas été demandé.
+            # coverage_pct, osm_coef?}`. Absent si `--technicity` n'a pas été demandé.
             "technicity": "obj",
             "notes": "list",
         },
