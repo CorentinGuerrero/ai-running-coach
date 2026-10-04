@@ -82,7 +82,10 @@ ASSUMPTIONS: Dict[str, str] = {
         "(au-delà de 2 800 m, hors plage mesurée : extrapolation, signalée) : choix du projet. "
         "Facteur identique pour les trois scénarios "
         "(l'ordre prudent >= réaliste >= ambitieux est donc conservé), composé multiplicativement "
-        "avec chaleur et nuit, section par section, avant la nuit. Limites : effet individuel très "
+        "avec chaleur, technicité et nuit, section par section, après la technicité et avant la nuit. "
+        "Coefficient personnel `[pacing.personal].altitude_scale` (#188, recalibré au débrief) : "
+        "multiplie le SURCOÛT de chaque section (facteur − 1, après crédit d'acclimatation) ; "
+        "`--altitude-loss-pct` en ligne de commande prime sur lui. Limites : effet individuel très "
         "variable (4,6-7,5 % mesuré), pas de modèle du mal aigu des montagnes, de l'hydratation ni "
         "de la descente (la montée en altitude et le séjour comptent autant que l'altitude)."),
     "acclimation": (

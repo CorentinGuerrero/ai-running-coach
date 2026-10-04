@@ -228,7 +228,11 @@ jusqu'à 25 %, à 10 h au-dessus de 1 500 m) — approximations du projet, `assu
 L'exposition mesurée n'est créditée que si la course a lieu **14 jours au plus** après la fin de
 la fenêtre mesurée (`--race-date` requis, `altitude.acclimation.training_credited`) : un plan
 calculé des semaines à l'avance est à recalculer dans les deux dernières semaines.
-Réglages : `--altitude-threshold-m`, `--altitude-loss-pct`, `--no-altitude`.
+Réglages : `--altitude-threshold-m`, `--altitude-loss-pct`, `--no-altitude`. Le coefficient
+personnel `[pacing.personal].altitude_scale` (#188, recalibré au débrief) multiplie le **surcoût**
+de chaque section (facteur − 1, après le crédit d'acclimatation) ; `--altitude-loss-pct` en ligne
+de commande prime sur lui. Quand il joue, il figure dans `altitude.parameters.personal_scale` et
+dans `pacing_personal` du plan.
 
 **Changement de comportement pour les plans existants.** La pénalité est active par défaut : un
 plan de course dont une section dépasse 1 500 m, recalculé après #185, donne des temps plus longs
@@ -238,8 +242,9 @@ déjà persistés ne changent pas tant qu'ils ne sont pas recalculés, et les ch
 (`altitude_m`, `altitude_factor`) sont optionnels dans le contrat `race_plan`.
 
 **Composition.** Le facteur (`altitude_m`, `altitude_factor` par section) est identique pour
-les trois scénarios, se compose par multiplication avec la chaleur et la nuit (appliqué avant
-la nuit, une seule étape du calcul) et conserve `prudent ≥ réaliste ≥ ambitieux`. **Si aucune
+les trois scénarios, se compose par multiplication avec la chaleur, la technicité et la nuit
+(ordre du calcul : correction MNT éventuelle → modèle pente → allure, avec la chaleur → fade →
+technicité → altitude → nuit ; une seule étape du calcul) et conserve `prudent ≥ réaliste ≥ ambitieux`. **Si aucune
 section ne dépasse le seuil, les temps et les sections sont identiques à ceux d'avant** : seul
 l'objet `altitude` (`status` : `applied`, `below_threshold`, `no_elevation`, `disabled`) s'ajoute.
 
@@ -281,11 +286,13 @@ chaque facteur et **propose** des coefficients personnels (JSON par défaut,
   rejouer le même débrief ne le compte pas deux fois.
 - **Chaleur** : un seul facteur pour toute la course, donc pas de contraste
   interne ; estimée **entre** courses, et **aucune proposition avant deux courses
-  chaudes** et une sans correction météo débriefées, confiance faible. **Altitude** : seulement si le plan porte `altitude_factor`.
+  chaudes** et une sans correction météo débriefées, confiance faible. **Altitude** : seulement si le plan porte `altitude_factor` ; le
+  `altitude_scale` proposé est l'échelle du surcoût d'altitude, appliquée par
+  `arc_race_pacing.py` aux plans suivants.
 - **Écriture après accord** : après confirmation explicite de l'athlète,
   `… --calibrate --apply` écrit `[pacing.personal]` dans
   `config/workspace.user.toml` ; `arc_race_pacing.py` le relit aux plans
-  suivants, les drapeaux CLI (`--night-penalty-pct`) gardant la priorité.
+  suivants, les drapeaux CLI (`--night-penalty-pct`, `--altitude-loss-pct`) gardant la priorité.
   Voir [la configuration](../configuration.md#les-coefficients-de-pacing-personnels-pacingpersonal).
 
 ## Dépense énergétique prévue par section

@@ -252,6 +252,95 @@ class TestRacePenalty(unittest.TestCase):
         RP._note_elevation_source(plan2)
         self.assertEqual(plan2["altitude"]["elevation_source"], "gpx")
 
+    def test_personal_scale_multiplies_surcharge(self):
+        """#188 x #185 : `altitude_scale` multiplie le SURCOÛT (facteur − 1) de chaque section —
+        la grandeur qu'estime `arc_pacing_calibration` — et il est consigné dans `pacing_personal`."""
+        scaled = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, altitude_scale=2.0, **_kw())
+        for a, b in zip(self.high["segments"], scaled["segments"]):
+            self.assertAlmostEqual(b["altitude_factor"] - 1.0, 2.0 * (a["altitude_factor"] - 1.0), delta=2e-4)
+        self.assertGreater(scaled["totals"]["time_s"]["realistic"], self.high["totals"]["time_s"]["realistic"])
+        self.assertEqual(scaled["pacing_personal"], {"altitude_scale": 2.0})
+        self.assertEqual(scaled["altitude"]["parameters"]["personal_scale"], 2.0)
+        self.assertNotIn("pacing_personal", self.high)
+        tt = scaled["totals"]["time_s"]
+        self.assertGreaterEqual(tt["safe"], tt["realistic"])
+        self.assertGreaterEqual(tt["realistic"], tt["ambitious"])
+
+    def test_personal_scale_absent_effect_below_threshold_or_disabled(self):
+        for pts, enabled in ((_pts(0.0), True), (_pts(1500.0), False)):
+            plan = RP.build_race_plan(pts, PERSONAL_BINS, altitude_scale=2.0, altitude_enabled=enabled, **_kw())
+            ref = RP.build_race_plan(pts, PERSONAL_BINS, altitude_enabled=enabled, **_kw())
+            self.assertEqual(json.dumps(plan, sort_keys=True), json.dumps(ref, sort_keys=True))
+        unit = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, altitude_scale=1.0, **_kw())
+        self.assertEqual(json.dumps(unit, sort_keys=True), json.dumps(self.high, sort_keys=True))
+
+    def test_composes_with_technicity(self):
+        """#186 x #185 : technicité puis altitude, facteurs multiplicatifs, ordre des scénarios gardé."""
+        tech = {"declared": [{"km_start": 0.0, "km_end": 200.0, "coef": 1.25}], "ways": None,
+                "osm_requested": False}
+        both = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, technicity=tech, **_kw())
+        tech_only = RP.build_race_plan(_pts(1500.0), PERSONAL_BINS, technicity=tech, altitude_enabled=False,
+                                       **_kw())
+        ratio = both["totals"]["time_s"]["realistic"] / tech_only["totals"]["time_s"]["realistic"]
+        plain = self.high["totals"]["time_s"]["realistic"] / self.off["totals"]["time_s"]["realistic"]
+        self.assertAlmostEqual(ratio, plain, delta=0.01)
+        for seg in both["segments"]:
+            self.assertIn("technicity", seg)
+            self.assertIn("altitude_factor", seg)
+            t = seg["predicted_time_s"]
+            self.assertGreaterEqual(t["safe"], t["realistic"])
+            self.assertGreaterEqual(t["realistic"], t["ambitious"])
+
+
+class TestAltitudeScaleCli(unittest.TestCase):
+    """`arc_race_pacing.py plan` en sous-processus : `[pacing.personal].altitude_scale` lu,
+    `--altitude-loss-pct` prioritaire, `--no-altitude` l'ignore."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        gpx = ['<?xml version="1.0"?><gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1">'
+               '<trk><trkseg>']
+        for p in _pts(1500.0):
+            gpx.append(f'<trkpt lat="{p["lat"]}" lon="{p["lon"]}"><ele>{p["ele"]}</ele></trkpt>')
+        gpx.append("</trkseg></trk></gpx>")
+        cls.gpx = cls.root / "course.gpx"
+        cls.gpx.write_text("".join(gpx), encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _plan(self, toml: str, *extra: str) -> dict:
+        import subprocess
+        ws = Path(tempfile.mkdtemp(dir=self.root))
+        (ws / "config").mkdir()
+        if toml:
+            (ws / "config" / "workspace.user.toml").write_text(toml, encoding="utf-8")
+        cmd = [sys.executable, str(REPO / "scripts" / "arc_race_pacing.py"), "plan", "--gpx", str(self.gpx),
+               "--workspace", str(ws), "--memory", "--race-date", "2026-06-20", *extra]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_precedence(self):
+        toml = "[pacing.personal]\naltitude_scale = 1.5\n"
+        base = self._plan("")
+        pers = self._plan(toml)
+        self.assertEqual(pers["pacing_personal"], {"altitude_scale": 1.5})
+        self.assertEqual(pers["altitude"]["status"], "applied")
+        self.assertEqual(pers["altitude"]["parameters"]["personal_scale"], 1.5)
+        for a, b in zip(base["segments"], pers["segments"]):
+            self.assertAlmostEqual(b["altitude_factor"] - 1.0, 1.5 * (a["altitude_factor"] - 1.0), delta=2e-4)
+        # --altitude-loss-pct (CLI) prime : l'échelle personnelle n'est pas appliquée
+        cli = self._plan(toml, "--altitude-loss-pct", "6.3")
+        self.assertNotIn("pacing_personal", cli)
+        self.assertEqual(cli["totals"], base["totals"])
+        off = self._plan(toml, "--no-altitude")
+        self.assertNotIn("pacing_personal", off)
+        self.assertEqual(off["altitude"]["status"], "disabled")
+
 
 class TestExposureReport(unittest.TestCase):
     def rows(self):

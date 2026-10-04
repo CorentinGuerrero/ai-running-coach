@@ -132,8 +132,16 @@ aux trois scénarios avant la nuit. Sans l'option : sortie inchangée (aucune cl
 Facteur de temps par section dès que l'altitude moyenne dépasse 1 500 m (pente tirée de
 Wehrlin & Hallén 2006, traduction vers la vitesse = approximation du projet), réduit par
 l'acclimatation déclarée (`--altitude-acclimated-days`) et l'exposition à l'entraînement
-(`arc_index.py altitude-exposure`). Appliqué avant la nuit, identique pour les trois
-scénarios ; sous le seuil partout : sortie inchangée (clé additive `altitude` seulement).
+(`arc_index.py altitude-exposure`), surcoût mis à l'échelle par `[pacing.personal].altitude_scale`
+(#188 ; `--altitude-loss-pct` prime). Appliqué après la technicité et avant la nuit, identique
+pour les trois scénarios ; sous le seuil partout : sortie inchangée (clé additive `altitude`
+seulement).
+
+Ordre des étapes de `build_race_plan` : (correction MNT #176, faite par `main` avant l'appel) →
+modèle pente -> allure, chaleur comprise (`predict_segments`, facteur scalaire par section) →
+fade (renormalisé neutre en temps sous 6 h) → technicité → altitude → nuit. Chaleur, technicité
+et altitude sont des facteurs multiplicatifs indépendants de l'horloge : leur ordre ne change le
+résultat qu'à l'arrondi près ; la nuit vient en dernier car elle lit les heures de passage.
 
 ## Allure de BASE : endurance mise à l'échelle de l'intensité de course (voir `ASSUMPTIONS["base_pace"]`)
 
@@ -2071,18 +2079,22 @@ def _segment_altitudes(pts: Sequence[dict], segments: Sequence[dict], threshold_
 
 def apply_altitude_penalty(pts: Sequence[dict], segments: Sequence[dict], *, credit: float = 0.0,
                             threshold_m: float = AL.ALTITUDE_THRESHOLD_M,
-                            loss_pct_per_1000m: float = AL.ALTITUDE_VO2MAX_LOSS_PCT_PER_1000M
-                            ) -> Tuple[List[dict], dict]:
+                            loss_pct_per_1000m: float = AL.ALTITUDE_VO2MAX_LOSS_PCT_PER_1000M,
+                            scale: float = 1.0) -> Tuple[List[dict], dict]:
     """Applique le facteur d'altitude section par section — pure. Rend `(segments, info)` ;
     si aucune section ne dépasse `threshold_m`, `segments` est rendu INCHANGÉ (aucun champ
     ajouté). Sinon chaque section gagne `altitude_m` et `altitude_factor` (scalaire, identique
     pour les trois scénarios : l'ordre prudent >= réaliste >= ambitieux est conservé) et ses
-    temps/allures majorés."""
+    temps/allures majorés. `scale` : coefficient personnel `[pacing.personal].altitude_scale`
+    (#188) — multiplie le SURCOÛT (facteur − 1) de chaque section, comme `technicity_scale` :
+    c'est exactement ce qu'estime `arc_pacing_calibration` (ratio surcoût réel / surcoût prévu)."""
     triples = _segment_altitudes(pts, segments, threshold_m)
     alts = [a for a, _, _ in triples]
     factors = [AL.altitude_time_factor(None if ex is None else threshold_m + ex, credit=credit,
                                        threshold_m=threshold_m, loss_pct_per_1000m=loss_pct_per_1000m)
                for _, ex, _ in triples]
+    if abs(scale - 1.0) > 1e-12:
+        factors = [1.0 + (f - 1.0) * scale if f > 1.0 else f for f in factors]
     known = [a for a in alts if a is not None]
     peaks = [m for (_, _, m), f in zip(triples, factors) if m is not None and f > 1.0]
     info = {"max_mean_altitude_m": round(max(known)) if known else None,
@@ -2107,8 +2119,11 @@ def apply_altitude_penalty(pts: Sequence[dict], segments: Sequence[dict], *, cre
 
 
 def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_days, exposure, coverage,
-                    race_date=None):
-    """Étape « altitude » de `build_race_plan` (#185). Rend `(altitude, segments, warnings)`."""
+                    race_date=None, scale: Optional[float] = None):
+    """Étape « altitude » de `build_race_plan` (#185). `scale` : `[pacing.personal].altitude_scale`
+    (#188, `None` = inchangé), multiplie le surcoût de chaque section. Rend
+    `(altitude, segments, warnings)`."""
+    personal = scale is not None and abs(scale - 1.0) > 1e-12
     params = {"threshold_m": threshold_m, "vo2max_loss_pct_per_1000m": loss_pct,
               "altitude_cap_m": AL.ALTITUDE_CAP_M, "measured_max_m": AL.ALTITUDE_MEASURED_MAX_M,
               "source": "Wehrlin & Hallén 2006, doi:10.1007/s00421-005-0081-9 ; "
@@ -2128,7 +2143,7 @@ def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_da
     lead_ok, lead_note = AL.training_credit_lead(exposure, race_date)
     credit = AL.altitude_credit(acclimated_days, hours if lead_ok else None)
     new_segments, info = apply_altitude_penalty(pts, segments, credit=credit["total"], threshold_m=threshold_m,
-                                                loss_pct_per_1000m=loss_pct)
+                                                loss_pct_per_1000m=loss_pct, scale=scale if personal else 1.0)
     before = {s: sum(x["predicted_time_s"][s] or 0 for x in segments) for s in SCENARIOS}
     after = {s: sum(x["predicted_time_s"][s] or 0 for x in new_segments) for s in SCENARIOS}
     altitude = {
@@ -2143,14 +2158,15 @@ def _altitude_stage(pts, segments, enabled, threshold_m, loss_pct, acclimated_da
                      if credit["total"] == 0 else "crédit d'acclimatation appliqué (approximation du projet)")
                     + (f" ; {lead_note}" if hours else "")},
         "time_added_s": {s: after[s] - before[s] for s in SCENARIOS},
-        "parameters": params,
+        "parameters": {**params, **({"personal_scale": scale} if personal else {})},
     }
     added_min = (after["realistic"] - before["realistic"]) / 60.0
     warnings = [f"altitude : {info['sections_above']} section(s) au-dessus de {threshold_m:.0f} m (point haut "
                 f"{info['max_altitude_m']} m), temps réaliste "
                 + (f"+{round(added_min)} min" if added_min >= 1 else "+< 1 min")
                 + " — pénalité appliquée par défaut depuis #185 (`--no-altitude` pour l'ancien calcul), "
-                "approximation du projet (ASSUMPTIONS['altitude'])"]
+                "approximation du projet (ASSUMPTIONS['altitude'])"
+                + (f" ; coefficient personnel altitude_scale = {scale:g} ([pacing.personal])" if personal else "")]
     if info["max_altitude_m"] is not None and info["max_altitude_m"] > AL.ALTITUDE_MEASURED_MAX_M:
         warnings.append(f"altitude > {AL.ALTITUDE_MEASURED_MAX_M:.0f} m sur le parcours : hors de la plage "
                         "mesurée par la source, pénalité extrapolée")
@@ -2183,7 +2199,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      altitude_enabled: bool = True, altitude_threshold_m: float = AL.ALTITUDE_THRESHOLD_M,
                      altitude_loss_pct_per_1000m: float = AL.ALTITUDE_VO2MAX_LOSS_PCT_PER_1000M,
                      altitude_acclimated_days: Optional[int] = None,
-                     altitude_exposure: Optional[dict] = None) -> dict:
+                     altitude_exposure: Optional[dict] = None, altitude_scale: Optional[float] = None) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
@@ -2205,7 +2221,10 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     `altitude_*` : pénalité d'altitude (#185, `ASSUMPTIONS["altitude"]`) — facteur de temps par
     section au-dessus du seuil, réduit par `altitude_acclimated_days` (déclaré) et par
     `altitude_exposure` (rapport de `arc_index.altitude_exposure`, résolu par l'appelant) ;
-    sous le seuil partout, seule la clé additive `altitude` s'ajoute.
+    sous le seuil partout, seule la clé additive `altitude` s'ajoute. `altitude_scale` :
+    `[pacing.personal].altitude_scale` (#188), résolu par l'appelant (`None` si
+    `--altitude-loss-pct` est donné : le drapeau CLI prime) ; consigné dans `pacing_personal`
+    seulement quand la pénalité est réellement appliquée.
 
     Lève `ValueError` si `start_time` n'est pas un `HH:MM` valide (revue de
     code #59, nit : jamais un repli silencieux sur 07:00) ou si `tz` est inconnu."""
@@ -2299,8 +2318,10 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
     # l'itération de nuit lit ensuite (composition multiplicative chaleur x altitude x nuit).
     altitude, segments, altitude_warnings = _altitude_stage(
         pts, segments, altitude_enabled, altitude_threshold_m, altitude_loss_pct_per_1000m,
-        altitude_acclimated_days, altitude_exposure, coverage, race_date)
+        altitude_acclimated_days, altitude_exposure, coverage, race_date, altitude_scale)
     warnings.extend(altitude_warnings)
+    if altitude.get("status") == "applied" and (altitude.get("parameters") or {}).get("personal_scale"):
+        personal_applied = {**(personal_applied or {}), "altitude_scale": altitude_scale}
 
     night, night_mask, night_start_dt, night_tzinfo = _night_stage(
         pts, segments, aid_stations, hh, mm, race_date, tz, start_time_known, night_enabled,
@@ -2918,7 +2939,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             technicity_scale=personal_values.get("technicity_scale"), personal_applied=personal_applied,
             altitude_enabled=not args.no_altitude, altitude_threshold_m=altitude_threshold_m,
             altitude_loss_pct_per_1000m=altitude_loss_pct, altitude_acclimated_days=altitude_acclimated_days,
-            altitude_exposure=altitude_exposure)
+            altitude_exposure=altitude_exposure,
+            # Priorité : --altitude-loss-pct (CLI) > [pacing.personal].altitude_scale > défaut.
+            altitude_scale=(personal_values.get("altitude_scale") if args.altitude_loss_pct is None else None))
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
