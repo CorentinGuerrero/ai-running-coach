@@ -1468,7 +1468,8 @@ async function friseSection(selected = null) {
   const describe = (w) => {
     const bits = [`Semaine du ${F.dayShort(w.week_start)}`, w.phase_label];
     if (w.week_type) bits.push(TYPE[w.week_type] || w.week_type);
-    bits.push(w.target_duration_s ? `prévu ${F.duration(w.target_duration_s)}${w.target_elevation_m ? ` · ${F.elevation(w.target_elevation_m)}` : ""}` : "volume prévu non renseigné");
+    if (!w.planned) bits.push("aucun fichier de semaine (trou dans le bloc)");
+    else bits.push(w.target_duration_s ? `prévu ${F.duration(w.target_duration_s)}${w.target_elevation_m ? ` · ${F.elevation(w.target_elevation_m)}` : ""}` : "volume prévu non renseigné");
     if (w.done) bits.push(`réalisé ${F.duration(w.done.duration_s)}${w.done.elevation_m ? ` · ${F.elevation(w.done.elevation_m)}` : ""}${w.done.partial ? " (semaine en cours)" : ""}`);
     if (w.status === "current") bits.push("semaine en cours");
     if (w.is_race_week) bits.push("semaine de course");
@@ -1478,7 +1479,7 @@ async function friseSection(selected = null) {
     const d = F.parseDate(w.week_start);
     return {
       href: `#/semaine?debut=${w.week_start}`, aria: describe(w), tip: describe(w), phase: w.phase,
-      phaseText: w.phase === "unknown" ? "Phase inconnue" : w.phase_label,
+      phaseText: w.phase_label,
       tick: `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
       h: w.target_duration_s ? w.target_duration_s / peak : null, d: w.done ? w.done.duration_s / peak : null,
       light: w.light, current: w.status === "current", selected: w.week_start === selected, race: w.is_race_week,
@@ -1488,6 +1489,7 @@ async function friseSection(selected = null) {
   const keys = b.phases.filter((p) => present.has(p.id)).map((p) => `<span class="legend__item"><span class="key key--phase-${p.id}"></span>${F.esc(p.label)}</span>`);
   if (present.has("other")) keys.push(`<span class="legend__item"><span class="key key--phase-other"></span>Autre libellé</span>`);
   if (present.has("unknown")) keys.push(`<span class="legend__item"><span class="key key--phase-unknown"></span>Phase inconnue</span>`);
+  if (present.has("missing")) keys.push(`<span class="legend__item"><span class="key key--phase-missing"></span>Semaine sans plan</span>`);
   const idx = b.weeks.findIndex((w) => w.status === "current");
   const race = b.race;
   const raceTxt = race ? (race.in_block ? `course le ${F.dateLong(race.date)}${race.days_left >= 0 ? ` (dans ${race.days_left} j)` : ""}` : `course le ${F.dateLong(race.date)}, hors des semaines planifiées`) : "";

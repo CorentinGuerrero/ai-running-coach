@@ -490,7 +490,10 @@ s'il correspond à un libellé du gabarit (c'est ce qu'écrit `plan-skeleton`, #
 sans phase (fichier antérieur) est tracée en pointillé « Phase inconnue » ; un autre libellé
 libre est affiché tel quel, sans teinte de phase. Le bloc est la suite de semaines planifiées
 aux lundis consécutifs qui contient la semaine courante (sinon la prochaine, sinon la plus
-récente). Les données viennent de `/api/block`.
+récente). Une **seule** semaine sans fichier entre deux semaines écrites par `plan-skeleton`
+(semaine de vacances, fichier supprimé) ne coupe pas le bloc : elle apparaît en contour
+pointillé « Semaine sans plan », jamais remplie. Deux semaines manquantes d'affilée, ou une
+voisine écrite à la main, coupent le bloc. Les données viennent de `/api/block`.
 
 En dessous, **le réalisé face à la cible** de la semaine (18,2 km sur 40 visés), puis
 **la conformité** — le KPI de l'épopée #20 (story #33) : % de séances faites, ratio

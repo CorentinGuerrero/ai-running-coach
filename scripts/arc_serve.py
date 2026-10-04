@@ -1013,7 +1013,7 @@ def api_block(store: Store, q: dict) -> dict:
     today = _today(store)
     weeks = store.rows("SELECT week_start, phase, week_type, target_duration_s, target_distance_m, "
                        "target_elevation_m FROM week WHERE shadowed = 0 ORDER BY week_start")
-    starts = BT.select_block([w["week_start"] for w in weeks if w["week_start"]], today)
+    starts = BT.select_block([w["week_start"] for w in weeks if w["week_start"]], today, BT.block_bridgeable(weeks))
     done: dict = {}
     if starts:
         last = date.fromisoformat(starts[-1]) + timedelta(days=6)

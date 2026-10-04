@@ -981,6 +981,8 @@ button.seg:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--foc
 .chart--frise .frise-cell--recovery { fill: var(--ph-recovery); } .chart--frise .frise-cell--other { fill: var(--ph-other); }
 /* Phase inconnue : jamais une teinte de phase — fond neutre + contour pointillé. */
 .chart--frise .frise-cell--unknown { fill: var(--surface-2); stroke: var(--ph-unknown); stroke-width: 1.5; stroke-dasharray: 4 3; }
+/* Semaine sans fichier comblée dans un bloc du squelette : ni teinte ni volume, contour discret. */
+.chart--frise .frise-cell--missing { fill: transparent; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 2 3; }
 .chart--frise .frise-cell--noplan { opacity: 0.55; }
 .chart--frise .frise-done-case { stroke: var(--surface); stroke-width: 6; stroke-linecap: round; }
 .chart--frise .frise-done { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
@@ -998,6 +1000,7 @@ button.seg:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--foc
 .key--phase-specific { background: var(--ph-specific); height: 0.6rem; } .key--phase-taper { background: var(--ph-taper); height: 0.6rem; }
 .key--phase-recovery { background: var(--ph-recovery); height: 0.6rem; } .key--phase-other { background: var(--ph-other); height: 0.6rem; }
 .key--phase-unknown { background: var(--surface-2); border: 1.5px dashed var(--ph-unknown); height: 0.6rem; }
+.key--phase-missing { background: transparent; border: 1px dashed var(--line-strong); height: 0.6rem; }
 .key--frise-light { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink-soft); }
 .key--frise-done { background: var(--ink); height: 0.2rem; }
 @media (max-width: 36em) {

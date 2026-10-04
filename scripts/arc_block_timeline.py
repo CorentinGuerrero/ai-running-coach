@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import unicodedata
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 PHASE_IDS = ("base", "development", "specific", "taper", "recovery")
 # Libellés d'affichage — identiques à `arc_plan_templates.PHASE_LABELS_FR` (non importé : ce module
@@ -25,6 +25,8 @@ PHASE_LABELS_FR = {"base": "Base", "development": "Développement", "specific": 
 RECOVERY_TYPES = ("recovery", "post_race")
 UNKNOWN = "unknown"
 OTHER = "other"
+# Semaine sans fichier comblée à l'intérieur d'un bloc du squelette (voir `ASSUMPTIONS["bloc"]`).
+MISSING = "missing"
 
 ASSUMPTIONS = {
     "reconnaissance": (
@@ -34,7 +36,10 @@ ASSUMPTIONS = {
     "bloc": (
         "Bloc = suite de semaines planifiées aux lundis consécutifs. On retient celle qui contient la "
         "semaine courante, sinon la prochaine à venir, sinon la plus récente. Convention de ce projet : "
-        "un trou d'une semaine sans fichier coupe le bloc."),
+        "UNE semaine sans fichier ne coupe pas le bloc si ses deux voisines viennent du squelette de bloc "
+        "(champ `week_type` renseigné, #190) — semaine de vacances, fichier supprimé ; elle est tracée "
+        "« semaine sans plan », jamais remplie. Deux semaines manquantes, ou une voisine écrite à la main "
+        "(sans `week_type`), coupent le bloc."),
     "realise": "Volume réalisé = somme des activités (hors repos) du lundi au dimanche ; partiel pour la semaine en cours.",
 }
 
@@ -61,13 +66,20 @@ def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def select_block(week_starts: List[str], today: date) -> List[str]:
-    """Lundis (ISO) du bloc retenu parmi les semaines planifiées (voir `ASSUMPTIONS["bloc"]`)."""
+def select_block(week_starts: List[str], today: date, bridgeable: Iterable[str] = ()) -> List[str]:
+    """Lundis (ISO) du bloc retenu parmi les semaines planifiées (voir `ASSUMPTIONS["bloc"]`).
+
+    `bridgeable` : lundis des semaines issues du squelette (`week_type` renseigné). Un trou d'UNE
+    semaine entre deux d'entre elles est comblé : son lundi figure dans la liste rendue (sans fichier)."""
     days = sorted({date.fromisoformat(w) for w in week_starts})
+    bridge = {date.fromisoformat(w) for w in bridgeable}
     runs: List[List[date]] = []
     for d in days:
-        if runs and d - runs[-1][-1] == timedelta(days=7):
+        gap = d - runs[-1][-1] if runs else None
+        if gap == timedelta(days=7):
             runs[-1].append(d)
+        elif gap == timedelta(days=14) and d in bridge and runs[-1][-1] in bridge:
+            runs[-1].extend([d - timedelta(days=7), d])
         else:
             runs.append([d])
     if not runs:
@@ -79,12 +91,17 @@ def select_block(week_starts: List[str], today: date) -> List[str]:
     return [d.isoformat() for d in chosen]
 
 
+def block_bridgeable(weeks: List[dict]) -> List[str]:
+    """Lundis des semaines issues du squelette (`week_type` renseigné) — voir `select_block`."""
+    return [w["week_start"] for w in weeks if w.get("week_start") and w.get("week_type")]
+
+
 def build(weeks: List[dict], done_by_week: Dict[str, dict], race_date: Optional[str], today: date,
           race_name: Optional[str] = None) -> dict:
     """Frise : `weeks` = lignes `week` non éclipsées ; `done_by_week` : lundi ISO ->
     `{duration_s, distance_m, elevation_m, sessions}` réalisés."""
     by_start = {w["week_start"]: w for w in weeks if w.get("week_start")}
-    starts = select_block(list(by_start), today)
+    starts = select_block(list(by_start), today, block_bridgeable(weeks))
     current = _monday(today).isoformat()
     race = None
     race_monday = None
@@ -96,14 +113,17 @@ def build(weeks: List[dict], done_by_week: Dict[str, dict], race_date: Optional[
             race = None
     out = []
     for ws in starts:
-        w = by_start[ws]
+        w = by_start.get(ws)
+        planned = w is not None
+        w = w or {}
         phase_text = (w.get("phase") or "").strip() or None
-        pid = classify_phase(phase_text)
+        pid = classify_phase(phase_text) if planned else MISSING
         wtype = w.get("week_type")
         status = "current" if ws == current else ("past" if ws < current else "future")
+        label = {MISSING: "Semaine sans plan", OTHER: phase_text}.get(pid, "Phase inconnue")
         item = {
-            "week_start": ws, "status": status, "phase": pid, "phase_text": phase_text,
-            "phase_label": PHASE_LABELS_FR.get(pid, phase_text if pid == OTHER else "Phase inconnue"),
+            "week_start": ws, "status": status, "planned": planned, "phase": pid, "phase_text": phase_text,
+            "phase_label": PHASE_LABELS_FR.get(pid, label),
             "week_type": wtype, "light": wtype in RECOVERY_TYPES or pid == "recovery",
             "is_race_week": ws == race_monday,
             "target_duration_s": w.get("target_duration_s"), "target_distance_m": w.get("target_distance_m"),
@@ -118,6 +138,7 @@ def build(weeks: List[dict], done_by_week: Dict[str, dict], race_date: Optional[
     payload = {"status": "ok" if out else "no_plan", "today": today.isoformat(), "current_week_start": current,
                "weeks": out, "phases": [{"id": i, "label": PHASE_LABELS_FR[i]} for i in PHASE_IDS],
                "unknown_weeks": sum(1 for w in out if w["phase"] == UNKNOWN),
+               "missing_weeks": sum(1 for w in out if not w["planned"]),
                "race": None}
     if race is not None:
         payload["race"] = {"date": race.isoformat(), "name": race_name, "week_start": race_monday,
