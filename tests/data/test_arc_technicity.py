@@ -266,6 +266,7 @@ class TestByteIdenticalWithoutTechnicity(unittest.TestCase):
         self.assertNotIn("technicity", plan)
         plan.pop("assumptions")
         plan.pop("night")
+        self.assertEqual(plan.pop("altitude")["status"], "below_threshold")   # clé additive (#185)
         text = json.dumps(plan, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
         self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), GOLDEN_NO_NIGHT_SHA256)
 
