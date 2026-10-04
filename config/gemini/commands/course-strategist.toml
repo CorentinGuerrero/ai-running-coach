@@ -472,6 +472,25 @@ course — voir l'exemple du skill). Ne propose jamais `suggested_profile_update
 comme un fait acquis : ce sera à `coach` de les présenter à l'athlète, jamais
 une écriture silencieuse dans `planning/Runner_Profile.md`.
 
+**Recalibrage des coefficients (#188).** Pour proposer des coefficients
+personnels (nuit, technicité, chaleur, altitude) à partir de ce débrief, lance
+`python3 scripts/arc_race_debrief.py debrief --plan <plan> --activity <activité>
+--calibrate --workspace <workspace>` (JSON ; `--text` pour lire ; `--scenario auto`
+retient le scénario le plus proche du réalisé). **Avant**, demande à l'athlète si
+un incident a faussé une partie de la course (blessure, fin marchée, longue pause
+hors ravito) : si oui, ajoute `--exclude-from-km <km>` (le script refuse de
+lui-même une fin de course anormale, `abnormal_fade`, mais pas une défaillance
+plus douce). Cite, par facteur, le statut, le nombre de segments, la confiance et
+`position_note` s'il existe ; si un facteur est refusé (trop peu de
+segments, confondu, dans le bruit, course anormale), dis POURQUOI, n'invente rien. Présente les
+`proposals` (courant → proposé, défaut, poids d'attrition) comme des
+PROPOSITIONS. **N'écris `[pacing.personal]` (`--apply`) QU'APRÈS le « oui »
+explicite de l'athlète**, jamais en headless ; sans accord, rien n'est écrit. Les
+preuves se cumulent d'un débrief à l'autre, ne les efface pas à la main. Rappelle
+que `arc_race_pacing.py` relit ces coefficients au prochain plan (les drapeaux
+CLI priment) et que le plan persisté (`heat_factor`, `heat_notes`,
+`pacing_personal`) doit être recopié dans le bloc ```arc pour le débrief.
+
 ---
 
 ### CONNAISSANCES & RESSOURCES

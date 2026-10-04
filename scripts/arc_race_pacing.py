@@ -180,6 +180,7 @@ import arc_elevation as EL  # noqa: E402
 import arc_energy as EN  # noqa: E402
 import arc_metrics as M  # noqa: E402
 import arc_slope_model as SL  # noqa: E402
+import arc_pacing_personal as PP  # noqa: E402
 import arc_technicity as TECH  # noqa: E402
 from coach_setup import workspace_root  # noqa: E402 (revue de code #107 : même résolution que arc_index.py/arc_guardrails.py, jamais un simple Path(".") qui ignore ARC_WORKSPACE/le pointeur)
 
@@ -1978,11 +1979,13 @@ def _night_stage(pts, segments, aid_stations, hh, mm, race_date, tz, start_time_
     return night, mask, start_dt, zone
 
 
-def _technicity_stage(pts, segments, technicity):
+def _technicity_stage(pts, segments, technicity, scale: Optional[float] = None):
     """Étape « technicité » de `build_race_plan` (#186). `technicity` : `None` (non demandée ->
     `(segments, None, [])`, sortie inchangée octet pour octet) ou `{"declared": [...]|None,
     "ways": [...]|None, "osm_requested": bool, "osm_status": str, "osm_note": str|None,
-    "osm_info": dict|None}` résolu par l'appelant (réseau et disque jamais ici). Rend
+    "osm_info": dict|None}` résolu par l'appelant (réseau et disque jamais ici). `scale` :
+    coefficient personnel `[pacing.personal].technicity_scale` (#188), multiplie le SURCOÛT
+    (coef - 1) de chaque section portant un coefficient ; `None` = inchangé. Rend
     `(segments, plan_technicity, warnings)`."""
     if technicity is None:
         return segments, None, []
@@ -1990,6 +1993,13 @@ def _technicity_stage(pts, segments, technicity):
     baseline = float(technicity.get("osm_baseline") or 1.0)
     baseline_label = technicity.get("osm_baseline_label") or ""
     coefs = TECH.section_coefficients(segments, pts, declared=declared, ways=ways, osm_baseline=baseline)
+    if scale is not None and abs(scale - 1.0) > 1e-12:
+        for seg, c in zip(segments, coefs):
+            if c["source"] == "none":
+                continue
+            c["coef_before_scale"] = c["coef"]
+            c["coef"] = round(min(TECH.COEF_MAX, max(TECH.COEF_MIN_DECLARED, 1.0 + (c["coef"] - 1.0) * scale)), 3)
+            c["effective_factor"] = round(TECH.effective_factor(c["coef"], seg.get("grade_mean_pct")), 4)
     warnings: List[str] = []
     osm_block = None
     if technicity.get("osm_requested"):
@@ -2006,6 +2016,7 @@ def _technicity_stage(pts, segments, technicity):
         "osm": osm_block,
         "scenario_scaling": "identique pour les trois scénarios (voir ASSUMPTIONS['technicity'])",
         **TECH.summarize(segments, coefs),
+        **({"personal_scale": scale} if scale is not None and abs(scale - 1.0) > 1e-12 else {}),
     }
     if technicity.get("osm_note"):
         warnings.append(technicity["osm_note"])
@@ -2040,7 +2051,9 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
                      tz: Optional[str] = None, start_time_known: bool = True,
                      night_enabled: bool = True, night_penalty_pct: float = NIGHT_BASE_PENALTY_PCT,
                      night_descent_extra_max_pct: float = NIGHT_DESCENT_EXTRA_MAX_PCT,
-                     technicity: Optional[dict] = None) -> dict:
+                     technicity: Optional[dict] = None,
+                     heat_hot_factor: Optional[float] = None, technicity_scale: Optional[float] = None,
+                     personal_applied: Optional[dict] = None) -> dict:
     """Assemble le plan de course complet — pure (aucun accès disque), pour que
     la CLI et les tests partagent exactement le même chemin de calcul.
 
@@ -2097,7 +2110,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
             {**sec, "km_start": round(sec["km_start"] * ratio, 3), "km_end": round(sec["km_end"] * ratio, 3)}
             for sec in technicity["declared"]]}
 
-    heat_factor, heat_notes = heat_time_factor(temp_max_c, acclimated=acclimated)
+    heat_factor, heat_notes = heat_time_factor(temp_max_c, acclimated=acclimated, hot_factor=heat_hot_factor)
     if acclimation_note:
         heat_notes = [*heat_notes, acclimation_note]
 
@@ -2144,7 +2157,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
 
     # Technicité du terrain (#186) : propriété du TERRAIN, pas de l'horloge -> AVANT la nuit, dont
     # l'itération part ainsi des temps de section déjà corrigés (heures de passage cohérentes).
-    segments, technicity_info, technicity_warnings = _technicity_stage(pts, segments, technicity)
+    segments, technicity_info, technicity_warnings = _technicity_stage(pts, segments, technicity, technicity_scale)
     warnings.extend(technicity_warnings)
 
     night, night_mask, night_start_dt, night_tzinfo = _night_stage(
@@ -2200,6 +2213,7 @@ def build_race_plan(pts: Sequence[dict], bins: Sequence[dict], *,
         "heat_notes": heat_notes,
         "night": night,
         **({"technicity": technicity_info} if technicity_info is not None else {}),
+        **({"pacing_personal": personal_applied} if personal_applied else {}),
         "start_time": start_time,
         "race_date": race_date,
         "warnings": warnings,
@@ -2603,8 +2617,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args.start = args.start or "07:00"
     try:
         hh, mm = _parse_hhmm(args.start, label="--start")
-        night_penalty_pct = _validate_night_pct(args.night_penalty_pct, NIGHT_BASE_PENALTY_PCT,
-                                                "--night-penalty-pct")
+        # Priorité : drapeau CLI > `[pacing.personal]` (#188) > défaut du projet. Validé après
+        # lecture de la config (les défauts doivent rester dans [0, NIGHT_PENALTY_PCT_MAX]).
+        workspace = workspace_root(args.workspace)
+        personal = PP.read_workspace(workspace)
+        for warning in personal["warnings"]:
+            print(f"avertissement : {warning}", file=sys.stderr)
+        personal_values = personal["values"]
+        night_penalty_pct = _validate_night_pct(
+            args.night_penalty_pct, personal_values.get("night_penalty_pct", NIGHT_BASE_PENALTY_PCT),
+            "--night-penalty-pct")
         night_descent_extra_max_pct = _validate_night_pct(
             args.night_descent_extra_max_pct, NIGHT_DESCENT_EXTRA_MAX_PCT, "--night-descent-extra-max-pct")
     except ValueError as exc:
@@ -2612,7 +2634,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     print(f"heure de départ effective : {hh:02d}:{mm:02d}", file=sys.stderr)
 
-    workspace = workspace_root(args.workspace)
     dem_info = None
     if args.dem and args.no_dem:
         print("ERREUR : --dem et --no-dem sont incompatibles.", file=sys.stderr)
@@ -2688,6 +2709,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1
 
+    # Coefficients personnels réellement appliqués (#188), consignés dans le plan : le débrief
+    # en a besoin pour que ses estimations restent absolues (voir `arc_pacing_calibration`).
+    personal_applied: Dict[str, float] = {}
+    if args.night_penalty_pct is None and "night_penalty_pct" in personal_values and not args.no_night:
+        personal_applied["night_penalty_pct"] = night_penalty_pct
+    if technicity is not None and "technicity_scale" in personal_values:
+        personal_applied["technicity_scale"] = personal_values["technicity_scale"]
+    if temp_max_c is not None and temp_max_c > HEAT_HOT_C and "heat_hot_factor" in personal_values:
+        personal_applied["heat_hot_factor"] = personal_values["heat_hot_factor"]
+
     try:
         plan = build_race_plan(
             pts, bins, aid_stations=aid_stations, fade_pct=fade_pct, fade_source=fade_source,
@@ -2702,7 +2733,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             calibration_band=calibration_band, calibration_band_source=calibration_band_source,
             calibration=calibration, tz=args.tz, start_time_known=start_time_known,
             night_enabled=not args.no_night, night_penalty_pct=night_penalty_pct,
-            night_descent_extra_max_pct=night_descent_extra_max_pct, technicity=technicity)
+            night_descent_extra_max_pct=night_descent_extra_max_pct, technicity=technicity,
+            heat_hot_factor=personal_values.get("heat_hot_factor"),
+            technicity_scale=personal_values.get("technicity_scale"), personal_applied=personal_applied)
     except ValueError as exc:
         print(f"ERREUR : {exc}", file=sys.stderr)
         return 1

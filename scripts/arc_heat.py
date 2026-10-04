@@ -136,19 +136,23 @@ ASSUMPTIONS = {
 # Coefficients partagés avec la course
 # ---------------------------------------------------------------------------
 
-def heat_time_factor(temp_max_c: Optional[float], *, acclimated: Optional[bool] = None) -> Tuple[float, List[str]]:
+def heat_time_factor(temp_max_c: Optional[float], *, acclimated: Optional[bool] = None,
+                     hot_factor: Optional[float] = None) -> Tuple[float, List[str]]:
     """Facteur multiplicatif sur le TEMPS (>= 1.0) pour la météo prévue — voir
     `ASSUMPTIONS["heat"]` d'`arc_race_pacing`. `acclimated=False` ajoute le
     supplément `HEAT_UNACCLIMATED_EXTRA_FACTOR` si `temp_max_c` dépasse
-    `HEAT_HOT_C`. Rend `(facteur, notes)`."""
+    `HEAT_HOT_C`. `hot_factor` (coefficient personnel `[pacing.personal].heat_hot_factor`, #188)
+    remplace `HEAT_HOT_TIME_FACTOR` ; `None` = défaut du projet (comportement inchangé).
+    Rend `(facteur, notes)`."""
+    hot = HEAT_HOT_TIME_FACTOR if hot_factor is None else hot_factor
     if temp_max_c is None:
         return 1.0, ["aucune prévision météo fournie : aucun ajustement chaleur/froid appliqué"]
     notes = []
     factor = 1.0
     if temp_max_c > HEAT_HOT_C:
-        factor *= HEAT_HOT_TIME_FACTOR
-        notes.append(f"chaleur prévue ({temp_max_c:g} °C > {HEAT_HOT_C:g} °C) : temps × {HEAT_HOT_TIME_FACTOR:g} "
-                     "(approximation du projet)")
+        factor *= hot
+        notes.append(f"chaleur prévue ({temp_max_c:g} °C > {HEAT_HOT_C:g} °C) : temps × {hot:g} "
+                     + ("(coefficient personnel, #188)" if hot_factor is not None else "(approximation du projet)"))
         if acclimated is False:
             factor *= HEAT_UNACCLIMATED_EXTRA_FACTOR
             notes.append(f"faible acclimatation chaleur récente (#38) : supplément × "
@@ -159,6 +163,22 @@ def heat_time_factor(temp_max_c: Optional[float], *, acclimated: Optional[bool] 
         notes.append(f"froid prévu ({temp_max_c:g} °C < {HEAT_COLD_C:g} °C) : temps × {HEAT_COLD_TIME_FACTOR:g} "
                      "(approximation du projet)")
     return factor, notes
+
+
+def heat_kind(notes) -> Optional[str]:
+    """Nature de l'ajustement météo d'un plan, relue de ses `heat_notes` (la source unique des
+    messages est `heat_time_factor`) : `"hot"`, `"cold"`, `"none"` (météo prévue sans correction) ou
+    `None` (plan sans notes, ou sans prévision : inconnu, jamais deviné). #188."""
+    if not isinstance(notes, (list, tuple)):
+        return None
+    text = " ".join(str(n) for n in notes)
+    if "aucune prévision" in text:
+        return None
+    if "chaleur prévue" in text:
+        return "hot"
+    if "froid prévu" in text:
+        return "cold"
+    return "none"
 
 
 def resolve_acclimated(conn, conf: dict, today_date, temp_c: Optional[float]) -> Tuple[Optional[bool], Optional[str]]:

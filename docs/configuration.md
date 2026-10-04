@@ -102,6 +102,32 @@ avec `morning_check = "off"`.
     booléen) ne fait planter ni `scripts/arc_index.py`, ni le tableau de bord :
     un avertissement est affiché et le défaut (25 °C) s'applique à la place.
 
+## Les coefficients de pacing personnels — `[pacing.personal]`
+
+```toml
+[pacing.personal]
+night_penalty_pct = 6.5    # pénalité de nuit à pleine nuit, % (défaut 5.0 ; 0 à 30)
+technicity_scale = 1.2     # échelle du surcoût de technicité (défaut 1.0 ; 0,25 à 3)
+heat_hot_factor = 1.14     # facteur de temps au-dessus du seuil chaud (défaut 1.10 ; 1,0 à 1,4)
+altitude_scale = 1.1       # échelle de la perte d'altitude (défaut 1.0 ; 0,25 à 3) — #185
+evidence = ["2026-09-27|trail-x|night|14|7.8"]   # preuves cumulées, une par course et facteur
+```
+
+Section **absente par défaut**, dans `config/workspace.user.toml` (jamais le
+fichier versionné). Elle est écrite par
+`arc_race_debrief.py … --calibrate --apply`, **uniquement après la confirmation
+explicite de l'athlète** au débrief d'une course (voir
+[le stratège de course](agents/course-strategist.md#recalibrage-des-coefficients-au-debrief-188)) ;
+vous pouvez aussi la renseigner à la main. `arc_race_pacing.py` la lit à chaque
+plan : **drapeau CLI** (`--night-penalty-pct`) **>** `[pacing.personal]` **>**
+défaut du projet. Sans la section, le plan est identique octet pour octet.
+`evidence` est tenue par le script : ne la modifiez pas à la main.
+
+!!! warning "Une valeur invalide ne casse jamais le plan"
+    Une valeur non numérique ou hors bornes est ignorée avec un avertissement
+    et le défaut s'applique. `altitude_scale` est stockée pour l'altitude
+    (#185) mais le moteur de cette version ne l'applique pas encore.
+
 ## Le cycle menstruel — `[health].cycle_tracking` (#166)
 
 ```toml

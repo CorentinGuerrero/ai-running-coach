@@ -460,6 +460,12 @@ SCHEMA = {
             # Fuseau IANA de la course (#184, ex. "Europe/Paris") : entrée `--tz` de la pénalité
             # de nuit, persistée pour qu'un recalcul ne redemande pas le fuseau.
             "timezone": "str",
+            # Chaleur du plan (`arc_race_pacing`, #38) et coefficients personnels réellement
+            # appliqués (`[pacing.personal]`, #188) : lus par `arc_pacing_calibration` au débrief
+            # pour que ses estimations restent absolues. Optionnels (plans anciens : absents).
+            "heat_factor": "num+",
+            "heat_notes": "list",
+            "pacing_personal": "obj",
             "target_time_s": "num+",
             "scenarios": "obj",
             "aid_stations": "[aid_station]",
